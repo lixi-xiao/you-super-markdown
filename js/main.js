@@ -639,6 +639,14 @@
                         table.parentNode.insertBefore(wrapper, table); wrapper.appendChild(table);
                     }
                 });
+                // 外链安全：禁止外链在当前页直接跳转离开本站；统一新窗口 + noopener noreferrer（防 tabnabbing）
+                markdownBody.querySelectorAll('a[href]').forEach(function(a) {
+                    var href = a.getAttribute('href') || '';
+                    if (/^(https?:)?\/\//i.test(href) && href.indexOf(window.location.host) === -1) {
+                        a.setAttribute('target', '_blank');
+                        a.setAttribute('rel', 'noopener noreferrer');
+                    }
+                });
                 if (typeof hljs !== 'undefined') {
                     markdownBody.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
                 }

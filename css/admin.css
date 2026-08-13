@@ -27,6 +27,7 @@
     --bg-elevated: #131827;
     --bg-card: #1a2035;
     --bg-input: #0d1222;
+    --surface: #232b47;
     --border: #2a3148;
     --border-light: #353d55;
     --text: #e8edf5;
@@ -589,9 +590,204 @@ td code {
     color: var(--accent);
     background: var(--accent-glass);
 }
+.btn-outline {
+    background: var(--surface);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+}
+.btn-outline:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-glass);
+}
 .btn-sm {
     padding: 6px 14px;
     font-size: 12px;
+}
+/* ---------- 日志搜索工具栏 + 分页控件（v2.6.6；同次更新：统一后台设计语言 + 修复嵌套边框穿模） ---------- */
+.log-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+.log-toolbar-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.log-toolbar .form-input {
+    width: 300px;
+    max-width: 100%;
+    height: 38px;
+    padding-left: 38px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7496' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: 12px center;
+    background-size: 16px;
+}
+.log-toolbar .btn {
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.log-toolbar .toolbar-spacer {
+    flex: 1;
+}
+.log-toolbar .result-count {
+    font-size: 0.82em;
+    color: var(--text-muted);
+    background: var(--accent-glass);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+/* 分页栏：无嵌套边框（避免卡片内双边框穿模），顶部细分隔线与卡片内容自然分区 */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px 20px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-light);
+}
+.pagination-info {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+.page-info {
+    font-size: 0.82em;
+    color: var(--text-muted);
+}
+.page-info strong {
+    color: var(--text);
+}
+.per-page {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82em;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.per-page select {
+    height: 34px;
+    padding: 0 28px 0 10px;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--border);
+    background-color: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7496' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    transition: border-color 0.15s;
+}
+.per-page select:hover,
+.per-page select:focus {
+    border-color: var(--accent);
+}
+.pagination-btns {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.page-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-width: 34px;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+    user-select: none;
+    white-space: nowrap;
+}
+.page-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-glass);
+}
+.page-btn.current {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    cursor: default;
+    box-shadow: 0 0 0 3px var(--accent-glass);
+}
+.page-btn[disabled] {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+.page-btn.page-ellipsis {
+    border: none;
+    background: none;
+    cursor: default;
+    min-width: 20px;
+    padding: 0;
+    box-shadow: none;
+}
+.page-btn.page-ellipsis:hover {
+    background: none;
+    color: var(--text-muted);
+}
+.pagination-jump {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82em;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.page-jump {
+    width: 60px;
+    height: 34px;
+    padding: 0 8px;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    text-align: center;
+    outline: none;
+    font-family: inherit;
+    transition: border-color 0.15s;
+    -moz-appearance: textfield;
+}
+.page-jump::-webkit-outer-spin-button,
+.page-jump::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.page-jump:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glass);
 }
 .btn-link {
     background: none;

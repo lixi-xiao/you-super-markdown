@@ -13,6 +13,7 @@ import sys
 import json
 import hashlib
 import shutil
+import sqlite3
 import time
 import signal
 import subprocess
@@ -22,13 +23,12 @@ from pathlib import Path
 # === 配置 ===
 WEB_ROOT = os.environ.get('YM_WEB_ROOT', '/var/www/you-markdown')
 INSTALL_BASE = '/opt/you-markdown/install-base'
-AUDIT_LOG = os.path.join(WEB_ROOT, 'data', '.audit.json')
+DB_FILE = os.path.join(WEB_ROOT, 'data', 'ym.db')
 AUDIT_CHAIN = os.path.join(WEB_ROOT, 'data', '.audit_chain')
-AUDIT_MIRROR = '/opt/you-markdown/logs/audit.json'
+AUDIT_MIRROR_DB = '/opt/you-markdown/logs/ym.db'
 AUDIT_MIRROR_CHAIN = '/opt/you-markdown/logs/audit_chain'
 GUARD_STATE = '/opt/you-markdown/guard-state.json'
 EMAIL_ALERT_BIN = '/usr/local/bin/ym-alert'
-CONFIG_FILE = os.path.join(WEB_ROOT, 'data', '.config.json')
 WATCHDOG_USEC = int(os.environ.get('WATCHDOG_USEC', 0)) / 1_000_000  # systemd watchdog 间隔（秒）
 
 # 核心监控文件列表（相对 WEB_ROOT 的路径）
@@ -37,6 +37,7 @@ WATCH_FILES = [
     'index.php',
     'api.php',
     'utils.php',
+    'db.php',
     'admin/entry.php',
     'admin/dashboard.php',
     'station/dashboard.php',
@@ -70,13 +71,19 @@ def file_md5(path: str) -> str:
 
 
 def load_admin_email() -> str:
-    """从配置读取管理员邮箱"""
+    """从 SQLite config 表读取管理员邮箱"""
     try:
-        with open(CONFIG_FILE, 'r') as f:
-            cfg = json.load(f)
-            return cfg.get('admin_email', '')
+        con = sqlite3.connect(DB_FILE)
+        cur = con.cursor()
+        cur.execute("SELECT value FROM config WHERE key='admin_email'")
+        row = cur.fetchone()
+        con.close()
+        if row:
+            v = json.loads(row[0])
+            return v if isinstance(v, str) else ''
     except Exception:
-        return ''
+        pass
+    return ''
 
 
 def load_app_name() -> str:
@@ -178,29 +185,39 @@ def verify_all_files():
 
 
 def verify_audit_chain() -> bool:
-    """校验审计日志哈希链"""
+    """校验审计日志哈希链（读 SQLite audit 表）"""
     if is_update_in_progress():
         return True  # 更新中，跳过哈希链校验
 
-    if not os.path.exists(AUDIT_LOG):
+    if not os.path.exists(DB_FILE):
         return True
 
     try:
-        with open(AUDIT_LOG, 'r') as f:
-            logs = json.load(f)
+        con = sqlite3.connect(DB_FILE)
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute("SELECT id, ts, user_id, user_name, role, ip, action, target, detail, result, hash FROM audit ORDER BY rowid")
+        rows = cur.fetchall()
+        con.close()
     except Exception:
         return False
 
-    if not logs:
-        return True
-
     prev_hash = ''
-    for i in range(len(logs)):
-        entry = logs[i]
-        expected = entry.get('hash', '')
-        check_data = dict(entry)
-        check_data.pop('hash', None)
-        check_data['prev_hash'] = prev_hash
+    for i, entry in enumerate(rows):
+        expected = entry['hash'] or ''
+        check_data = {
+            'id': entry['id'],
+            'ts': entry['ts'],
+            'user_id': entry['user_id'],
+            'user_name': entry['user_name'],
+            'role': entry['role'],
+            'ip': entry['ip'],
+            'action': entry['action'],
+            'target': entry['target'],
+            'detail': entry['detail'],
+            'result': entry['result'],
+            'prev_hash': prev_hash,
+        }
         check_json = json.dumps(check_data, ensure_ascii=False, separators=(',', ':'))
         computed = hashlib.sha256(check_json.encode()).hexdigest()
         if computed != expected:
@@ -213,12 +230,44 @@ def verify_audit_chain() -> bool:
     return True
 
 
+def mirror_db():
+    """背书：将 data/ym.db 落盘（checkpoint）后拷贝到镜像目录（root 只读）"""
+    try:
+        con = sqlite3.connect(DB_FILE)
+        con.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        con.close()
+        os.makedirs(os.path.dirname(AUDIT_MIRROR_DB), exist_ok=True)
+        shutil.copy2(DB_FILE, AUDIT_MIRROR_DB)
+        if os.path.exists(AUDIT_CHAIN):
+            shutil.copy2(AUDIT_CHAIN, AUDIT_MIRROR_CHAIN)
+        return True
+    except Exception as e:
+        log(f"审计镜像背书失败: {e}")
+        return False
+
+
 def recover_audit():
-    """从镜像恢复审计日志"""
-    if os.path.exists(AUDIT_MIRROR):
-        shutil.copy2(AUDIT_MIRROR, AUDIT_LOG)
+    """从镜像 SQLite 恢复审计表与链尾（仅恢复 audit 表，不覆盖业务数据）"""
+    if not os.path.exists(AUDIT_MIRROR_DB):
+        return
+    try:
+        mcon = sqlite3.connect(AUDIT_MIRROR_DB)
+        mcon.row_factory = sqlite3.Row
+        rows = mcon.execute("SELECT * FROM audit ORDER BY rowid").fetchall()
+        mcon.close()
+
+        con = sqlite3.connect(DB_FILE)
+        con.execute('DELETE FROM audit')
+        con.executemany(
+            'INSERT INTO audit (id,ts,user_id,user_name,role,ip,action,target,detail,result,hash,prev_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+            [(r['id'], r['ts'], r['user_id'], r['user_name'], r['role'], r['ip'], r['action'], r['target'], r['detail'], r['result'], r['hash'], r['prev_hash']) for r in rows]
+        )
+        con.commit()
+        con.close()
         log("审计日志已从镜像恢复")
-        send_alert("日志已恢复", "审计日志已从镜像副本恢复，请检查")
+        send_alert("日志已恢复", "审计日志已从镜像 SQLite 副本恢复，请检查")
+    except Exception as e:
+        log(f"从镜像恢复审计失败: {e}")
     if os.path.exists(AUDIT_MIRROR_CHAIN):
         shutil.copy2(AUDIT_MIRROR_CHAIN, AUDIT_CHAIN)
 
@@ -261,7 +310,7 @@ def signal_handler(signum, frame):
 
 
 def periodic_audit_thread():
-    """定时审计日志校验线程（每5分钟执行一次）"""
+    """定时审计日志校验线程（每5分钟执行一次）：校验哈希链 + 背书镜像"""
     global last_audit_check
     while running:
         time.sleep(AUDIT_CHECK_INTERVAL)
@@ -269,6 +318,7 @@ def periodic_audit_thread():
             log("审计日志哈希链校验失败，已尝试恢复")
         else:
             log("审计日志哈希链校验通过")
+            mirror_db()  # 背书：将 SQLite 落盘并同步镜像
         save_guard_state()
 
 
@@ -381,6 +431,7 @@ def run_polling_mode():
                 log("审计日志哈希链校验失败，已尝试恢复")
             else:
                 log("审计日志哈希链校验通过")
+                mirror_db()  # 背书镜像
             save_guard_state()
 
 

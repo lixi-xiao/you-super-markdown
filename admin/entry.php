@@ -14,17 +14,13 @@ if (!$entryToken || strlen($entryToken) !== 12 || !preg_match('/^[a-zA-Z0-9]+$/'
     exit('Not Found');
 }
 
-$entriesFile = __DIR__ . '/../data/.entries.json';
-$entries = file_exists($entriesFile) ? json_decode(file_get_contents($entriesFile), true) : [];
-if (!is_array($entries)) $entries = [];
+$entries = loadEntries();
 
 // 查找匹配的 entry
 $found = null;
-$foundIdx = null;
-foreach ($entries as $i => $e) {
+foreach ($entries as $e) {
     if (($e['token'] ?? '') === $entryToken && empty($e['used']) && ($e['expires'] ?? 0) > time()) {
         $found = $e;
-        $foundIdx = $i;
         break;
     }
 }
@@ -44,16 +40,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // OTP 尝试限次：连续 3 次失败即销毁入口（防暴力枚举）
     $otpFails = (int)($_SESSION['otp_fails'] ?? 0);
     if ($otpFails >= 3) {
-        $entries[$foundIdx]['used'] = 1;
-        file_put_contents($entriesFile, json_encode($entries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+        db_exec('UPDATE entries SET used = 1 WHERE token = ?', [$entryToken]);
         http_response_code(404);
         exit('Not Found');
     }
     if (password_verify($otp, $found['otp_hash'])) {
         $_SESSION['otp_fails'] = 0;
         // 原子消费：标记 used=1
-        $entries[$foundIdx]['used'] = 1;
-        file_put_contents($entriesFile, json_encode($entries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+        db_exec('UPDATE entries SET used = 1 WHERE token = ?', [$entryToken]);
 
         // 加载用户
         $users = loadUsers();

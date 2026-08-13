@@ -54,7 +54,7 @@ function qq_getPlaylist($id, $sortAll = '', $cookies = '') {
 
     // 批量获取播放地址
     if (!empty($songmids)) {
-        $urlMap = qq_batchGetSongUrls($songmids);
+        $urlMap = qq_batchGetSongUrls($songmids, $cookies);
         foreach ($songs as &$s) {
             if (isset($urlMap[$s['id']])) {
                 $s['url'] = $urlMap[$s['id']];
@@ -66,17 +66,27 @@ function qq_getPlaylist($id, $sortAll = '', $cookies = '') {
     return $songs;
 }
 
-function qq_batchGetSongUrls($songmids) {
+// v2.6.0：从 QQ 音乐 Cookies 中提取 uin（付费歌曲 vkey 需要真实 uin 而非游客 0）
+// 支持 uin=123 / p_uin=o123 / p_uin=123 常见格式
+function qq_extractUin($cookies) {
+    if (preg_match('/(?:^|;\s*)(?:p_)?uin=o?(\d{3,})/', $cookies, $m)) {
+        return $m[1];
+    }
+    return '0';
+}
+
+function qq_batchGetSongUrls($songmids, $cookies = '') {
     // 分批处理，每批最多50首
     $urlMap = [];
+    $uin = qq_extractUin($cookies);
     $chunks = array_chunk($songmids, 50);
     foreach ($chunks as $chunk) {
         $mids = array_map(function($m) { return '"' . $m . '"'; }, $chunk);
         $midList = implode(',', $mids);
         $guid = sprintf('%d', rand(1000000000, 9999999999));
-        $dataParam = '{"req_0":{"module":"vkey.GetVkey","method":"CgiGetVkey","param":{"guid":"' . $guid . '","songmid":[' . $midList . '],"songtype":[0],"uin":"0","loginflag":1,"platform":"20"}}}';
+        $dataParam = '{"req_0":{"module":"vkey.GetVkey","method":"CgiGetVkey","param":{"guid":"' . $guid . '","songmid":[' . $midList . '],"songtype":[0],"uin":"' . $uin . '","loginflag":1,"platform":"20"}}}';
         $url = 'https://u.y.qq.com/cgi-bin/musicu.fcg?data=' . urlencode($dataParam);
-        $resp = qq_apiRequest($url);
+        $resp = qq_apiRequest($url, 15, $cookies);
         if ($resp && isset($resp['req_0']['data']['midurlinfo'])) {
             foreach ($resp['req_0']['data']['midurlinfo'] as $info) {
                 $mid = $info['songmid'] ?? '';
@@ -92,7 +102,7 @@ function qq_batchGetSongUrls($songmids) {
         // 对小部分没获取到的，单独请求
         foreach ($chunk as $mid) {
             if (!isset($urlMap[$mid])) {
-                $singleUrl = qq_getSingleSongUrl($mid);
+                $singleUrl = qq_getSingleSongUrl($mid, $cookies);
                 if ($singleUrl) $urlMap[$mid] = $singleUrl;
             }
         }
@@ -100,11 +110,12 @@ function qq_batchGetSongUrls($songmids) {
     return $urlMap;
 }
 
-function qq_getSingleSongUrl($songmid) {
+function qq_getSingleSongUrl($songmid, $cookies = '') {
     $guid = sprintf('%d', rand(1000000000, 9999999999));
-    $dataParam = '{"req_0":{"module":"vkey.GetVkey","method":"CgiGetVkey","param":{"guid":"' . $guid . '","songmid":["' . $songmid . '"],"songtype":[0],"uin":"0","loginflag":1,"platform":"20"}}}';
+    $uin = qq_extractUin($cookies);
+    $dataParam = '{"req_0":{"module":"vkey.GetVkey","method":"CgiGetVkey","param":{"guid":"' . $guid . '","songmid":["' . $songmid . '"],"songtype":[0],"uin":"' . $uin . '","loginflag":1,"platform":"20"}}}';
     $url = 'https://u.y.qq.com/cgi-bin/musicu.fcg?data=' . urlencode($dataParam);
-    $resp = qq_apiRequest($url);
+    $resp = qq_apiRequest($url, 15, $cookies);
     if ($resp && isset($resp['req_0']['data']['midurlinfo'][0])) {
         $info = $resp['req_0']['data']['midurlinfo'][0];
         $vkey = $info['vkey'] ?? '';
@@ -159,8 +170,8 @@ function qq_getLyric($id) {
     ];
 }
 
-function qq_getSongUrl($id) {
-    return qq_getSingleSongUrl($id);
+function qq_getSongUrl($id, $cookies = '') {
+    return qq_getSingleSongUrl($id, $cookies);
 }
 
 function qq_getArtists($singers) {
@@ -171,7 +182,7 @@ function qq_getArtists($singers) {
     return implode(' / ', $names);
 }
 
-function qq_apiRequest($url, $timeout = 15) {
+function qq_apiRequest($url, $timeout = 15, $cookies = '') {
     $headers = [
         'Referer: https://y.qq.com/',
         'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -186,6 +197,9 @@ function qq_apiRequest($url, $timeout = 15) {
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_HTTPHEADER => $headers,
     ]);
+    if (!empty($cookies)) {
+        curl_setopt($ch, CURLOPT_COOKIE, $cookies);
+    }
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $error = curl_error($ch);

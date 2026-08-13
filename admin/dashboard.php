@@ -57,6 +57,23 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'update_status') {
     exit;
 }
 
+// AJAX 处理：获取更新历史（v2.6.6 支持分页 + 搜索 + 每页条数自定义；从审计日志读取）
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'update_history') {
+    header('Content-Type: application/json; charset=utf-8');
+    $uhQ = trim((string)($_GET['q'] ?? ''));
+    $uhPerPage = (int)($_GET['per_page'] ?? 20);
+    if (!in_array($uhPerPage, [10, 20, 50, 100], true)) $uhPerPage = 20;
+    $uhData = paginateList(getUpdateHistory(100), ['from_version', 'to_version', 'completed_at', 'status'], $uhQ, (int)($_GET['page'] ?? 1), $uhPerPage);
+    echo json_encode([
+        'history' => $uhData['items'],
+        'total' => $uhData['total'],
+        'page' => $uhData['page'],
+        'pages' => $uhData['pages'],
+        'per_page' => $uhPerPage,
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // AJAX 处理：验证挑战码并触发更新
 if (isset($_POST['ajax']) && $_POST['ajax'] === 'trigger_update') {
     header('Content-Type: application/json; charset=utf-8');
@@ -213,24 +230,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $newQQ = trim($_POST['qq'] ?? '');
         $newPwd = trim($_POST['password'] ?? '');
         if ($newNick && $newQQ && $newPwd) {
-            // QQ 唯一性检查（避免同 QQ 账号登录歧义）
-            $qqExists = false;
-            foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
-            if ($qqExists) {
-                $msg = 'qq_duplicate';
+            $vp = validatePassword($newPwd);
+            if ($vp !== true) {
+                $msg = 'pw_weak';
             } else {
-                $users[] = [
-                    'id' => bin2hex(random_bytes(8)),
-                    'qq' => $newQQ,
-                    'nickname' => $newNick,
-                    'password' => password_hash($newPwd, PASSWORD_DEFAULT),
-                    'role' => $newRole,
-                    'created' => date('Y-m-d H:i:s'),
-                    'created_by' => getCurrentUserId(),
-                ];
-                file_put_contents(__DIR__ . '/../data/.users.json', json_encode($users, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
-                auditLog('user_create', $newQQ, "创建用户: {$newNick}, 角色: {$newRole}");
-                $msg = 'user_created';
+                // QQ 唯一性检查（避免同 QQ 账号登录歧义）
+                $qqExists = false;
+                foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
+                if ($qqExists) {
+                    $msg = 'qq_duplicate';
+                } else {
+                    $users[] = [
+                        'id' => bin2hex(random_bytes(8)),
+                        'qq' => $newQQ,
+                        'nickname' => $newNick,
+                        'password' => password_hash($newPwd, PASSWORD_DEFAULT),
+                        'role' => $newRole,
+                        'created' => date('Y-m-d H:i:s'),
+                        'created_by' => getCurrentUserId(),
+                    ];
+                    saveUsers($users);
+                    auditLog('user_create', $newQQ, "创建用户: {$newNick}, 角色: {$newRole}");
+                    $msg = 'user_created';
+                }
             }
         }
     } elseif ($_POST['action'] === 'delete_user') {
@@ -239,7 +261,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($u['id'] === $delId && ($u['role'] ?? '') !== ROLE_SUPER_ADMIN) {
                 auditLog('user_delete', $u['qq'] ?? $delId, "删除用户: {$u['nickname']}");
                 array_splice($users, $i, 1);
-                file_put_contents(__DIR__ . '/../data/.users.json', json_encode($users, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+                saveUsers($users);
                 $msg = 'user_deleted';
                 break;
             }
@@ -264,6 +286,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
     $config['site_title'] = trim($_POST['site_title'] ?? 'You Super Markdown');
     $config['registration_enabled'] = !empty($_POST['registration_enabled']);
     $config['guest_comments_enabled'] = !empty($_POST['guest_comments_enabled']);
+    // v2.6.5：超管主页评论开关（默认关=超管不参与前台评论/回复）
+    $config['super_admin_comment'] = !empty($_POST['super_admin_comment']);
     $config['update_channel'] = ($_POST['update_channel'] ?? 'stable') === 'beta' ? 'beta' : 'stable';
     $config['admin_email'] = trim($_POST['admin_email'] ?? '');
     $newStationPath = trim($_POST['station_path'] ?? '');
@@ -288,7 +312,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
     $config['max_comments_per_minute'] = max(1, intval($_POST['max_comments_per_minute'] ?? 5));
     $config['max_registrations_per_ip'] = max(1, intval($_POST['max_registrations_per_ip'] ?? 3));
     $config['music_playlist_id'] = trim($_POST['music_playlist_id'] ?? '3778678');
+    $config['music_playlist_id_qq'] = trim($_POST['music_playlist_id_qq'] ?? '');
     $config['music_cookies'] = trim($_POST['music_cookies'] ?? '');
+    $config['music_cookies_qq'] = trim($_POST['music_cookies_qq'] ?? '');
     $config['hide_default_paths'] = !empty($_POST['hide_default_paths']);
     saveSiteConfig($config);
     auditLog('config_update', 'site_config', '修改系统配置');
@@ -306,39 +332,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ban_action'])) {
         header('Location: dashboard.php?tab=security&bmsg=challenge_error');
         exit;
     }
-    $bansFile = __DIR__ . '/../data/.bans.json';
-    $bans = file_exists($bansFile) ? (json_decode(file_get_contents($bansFile), true) ?: []) : [];
     $act = $_POST['ban_action'];
     if ($act === 'add') {
         $ip = trim($_POST['ip'] ?? '');
         $types = $_POST['types'] ?? [];
         $reason = trim($_POST['reason'] ?? '');
         if ($ip && !empty($types)) {
-            $exists = false;
-            foreach ($bans as &$b) {
-                if ($b['ip'] === $ip) {
-                    foreach ($types as $t) { if (!in_array($t, $b['types'])) $b['types'][] = $t; }
-                    $exists = true; break;
-                }
-            }
-            unset($b);
-            if (!$exists) $bans[] = ['ip' => $ip, 'types' => $types, 'reason' => $reason, 'time' => date('Y-m-d H:i:s')];
-            file_put_contents($bansFile, json_encode($bans, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+            addBan($ip, $types, $reason);
             header('Location: dashboard.php?tab=security&bmsg=' . urlencode('封禁已添加'));
             exit;
         }
     } elseif ($act === 'remove') {
         $ip = trim($_POST['ip'] ?? '');
-        $bans = array_values(array_filter($bans, fn($b) => $b['ip'] !== $ip));
-        file_put_contents($bansFile, json_encode($bans, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+        db_exec('DELETE FROM bans WHERE ip = ?', [$ip]);
         header('Location: dashboard.php?tab=security&bmsg=' . urlencode('已解除封禁'));
         exit;
     } elseif ($act === 'update_types') {
         $ip = trim($_POST['ip'] ?? '');
         $types = $_POST['types'] ?? [];
-        foreach ($bans as &$b) { if ($b['ip'] === $ip) { $b['types'] = $types; break; } }
-        unset($b);
-        file_put_contents($bansFile, json_encode($bans, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+        db_exec('UPDATE bans SET types_json = ? WHERE ip = ?', [json_encode($types, JSON_UNESCAPED_UNICODE), $ip]);
         header('Location: dashboard.php?tab=security&bmsg=' . urlencode('权限已更新'));
         exit;
     }
@@ -356,12 +368,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clear_audit'])) {
         header('Location: dashboard.php?tab=security&bmsg=challenge_error');
         exit;
     }
-    file_put_contents(AUDIT_LOG_FILE, json_encode([], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
-    file_put_contents(AUDIT_CHAIN_FILE, '', LOCK_EX);
-    if (is_dir(AUDIT_MIRROR_DIR)) {
-        file_put_contents(AUDIT_MIRROR_DIR . 'audit.json', json_encode([], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
-        file_put_contents(AUDIT_MIRROR_DIR . 'audit_chain', '', LOCK_EX);
-    }
+    clearAuditLogs();
     auditLog('audit_cleared', '', '清空全部操作日志（已挑战码确认）');
     header('Location: dashboard.php?tab=security&bmsg=cleared');
     exit;
@@ -384,7 +391,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clear_unauth'])) {
         header('Location: dashboard.php?tab=security&bmsg=csrf_error');
         exit;
     }
-    file_put_contents(__DIR__ . '/../data/.unauthorized.json', json_encode([], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    db_exec('DELETE FROM unauthorized');
     header('Location: dashboard.php?tab=security&bmsg=cleared_unauth');
     exit;
 }
@@ -435,17 +442,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['bg_image']) || isse
         exit;
     }
 }
-// 封禁相关函数（全局可用）
-$bansFile = __DIR__ . '/../data/.bans.json';
+// 封禁相关函数（全局可用，代理到 utils.php 的 SQLite 实现）
 function loadBans() {
-    global $bansFile;
-    if (!file_exists($bansFile)) return [];
-    $data = json_decode(file_get_contents($bansFile), true);
-    return is_array($data) ? $data : [];
+    return loadBansList();
 }
 function saveBans($bans) {
-    global $bansFile;
-    file_put_contents($bansFile, json_encode($bans, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    return saveBansList($bans);
 }
 $banMsg = $_GET['bmsg'] ?? '';
 ?>
@@ -519,6 +521,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php if ($msg === 'user_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>用户已创建</div><?php endif; ?>
     <?php if ($msg === 'user_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>用户已删除</div><?php endif; ?>
     <?php if ($msg === 'qq_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
+    <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>密码至少 8 位，且必须包含大写字母、小写字母与数字</div><?php endif; ?>
     <?php if ($msg === 'challenge_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>挑战码无效或已过期，请重新生成</div><?php endif; ?>
 
     <?php
@@ -527,6 +530,69 @@ $banMsg = $_GET['bmsg'] ?? '';
     $stationCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_STATION_ADMIN));
     $authorCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_AUTHOR));
     $userCount = count(array_filter($users, fn($u) => ($u['role'] ?? 'user') === ROLE_USER));
+
+    // v2.6.6：日志分页控件渲染（GET 无副作用，无需 CSRF）
+    // $p: paginateList() 结果；$pageParam: 页码参数名；$extra: 需保持的额外查询参数（如 tab/q，不含分页参数）
+    // $perPageParam: 每页条数参数名。分页栏 = 总数+每页条数选择 + 页码按钮 + 页码跳转（每页自定义 v2.6.6 同次更新）
+    function renderPager(array $p, string $pageParam, array $extra = [], string $perPageParam = 'per_page'): string {
+        $page = $p['page'];
+        $pages = $p['pages'];
+        $perPage = (int)($p['per_page'] ?? 50);
+        $enc = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+        // 页码按钮 URL 模板：固定 per_page，page 用 __PAGE__ 占位
+        $urlTpl = 'dashboard.php?' . http_build_query(array_merge($extra, [$perPageParam => $perPage, $pageParam => '__PAGE__']));
+        $link = fn($pg) => $enc(str_replace('__PAGE__', (string)$pg, $urlTpl));
+        // 每页条数切换 URL 模板：per_page 用 __PP__ 占位，页码回第 1 页
+        $ppTpl = 'dashboard.php?' . http_build_query(array_merge($extra, [$perPageParam => '__PP__', $pageParam => 1]));
+        // 页码跳转 URL 模板：page 用 __PG__ 占位
+        $pgTpl = 'dashboard.php?' . http_build_query(array_merge($extra, [$perPageParam => $perPage, $pageParam => '__PG__']));
+        // 单页时仅保留「总数 + 每页条数选择器」，隐藏页码按钮与跳转区（避免分页栏整体消失）
+        $showNav = $pages > 1;
+        // 页码序列：页数少全显示，多则首末+当前±1+省略号
+        $seq = [];
+        if ($pages <= 7) {
+            $seq = range(1, $pages);
+        } else {
+            $seq = [1];
+            for ($i = max(2, $page - 1); $i <= min($pages - 1, $page + 1); $i++) $seq[] = $i;
+            $seq[] = $pages;
+            $seq = array_values(array_unique($seq));
+        }
+        $html = '<nav class="pagination">';
+        // 左：总数 + 每页条数（始终显示）
+        $html .= '<div class="pagination-info"><span class="page-info">共 <strong>' . $p['total'] . '</strong> 条</span>'
+               . '<label class="per-page">每页 <select data-pp-url="' . $enc($ppTpl) . '" onchange="if(this.dataset.ppUrl)location.href=this.dataset.ppUrl.replace(\'__PP__\',this.value)">';
+        foreach ([10, 20, 50, 100] as $opt) {
+            $html .= '<option value="' . $opt . '"' . ($opt === $perPage ? ' selected' : '') . '>' . $opt . '</option>';
+        }
+        $html .= '</select> 条</label></div>';
+        // 中：页码按钮（仅多页时显示）
+        if ($showNav) {
+            $html .= '<div class="pagination-btns">';
+            $html .= '<a class="page-btn" href="' . $link(1) . '" title="首页">« 首页</a>';
+            $html .= '<a class="page-btn" href="' . $link(max(1, $page - 1)) . '" title="上一页">‹ 上一页</a>';
+            $prev = 0;
+            foreach ($seq as $pg) {
+                if ($pg - $prev > 1) $html .= '<span class="page-btn page-ellipsis">…</span>';
+                $html .= ($pg === $page)
+                    ? '<span class="page-btn current">' . $pg . '</span>'
+                    : '<a class="page-btn" href="' . $link($pg) . '">' . $pg . '</a>';
+                $prev = $pg;
+            }
+            $html .= '<a class="page-btn" href="' . $link(min($pages, $page + 1)) . '" title="下一页">下一页 ›</a>';
+            $html .= '<a class="page-btn" href="' . $link($pages) . '" title="末页">末页 »</a>';
+            $html .= '</div>';
+        }
+        // 右：页码信息 + 跳转（仅多页时显示）
+        if ($showNav) {
+            $html .= '<div class="pagination-jump"><span class="page-info">第 ' . $page . ' / ' . $pages . ' 页</span>'
+                   . '<input type="number" class="page-jump" min="1" max="' . $pages . '" placeholder="页码" data-pg-url="' . $enc($pgTpl) . '" '
+                   . 'onchange="if(this.value&&this.dataset.pgUrl)location.href=this.dataset.pgUrl.replace(\'__PG__\',this.value)" '
+                   . 'onkeydown="if(event.key===\'Enter\')this.onchange()">'
+                   . '<button type="button" class="page-btn" onclick="var i=this.previousElementSibling;if(i&&i.value&&i.dataset.pgUrl)location.href=i.dataset.pgUrl.replace(\'__PG__\',i.value)">跳转</button></div>';
+        }
+        return $html . '</nav>';
+    }
     ?>
 
     <?php if ($tab === 'overview'): ?>
@@ -555,6 +621,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <tr><td style="color:var(--text-muted)">版本</td><td><code><?= APP_VERSION ?></code></td></tr>
             <tr><td style="color:var(--text-muted)">注册开关</td><td><?= empty($config['registration_enabled']) ? '关闭' : '开启' ?></td></tr>
             <tr><td style="color:var(--text-muted)">访客评论</td><td><?= empty($config['guest_comments_enabled']) ? '关闭' : '开启' ?></td></tr>
+            <tr><td style="color:var(--text-muted)">超管主页评论</td><td><?= empty($config['super_admin_comment']) ? '关闭' : '开启' ?></td></tr>
             <tr><td style="color:var(--text-muted)">更新通道</td><td><?= htmlspecialchars($config['update_channel'] ?? 'stable') ?></td></tr>
         </table>
         </div>
@@ -590,7 +657,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                     <input class="form-input" name="qq" placeholder="登录账号">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">密码</label>
+                    <label class="form-label">密码（至少 8 位，含大小写字母与数字）</label>
                     <input class="form-input" name="password" type="password" placeholder="******">
                 </div>
                 <div class="form-group" style="min-width:120px">
@@ -649,11 +716,10 @@ $banMsg = $_GET['bmsg'] ?? '';
         <div class="page-subtitle">操作审计记录 · 哈希链防篡改</div>
     </div>
     <?php
-    $auditLogs = [];
-    if (file_exists(AUDIT_LOG_FILE)) {
-        $auditLogs = json_decode(file_get_contents(AUDIT_LOG_FILE), true) ?: [];
-    }
-    $auditLogs = array_reverse(array_slice($auditLogs, -200));
+    $q = trim((string)($_GET['q'] ?? ''));
+    $perPage = (int)($_GET['per_page'] ?? 50);
+    if (!in_array($perPage, [10, 20, 50, 100], true)) $perPage = 50;
+    $pageData = paginateList(loadAuditLogs(), ['ts', 'user_name', 'user_id', 'role', 'action', 'target', 'detail', 'ip'], $q, (int)($_GET['page'] ?? 1), $perPage);
     $chainResult = verifyAuditChain();
     ?>
     <?php if (!$chainResult['valid']): ?>
@@ -675,12 +741,25 @@ $banMsg = $_GET['bmsg'] ?? '';
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            最近操作记录
+            最近操作记录（共 <?= $pageData['total'] ?> 条）
+        </div>
+        <div class="log-toolbar">
+            <form class="log-toolbar-search" method="get" action="dashboard.php">
+                <input type="hidden" name="tab" value="logs">
+                <input type="text" class="form-input" name="q" value="<?= htmlspecialchars($q) ?>" placeholder="搜索 时间/用户/角色/操作/目标/IP..." autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
+                <?php if ($q !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=logs">清除</a><?php endif; ?>
+            </form>
+            <span class="toolbar-spacer"></span>
+            <?php if ($q !== ''): ?><span class="result-count">匹配 <?= $pageData['total'] ?> 条</span><?php endif; ?>
         </div>
         <div class="table-wrap">
         <table>
             <tr><th>时间</th><th>用户</th><th>角色</th><th>操作</th><th>目标</th><th>结果</th><th>IP</th></tr>
-            <?php foreach ($auditLogs as $log): ?>
+            <?php if (empty($pageData['items'])): ?>
+            <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:28px"><?= $q !== '' ? '未找到匹配「' . htmlspecialchars($q) . '」的记录' : '暂无审计日志' ?></td></tr>
+            <?php else: ?>
+            <?php foreach ($pageData['items'] as $log): ?>
             <tr>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($log['ts'] ?? '') ?></td>
                 <td><?= htmlspecialchars($log['user_name'] ?? '') ?></td>
@@ -691,8 +770,10 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($log['ip'] ?? '') ?></td>
             </tr>
             <?php endforeach; ?>
+            <?php endif; ?>
         </table>
         </div>
+        <?= renderPager($pageData, 'page', ['tab' => 'logs', 'q' => $q]) ?>
     </div>
 
     <?php elseif ($tab === 'config'): ?>
@@ -724,6 +805,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <div class="form-row" style="margin-bottom:16px">
                 <label class="form-check"><input type="checkbox" name="registration_enabled" <?= empty($config['registration_enabled']) ? '' : 'checked' ?>> 允许注册</label>
                 <label class="form-check"><input type="checkbox" name="guest_comments_enabled" <?= empty($config['guest_comments_enabled']) ? '' : 'checked' ?>> 允许访客评论</label>
+                <label class="form-check"><input type="checkbox" name="super_admin_comment" <?= empty($config['super_admin_comment']) ? '' : 'checked' ?>> 允许超管主页评论（默认关闭，超管以访客身份浏览不参与前台评论）</label>
             </div>
             <div class="form-group">
                 <label class="form-label">更新通道</label>
@@ -757,14 +839,24 @@ $banMsg = $_GET['bmsg'] ?? '';
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label">音乐歌单 ID</label>
+                <label class="form-label">网易云歌单 ID</label>
                 <input class="form-input" name="music_playlist_id" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>" placeholder="3778678">
                 <p class="form-hint">网易云音乐歌单 ID，默认 3778678 为热歌榜</p>
             </div>
             <div class="form-group">
+                <label class="form-label">QQ 音乐歌单 ID</label>
+                <input class="form-input" name="music_playlist_id_qq" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>" placeholder="留空则使用 QQ 热歌榜">
+                <p class="form-hint">QQ 音乐歌单 ID（前端切换到 QQ 平台时使用），留空则加载 QQ 热歌榜</p>
+            </div>
+            <div class="form-group">
                 <label class="form-label">网易云 Cookies（可选）</label>
                 <input class="form-input" name="music_cookies" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
-                <p class="form-hint">配置后可播放 VIP 歌曲</p>
+                <p class="form-hint">配置后可播放网易云 VIP 歌曲</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">QQ 音乐 Cookies（可选）</label>
+                <input class="form-input" name="music_cookies_qq" value="<?= htmlspecialchars($config['music_cookies_qq'] ?? '') ?>" placeholder="uin=xxx; p_skey=xxx; skey=xxx; ...">
+                <p class="form-hint">配置后可播放 QQ 音乐付费/VIP 歌曲（v2.6.0）</p>
             </div>
 
             <div style="padding-top:16px;border-top:1px solid var(--border);margin-bottom:16px">
@@ -981,19 +1073,32 @@ $banMsg = $_GET['bmsg'] ?? '';
     });
     </script>
     <!-- 越权访问日志 -->
+    <?php
+    // v2.6.6：三个日志区域的每页条数需互相保留（切换任一区域时其它区域不回退默认值）
+    $unauthPerPage = (int)($_GET['unauth_per_page'] ?? 50);
+    $loginPerPage = (int)($_GET['login_per_page'] ?? 50);
+    $auditPerPage = (int)($_GET['audit_per_page'] ?? 50);
+    if (!in_array($unauthPerPage, [10, 20, 50, 100], true)) $unauthPerPage = 50;
+    if (!in_array($loginPerPage, [10, 20, 50, 100], true)) $loginPerPage = 50;
+    if (!in_array($auditPerPage, [10, 20, 50, 100], true)) $auditPerPage = 50;
+    $unauthQ = trim((string)($_GET['unauth_q'] ?? ''));
+    $unauthData = paginateList(db_all('SELECT * FROM unauthorized ORDER BY time DESC'), ['time', 'ip', 'action', 'user', 'user_id', 'ua'], $unauthQ, (int)($_GET['unauth_page'] ?? 1), $unauthPerPage);
+    ?>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            越权访问日志
+            越权访问日志（共 <?= $unauthData['total'] ?> 条）
         </div>
-        <?php
-        $unauthFile = __DIR__ . '/../data/.unauthorized.json';
-        $unauthLogs = file_exists($unauthFile) ? json_decode(file_get_contents($unauthFile), true) : [];
-        if (!is_array($unauthLogs)) $unauthLogs = [];
-        usort($unauthLogs, fn($a, $b) => strcmp($b['time'] ?? '', $a['time'] ?? ''));
-        ?>
-        <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-            <?php if (!empty($unauthLogs)): ?>
+        <div class="log-toolbar">
+            <form method="get" action="dashboard.php" class="log-toolbar-search">
+                <input type="hidden" name="tab" value="security">
+                <input type="text" class="form-input" name="unauth_q" value="<?= htmlspecialchars($unauthQ) ?>" placeholder="搜索 时间/IP/操作/用户..." autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
+                <?php if ($unauthQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=security">清除</a><?php endif; ?>
+            </form>
+            <span class="toolbar-spacer"></span>
+            <?php if ($unauthQ !== ''): ?><span class="result-count">匹配 <?= $unauthData['total'] ?> 条</span><?php endif; ?>
+            <?php if ($unauthData['total'] > 0): ?>
             <form method="post" onsubmit="return confirm('确定清空所有越权访问日志？')">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <input type="hidden" name="clear_unauth" value="1">
@@ -1001,16 +1106,16 @@ $banMsg = $_GET['bmsg'] ?? '';
             </form>
             <?php endif; ?>
         </div>
-        <?php if (empty($unauthLogs)): ?>
+        <?php if (empty($unauthData['items'])): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            <p>暂无越权访问记录</p>
+            <p><?= $unauthQ !== '' ? '未找到匹配「' . htmlspecialchars($unauthQ) . '」的记录' : '暂无越权访问记录' ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
         <table>
             <tr><th>时间</th><th>IP</th><th>操作</th><th>用户</th></tr>
-            <?php foreach ($unauthLogs as $log): ?>
+            <?php foreach ($unauthData['items'] as $log): ?>
             <tr>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($log['time'] ?? '') ?></td>
                 <td><code><?= htmlspecialchars($log['ip'] ?? '') ?></code></td>
@@ -1020,29 +1125,40 @@ $banMsg = $_GET['bmsg'] ?? '';
             <?php endforeach; ?>
         </table>
         </div>
+        <?= renderPager($unauthData, 'unauth_page', ['tab' => 'security', 'unauth_q' => $unauthQ, 'login_per_page' => $loginPerPage, 'audit_per_page' => $auditPerPage], 'unauth_per_page') ?>
         <?php endif; ?>
     </div>
 
     <!-- 登录日志 -->
+    <?php
+    $loginQ = trim((string)($_GET['login_q'] ?? ''));
+    $loginData = paginateList(array_reverse(loadLogsList()), ['time', 'ip', 'action'], $loginQ, (int)($_GET['login_page'] ?? 1), $loginPerPage);
+    ?>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-            登录日志
+            登录日志（共 <?= $loginData['total'] ?> 条）
         </div>
-        <?php
-        $loginLogs = loadLogsList();
-        $loginLogs = array_reverse($loginLogs);
-        ?>
-        <?php if (empty($loginLogs)): ?>
+        <div class="log-toolbar">
+            <form class="log-toolbar-search" method="get" action="dashboard.php">
+                <input type="hidden" name="tab" value="security">
+                <input type="text" class="form-input" name="login_q" value="<?= htmlspecialchars($loginQ) ?>" placeholder="搜索 时间/IP/操作..." autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
+                <?php if ($loginQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=security">清除</a><?php endif; ?>
+            </form>
+            <span class="toolbar-spacer"></span>
+            <?php if ($loginQ !== ''): ?><span class="result-count">匹配 <?= $loginData['total'] ?> 条</span><?php endif; ?>
+        </div>
+        <?php if (empty($loginData['items'])): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-            <p>暂无登录日志</p>
+            <p><?= $loginQ !== '' ? '未找到匹配「' . htmlspecialchars($loginQ) . '」的记录' : '暂无登录日志' ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
         <table>
             <tr><th>时间</th><th>IP</th><th>操作</th></tr>
-            <?php foreach ($loginLogs as $log): ?>
+            <?php foreach ($loginData['items'] as $log): ?>
             <tr>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($log['time'] ?? '') ?></td>
                 <td><code><?= htmlspecialchars($log['ip'] ?? '') ?></code></td>
@@ -1051,23 +1167,21 @@ $banMsg = $_GET['bmsg'] ?? '';
             <?php endforeach; ?>
         </table>
         </div>
+        <?= renderPager($loginData, 'login_page', ['tab' => 'security', 'login_q' => $loginQ, 'unauth_per_page' => $unauthPerPage, 'audit_per_page' => $auditPerPage], 'login_per_page') ?>
         <?php endif; ?>
     </div>
 
     <!-- 操作日志（哈希链） -->
+    <?php
+    $auditQ = trim((string)($_GET['audit_q'] ?? ''));
+    $auditData = paginateList(loadAuditLogs(), ['ts', 'user_name', 'user_id', 'role', 'ip', 'action', 'target', 'detail'], $auditQ, (int)($_GET['audit_page'] ?? 1), $auditPerPage);
+    $chainResult = verifyAuditChain();
+    ?>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            操作日志
+            操作日志（共 <?= $auditData['total'] ?> 条）
         </div>
-        <?php
-        $chainResult = verifyAuditChain();
-        $auditLogs = [];
-        if (file_exists(AUDIT_LOG_FILE)) {
-            $auditLogs = json_decode(file_get_contents(AUDIT_LOG_FILE), true) ?: [];
-        }
-        $auditLogs = array_reverse($auditLogs);
-        ?>
         <div style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <span style="font-size:0.82em;color:var(--text-muted)">哈希链状态：</span>
             <span class="chain-badge <?= $chainResult['valid'] ? 'chain-valid' : 'chain-invalid' ?>" style="font-size:0.82em">
@@ -1091,16 +1205,26 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <button type="submit" class="btn btn-sm btn-outline" style="color:#ef4444;border-color:#fecaca">清空日志</button>
             </form>
         </div>
-        <?php if (empty($auditLogs)): ?>
+        <div class="log-toolbar">
+            <form class="log-toolbar-search" method="get" action="dashboard.php">
+                <input type="hidden" name="tab" value="security">
+                <input type="text" class="form-input" name="audit_q" value="<?= htmlspecialchars($auditQ) ?>" placeholder="搜索 时间/用户/角色/操作/目标/IP..." autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
+                <?php if ($auditQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=security">清除</a><?php endif; ?>
+            </form>
+            <span class="toolbar-spacer"></span>
+            <?php if ($auditQ !== ''): ?><span class="result-count">匹配 <?= $auditData['total'] ?> 条</span><?php endif; ?>
+        </div>
+        <?php if (empty($auditData['items'])): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            <p>暂无操作日志</p>
+            <p><?= $auditQ !== '' ? '未找到匹配「' . htmlspecialchars($auditQ) . '」的记录' : '暂无操作日志' ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
         <table>
             <tr><th>时间</th><th>用户</th><th>角色</th><th>操作</th><th>目标</th><th>结果</th><th>哈希</th></tr>
-            <?php foreach ($auditLogs as $log): ?>
+            <?php foreach ($auditData['items'] as $log): ?>
             <tr>
                 <td style="color:var(--text-muted);font-size:0.85em;white-space:nowrap"><?= htmlspecialchars($log['ts'] ?? '') ?></td>
                 <td><?= htmlspecialchars($log['user_name'] ?? '') ?><br><span style="font-size:0.78em;color:var(--text-muted)"><?= htmlspecialchars($log['user_id'] ?? '') ?></span></td>
@@ -1113,6 +1237,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <?php endforeach; ?>
         </table>
         </div>
+        <?= renderPager($auditData, 'audit_page', ['tab' => 'security', 'audit_q' => $auditQ, 'unauth_per_page' => $unauthPerPage, 'login_per_page' => $loginPerPage], 'audit_per_page') ?>
         <?php endif; ?>
     </div>
 
@@ -1391,9 +1516,17 @@ $banMsg = $_GET['bmsg'] ?? '';
     <!-- 更新历史 -->
     <div class="card">
         <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>更新历史</div>
+        <form class="log-toolbar" onsubmit="return loadBackupHistory(1, document.getElementById('backupSearchInput').value)">
+            <input type="text" class="form-input" id="backupSearchInput" placeholder="搜索 版本/时间/状态..." autocomplete="off">
+            <button type="submit" class="btn btn-sm btn-primary">搜索</button>
+            <button type="button" class="btn btn-sm btn-outline" onclick="document.getElementById('backupSearchInput').value='';loadBackupHistory(1,'')">清除</button>
+            <span class="toolbar-spacer"></span>
+            <span class="page-info" id="backupPageInfo"></span>
+        </form>
         <div class="backup-list" id="backupList">
             <p style="color:var(--text-muted);font-size:0.85em">加载中...</p>
         </div>
+        <div id="backupPager"></div>
     </div>
 
     <script>
@@ -1605,22 +1738,125 @@ $banMsg = $_GET['bmsg'] ?? '';
         loadBackupHistory();
     });
 
-    function loadBackupHistory() {
+    var backupSearchQ = '';
+    var backupPerPage = 20;
+    // v2.6.6 同次更新：初始每页条数从 URL 的 per_page 读取，修复"选择每页条数后刷新被重置为 20"的 bug
+    (function() {
+        var m = (location.search || '').match(/[?&]per_page=(\d+)/);
+        if (m) {
+            var v = parseInt(m[1], 10);
+            if (v === 10 || v === 20 || v === 50 || v === 100) backupPerPage = v;
+        }
+    })();
+    function loadBackupHistory(page, q, perPage) {
+        page = page || 1;
+        if (q !== undefined) backupSearchQ = q;
+        if (perPage !== undefined) backupPerPage = perPage;
         var list = document.getElementById('backupList');
-        fetch('<?= $_SERVER['SCRIPT_NAME'] ?>?tab=update&ajax=update_status')
+        list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85em">加载中...</p>';
+        fetch('<?= $_SERVER['SCRIPT_NAME'] ?>?tab=update&ajax=update_history&page=' + encodeURIComponent(page) + '&q=' + encodeURIComponent(backupSearchQ) + '&per_page=' + encodeURIComponent(backupPerPage))
             .then(function(r) { return r.json(); })
-            .then(function(s) {
+            .then(function(d) {
+                var hist = (d && d.history) || [];
                 var html = '';
-                if (s.status !== 'idle') {
-                    html += '<div class="backup-item"><div class="backup-info"><span class="backup-version">更新 ' + s.from_version + ' → ' + s.to_version + '</span><span class="backup-time">' + (s.completed_at ? new Date(s.completed_at * 1000).toLocaleString() : '进行中') + '</span></div><span class="backup-status ' + s.status + '">' + ({'pending':'等待中','in_progress':'进行中','completed':'已完成','failed':'失败'}[s.status] || s.status) + '</span></div>';
+                if (hist.length === 0) {
+                    html = '<p style="color:var(--text-muted);font-size:0.85em">' + (backupSearchQ ? '未找到匹配「' + backupSearchQ + '」的记录' : '暂无更新记录') + '</p>';
                 } else {
-                    html = '<p style="color:var(--text-muted);font-size:0.85em">暂无更新记录</p>';
+                    for (var i = 0; i < hist.length; i++) {
+                        var h = hist[i];
+                        var stText = ({'completed':'已完成','failed':'失败','in_progress':'进行中'}[h.status] || h.status);
+                        html += '<div class="backup-item">'
+                            + '<div class="backup-info"><span class="backup-version">更新 ' + h.from_version + ' → ' + h.to_version + '</span>'
+                            + '<span class="backup-time">' + (h.completed_at || '') + '</span></div>'
+                            + '<span class="backup-status ' + h.status + '">' + stText + '</span></div>';
+                    }
                 }
                 list.innerHTML = html;
+                renderBackupPager(d);
             })
             .catch(function() {
                 list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85em">加载失败</p>';
             });
+        return false;
+    }
+
+    // v2.6.6：更新历史分页控件（三段式：总数+每页条数 / 页码按钮 / 页码跳转；事件委托防注入）
+    function renderBackupPager(d) {
+        var info = document.getElementById('backupPageInfo');
+        if (info) info.textContent = (d && d.total > 0) ? ('共 ' + d.total + ' 条 · 第 ' + d.page + '/' + d.pages + ' 页') : '';
+        var pager = document.getElementById('backupPager');
+        if (!d || !d.total || !d.pages) { pager.innerHTML = ''; return; }
+        var page = d.page, pages = d.pages, perPage = d.per_page || backupPerPage;
+        // 单页时仍保留「共 N 条 + 每页条数选择器」，仅隐藏页码按钮与跳转区（与 PHP renderPager 逻辑对齐）
+        var showNav = pages > 1;
+        // 安全基础 URL：搜索词经 encodeURIComponent，插入 data 属性无注入风险
+        var baseUrl = '<?= $_SERVER['SCRIPT_NAME'] ?>?tab=update&ajax=update_history&q=' + encodeURIComponent(backupSearchQ);
+        var ppTpl = baseUrl + '&per_page=__PP__&page=1';
+        var pgTpl = baseUrl + '&per_page=' + perPage + '&page=__PG__';
+        var seq = [];
+        if (pages <= 7) { for (var i = 1; i <= pages; i++) seq.push(i); }
+        else {
+            seq.push(1);
+            for (var i = Math.max(2, page - 1); i <= Math.min(pages - 1, page + 1); i++) seq.push(i);
+            seq.push(pages);
+            seq = seq.filter(function(v, idx, a) { return a.indexOf(v) === idx; });
+        }
+        var html = '<nav class="pagination">';
+        // 左：总数 + 每页条数
+        html += '<div class="pagination-info"><span class="page-info">共 <strong>' + d.total + '</strong> 条</span>'
+              + '<label class="per-page">每页 <select data-pp-url="' + ppTpl + '">';
+        [10, 20, 50, 100].forEach(function(opt) {
+            html += '<option value="' + opt + '"' + (opt === perPage ? ' selected' : '') + '>' + opt + '</option>';
+        });
+        html += '</select> 条</label></div>';
+        // 中：页码按钮（仅多页时显示）
+        if (showNav) {
+            html += '<div class="pagination-btns">';
+            var mkBtn = function(pg, label, title, current) {
+                if (current) return '<span class="page-btn current" title="' + title + '">' + label + '</span>';
+                return '<a class="page-btn" data-page="' + pg + '" href="javascript:void(0)" title="' + title + '">' + label + '</a>';
+            };
+            html += mkBtn(1, '« 首页', '首页', false);
+            html += mkBtn(Math.max(1, page - 1), '‹ 上一页', '上一页', false);
+            var prev = 0;
+            for (var i = 0; i < seq.length; i++) {
+                var pg = seq[i];
+                if (pg - prev > 1) html += '<span class="page-btn page-ellipsis">…</span>';
+                html += mkBtn(pg, pg, '第 ' + pg + ' 页', pg === page);
+                prev = pg;
+            }
+            html += mkBtn(Math.min(pages, page + 1), '下一页 ›', '下一页', false);
+            html += mkBtn(pages, '末页 »', '末页', false);
+            html += '</div>';
+        }
+        // 右：页码信息 + 跳转（仅多页时显示）
+        if (showNav) {
+            html += '<div class="pagination-jump"><span class="page-info">第 ' + page + ' / ' + pages + ' 页</span>'
+                  + '<input type="number" class="page-jump" min="1" max="' + pages + '" placeholder="页码" data-pg-url="' + pgTpl + '">'
+                  + '<button type="button" class="page-btn">跳转</button></div>';
+        }
+        pager.innerHTML = html + '</nav>';
+        // 事件委托（click: 页码按钮/跳转按钮；change: 每页条数/页码输入）
+        pager.onclick = function(e) {
+            var target = e.target;
+            while (target && target !== pager && !(target.getAttribute && target.getAttribute('data-page'))) target = target.parentNode;
+            if (target && target !== pager && target.getAttribute('data-page')) {
+                loadBackupHistory(parseInt(target.getAttribute('data-page'), 10));
+                return;
+            }
+            var btn = e.target;
+            if (btn && btn.type === 'button') {
+                var inp = btn.previousElementSibling;
+                if (inp && inp.dataset && inp.dataset.pgUrl && inp.value) {
+                    location.href = inp.dataset.pgUrl.replace('__PG__', inp.value);
+                }
+            }
+        };
+        pager.onchange = function(e) {
+            var t = e.target;
+            if (t && t.dataset && t.dataset.ppUrl) location.href = t.dataset.ppUrl.replace('__PP__', t.value);
+            else if (t && t.dataset && t.dataset.pgUrl && t.value) location.href = t.dataset.pgUrl.replace('__PG__', t.value);
+        };
     }
     </script>
 

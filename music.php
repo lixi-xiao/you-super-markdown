@@ -2,12 +2,9 @@
 header('Content-Type: application/json; charset=utf-8');
 // 同源调用无需 CORS；不输出跨域头，公网模式下避免任意来源滥用（见 14.10 公网/内网模式）
 
-// 加载配置
-$configFile = __DIR__ . '/data/.config.json';
-$config = [];
-if (file_exists($configFile)) {
-    $config = json_decode(file_get_contents($configFile), true) ?: [];
-}
+// 加载配置（SQLite）
+require_once __DIR__ . '/utils.php';
+$config = loadSiteConfig();
 
 // 获取参数
 $platform = $_GET['platform'] ?? $config['music_platform'] ?? 'netease';
@@ -20,6 +17,11 @@ $sortAll = $_GET['sortAll'] ?? '';
 $playlistId = $_GET['playlistId'] ?? '';
 $lyricId = $_GET['lyric'] ?? '';
 $songId = $_GET['songId'] ?? '';
+
+// v2.6.0：按平台取 Cookies（网易云 music_cookies / QQ 音乐 music_cookies_qq 独立配置）
+$musicCookies = ($platform === 'qq')
+    ? ($config['music_cookies_qq'] ?? '')
+    : ($config['music_cookies'] ?? '');
 
 // 平台到歌单ID的映射
 $platformPlaylistKeys = [
@@ -57,13 +59,12 @@ if (!empty($lyricId)) {
 // 单曲播放地址请求
 if (!empty($songId)) {
     $funcName = $platform . '_getSongUrl';
-    $url = $funcName($songId);
+    $url = $funcName($songId, $musicCookies);
     echo json_encode(['url' => $url], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 // 歌单请求
-$musicCookies = $config['music_cookies'] ?? '';
 $funcName = $platform . '_getPlaylist';
 $result = $funcName($playlistId, $sortAll, $musicCookies);
 

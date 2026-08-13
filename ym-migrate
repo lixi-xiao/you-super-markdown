@@ -1,0 +1,289 @@
+#!/usr/bin/env php
+<?php
+// ============================================================
+// You Super Markdown — JSON → SQLite 一次性迁移脚本（v2.5.0）
+// 将 data/*.json 及 data/.comments/*.json 导入 data/ym.db。
+// 幂等：meta 表存在 migrated_json_v1 标记时跳过（--force 可重跑）。
+// 用法：
+//   php ym-migrate            # 增量迁移（有标记则跳过）
+//   php ym-migrate --force    # 忽略标记，覆盖重迁
+// ============================================================
+require_once __DIR__ . '/utils.php';
+
+define('MIGRATE_MARKER', 'migrated_json_v1');
+
+function migrate_read_json($path) {
+    if (!file_exists($path)) return null;
+    $raw = @file_get_contents($path);
+    if ($raw === false || trim($raw) === '') return null;
+    $d = json_decode($raw, true);
+    return is_array($d) ? $d : null;
+}
+
+function migrate_sanitize_article($article) {
+    // 与原 loadComments() 相同的文件名清洗规则
+    return preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '_', (string)$article);
+}
+
+function migrate_rates($pdo, $dataDir, $file, $table) {
+    $rows = migrate_read_json($dataDir . '/' . $file);
+    if ($rows === null) return;
+    $pdo->exec("DELETE FROM {$table}");
+    $st = $pdo->prepare("INSERT INTO {$table} (ip, t) VALUES (?,?)");
+    $n = 0;
+    foreach ($rows as $r) {
+        if (!is_array($r)) continue;
+        $st->execute([$r['ip'] ?? '', (int)($r['t'] ?? 0)]);
+        $n++;
+    }
+    echo "[ok] {$table}: {$n}\n";
+}
+
+function migrate_insert_comments($pdo, $article, $comments, $parentId = null) {
+    foreach ($comments as $c) {
+        if (!is_array($c)) continue;
+        $id = isset($c['id']) && $c['id'] !== '' ? $c['id'] : bin2hex(random_bytes(8));
+        $st = $pdo->prepare(
+            'INSERT INTO comments (id, article, parent_id, user_id, qq, nickname, avatar, signature, content, likes, created_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+        );
+        $st->execute([
+            $id,
+            $article,
+            $parentId,
+            $c['user_id'] ?? '',
+            $c['qq'] ?? '',
+            $c['nickname'] ?? '',
+            $c['avatar'] ?? '',
+            $c['signature'] ?? '',
+            $c['content'] ?? '',
+            (int)($c['likes'] ?? 0),
+            $c['created_at'] ?? '',
+        ]);
+        if (!empty($c['replies']) && is_array($c['replies'])) {
+            migrate_insert_comments($pdo, $article, $c['replies'], $id);
+        }
+    }
+}
+
+function migrate_comments($pdo, $dataDir) {
+    $commentDir = $dataDir . '/.comments';
+    $articleDir = $dataDir . '/articles';
+    $imported = [];
+    $total = 0;
+
+    // 优先按文章目录精确还原 article（文章名为含 .md 的文件名）
+    $articles = glob($articleDir . '/*.md') ?: [];
+    foreach ($articles as $af) {
+        $article = basename($af);
+        $cf = $commentDir . '/' . migrate_sanitize_article($article) . '.json';
+        if (!file_exists($cf)) continue;
+        $comments = migrate_read_json($cf);
+        if ($comments === null) continue;
+        $before = (int)$pdo->query('SELECT COUNT(*) FROM comments')->fetchColumn();
+        migrate_insert_comments($pdo, $article, $comments);
+        $total += (int)$pdo->query('SELECT COUNT(*) FROM comments')->fetchColumn() - $before;
+        $imported[realpath($cf)] = true;
+    }
+
+    // 兜底：未关联到任何文章的孤儿评论文件（article 取文件名，尽力保留数据）
+    $orphans = glob($commentDir . '/*.json') ?: [];
+    foreach ($orphans as $cf) {
+        if (isset($imported[realpath($cf)])) continue;
+        $comments = migrate_read_json($cf);
+        if ($comments === null) continue;
+        $before = (int)$pdo->query('SELECT COUNT(*) FROM comments')->fetchColumn();
+        migrate_insert_comments($pdo, basename($cf, '.json'), $comments);
+        $total += (int)$pdo->query('SELECT COUNT(*) FROM comments')->fetchColumn() - $before;
+    }
+    echo "[ok] comments: {$total}\n";
+}
+
+function migrate_run($force = false) {
+    $pdo = db();
+    $dataDir = __DIR__ . '/data';
+
+    $marker = db_one('SELECT value FROM meta WHERE key = ?', [MIGRATE_MARKER]);
+    if ($marker && !$force) {
+        echo "[skip] 已迁移过（{$marker['value']}），跳过。使用 --force 重新迁移。\n";
+        return;
+    }
+
+    $pdo->beginTransaction();
+    try {
+        // 1. users
+        $users = migrate_read_json($dataDir . '/.users.json');
+        if ($users !== null) {
+            $pdo->exec('DELETE FROM users');
+            $st = $pdo->prepare('INSERT INTO users (id, qq, nickname, password, avatar, signature, role, station_id, created, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)');
+            $n = 0;
+            foreach ($users as $u) {
+                if (!is_array($u)) continue;
+                $st->execute([
+                    $u['id'] ?? '', $u['qq'] ?? '', $u['nickname'] ?? '', $u['password'] ?? '',
+                    $u['avatar'] ?? '', $u['signature'] ?? '', $u['role'] ?? 'user',
+                    $u['station_id'] ?? '', $u['created'] ?? '', $u['created_by'] ?? '',
+                ]);
+                $n++;
+            }
+            echo "[ok] users: {$n}\n";
+        }
+
+        // 2. config
+        $config = migrate_read_json($dataDir . '/.config.json');
+        if ($config !== null) {
+            $pdo->exec('DELETE FROM config');
+            $st = $pdo->prepare('INSERT INTO config (key, value) VALUES (?,?)');
+            foreach ($config as $k => $v) {
+                $st->execute([$k, json_encode($v, JSON_UNESCAPED_UNICODE)]);
+            }
+            echo "[ok] config: " . count($config) . "\n";
+        }
+
+        // 3. bans
+        $bans = migrate_read_json($dataDir . '/.bans.json');
+        if ($bans !== null) {
+            $pdo->exec('DELETE FROM bans');
+            $st = $pdo->prepare('INSERT INTO bans (ip, types_json, reason, time) VALUES (?,?,?,?)');
+            $n = 0;
+            foreach ($bans as $b) {
+                if (!is_array($b)) continue;
+                $st->execute([
+                    $b['ip'] ?? '', json_encode($b['types'] ?? [], JSON_UNESCAPED_UNICODE),
+                    $b['reason'] ?? '', $b['time'] ?? '',
+                ]);
+                $n++;
+            }
+            echo "[ok] bans: {$n}\n";
+        }
+
+        // 4. logs
+        $logs = migrate_read_json($dataDir . '/.logs.json');
+        if ($logs !== null) {
+            $pdo->exec('DELETE FROM logs');
+            $st = $pdo->prepare('INSERT INTO logs (ip, action, time) VALUES (?,?,?)');
+            $n = 0;
+            foreach ($logs as $l) {
+                if (!is_array($l)) continue;
+                $st->execute([$l['ip'] ?? '', $l['action'] ?? '', $l['time'] ?? '']);
+                $n++;
+            }
+            echo "[ok] logs: {$n}\n";
+        }
+
+        // 5. unauthorized
+        $unauth = migrate_read_json($dataDir . '/.unauthorized.json');
+        if ($unauth !== null) {
+            $pdo->exec('DELETE FROM unauthorized');
+            $st = $pdo->prepare('INSERT INTO unauthorized (ip, action, user, user_id, ua, time) VALUES (?,?,?,?,?,?)');
+            $n = 0;
+            foreach ($unauth as $u) {
+                if (!is_array($u)) continue;
+                $st->execute([$u['ip'] ?? '', $u['action'] ?? '', $u['user'] ?? '', $u['user_id'] ?? '', $u['ua'] ?? '', $u['time'] ?? '']);
+                $n++;
+            }
+            echo "[ok] unauthorized: {$n}\n";
+        }
+
+        // 6. roles → meta
+        $roles = migrate_read_json($dataDir . '/.roles.json');
+        if ($roles !== null) {
+            $pdo->prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)')->execute(['roles', json_encode($roles, JSON_UNESCAPED_UNICODE)]);
+            echo "[ok] roles\n";
+        }
+
+        // 7. audit（保留哈希链，按顺序重算 prev_hash）
+        $audit = migrate_read_json($dataDir . '/.audit.json');
+        if ($audit !== null) {
+            $pdo->exec('DELETE FROM audit');
+            $st = $pdo->prepare('INSERT INTO audit (id, ts, user_id, user_name, role, ip, action, target, detail, result, hash, prev_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
+            $prevHash = '';
+            $n = 0;
+            foreach ($audit as $e) {
+                if (!is_array($e)) continue;
+                $st->execute([
+                    $e['id'] ?? '', $e['ts'] ?? '', $e['user_id'] ?? '', $e['user_name'] ?? '',
+                    $e['role'] ?? '', $e['ip'] ?? '', $e['action'] ?? '', $e['target'] ?? '',
+                    $e['detail'] ?? '', $e['result'] ?? '', $e['hash'] ?? '', $prevHash,
+                ]);
+                $prevHash = $e['hash'] ?? '';
+                $n++;
+            }
+            echo "[ok] audit: {$n}\n";
+        }
+
+        // 8. entries
+        $entries = migrate_read_json($dataDir . '/.entries.json');
+        if ($entries !== null) {
+            $pdo->exec('DELETE FROM entries');
+            $st = $pdo->prepare('INSERT INTO entries (id, token, otp_hash, expires, used, created) VALUES (?,?,?,?,?,?)');
+            $n = 0;
+            foreach ($entries as $e) {
+                if (!is_array($e)) continue;
+                $st->execute([
+                    $e['id'] ?? bin2hex(random_bytes(8)), $e['token'] ?? '', $e['otp_hash'] ?? '',
+                    (int)($e['expires'] ?? 0), (int)($e['used'] ?? 0), $e['created'] ?? '',
+                ]);
+                $n++;
+            }
+            echo "[ok] entries: {$n}\n";
+        }
+
+        // 9. challenge
+        $challenges = migrate_read_json($dataDir . '/.challenge.json');
+        if ($challenges !== null) {
+            $pdo->exec('DELETE FROM challenge');
+            $st = $pdo->prepare('INSERT INTO challenge (id, code, expires, used, created) VALUES (?,?,?,?,?)');
+            $n = 0;
+            foreach ($challenges as $c) {
+                if (!is_array($c)) continue;
+                $st->execute([
+                    $c['id'] ?? bin2hex(random_bytes(8)), $c['code'] ?? '',
+                    (int)($c['expires'] ?? 0), (int)($c['used'] ?? 0), (int)($c['created'] ?? time()),
+                ]);
+                $n++;
+            }
+            echo "[ok] challenge: {$n}\n";
+        }
+
+        // 10. pinned
+        $pinned = migrate_read_json($dataDir . '/.pinned.json');
+        if ($pinned !== null) {
+            $pdo->exec('DELETE FROM pinned');
+            $st = $pdo->prepare('INSERT INTO pinned (article) VALUES (?)');
+            $n = 0;
+            foreach ($pinned as $a) {
+                if (!is_string($a)) continue;
+                $st->execute([$a]);
+                $n++;
+            }
+            echo "[ok] pinned: {$n}\n";
+        }
+
+        // 11. 频率表
+        migrate_rates($pdo, $dataDir, '.login_fails.json', 'login_fails');
+        migrate_rates($pdo, $dataDir, '.reg_rates.json', 'reg_rates');
+        migrate_rates($pdo, $dataDir, '.comment_rates.json', 'comment_rates');
+
+        // 12. comments
+        migrate_comments($pdo, $dataDir);
+
+        $pdo->commit();
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        fwrite(STDERR, "[error] 迁移失败: " . $e->getMessage() . "\n");
+        exit(1);
+    }
+
+    db_exec('INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)', [MIGRATE_MARKER, date('Y-m-d H:i:s')]);
+    echo "[done] 迁移完成，标记已写入 meta." . MIGRATE_MARKER . "\n";
+
+    // 只读校验审计哈希链（不修改任何数据）
+    $r = verifyAuditChain();
+    echo $r['valid']
+        ? "[verify] 审计哈希链校验通过（{$r['count']} 条）\n"
+        : "[verify] 审计哈希链断裂于第 {$r['broken_at']} 条，请检查！\n";
+}
+
+$force = in_array('--force', $argv ?? [], true);
+migrate_run($force);

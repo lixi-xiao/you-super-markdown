@@ -18,7 +18,7 @@ import datetime
 WEB_ROOT = os.environ.get('YM_WEB_ROOT', '/var/www/you-markdown')
 APP_CONFIG = os.path.join(WEB_ROOT, 'app-config.json')
 SNAPSHOT_FILE = os.path.join(WEB_ROOT, 'data', '.hfish_snapshot.json')
-BANS_FILE = os.path.join(WEB_ROOT, 'data', '.bans.json')
+DB_FILE = os.path.join(WEB_ROOT, 'data', 'ym.db')
 
 
 def load_config():
@@ -72,17 +72,37 @@ def _parse_json(s):
 
 
 def load_bans():
+    """从 SQLite bans 表读取封禁列表（保持原 [{ip,types,reason,time}] 格式）"""
     try:
-        with open(BANS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
+        con = sqlite3.connect(DB_FILE)
+        con.row_factory = sqlite3.Row
+        rows = con.execute("SELECT ip, types_json, reason, time FROM bans ORDER BY time DESC").fetchall()
+        con.close()
+        bans = []
+        for r in rows:
+            bans.append({
+                'ip': r['ip'],
+                'types': json.loads(r['types_json'] or '[]'),
+                'reason': r['reason'],
+                'time': r['time'],
+            })
+        return bans
     except Exception:
         return []
 
 
 def save_bans(bans):
-    with open(BANS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(bans, f, ensure_ascii=False, indent=4)
+    try:
+        con = sqlite3.connect(DB_FILE)
+        con.execute('DELETE FROM bans')
+        con.executemany(
+            'INSERT INTO bans (ip, types_json, reason, time) VALUES (?,?,?,?)',
+            [(b.get('ip'), json.dumps(b.get('types', []), ensure_ascii=False), b.get('reason', ''), b.get('time', '')) for b in bans]
+        )
+        con.commit()
+        con.close()
+    except Exception:
+        pass
 
 
 def is_private_ip(ip):
@@ -99,18 +119,24 @@ def is_private_ip(ip):
 
 def apply_ban(ip, threshold):
     """攻击次数达到阈值 → 写入封禁（登录/注册/评论），已封禁则跳过"""
-    bans = load_bans()
-    for b in bans:
-        if b.get('ip') == ip:
+    try:
+        con = sqlite3.connect(DB_FILE)
+        cur = con.cursor()
+        cur.execute("SELECT ip FROM bans WHERE ip=?", (ip,))
+        if cur.fetchone():
+            con.close()
             return False  # 已封禁
-    bans.append({
-        'ip': ip,
-        'types': ['login', 'register', 'comment'],
-        'reason': '触发蜜罐行为达到 %d 次自动封禁' % threshold,
-        'time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-    })
-    save_bans(bans)
-    return True
+        cur.execute(
+            "INSERT INTO bans (ip, types_json, reason, time) VALUES (?,?,?,?)",
+            (ip, json.dumps(['login', 'register', 'comment'], ensure_ascii=False),
+             '触发蜜罐行为达到 %d 次自动封禁' % threshold,
+             datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        )
+        con.commit()
+        con.close()
+        return True
+    except Exception:
+        return False
 
 
 def main():

@@ -1,0 +1,22 @@
+# ===== 数据目录（用户数据、日志、封禁等敏感文件，不入库）=====
+data/
+
+# ===== 构建产物与更新包（统一存放于 f:\测试白盒\update-package）=====
+*.tar.gz
+*.zip
+staging/
+inc-stage/
+v221-base/
+
+# ===== 敏感文件 =====
+.pw.txt
+*.pem
+*.key
+*.secret
+
+# ===== 日志 =====
+*.log
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db

@@ -19,7 +19,7 @@ if (!validateJWT($jwt)) {
 
 $users = loadUsers();
 $config = loadSiteConfig();
-$siteTitle = $config['site_title'] ?? 'You Markdown';
+$siteTitle = $config['site_title'] ?? 'You Super Markdown';
 $msg = $_GET['msg'] ?? '';
 
 // AJAX 处理：更新通道切换
@@ -168,6 +168,27 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'upload_package') {
     exit;
 }
 
+// AJAX 处理：蜜罐立即同步（拉取攻击日志 + 执行封禁检查）
+if (isset($_POST['ajax']) && $_POST['ajax'] === 'hfish_sync') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (!checkCsrfToken($_POST['csrf_token'] ?? '')) {
+        echo json_encode(['success' => false, 'error' => 'csrf_error'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $syncScript = __DIR__ . '/../ym-hfish-sync.py';
+    $outArr = [];
+    $rc = 1;
+    if (file_exists($syncScript)) {
+        exec('python3 ' . escapeshellarg($syncScript) . ' 2>&1', $outArr, $rc);
+    } else {
+        $outArr[] = '同步脚本不存在: ym-hfish-sync.py';
+    }
+    $output = implode("\n", $outArr);
+    auditLog('hfish_sync', '', '手动触发蜜罐同步: ' . $output);
+    echo json_encode(['success' => $rc === 0, 'output' => $output], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // ====== 统一表单处理（在所有 HTML 输出之前，确保重定向正常） ======
 
 // 用户管理表单
@@ -218,7 +239,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
         header('Location: dashboard.php?tab=config&msg=csrf_error');
         exit;
     }
-    $config['site_title'] = trim($_POST['site_title'] ?? 'You Markdown');
+    $config['site_title'] = trim($_POST['site_title'] ?? 'You Super Markdown');
     $config['registration_enabled'] = !empty($_POST['registration_enabled']);
     $config['guest_comments_enabled'] = !empty($_POST['guest_comments_enabled']);
     $config['update_channel'] = ($_POST['update_channel'] ?? 'stable') === 'beta' ? 'beta' : 'stable';
@@ -443,6 +464,10 @@ $banMsg = $_GET['bmsg'] ?? '';
         <a href="dashboard.php?tab=guard" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'guard' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
             守护进程
+        </a>
+        <a href="dashboard.php?tab=hfish" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'hfish' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
+            蜜罐安全
         </a>
         <a href="?logout=1" class="sidebar-link danger <?= ($_GET['tab'] ?? '') === 'logout' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -1284,7 +1309,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                     <label class="form-label">输入 6 位确认码</label>
                     <input class="form-input" type="text" id="challengeCodeInput" placeholder="例如: A3B9F2" maxlength="6" style="text-transform:uppercase;letter-spacing:4px;font-size:1.2em;text-align:center" autocomplete="off">
                 </div>
-                <div style="margin-top:8px;color:var(--text-muted);font-size:0.82em">确认码 60 秒有效，每次操作后自动失效</div>
+                <div style="margin-top:8px;color:var(--text-muted);font-size:0.82em">确认码 300 秒有效，每次操作后自动失效</div>
                 <div id="challengeError" style="color:var(--danger);margin-top:8px;display:none"></div>
             </div>
             <div class="modal-footer">
@@ -1513,7 +1538,6 @@ $banMsg = $_GET['bmsg'] ?? '';
                             document.getElementById('updateActionCard').style.display = 'block';
                             document.getElementById('newVersionText').textContent = verText;
                             pendingUpdateVersion = d.target_version || 'uploaded';
-                            pendingUpdatePath = d.package_path || '';
                         }, 800);
                     } else {
                         document.getElementById('mUpStep1').className = 'update-progress-step failed';
@@ -1581,6 +1605,87 @@ $banMsg = $_GET['bmsg'] ?? '';
             <tr><td style="color:var(--text-muted)">PID</td><td><code><?= $guardPid ?: 'N/A' ?></code></td></tr>
         </table>
     </div>
+
+    <?php elseif ($tab === 'hfish'): ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
+            蜜罐安全
+        </div>
+        <div class="page-subtitle">HFish 蜜罐攻击日志与自动封禁（攻击≥阈值自动封禁登录/注册/评论）</div>
+    </div>
+    <?php
+    $hfishSnapshot = [];
+    $hfishSnapFile = __DIR__ . '/../data/.hfish_snapshot.json';
+    if (file_exists($hfishSnapFile)) {
+        $hfishSnapshot = json_decode(file_get_contents($hfishSnapFile), true) ?: [];
+    }
+    $hfishAttacks = $hfishSnapshot['attacks'] ?? [];
+    $hfishThreshold = $hfishSnapshot['threshold'] ?? 3;
+    $hfishUpdated = $hfishSnapshot['updated_at'] ?? '从未同步';
+    $hfishError = $hfishSnapshot['error'] ?? '';
+    $hfishBannedCount = count(array_filter($hfishAttacks, fn($a) => !empty($a['banned'])));
+    ?>
+    <div class="card">
+        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>蜜罐状态</div>
+        <div class="table-wrap"><table>
+            <tr><td style="color:var(--text-muted)">最近同步时间</td><td><?= htmlspecialchars($hfishUpdated) ?></td></tr>
+            <tr><td style="color:var(--text-muted)">自动封禁阈值</td><td>攻击次数 ≥ <strong><?= intval($hfishThreshold) ?></strong> 次 → 封禁（登录/注册/评论）</td></tr>
+            <tr><td style="color:var(--text-muted)">攻击 IP 记录</td><td><?= count($hfishAttacks) ?> 条（已封禁 <?= $hfishBannedCount ?> 条）</td></tr>
+            <?php if ($hfishError): ?>
+            <tr><td style="color:var(--text-muted)">数据源状态</td><td><span style="color:#ef4444"><?= htmlspecialchars($hfishError) ?></span></td></tr>
+            <?php endif; ?>
+        </table></div>
+        <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+            <button class="btn btn-primary" onclick="hfishSync()" id="hfishSyncBtn">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                立即同步
+            </button>
+            <span id="hfishSyncMsg" style="font-size:0.85em;color:var(--text-muted)"></span>
+        </div>
+        <p style="font-size:0.82em;color:var(--text-muted);margin-top:10px">守护进程每 5 分钟自动同步一次；点击「立即同步」可即时拉取蜜罐攻击记录并执行封禁检查。</p>
+    </div>
+
+    <div class="card">
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>攻击 IP 列表（<?= count($hfishAttacks) ?>）</div>
+        <?php if (empty($hfishAttacks)): ?>
+        <div class="empty-state"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg><p>暂无攻击记录（或蜜罐尚未同步）</p></div>
+        <?php else: ?>
+        <div class="table-wrap"><table>
+            <tr><th>IP</th><th>攻击次数</th><th>攻击行为</th><th>命中蜜罐</th><th>UA</th><th>最近时间</th><th>状态</th></tr>
+            <?php foreach ($hfishAttacks as $a): ?>
+            <tr>
+                <td><code><?= htmlspecialchars($a['ip'] ?? '') ?></code></td>
+                <td><strong><?= intval($a['attack_cnt'] ?? 0) ?></strong><?= intval($a['attack_cnt'] ?? 0) >= $hfishThreshold ? ' <span class="chain-badge chain-invalid">已达阈值</span>' : '' ?></td>
+                <td style="font-size:0.85em"><?= htmlspecialchars(implode(', ', array_keys($a['styles'] ?? [])) ?: '-') ?></td>
+                <td style="font-size:0.85em"><?= htmlspecialchars(implode(', ', array_keys($a['honeypots'] ?? [])) ?: '-') ?></td>
+                <td style="font-size:0.82em;color:var(--text-muted)"><?= htmlspecialchars(implode(', ', array_keys($a['uas'] ?? [])) ?: '-') ?></td>
+                <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['date'] ?? '') ?></td>
+                <td><?= !empty($a['banned']) ? '<span class="chain-badge chain-invalid">已封禁</span>' : '<span class="chain-badge chain-valid">未封禁</span>' ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table></div>
+        <?php endif; ?>
+    </div>
+    <script>
+    function hfishSync() {
+        var btn = document.getElementById('hfishSyncBtn');
+        var msg = document.getElementById('hfishSyncMsg');
+        btn.disabled = true;
+        msg.textContent = '同步中...';
+        var fd = new FormData();
+        fd.append('ajax', 'hfish_sync');
+        fd.append('csrf_token', '<?= generateCsrfToken() ?>');
+        fetch('<?= $_SERVER['SCRIPT_NAME'] ?>?tab=hfish', { method: 'POST', body: fd })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                btn.disabled = false;
+                if (d.success) { msg.textContent = '同步成功'; setTimeout(function() { location.reload(); }, 800); }
+                else { msg.textContent = '同步失败：' + (d.output || d.error || '未知错误'); }
+            })
+            .catch(function() { btn.disabled = false; msg.textContent = '请求失败'; });
+    }
+    </script>
     <?php endif; ?>
 </div>
 

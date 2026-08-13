@@ -9,6 +9,24 @@ if (!checkRole(ROLE_STATION_ADMIN) && !checkRole(ROLE_AUTHOR)) {
     exit;
 }
 $isStationAdmin = checkRole(ROLE_STATION_ADMIN);
+$myId = getCurrentUserId();
+$myNick = $_SESSION['cmt_user']['nickname'] ?? '';
+
+// 文章归属辅助：写作者仅能管理自己的文章（author_id 匹配；兼容旧文章按作者昵称匹配）
+function getArticleMeta($filePath) {
+    $raw = @file_get_contents($filePath);
+    if ($raw && preg_match('/<!--META(.*?)-->/s', $raw, $m)) {
+        $meta = json_decode(trim($m[1]), true);
+        if (is_array($meta)) return $meta;
+    }
+    return [];
+}
+function canManageArticle($meta) {
+    global $isStationAdmin, $myId, $myNick;
+    if ($isStationAdmin) return true;
+    return ($meta['author_id'] ?? '') === $myId
+        || (empty($meta['author_id']) && ($meta['author'] ?? '') === $myNick);
+}
 
 $dataDir = './data/articles';
 if (!is_dir($dataDir)) mkdir($dataDir, 0755, true);
@@ -30,7 +48,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_file'])) {
         $realDataPath = realpath($dataDir);
         $realDelPath = realpath($delPath);
         if ($realDelPath !== false && strpos($realDelPath, $realDataPath) === 0) {
-            unlink($delPath);
+            if (canManageArticle(getArticleMeta($delPath))) {
+                unlink($delPath);
+            } else {
+                logUnauthorized('越权尝试删除文章: ' . $delFile);
+            }
         }
     }
     header('Location: sc.php?deleted=1');
@@ -84,7 +106,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
                 $zip = new ZipArchive();
                 if ($zip->open($uploadedFile['tmp_name']) === true) {
                     $extractedCount = 0;
-                    for ($i = 0; $i < $zip->numFiles; $i++) {
+                    // 防 zip bomb：限制文件数量与解压总大小
+                    $zipSafe = true;
+                    if ($zip->numFiles > 200) {
+                        $zipSafe = false;
+                        $editError = 'ZIP 内文件过多（最多 200 个），已拒绝导入';
+                    }
+                    $totalZipSize = 0;
+                    for ($i = 0; $zipSafe && $i < $zip->numFiles; $i++) {
+                        $stat = $zip->statIndex($i);
+                        $totalZipSize += (int)($stat['size'] ?? 0);
+                        if ($totalZipSize > 50 * 1024 * 1024) {
+                            $zipSafe = false;
+                            $editError = 'ZIP 解压总大小超限（最大 50MB），已拒绝导入';
+                            break;
+                        }
                         $entryName = $zip->getNameIndex($i);
                         if (substr($entryName, -1) === '/' || strpos(basename($entryName), '.') === 0) continue;
                         $entryExt = strtolower(pathinfo($entryName, PATHINFO_EXTENSION));
@@ -99,19 +135,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
                         }
                         $fileContent = $zip->getFromIndex($i);
                         if ($fileContent === false) continue;
+                        if (strlen($fileContent) > 10 * 1024 * 1024) {
+                            $zipSafe = false;
+                            $editError = 'ZIP 内单个文件超过 10MB，已拒绝导入';
+                            break;
+                        }
                         if (!preg_match('/^<!--META/', $fileContent)) {
                             $licenseUrlMap = ['CC BY 4.0' => 'https://creativecommons.org/licenses/by/4.0/', 'CC BY-SA 4.0' => 'https://creativecommons.org/licenses/by-sa/4.0/', 'CC BY-NC 4.0' => 'https://creativecommons.org/licenses/by-nc/4.0/', 'CC BY-NC-SA 4.0' => 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'CC BY-ND 4.0' => 'https://creativecommons.org/licenses/by-nd/4.0/', 'CC BY-NC-ND 4.0' => 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'CC0 1.0' => 'https://creativecommons.org/publicdomain/zero/1.0/'];
-                            $meta = json_encode(['category' => $category, 'tags' => $tags, 'excerpt' => $excerpt, 'author' => $author, 'license' => $license, 'licenseUrl' => ($licenseUrlMap[$license] ?? '')], JSON_UNESCAPED_UNICODE);
+                            $meta = json_encode(['category' => $category, 'tags' => $tags, 'excerpt' => $excerpt, 'author' => $author, 'author_id' => $myId, 'license' => $license, 'licenseUrl' => ($licenseUrlMap[$license] ?? '')], JSON_UNESCAPED_UNICODE);
                             $fileContent = "<!--META" . $meta . "-->\n" . $fileContent;
                         }
-                        if (file_put_contents($dataDir . '/' . $targetName, $fileContent)) {
+                        if (file_put_contents($dataDir . '/' . $targetName, $fileContent, LOCK_EX)) {
                             $extractedCount++;
                         }
                     }
                     $zip->close();
                     @unlink($uploadedFile['tmp_name']);
-                    $editSuccess = $extractedCount > 0 ? 'ZIP 解压完成，共导入 ' . $extractedCount . ' 篇文档' : 'ZIP 中未找到可识别的 Markdown 文件';
-                    if ($extractedCount === 0) $editError = 'ZIP 中未找到可识别的 Markdown 文件';
+                    if ($zipSafe) {
+                        $editSuccess = $extractedCount > 0 ? 'ZIP 解压完成，共导入 ' . $extractedCount . ' 篇文档' : 'ZIP 中未找到可识别的 Markdown 文件';
+                        if ($extractedCount === 0) $editError = 'ZIP 中未找到可识别的 Markdown 文件';
+                    }
                 } else {
                     $editError = '无法打开 ZIP 文件';
                 }
@@ -146,14 +189,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
             }
             $licenseUrlMap = ['CC BY 4.0' => 'https://creativecommons.org/licenses/by/4.0/', 'CC BY-SA 4.0' => 'https://creativecommons.org/licenses/by-sa/4.0/', 'CC BY-NC 4.0' => 'https://creativecommons.org/licenses/by-nc/4.0/', 'CC BY-NC-SA 4.0' => 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'CC BY-ND 4.0' => 'https://creativecommons.org/licenses/by-nd/4.0/', 'CC BY-NC-ND 4.0' => 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'CC0 1.0' => 'https://creativecommons.org/publicdomain/zero/1.0/'];
             $licenseUrl = $licenseUrlMap[$license] ?? '';
-            $meta = json_encode(['category' => $category, 'tags' => $tags, 'excerpt' => $excerpt, 'author' => $author, 'license' => $license, 'licenseUrl' => $licenseUrl], JSON_UNESCAPED_UNICODE);
+            $meta = json_encode(['category' => $category, 'tags' => $tags, 'excerpt' => $excerpt, 'author' => $author, 'author_id' => $myId, 'license' => $license, 'licenseUrl' => $licenseUrl], JSON_UNESCAPED_UNICODE);
             $fullContent = "<!--META" . $meta . "-->\n" . $content;
 
             if (!empty($updateFile)) {
                 $fn = basename($updateFile);
                 $fp = $dataDir . '/' . $fn;
                 if (file_exists($fp)) {
-                    if (file_put_contents($fp, $fullContent)) {
+                    if (!canManageArticle(getArticleMeta($fp))) {
+                        $editError = '无权编辑该文章';
+                        logUnauthorized('越权尝试编辑文章: ' . $fn);
+                    } elseif (file_put_contents($fp, $fullContent, LOCK_EX)) {
                         $editSuccess = '文档已更新';
                         auditLog('article_update', $fn, '更新文档: ' . $title);
                     } else { $editError = '保存失败'; }
@@ -165,7 +211,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
                 } else { $fn = ''; }
                 if (empty($fn)) { $fn = 'doc_' . time(); }
                 $fn .= '.md';
-                if (file_put_contents($dataDir . '/' . $fn, $fullContent)) {
+                if (file_put_contents($dataDir . '/' . $fn, $fullContent, LOCK_EX)) {
                     $editSuccess = '文档已创建';
                     auditLog('article_create', $fn, '创建文档: ' . $title);
                 } else { $editError = '保存失败'; }
@@ -177,11 +223,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
     exit;
 }
 
-// 登出
-if (isset($_GET['logout'])) {
-    auditLog('logout', getCurrentUserId(), '文档管理登出');
-    session_unset();
-    session_destroy();
+// 登出（POST + CSRF）
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])) {
+    if (verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        auditLog('logout', getCurrentUserId(), '文档管理登出');
+        session_unset();
+        session_destroy();
+    }
     header('Location: /');
     exit;
 }
@@ -200,6 +248,8 @@ if ($files) {
     foreach ($files as $file) {
         $filename = basename($file);
         if (strpos($filename, '.') === 0) continue;
+        // 写作者仅显示自己的文章（最小权限）
+        if (!$isStationAdmin && !canManageArticle(getArticleMeta($file))) continue;
         $content = file_get_contents($file);
         $displayName = preg_replace('/\.md$/i', '', $filename);
         if (preg_match('/^#\s+(.+)/m', $content, $m)) { $displayName = $m[1]; }
@@ -223,6 +273,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>文档管理 - <?= htmlspecialchars($siteTitle) ?></title>
+<meta name="csrf-token" content="<?= htmlspecialchars(generateCsrfToken()) ?>">
 <link rel="stylesheet" href="css/admin.css">
 </head>
 <body>
@@ -247,7 +298,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
             <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             返回首页
         </a>
-        <a href="sc.php?logout=1" class="sidebar-link danger">
+        <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             退出登录
         </a>
@@ -542,7 +593,16 @@ document.getElementById('editContent')?.addEventListener('input', function() {
     document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
 });
 
-// 置顶/取消置顶
+// 置顶/取消置顶（index.php 的 POST 需要 CSRF token）
+var scCsrfToken = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+// 登出走 POST + CSRF
+function logoutSubmit(e) {
+    e.preventDefault();
+    var fd = new FormData();
+    fd.append('logout', '1');
+    fd.append('csrf_token', scCsrfToken);
+    fetch('sc.php', { method: 'POST', body: fd }).then(function() { location.href = '/'; });
+}
 document.querySelectorAll('.pin-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
         var name = this.dataset.name;
@@ -551,7 +611,7 @@ document.querySelectorAll('.pin-btn').forEach(function(btn) {
         var btnEl = this;
         fetch('index.php?action=' + action, {
             method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': scCsrfToken},
             body: 'file=' + encodeURIComponent(name)
         }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.success) location.reload();

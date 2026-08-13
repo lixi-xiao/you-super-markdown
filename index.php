@@ -94,6 +94,14 @@ if ($hideDefaults) {
 }
 
 $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+// CSRF 防护：index.php 所有 POST 操作（pin/unpin/delete/update）统一校验
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) {
+        jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    }
+}
+
 if ($action === 'pin') {
     if (!isAdmin()) { logUnauthorized('越权尝试置顶文章', true); jsonOut(['success' => false, 'error' => '无权限'], 403); }
     header('Content-Type: application/json; charset=utf-8');

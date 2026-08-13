@@ -29,6 +29,11 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'save_channel' && isset($_POST['
         echo json_encode(['success' => false, 'error' => 'csrf_error'], JSON_UNESCAPED_UNICODE);
         exit;
     }
+    // 切换更新通道属敏感操作，需服务器挑战码
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        echo json_encode(['success' => false, 'error' => '挑战码无效或已过期'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     $ch = ($_POST['channel'] ?? 'stable') === 'beta' ? 'beta' : 'stable';
     $config['update_channel'] = $ch;
     saveSiteConfig($config);
@@ -65,29 +70,33 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'trigger_update') {
         echo json_encode(['success' => false, 'error' => '参数不完整'], JSON_UNESCAPED_UNICODE);
         exit;
     }
+    // 防注入：目标版本仅允许数字与点（避免写入 utils.php 时破坏/注入代码）
+    if (!preg_match('/^[\d.]+$/', $targetVersion)) {
+        echo json_encode(['success' => false, 'error' => '目标版本格式非法'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     // 读取上传的更新包路径（仅接受已上传到固定目录的路径，防止任意路径注入）
     $pkgPath = trim($_POST['package_path'] ?? '');
     if ($pkgPath !== '' && strpos($pkgPath, '/tmp/ym-update-packages/') !== 0) {
         echo json_encode(['success' => false, 'error' => '更新包路径非法'], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    // 验证挑战码（不区分大小写）
-    $challengeFile = __DIR__ . '/../data/.challenge.json';
-    $challenges = file_exists($challengeFile) ? json_decode(file_get_contents($challengeFile), true) : [];
-    if (!is_array($challenges)) $challenges = [];
-    $valid = false;
-    foreach ($challenges as $i => $c) {
-        if (strtoupper($c['code'] ?? '') === $challengeCode && ($c['expires'] ?? 0) > time() && empty($c['used'])) {
-            $challenges[$i]['used'] = 1;
-            $valid = true;
-            break;
-        }
+    // 挑战码尝试限次（防暴力枚举：连续 5 次失败锁定 60 秒）
+    $nowTs = time();
+    if ($nowTs < (int)($_SESSION['challenge_lock_until'] ?? 0)) {
+        echo json_encode(['success' => false, 'error' => '尝试过于频繁，请 60 秒后重试'], JSON_UNESCAPED_UNICODE);
+        exit;
     }
-    file_put_contents($challengeFile, json_encode($challenges, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
-    if (!$valid) {
+    if (!verifyChallenge($challengeCode)) {
+        $_SESSION['challenge_fails'] = (int)($_SESSION['challenge_fails'] ?? 0) + 1;
+        if ($_SESSION['challenge_fails'] >= 5) {
+            $_SESSION['challenge_lock_until'] = time() + 60;
+            $_SESSION['challenge_fails'] = 0;
+        }
         echo json_encode(['success' => false, 'error' => '挑战码无效或已过期'], JSON_UNESCAPED_UNICODE);
         exit;
     }
+    $_SESSION['challenge_fails'] = 0;
     // 验证通过，创建更新请求
     $updateToken = bin2hex(random_bytes(16));
     $updateRequest = [
@@ -195,6 +204,8 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'hfish_sync') {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         $msg = 'csrf_error';
+    } elseif (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        $msg = 'challenge_error';
     } elseif ($_POST['action'] === 'create_user') {
         $newRole = $_POST['role'] ?? ROLE_USER;
         if (!in_array($newRole, [ROLE_STATION_ADMIN, ROLE_AUTHOR, ROLE_USER])) $newRole = ROLE_USER;
@@ -202,18 +213,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $newQQ = trim($_POST['qq'] ?? '');
         $newPwd = trim($_POST['password'] ?? '');
         if ($newNick && $newQQ && $newPwd) {
-            $users[] = [
-                'id' => bin2hex(random_bytes(8)),
-                'qq' => $newQQ,
-                'nickname' => $newNick,
-                'password' => password_hash($newPwd, PASSWORD_DEFAULT),
-                'role' => $newRole,
-                'created' => date('Y-m-d H:i:s'),
-                'created_by' => getCurrentUserId(),
-            ];
-            file_put_contents(__DIR__ . '/../data/.users.json', json_encode($users, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
-            auditLog('user_create', $newQQ, "创建用户: {$newNick}, 角色: {$newRole}");
-            $msg = 'user_created';
+            // QQ 唯一性检查（避免同 QQ 账号登录歧义）
+            $qqExists = false;
+            foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
+            if ($qqExists) {
+                $msg = 'qq_duplicate';
+            } else {
+                $users[] = [
+                    'id' => bin2hex(random_bytes(8)),
+                    'qq' => $newQQ,
+                    'nickname' => $newNick,
+                    'password' => password_hash($newPwd, PASSWORD_DEFAULT),
+                    'role' => $newRole,
+                    'created' => date('Y-m-d H:i:s'),
+                    'created_by' => getCurrentUserId(),
+                ];
+                file_put_contents(__DIR__ . '/../data/.users.json', json_encode($users, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+                auditLog('user_create', $newQQ, "创建用户: {$newNick}, 角色: {$newRole}");
+                $msg = 'user_created';
+            }
         }
     } elseif ($_POST['action'] === 'delete_user') {
         $delId = $_POST['user_id'] ?? '';
@@ -237,6 +255,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         header('Location: dashboard.php?tab=config&msg=csrf_error');
+        exit;
+    }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=config&msg=challenge_error');
         exit;
     }
     $config['site_title'] = trim($_POST['site_title'] ?? 'You Super Markdown');
@@ -280,6 +302,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ban_action'])) {
         header('Location: dashboard.php?tab=security&bmsg=csrf_error');
         exit;
     }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=security&bmsg=challenge_error');
+        exit;
+    }
     $bansFile = __DIR__ . '/../data/.bans.json';
     $bans = file_exists($bansFile) ? (json_decode(file_get_contents($bansFile), true) ?: []) : [];
     $act = $_POST['ban_action'];
@@ -320,14 +346,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ban_action'])) {
     exit;
 }
 
-// 清空操作日志
+// 清空操作日志（敏感操作：需挑战码确认；清空后同步镜像并留下审计痕迹）
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clear_audit'])) {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         header('Location: dashboard.php?tab=security&bmsg=csrf_error');
         exit;
     }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=security&bmsg=challenge_error');
+        exit;
+    }
     file_put_contents(AUDIT_LOG_FILE, json_encode([], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
     file_put_contents(AUDIT_CHAIN_FILE, '', LOCK_EX);
+    if (is_dir(AUDIT_MIRROR_DIR)) {
+        file_put_contents(AUDIT_MIRROR_DIR . 'audit.json', json_encode([], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+        file_put_contents(AUDIT_MIRROR_DIR . 'audit_chain', '', LOCK_EX);
+    }
+    auditLog('audit_cleared', '', '清空全部操作日志（已挑战码确认）');
     header('Location: dashboard.php?tab=security&bmsg=cleared');
     exit;
 }
@@ -387,7 +422,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['bg_image']) || isse
     // 保存背景配置
     if (isset($_POST['_bg_save'])) {
         $config['bg_type'] = in_array($_POST['bg_type']??'', ['none','image','api']) ? $_POST['bg_type'] : 'none';
-        $config['bg_image'] = trim($_POST['bg_image']??'');
+        // bg_image 仅允许站内 data/bg/ 路径或 http(s) URL，防止 CSS 值注入
+        $bgImage = trim($_POST['bg_image']??'');
+        if ($bgImage !== '' && strpos($bgImage, 'data/bg/') !== 0 && !preg_match('#^https?://#i', $bgImage)) $bgImage = '';
+        $config['bg_image'] = $bgImage;
         $config['bg_api_url'] = trim($_POST['bg_api_url']??'');
         $config['bg_blur_enabled'] = !empty($_POST['bg_blur_enabled']);
         $config['bg_blur_level'] = max(0, min(50, intval($_POST['bg_blur_level']??0)));
@@ -469,7 +507,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
             蜜罐安全
         </a>
-        <a href="?logout=1" class="sidebar-link danger <?= ($_GET['tab'] ?? '') === 'logout' ? 'active' : '' ?>">
+        <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             退出登录
         </a>
@@ -480,6 +518,8 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php if ($msg === 'saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>配置已保存</div><?php endif; ?>
     <?php if ($msg === 'user_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>用户已创建</div><?php endif; ?>
     <?php if ($msg === 'user_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>用户已删除</div><?php endif; ?>
+    <?php if ($msg === 'qq_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
+    <?php if ($msg === 'challenge_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>挑战码无效或已过期，请重新生成</div><?php endif; ?>
 
     <?php
     $tab = $_GET['tab'] ?? 'overview';
@@ -536,9 +576,10 @@ $banMsg = $_GET['bmsg'] ?? '';
             <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
             创建用户
         </div>
-        <form method="post">
+        <form method="post" class="need-challenge">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="action" value="create_user">
+            <input type="hidden" name="challenge_code">
             <div class="form-row">
                 <div class="form-group">
                     <label class="form-label">昵称</label>
@@ -584,10 +625,11 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
                 <td>
                     <?php if (($u['role'] ?? '') !== ROLE_SUPER_ADMIN): ?>
-                    <form method="post" style="display:inline" onsubmit="return confirm('确定删除 <?= htmlspecialchars($u['nickname'] ?? '') ?>？')">
+                    <form method="post" style="display:inline" class="need-challenge" data-confirm="确定删除 <?= htmlspecialchars($u['nickname'] ?? '') ?>？">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="action" value="delete_user">
                         <input type="hidden" name="user_id" value="<?= htmlspecialchars($u['id']) ?>">
+                        <input type="hidden" name="challenge_code">
                         <button type="submit" class="btn-link danger">删除</button>
                     </form>
                     <?php endif; ?>
@@ -667,9 +709,10 @@ $banMsg = $_GET['bmsg'] ?? '';
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
             站点设置
         </div>
-        <form method="post">
+        <form method="post" class="need-challenge">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="_save_config" value="1">
+            <input type="hidden" name="challenge_code">
             <div class="form-group">
                 <label class="form-label">网站标题</label>
                 <input class="form-input" name="site_title" value="<?= htmlspecialchars($config['site_title'] ?? '') ?>">
@@ -820,9 +863,10 @@ $banMsg = $_GET['bmsg'] ?? '';
             <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             添加封禁
         </div>
-        <form method="post">
+        <form method="post" class="need-challenge">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="ban_action" value="add">
+            <input type="hidden" name="challenge_code">
             <div class="form-row">
                 <div class="form-group" style="flex:1">
                     <label class="form-label">IP 地址</label>
@@ -871,10 +915,11 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <div style="font-size:0.82em;color:var(--text-muted);margin-bottom:8px">原因：<?= htmlspecialchars($ban['reason']) ?></div>
                 <?php endif; ?>
                 <div class="ban-item-actions">
-                    <form method="post" style="display:inline" onsubmit="return confirm('确定解除封禁 <?= htmlspecialchars($ban['ip']) ?>？')">
+                    <form method="post" style="display:inline" class="need-challenge" data-confirm="确定解除封禁 <?= htmlspecialchars($ban['ip']) ?>？">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="ban_action" value="remove">
                         <input type="hidden" name="ip" value="<?= htmlspecialchars($ban['ip']) ?>">
+                        <input type="hidden" name="challenge_code">
                         <button type="submit" class="btn-link danger" title="解除封禁">解除封禁</button>
                     </form>
                     <button type="button" class="btn-link" onclick="openBanEdit('<?= htmlspecialchars($ban['ip']) ?>', '<?= htmlspecialchars(json_encode($ban['types'] ?? [])) ?>')" title="编辑">编辑</button>
@@ -893,10 +938,11 @@ $banMsg = $_GET['bmsg'] ?? '';
             </div>
             <div class="modal-body">
                 <div class="ban-modal-ip" id="banModalIp"></div>
-                <form method="post" id="banEditForm">
+                <form method="post" id="banEditForm" class="need-challenge">
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                     <input type="hidden" name="ban_action" value="update_types">
                     <input type="hidden" name="ip" id="banModalIpInput">
+                    <input type="hidden" name="challenge_code">
                     <div class="toggle-row">
                         <div><div class="toggle-label">注册</div><div class="toggle-desc">禁止该 IP 注册新账号</div></div>
                         <label class="toggle"><input type="checkbox" name="types[]" value="register"><span class="slider"></span></label>
@@ -1038,9 +1084,10 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <button type="submit" class="btn btn-sm btn-outline" style="color:#f59e0b;border-color:#fcd34d">从镜像恢复</button>
             </form>
             <?php endif; ?>
-            <form method="post" style="display:inline;margin-left:auto" onsubmit="return confirm('确定清空所有操作日志？')">
+            <form method="post" style="display:inline;margin-left:auto" class="need-challenge" data-confirm="确定清空所有操作日志？">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <input type="hidden" name="clear_audit" value="1">
+                <input type="hidden" name="challenge_code">
                 <button type="submit" class="btn btn-sm btn-outline" style="color:#ef4444;border-color:#fecaca">清空日志</button>
             </form>
         </div>
@@ -1356,10 +1403,13 @@ $banMsg = $_GET['bmsg'] ?? '';
     var pendingUpdatePath = '';
 
     function switchChannel(ch) {
+        var code = prompt('切换更新通道为敏感操作，请在 SSH 中执行 sudo ym-admin challenge 获取确认码后输入：');
+        if (!code) return;
         var fd = new FormData();
         fd.append('ajax', 'save_channel');
         fd.append('channel', ch);
         fd.append('csrf_token', '<?= generateCsrfToken() ?>');
+        fd.append('challenge_code', code.trim().toUpperCase());
         fetch('<?= $_SERVER['SCRIPT_NAME'] ?>?tab=update', { method: 'POST', body: fd })
             .then(function(r) { return r.json(); })
             .then(function(d) {
@@ -1612,7 +1662,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
             蜜罐安全
         </div>
-        <div class="page-subtitle">HFish 蜜罐攻击日志与自动封禁（攻击≥阈值自动封禁登录/注册/评论）</div>
+        <div class="page-subtitle">HFish 蜜罐攻击日志与自动封禁（攻击≥阈值自动封禁登录/注册/评论；内网 IP 豁免）</div>
     </div>
     <?php
     $hfishSnapshot = [];
@@ -1630,7 +1680,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>蜜罐状态</div>
         <div class="table-wrap"><table>
             <tr><td style="color:var(--text-muted)">最近同步时间</td><td><?= htmlspecialchars($hfishUpdated) ?></td></tr>
-            <tr><td style="color:var(--text-muted)">自动封禁阈值</td><td>攻击次数 ≥ <strong><?= intval($hfishThreshold) ?></strong> 次 → 封禁（登录/注册/评论）</td></tr>
+            <tr><td style="color:var(--text-muted)">自动封禁阈值</td><td>攻击次数 ≥ <strong><?= intval($hfishThreshold) ?></strong> 次 → 封禁（登录/注册/评论）；内网/私有 IP（10/8、172.16/12、192.168/16 等）豁免自动封禁</td></tr>
             <tr><td style="color:var(--text-muted)">攻击 IP 记录</td><td><?= count($hfishAttacks) ?> 条（已封禁 <?= $hfishBannedCount ?> 条）</td></tr>
             <?php if ($hfishError): ?>
             <tr><td style="color:var(--text-muted)">数据源状态</td><td><span style="color:#ef4444"><?= htmlspecialchars($hfishError) ?></span></td></tr>
@@ -1690,16 +1740,41 @@ $banMsg = $_GET['bmsg'] ?? '';
 </div>
 
 <script>
+// 敏感操作挑战码统一处理：提交前弹出确认码输入（SSH: sudo ym-admin challenge）
+(function() {
+    document.querySelectorAll('form.need-challenge').forEach(function(f) {
+        f.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (f.dataset.confirm && !confirm(f.dataset.confirm)) return;
+            var code = prompt('请在 SSH 中执行 sudo ym-admin challenge 获取 6 位确认码后输入：');
+            if (!code) return;
+            var hid = f.querySelector('input[name="challenge_code"]');
+            if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = 'challenge_code'; f.appendChild(hid); }
+            hid.value = code.trim().toUpperCase();
+            f.submit();
+        });
+    });
+})();
+// 登出走 POST + CSRF（防 GET 登出被 CSRF 利用）
+function logoutSubmit(e) {
+    e.preventDefault();
+    var fd = new FormData();
+    fd.append('logout', '1');
+    fd.append('csrf_token', '<?= generateCsrfToken() ?>');
+    fetch(window.location.href.split('?')[0], { method: 'POST', body: fd }).then(function() { location.href = '/'; });
+}
 function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebarOverlay').classList.toggle('active');
 }
 </script>
-<?php if (isset($_GET['logout'])): ?>
+<?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])): ?>
 <?php
-auditLog('logout', getCurrentUserId(), '超管登出');
-session_unset();
-session_destroy();
+if (verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+    auditLog('logout', getCurrentUserId(), '超管登出');
+    session_unset();
+    session_destroy();
+}
 header('Location: /');
 exit;
 ?>

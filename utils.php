@@ -13,7 +13,8 @@ function appConfig($key, $default = '') {
     $config = loadAppConfig();
     return (isset($config[$key]) && $config[$key] !== '') ? $config[$key] : $default;
 }
-define('APP_VERSION', appConfig('version', '2.3.3'));
+// 版本唯一事实来源：app-config.json 的 version；代码禁止硬编码版本号
+define('APP_VERSION', appConfig('version', '0.0.0'));
 function generateCsrfToken() {
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -89,7 +90,7 @@ function loadSiteConfig() {
     return is_array($d) ? $d : [];
 }
 function saveSiteConfig($config) {
-    return file_put_contents(__DIR__ . '/data/.config.json', json_encode($config, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    return file_put_contents(__DIR__ . '/data/.config.json', json_encode($config, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
 }
 function getStationPath() {
     $config = loadSiteConfig();
@@ -121,7 +122,7 @@ function loadBansList() {
     return is_array($d) ? $d : [];
 }
 function saveBansList($bans) {
-    file_put_contents(__DIR__ . '/data/.bans.json', json_encode($bans, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    file_put_contents(__DIR__ . '/data/.bans.json', json_encode($bans, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
 }
 function addBan($ip, $types, $reason = '') {
     $bans = loadBansList();
@@ -378,6 +379,26 @@ define('UPDATE_REQUEST_FILE', '/tmp/ym-update-request.json');
 define('UPDATE_LOCK_FILE', '/tmp/ym-update.lock');
 define('BACKUP_DIR', '/opt/you-markdown/backups');
 
+// 服务器挑战码校验（300 秒、单次）：匹配 code + 未过期 + 未使用，通过则原子消费
+function verifyChallenge($code) {
+    $f = __DIR__ . '/data/.challenge.json';
+    if (!file_exists($f) || empty($code)) return false;
+    $challenges = json_decode(file_get_contents($f), true);
+    if (!is_array($challenges)) return false;
+    $valid = false;
+    foreach ($challenges as $i => $c) {
+        if (strtoupper($c['code'] ?? '') === strtoupper($code) && ($c['expires'] ?? 0) > time() && empty($c['used'])) {
+            $challenges[$i]['used'] = 1;
+            $valid = true;
+            break;
+        }
+    }
+    if ($valid) {
+        file_put_contents($f, json_encode($challenges, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    }
+    return $valid;
+}
+
 function getUpdateRequest() {
     if (!file_exists(UPDATE_REQUEST_FILE)) return null;
     $data = json_decode(file_get_contents(UPDATE_REQUEST_FILE), true);
@@ -421,8 +442,19 @@ function clearUpdateLock() {
 function getUpdateStatus() {
     $req = getUpdateRequest();
     if (!$req) return ['status' => 'idle', 'version' => APP_VERSION];
+    // 请求超时处理：pending/in_progress 超过 expires 自动标记 failed（防"等待中/进行中"卡死）
+    $st = $req['status'] ?? 'pending';
+    if (in_array($st, ['pending', 'in_progress'], true) && (int)($req['expires'] ?? 0) > 0 && time() > (int)$req['expires']) {
+        $req['status'] = 'failed';
+        $req['error'] = '请求超时';
+        $req['completed_at'] = time();
+        saveUpdateRequest($req);
+        @chmod(UPDATE_REQUEST_FILE, 0666);
+        clearUpdateLock();
+        $st = 'failed';
+    }
     return [
-        'status' => $req['status'] ?? 'pending',
+        'status' => $st,
         'from_version' => $req['from_version'] ?? APP_VERSION,
         'to_version' => $req['to_version'] ?? '',
         'channel' => $req['channel'] ?? 'stable',
@@ -434,11 +466,14 @@ function getUpdateStatus() {
 
 function getBackupList() {
     if (!is_dir(BACKUP_DIR)) return [];
-    $files = glob(BACKUP_DIR . '/pre-update-*.tar.gz');
+    $files = array_merge(
+        glob(BACKUP_DIR . '/pre-update-*.tar.gz') ?: [],
+        glob(BACKUP_DIR . '/ym-backup-*.tar.gz') ?: []
+    );
     $backups = [];
     foreach ($files as $f) {
         $basename = basename($f);
-        // 格式: pre-update-{version}-{timestamp}.tar.gz
+        // 更新备份格式: pre-update-{version}-{timestamp}.tar.gz
         if (preg_match('/^pre-update-v?([\d.]+)-(\d+)\.tar\.gz$/', $basename, $m)) {
             $backups[] = [
                 'file' => $basename,
@@ -446,6 +481,18 @@ function getBackupList() {
                 'version' => $m[1],
                 'timestamp' => (int)$m[2],
                 'size' => filesize($f),
+                'type' => 'update',
+            ];
+        }
+        // 手动备份格式: ym-backup-{yyyyMMdd}-{HHmmss}.tar.gz
+        elseif (preg_match('/^ym-backup-(\d{8})-(\d{6})\.tar\.gz$/', $basename, $m2)) {
+            $backups[] = [
+                'file' => $basename,
+                'path' => $f,
+                'version' => '手动备份',
+                'timestamp' => (int)strtotime($m2[1] . ' ' . $m2[2]),
+                'size' => filesize($f),
+                'type' => 'manual',
             ];
         }
     }

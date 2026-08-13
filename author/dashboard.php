@@ -26,17 +26,31 @@ $siteTitle = $config['site_title'] ?? 'You Markdown';
 $currentUser = $_SESSION['cmt_user'] ?? [];
 $myId = $currentUser['id'] ?? '';
 
-// 写作者只能看自己的文章
+// 写作者只能看自己的文章（解析文章 META 的 author_id 归属；兼容旧文章按作者昵称匹配）
 $articlesDir = __DIR__ . '/../data/articles/';
 $myArticles = [];
 if (is_dir($articlesDir)) {
-    $files = glob($articlesDir . '*.json');
+    $files = glob($articlesDir . '*.md');
     foreach ($files as $f) {
-        $article = json_decode(file_get_contents($f), true);
-        if ($article && ($article['author_id'] ?? '') === $myId) {
-            $article['file'] = basename($f);
-            $myArticles[] = $article;
+        $raw = @file_get_contents($f);
+        $meta = [];
+        $title = preg_replace('/\.md$/i', '', basename($f));
+        if ($raw) {
+            if (preg_match('/<!--META(.*?)-->/s', $raw, $m)) {
+                $meta = json_decode(trim($m[1]), true) ?: [];
+            }
+            if (preg_match('/^#\s+(.+)/m', $raw, $tm)) $title = $tm[1];
         }
+        $belongs = ($meta['author_id'] ?? '') === $myId
+            || (empty($meta['author_id']) && ($meta['author'] ?? '') === ($currentUser['nickname'] ?? ''));
+        if (!$belongs) continue;
+        $myArticles[] = [
+            'id' => basename($f, '.md'),
+            'file' => basename($f),
+            'title' => $title,
+            'created' => date('Y-m-d H:i', filemtime($f)),
+            'author_id' => $meta['author_id'] ?? '',
+        ];
     }
 }
 ?>
@@ -72,7 +86,7 @@ if (is_dir($articlesDir)) {
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
             我的文章
         </a>
-        <a href="?logout=1" class="sidebar-link danger">
+        <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             退出登录
         </a>
@@ -123,9 +137,25 @@ function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebarOverlay').classList.toggle('active');
 }
+// 登出走 POST + CSRF
+function logoutSubmit(e) {
+    e.preventDefault();
+    var fd = new FormData();
+    fd.append('logout', '1');
+    fd.append('csrf_token', '<?= generateCsrfToken() ?>');
+    fetch(window.location.href.split('?')[0], { method: 'POST', body: fd }).then(function() { location.href = '/'; });
+}
 </script>
-<?php if (isset($_GET['logout'])): ?>
-<?php auditLog('logout', $myId, '写作者登出'); session_unset(); session_destroy(); header('Location: /'); exit; ?>
+<?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])): ?>
+<?php
+if (verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+    auditLog('logout', $myId, '写作者登出');
+    session_unset();
+    session_destroy();
+}
+header('Location: /');
+exit;
+?>
 <?php endif; ?>
 </body>
 </html>

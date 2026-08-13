@@ -110,7 +110,7 @@
         const origFetch = window.fetch.bind(window);
         window.fetch = function(url, options) {
             options = options || {};
-            if (typeof url === 'string' && url.indexOf('api.php') !== -1 && String(options.method || 'GET').toUpperCase() === 'POST') {
+            if (typeof url === 'string' && (url.indexOf('api.php') !== -1 || url.indexOf('index.php') !== -1) && String(options.method || 'GET').toUpperCase() === 'POST') {
                 const headers = options.headers || {};
                 if (headers instanceof Headers) {
                     headers.set('X-CSRF-Token', CSRF_TOKEN);

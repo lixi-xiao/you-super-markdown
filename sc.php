@@ -9,6 +9,9 @@ if (!checkRole(ROLE_STATION_ADMIN) && !checkRole(ROLE_AUTHOR)) {
     exit;
 }
 $isStationAdmin = checkRole(ROLE_STATION_ADMIN);
+// v2.6.4：写作者进入编辑器后侧边栏提供返回「写作者后台」入口（与站长一致）
+// 注意：checkRole 是层级匹配（站长也会命中 author），此处用精确角色匹配，入口各归各
+$isAuthor = (($_SESSION['cmt_user']['role'] ?? '') === ROLE_AUTHOR);
 $myId = getCurrentUserId();
 $myNick = $_SESSION['cmt_user']['nickname'] ?? '';
 
@@ -68,6 +71,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_content') {
     }
     $reqPath = $dataDir . '/' . $reqFile;
     if (!file_exists($reqPath)) { echo json_encode(['success' => false]); exit; }
+    // 最小权限：写作者只能读取自己的文章（站长可读全部）
+    if (!$isStationAdmin && !canManageArticle(getArticleMeta($reqPath))) {
+        logUnauthorized('越权尝试读取文章内容: ' . $reqFile);
+        echo json_encode(['success' => false, 'error' => '无权访问']); exit;
+    }
     $raw = file_get_contents($reqPath);
     $meta = []; $content = $raw;
     if (preg_match('/<!--META(.*?)-->/s', $raw, $m)) {
@@ -238,11 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])) {
 
 $files = glob($dataDir . '/*.md');
 $fileList = [];
-$pinFile = './data/.pinned.json';
-$pinnedNames = [];
-if (file_exists($pinFile)) {
-    $pinnedNames = json_decode(file_get_contents($pinFile), true) ?? [];
-}
+$pinnedNames = getPinnedList();
 if ($files) {
     usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
     foreach ($files as $file) {
@@ -292,6 +296,12 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
         <a href="station/dashboard.php" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
             站长后台
+        </a>
+        <?php endif; ?>
+        <?php if ($isAuthor): ?>
+        <a href="author/dashboard.php" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            写作者后台
         </a>
         <?php endif; ?>
         <a href="index.php" class="sidebar-link">
@@ -592,6 +602,13 @@ document.getElementById('editContent')?.addEventListener('input', function() {
     var l = this.value.replace(/\s/g,'').length;
     document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
 });
+
+// 支持 ?edit=<文件名>：从写作者/站长后台直接进入编辑弹窗（v2.5.1）
+(function() {
+    var p = new URLSearchParams(window.location.search);
+    var ef = p.get('edit');
+    if (ef) openEditModal(ef);
+})();
 
 // 置顶/取消置顶（index.php 的 POST 需要 CSRF token）
 var scCsrfToken = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';

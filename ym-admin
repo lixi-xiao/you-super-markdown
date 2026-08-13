@@ -10,25 +10,7 @@ case "${1:-}" in
         OTP_HASH=$(php -r "echo password_hash('$OTP', PASSWORD_DEFAULT);")
         EXPIRES=$(( $(date +%s) + 600 ))
 
-        # 使用 sudo 写入 entries 文件（追加模式）
-        php -r "
-            \$f = '$ENTRIES_FILE';
-            \$entries = file_exists(\$f) ? json_decode(file_get_contents(\$f), true) : [];
-            if (!is_array(\$entries)) \$entries = [];
-            \$entries[] = ['token'=>'$ENTRY_TOKEN','otp_hash'=>'$OTP_HASH','expires'=>$EXPIRES,'used'=>0,'created'=>date('Y-m-d H:i:s')];
-            file_put_contents(\$f, json_encode(\$entries, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
-        " 2>/dev/null
-
-        # 如果直接写入失败（权限不足），尝试 sudo
-        if [ $? -ne 0 ]; then
-            php -r "
-                \$f = '$ENTRIES_FILE';
-                \$entries = file_exists(\$f) ? json_decode(file_get_contents(\$f), true) : [];
-                if (!is_array(\$entries)) \$entries = [];
-                \$entries[] = ['token'=>'$ENTRY_TOKEN','otp_hash'=>'$OTP_HASH','expires'=>$EXPIRES,'used'=>0,'created'=>date('Y-m-d H:i:s')];
-                echo json_encode(\$entries, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT);
-            " | sudo tee "$ENTRIES_FILE" > /dev/null
-        fi
+        php -r "require_once '$WEB_ROOT/utils.php'; addEntry('$ENTRY_TOKEN', '$OTP_HASH', $EXPIRES);" 2>/dev/null
 
         echo ""
         echo "============================================"
@@ -47,19 +29,19 @@ case "${1:-}" in
         NAME="${2:-}"
         if [ -z "$NAME" ]; then echo "用法: ym-admin create-station <站长名称>"; exit 1; fi
         QQ="station_$(openssl rand -hex 4)"
-        PWD=$(openssl rand -base64 12 | tr -d '=+/')
+        # v2.6.4：生成满足密码策略（≥8 位 + 大写 + 小写 + 数字）的随机密码
+        for i in 1 2 3 4 5; do
+            PWD=$(openssl rand -base64 12 | tr -d '=+/')
+            if [ ${#PWD} -ge 8 ] && echo "$PWD" | grep -q '[a-z]' && echo "$PWD" | grep -q '[A-Z]' && echo "$PWD" | grep -q '[0-9]'; then
+                break
+            fi
+        done
         php -r "
-            \$users = json_decode(file_get_contents('$USERS_FILE'), true);
-            \$users[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'station_admin','created'=>date('Y-m-d H:i:s')];
-            file_put_contents('$USERS_FILE', json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
+            require_once '$WEB_ROOT/utils.php';
+            \$u = loadUsers();
+            \$u[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'station_admin','created'=>date('Y-m-d H:i:s')];
+            saveUsers(\$u);
         " 2>/dev/null
-        if [ $? -ne 0 ]; then
-            php -r "
-                \$users = json_decode(file_get_contents('$USERS_FILE'), true);
-                \$users[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'station_admin','created'=>date('Y-m-d H:i:s')];
-                echo json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT);
-            " | sudo tee "$USERS_FILE" > /dev/null
-        fi
         echo "站长账号已创建: $NAME (QQ: $QQ, 密码: $PWD)"
         ;;
 
@@ -68,37 +50,26 @@ case "${1:-}" in
         STATION_ID="${3:-}"
         if [ -z "$NAME" ]; then echo "用法: ym-admin create-author <写作者名称> [站长ID]"; exit 1; fi
         QQ="author_$(openssl rand -hex 4)"
-        PWD=$(openssl rand -base64 12 | tr -d '=+/')
+        # v2.6.4：生成满足密码策略（≥8 位 + 大写 + 小写 + 数字）的随机密码
+        for i in 1 2 3 4 5; do
+            PWD=$(openssl rand -base64 12 | tr -d '=+/')
+            if [ ${#PWD} -ge 8 ] && echo "$PWD" | grep -q '[a-z]' && echo "$PWD" | grep -q '[A-Z]' && echo "$PWD" | grep -q '[0-9]'; then
+                break
+            fi
+        done
         php -r "
-            \$users = json_decode(file_get_contents('$USERS_FILE'), true);
-            \$users[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'author','station_id'=>'$STATION_ID','created'=>date('Y-m-d H:i:s')];
-            file_put_contents('$USERS_FILE', json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
+            require_once '$WEB_ROOT/utils.php';
+            \$u = loadUsers();
+            \$u[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'author','station_id'=>'$STATION_ID','created'=>date('Y-m-d H:i:s')];
+            saveUsers(\$u);
         " 2>/dev/null
-        if [ $? -ne 0 ]; then
-            php -r "
-                \$users = json_decode(file_get_contents('$USERS_FILE'), true);
-                \$users[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'author','station_id'=>'$STATION_ID','created'=>date('Y-m-d H:i:s')];
-                echo json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT);
-            " | sudo tee "$USERS_FILE" > /dev/null
-        fi
         echo "写作者账号已创建: $NAME (QQ: $QQ, 密码: $PWD)"
         ;;
 
     revoke-user)
         USER_ID="${2:-}"
         if [ -z "$USER_ID" ]; then echo "用法: ym-admin revoke-user <用户ID>"; exit 1; fi
-        php -r "
-            \$users = json_decode(file_get_contents('$USERS_FILE'), true);
-            \$users = array_values(array_filter(\$users, fn(\$u) => (\$u['id']??'')!=='$USER_ID'));
-            file_put_contents('$USERS_FILE', json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
-        " 2>/dev/null
-        if [ $? -ne 0 ]; then
-            php -r "
-                \$users = json_decode(file_get_contents('$USERS_FILE'), true);
-                \$users = array_values(array_filter(\$users, fn(\$u) => (\$u['id']??'')!=='$USER_ID'));
-                echo json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT);
-            " | sudo tee "$USERS_FILE" > /dev/null
-        fi
+        php -r "require_once '$WEB_ROOT/utils.php'; db_exec('DELETE FROM users WHERE id = ?', ['$USER_ID']);" 2>/dev/null
         echo "用户已吊销: $USER_ID"
         ;;
 
@@ -114,7 +85,7 @@ case "${1:-}" in
         echo "Nginx: $(systemctl is-active nginx 2>/dev/null || echo 'unknown')"
         PHP_FPM_SVC="php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm"
         echo "PHP-FPM: $(systemctl is-active $PHP_FPM_SVC 2>/dev/null || systemctl is-active php-fpm 2>/dev/null || echo 'unknown')"
-        [ -f "$WEB_ROOT/data/.users.json" ] && echo "用户数: $(php -r "echo count(json_decode(file_get_contents('$USERS_FILE'),true)?:[]);")"
+        echo "用户数: $(php -r "require_once '$WEB_ROOT/utils.php'; echo count(loadUsers());" 2>/dev/null)"
         ;;
 
     log-verify)
@@ -128,16 +99,7 @@ case "${1:-}" in
     challenge)
         CODE=$(openssl rand -hex 3)
         EXPIRES=$(date -d "+300 seconds" +%s 2>/dev/null || echo $(($(date +%s) + 300)))
-        # 保存到挑战文件
-        php -r "
-            \$f = '$WEB_ROOT/data/.challenge.json';
-            \$challenges = file_exists(\$f) ? json_decode(file_get_contents(\$f), true) : [];
-            if (!is_array(\$challenges)) \$challenges = [];
-            \$challenges[] = ['code'=>'$CODE', 'expires'=>$EXPIRES, 'used'=>0, 'created'=>time()];
-            // 清理过期条目
-            \$challenges = array_filter(\$challenges, function(\$c) { return (\$c['expires'] ?? 0) > time() && empty(\$c['used']); });
-            file_put_contents(\$f, json_encode(array_values(\$challenges), JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
-        " 2>/dev/null
+        php -r "require_once '$WEB_ROOT/utils.php'; addChallenge('$CODE', $EXPIRES);" 2>/dev/null
         echo "挑战码: $CODE (300秒有效)"
         ;;
 
@@ -316,6 +278,31 @@ case "${1:-}" in
         rm -rf "$TMP_DIR" 2>/dev/null || true
         echo "  文件更新完成"
 
+        # 4.4 同步运行中的守护进程与 CLI（安装时复制到 /opt 与 /usr/local/bin，更新时需一并覆盖）
+        if [ -f "$WEB_ROOT/ym-guard.py" ]; then
+            cp "$WEB_ROOT/ym-guard.py" /opt/you-markdown/ym-guard.py 2>/dev/null || true
+            chmod 700 /opt/you-markdown/ym-guard.py 2>/dev/null || true
+        fi
+        if [ -f "$WEB_ROOT/ym-admin" ]; then
+            cp "$WEB_ROOT/ym-admin" /usr/local/bin/ym-admin 2>/dev/null || true
+            chmod +x /usr/local/bin/ym-admin 2>/dev/null || true
+        fi
+
+        # 4.5 JSON → SQLite 迁移（v2.5.0；幂等，有标记则跳过）
+        if [ -f "$WEB_ROOT/ym-migrate" ]; then
+            php "$WEB_ROOT/ym-migrate" 2>&1 || {
+                echo "错误：数据迁移失败，已中止"
+                rm -rf "$TMP_DIR" 2>/dev/null || true
+                mark_failed "数据迁移失败"
+                exit 1
+            }
+            # 确保 PHP-FPM（www-data）可写 SQLite 及 WAL/SHM 文件；data 目录组可写供 CLI 只读命令无 sudo 读取
+            chown -R www-data:www-data "$WEB_ROOT/data" 2>/dev/null || true
+            chmod 775 "$WEB_ROOT/data" 2>/dev/null || true
+            chmod 660 "$WEB_ROOT/data/ym.db" 2>/dev/null || true
+            echo "  数据迁移完成"
+        fi
+
         # 5. 锁定母本
         echo "[5/6] 锁定母本目录..."
         chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
@@ -323,12 +310,13 @@ case "${1:-}" in
         # 6. 重启守护
         echo "[6/6] 重启守护进程并记录日志..."
         php -r "
-            \$utilsFile = '$WEB_ROOT/utils.php';
-            if (!file_exists(\$utilsFile)) { echo 'utils.php 不存在，跳过版本号更新'; exit; }
-            \$content = file_get_contents(\$utilsFile);
-            \$content = preg_replace('/define\(\'APP_VERSION\',\s*\'(.*?)\'\)/', \"define('APP_VERSION', '$TO_VER')\", \$content);
-            file_put_contents(\$utilsFile, \$content, LOCK_EX);
-            @copy(\$utilsFile, '/opt/you-markdown/install-base/utils.php');
+            \$cfgFile = '$WEB_ROOT/app-config.json';
+            if (file_exists(\$cfgFile)) {
+                \$c = json_decode(file_get_contents(\$cfgFile), true) ?: [];
+                \$c['version'] = '$TO_VER';
+                file_put_contents(\$cfgFile, json_encode(\$c, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
+                @copy(\$cfgFile, '/opt/you-markdown/install-base/app-config.json');
+            }
         " 2>/dev/null
         php -r "
             require_once '$WEB_ROOT/utils.php';

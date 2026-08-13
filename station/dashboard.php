@@ -27,52 +27,142 @@ $siteTitle = $config['site_title'] ?? 'You Markdown';
 $currentUser = $_SESSION['cmt_user'] ?? [];
 $myId = $currentUser['id'] ?? '';
 $msg = $_GET['msg'] ?? '';
+// v2.6.0 起 tab 结构（authors 写作者管理 / background 网站背景 / music 音乐设置 / banlog 封禁日志只读）；v2.6.3 新增 profile 个人信息
+$tab = $_GET['tab'] ?? 'authors';
+if (!in_array($tab, ['authors', 'background', 'music', 'banlog', 'profile'], true)) $tab = 'authors';
 
 // 站长只能管理自己的写作者
 $myAuthors = array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_AUTHOR && ($u['station_id'] ?? '') === $myId);
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         $msg = 'csrf_error';
-    } elseif ($_POST['action'] === 'create_author') {
-        $newNick = trim($_POST['nickname'] ?? '');
-        $newQQ = trim($_POST['qq'] ?? '');
-        $newPwd = trim($_POST['password'] ?? '');
-        if ($newNick && $newQQ && $newPwd) {
-            // QQ 唯一性检查（避免同 QQ 账号登录歧义）
-            $qqExists = false;
-            foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
-            if ($qqExists) {
-                $msg = 'qq_duplicate';
-            } else {
-                $users[] = [
-                    'id' => bin2hex(random_bytes(8)),
-                    'qq' => $newQQ,
-                    'nickname' => $newNick,
-                    'password' => password_hash($newPwd, PASSWORD_DEFAULT),
-                    'role' => ROLE_AUTHOR,
-                    'station_id' => $myId,
-                    'created' => date('Y-m-d H:i:s'),
-                    'created_by' => $myId,
-                ];
-                file_put_contents(__DIR__ . '/../data/.users.json', json_encode($users, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
-                auditLog('author_create', $newQQ, "站长创建写作者: {$newNick}");
-                $msg = 'author_created';
+    } elseif (isset($_POST['action'])) {
+        if ($_POST['action'] === 'create_author') {
+            $newNick = trim($_POST['nickname'] ?? '');
+            $newQQ = trim($_POST['qq'] ?? '');
+            $newPwd = trim($_POST['password'] ?? '');
+            if ($newNick && $newQQ && $newPwd) {
+                $vp = validatePassword($newPwd);
+                if ($vp !== true) {
+                    $msg = 'pw_weak';
+                } else {
+                    // QQ 唯一性检查（避免同 QQ 账号登录歧义）
+                    $qqExists = false;
+                    foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
+                    if ($qqExists) {
+                        $msg = 'qq_duplicate';
+                    } else {
+                        $users[] = [
+                            'id' => bin2hex(random_bytes(8)),
+                            'qq' => $newQQ,
+                            'nickname' => $newNick,
+                            'password' => password_hash($newPwd, PASSWORD_DEFAULT),
+                            'role' => ROLE_AUTHOR,
+                            'station_id' => $myId,
+                            'created' => date('Y-m-d H:i:s'),
+                            'created_by' => $myId,
+                        ];
+                        saveUsers($users);
+                        auditLog('author_create', $newQQ, "站长创建写作者: {$newNick}");
+                        $msg = 'author_created';
+                    }
+                }
+            }
+        } elseif ($_POST['action'] === 'delete_author') {
+            $delId = $_POST['user_id'] ?? '';
+            foreach ($users as $i => $u) {
+                if ($u['id'] === $delId && ($u['role'] ?? '') === ROLE_AUTHOR && ($u['station_id'] ?? '') === $myId) {
+                    auditLog('author_delete', $u['qq'] ?? $delId, "站长删除写作者: {$u['nickname']}");
+                    array_splice($users, $i, 1);
+                    saveUsers($users);
+                    $msg = 'author_deleted';
+                    break;
+                }
             }
         }
-    } elseif ($_POST['action'] === 'delete_author') {
-        $delId = $_POST['user_id'] ?? '';
-        foreach ($users as $i => $u) {
-            if ($u['id'] === $delId && ($u['role'] ?? '') === ROLE_AUTHOR && ($u['station_id'] ?? '') === $myId) {
-                auditLog('author_delete', $u['qq'] ?? $delId, "站长删除写作者: {$u['nickname']}");
-                array_splice($users, $i, 1);
-                file_put_contents(__DIR__ . '/../data/.users.json', json_encode($users, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
-                $msg = 'author_deleted';
-                break;
+    } elseif (isset($_FILES['bg_image']) && $_FILES['bg_image']['error'] === UPLOAD_ERR_OK) {
+        // v2.6.0：站长上传背景图片（校验逻辑与超管一致：MIME 白名单 + 10MB）
+        $file = $_FILES['bg_image'];
+        $extMap = ['jpg'=>'image/jpeg','jpeg'=>'image/jpeg','png'=>'image/png','gif'=>'image/gif','webp'=>'image/webp'];
+        $origExt = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        $mime = null;
+        if (function_exists('getimagesize')) { $info = @getimagesize($file['tmp_name']); if ($info && isset($info['mime'])) $mime = $info['mime']; }
+        if (!$mime && isset($extMap[$origExt])) $mime = $extMap[$origExt];
+        if ($mime && in_array($mime, array_values($extMap)) && $file['size'] <= 10*1024*1024) {
+            $ext = array_search($mime, $extMap) ?: $origExt;
+            $fname = 'bg_'.time().'_'.bin2hex(random_bytes(4)).'.'.$ext;
+            $dir = __DIR__.'/../data/bg/';
+            if (!is_dir($dir)) mkdir($dir, 0755, true);
+            if (move_uploaded_file($file['tmp_name'], $dir.$fname)) {
+                $config['bg_type'] = 'image';
+                $config['bg_image'] = 'data/bg/'.$fname;
+                saveSiteConfig($config);
+                auditLog('bg_upload', 'site_config', '站长上传背景图片');
+                $msg = 'uploaded';
+            } else {
+                $msg = 'upload_error';
             }
+        } else {
+            $msg = 'upload_error';
+        }
+    } elseif (isset($_POST['_bg_save'])) {
+        // v2.6.0：站长保存背景配置（校验逻辑与超管一致）
+        $config['bg_type'] = in_array($_POST['bg_type']??'', ['none','image','api']) ? $_POST['bg_type'] : 'none';
+        // bg_image 仅允许站内 data/bg/ 路径或 http(s) URL，防止 CSS 值注入
+        $bgImage = trim($_POST['bg_image']??'');
+        if ($bgImage !== '' && strpos($bgImage, 'data/bg/') !== 0 && !preg_match('#^https?://#i', $bgImage)) $bgImage = '';
+        $config['bg_image'] = $bgImage;
+        $config['bg_api_url'] = trim($_POST['bg_api_url']??'');
+        $config['bg_blur_enabled'] = !empty($_POST['bg_blur_enabled']);
+        $config['bg_blur_level'] = max(0, min(50, intval($_POST['bg_blur_level']??0)));
+        $config['bg_card_opacity'] = max(20, min(100, intval($_POST['bg_card_opacity']??100)));
+        saveSiteConfig($config);
+        auditLog('bg_config', 'site_config', '站长修改网站背景');
+        $msg = 'saved';
+    } elseif (isset($_POST['music_save'])) {
+        // v2.6.0：站长保存音乐设置（与超管共享同一 config，后保存者生效）
+        $config['music_playlist_id'] = trim($_POST['music_playlist_id'] ?? '3778678');
+        $config['music_playlist_id_qq'] = trim($_POST['music_playlist_id_qq'] ?? '');
+        $config['music_cookies'] = trim($_POST['music_cookies'] ?? '');
+        $config['music_cookies_qq'] = trim($_POST['music_cookies_qq'] ?? '');
+        saveSiteConfig($config);
+        auditLog('music_config', 'site_config', '站长修改音乐设置');
+        $msg = 'music_saved';
+    } elseif (isset($_POST['profile_save'])) {
+        // v2.6.3：站长修改个人信息（昵称/签名/新密码）
+        $nick = trim($_POST['nickname'] ?? '');
+        $sign = trim($_POST['signature'] ?? '');
+        $newPw = $_POST['password'] ?? '';
+        $newPw2 = $_POST['password2'] ?? '';
+        if (empty($nick)) {
+            $msg = 'nick_empty';
+        } elseif ($newPw !== '' && validatePassword($newPw) !== true) {
+            $msg = 'pw_weak';
+        } elseif ($newPw !== $newPw2) {
+            $msg = 'pw_mismatch';
+        } else {
+            $nick = mb_substr($nick, 0, 20, 'UTF-8');
+            $sign = mb_substr($sign, 0, 16, 'UTF-8');
+            $users = loadUsers();
+            foreach ($users as &$usr) {
+                if ($usr['id'] === $myId) {
+                    $usr['nickname'] = $nick;
+                    $usr['signature'] = $sign;
+                    if ($newPw !== '') $usr['password'] = password_hash($newPw, PASSWORD_DEFAULT);
+                    break;
+                }
+            }
+            unset($usr);
+            saveUsers($users);
+            $_SESSION['cmt_user']['nickname'] = $nick;
+            $_SESSION['cmt_user']['signature'] = $sign;
+            if ($newPw !== '') $_SESSION['cmt_user']['pw_hash'] = password_hash($newPw, PASSWORD_DEFAULT);
+            auditLog('profile_update', $myId, '站长修改个人信息');
+            $msg = 'profile_saved';
         }
     }
-    header("Location: dashboard.php?msg={$msg}");
+    header("Location: dashboard.php?msg={$msg}&tab={$tab}");
     exit;
 }
 ?>
@@ -104,9 +194,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         </div>
     </div>
     <nav class="sidebar-nav">
-        <a href="dashboard.php" class="sidebar-link active">
+        <a href="dashboard.php" class="sidebar-link <?= $tab==='authors'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
             写作者管理
+        </a>
+        <a href="dashboard.php?tab=background" class="sidebar-link <?= $tab==='background'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            网站背景
+        </a>
+        <a href="dashboard.php?tab=music" class="sidebar-link <?= $tab==='music'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            音乐设置
+        </a>
+        <a href="dashboard.php?tab=banlog" class="sidebar-link <?= $tab==='banlog'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            封禁日志（只读）
+        </a>
+        <a href="dashboard.php?tab=profile" class="sidebar-link <?= $tab==='profile'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            个人信息
         </a>
         <a href="/sc.php" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -123,7 +229,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     <?php if ($msg === 'author_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者已创建</div><?php endif; ?>
     <?php if ($msg === 'author_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者已删除</div><?php endif; ?>
     <?php if ($msg === 'qq_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
+    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>请求已过期，请重试</div><?php endif; ?>
+    <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>密码至少 8 位，且必须包含大写字母、小写字母与数字</div><?php endif; ?>
+    <?php if ($msg === 'saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>保存成功</div><?php endif; ?>
+    <?php if ($msg === 'uploaded'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>上传成功</div><?php endif; ?>
+    <?php if ($msg === 'upload_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>上传失败，请检查文件格式与 data/bg/ 目录权限</div><?php endif; ?>
+    <?php if ($msg === 'music_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>音乐设置已保存</div><?php endif; ?>
 
+    <?php if ($tab === 'authors'): ?>
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
@@ -150,7 +263,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     <input class="form-input" name="qq" placeholder="登录账号">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">密码</label>
+                    <label class="form-label">密码（至少 8 位，含大小写字母与数字）</label>
                     <input class="form-input" name="password" type="password" placeholder="******">
                 </div>
                 <div class="form-group" style="flex:0">
@@ -194,6 +307,355 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         </div>
         <?php endif; ?>
     </div>
+
+    <?php elseif ($tab === 'background'): ?>
+    <?php
+    $bgType = $config['bg_type'] ?? 'none';
+    $bgImage = $config['bg_image'] ?? '';
+    $bgApiUrl = $config['bg_api_url'] ?? '';
+    $bgBlurEnabled = !empty($config['bg_blur_enabled']);
+    $bgBlurLevel = $config['bg_blur_level'] ?? 0;
+    $bgCardOpacity = $config['bg_card_opacity'] ?? 100;
+    ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            网站背景
+        </div>
+        <div class="page-subtitle">自定义网站背景图片与效果（与超管共享配置）</div>
+    </div>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            背景类型
+        </div>
+        <div class="bg-type-grid">
+            <label class="bg-type-card <?= $bgType==='none'?'active':'' ?>" data-type="none"><input type="radio" name="bg_type" value="none" <?= $bgType==='none'?'checked':'' ?>><div class="type-icon none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div><div class="type-name">无背景</div></label>
+            <label class="bg-type-card <?= $bgType==='image'?'active':'' ?>" data-type="image"><input type="radio" name="bg_type" value="image" <?= $bgType==='image'?'checked':'' ?>><div class="type-icon upload"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><div class="type-name">上传图片</div></label>
+            <label class="bg-type-card <?= $bgType==='api'?'active':'' ?>" data-type="api"><input type="radio" name="bg_type" value="api" <?= $bgType==='api'?'checked':'' ?>><div class="type-icon api"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div><div class="type-name">API 获取</div></label>
+        </div>
+    </div>
+    <div class="card" id="imageSection" style="display:<?= $bgType==='image'?'block':'none' ?>">
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>上传背景图片</div>
+        <?php if ($bgImage && $bgType==='image'): ?>
+        <div class="img-preview-thumb"><img src="../<?= htmlspecialchars($bgImage) ?>" alt="当前背景"><button class="remove-img" onclick="removeBgImage()" title="移除">&times;</button></div>
+        <?php endif; ?>
+        <form method="post" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <div class="upload-area">
+                <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <div class="upload-text">点击上传背景图片</div>
+                <div class="upload-hint">支持 JPG / PNG / GIF / WebP，最大 10MB</div>
+                <input type="file" name="bg_image" accept="image/jpeg,image/png,image/gif,image/webp" onchange="if(this.files.length)this.form.submit()">
+            </div>
+        </form>
+        <input type="hidden" id="bgImagePath" value="<?= htmlspecialchars($bgImage) ?>">
+    </div>
+    <div class="card" id="apiSection" style="display:<?= $bgType==='api'?'block':'none' ?>">
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>API 背景地址</div>
+        <div class="form-group">
+            <label class="form-label">图片 API URL</label>
+            <div class="api-url-group">
+                <input class="form-input" type="url" id="bgApiUrl" value="<?= htmlspecialchars($bgApiUrl) ?>" placeholder="https://api.example.com/random-bg">
+                <button class="btn btn-sm btn-outline" type="button" onclick="testApiUrl()">测试</button>
+            </div>
+        </div>
+        <div id="apiTestResult" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>模糊与透明度</div>
+        <div class="toggle-row" id="bgBlurRow" style="display:<?= $bgType!=='none'?'flex':'none' ?>">
+            <div><div class="toggle-label">背景模糊</div><div class="toggle-desc">对网站背景应用高斯模糊</div></div>
+            <label class="toggle"><input type="checkbox" id="blurToggle" <?= $bgBlurEnabled?'checked':'' ?>><span class="slider"></span></label>
+        </div>
+        <div id="blurLevelWrap" style="display:<?= ($bgBlurEnabled && $bgType!=='none')?'block':'none' ?>;padding-top:8px">
+            <div class="slider-group">
+                <div class="slider-header"><label>模糊程度</label><span class="slider-val" id="blurVal"><?= $bgBlurLevel ?>px</span></div>
+                <div class="slider-row"><span class="slider-label">清晰</span><input type="range" min="0" max="50" value="<?= $bgBlurLevel ?>" step="2" id="blurSlider"><span class="slider-label">模糊</span></div>
+            </div>
+        </div>
+        <div class="slider-group" style="margin-top:12px">
+            <div class="slider-header"><label>卡片透明度</label><span class="slider-val" id="opacityVal"><?= $bgCardOpacity ?>%</span></div>
+            <div class="slider-row"><span class="slider-label">透明</span><input type="range" min="20" max="100" value="<?= $bgCardOpacity ?>" step="5" id="opacitySlider"><span class="slider-label">不透明</span></div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>实时预览</div>
+        <div class="preview-box" id="previewBox">
+            <div class="preview-blur" id="previewBlur"></div>
+            <div class="preview-card-sim" id="previewCard"><div class="sim-title">文章卡片</div><div class="sim-line" style="width:80%"></div><div class="sim-line" style="width:100%"></div><div class="sim-line"></div></div>
+            <div class="preview-overlay"><span id="previewBgLabel">无背景</span><span id="previewBlurLabel"></span></div>
+        </div>
+    </div>
+    <form method="post" id="bgForm">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+        <input type="hidden" name="_bg_save" value="1">
+        <input type="hidden" name="bg_type" id="formBgType" value="<?= htmlspecialchars($bgType) ?>">
+        <input type="hidden" name="bg_image" id="formBgImage" value="<?= htmlspecialchars($bgImage) ?>">
+        <input type="hidden" name="bg_api_url" id="formBgApiUrl" value="<?= htmlspecialchars($bgApiUrl) ?>">
+        <input type="hidden" name="bg_blur_enabled" id="formBlurEnabled" value="<?= $bgBlurEnabled?'1':'' ?>">
+        <input type="hidden" name="bg_blur_level" id="formBlurLevel" value="<?= $bgBlurLevel ?>">
+        <input type="hidden" name="bg_card_opacity" id="formCardOpacity" value="<?= $bgCardOpacity ?>">
+        <div style="display:flex;justify-content:flex-end;gap:10px">
+            <button type="button" class="btn btn-outline" onclick="resetBg()">重置</button>
+            <button type="submit" class="btn btn-primary">保存配置</button>
+        </div>
+    </form>
+    <script>
+    (function() {
+        var typeCards = document.querySelectorAll('.bg-type-card');
+        var imageSection = document.getElementById('imageSection');
+        var apiSection = document.getElementById('apiSection');
+        var bgBlurRow = document.getElementById('bgBlurRow');
+        var blurLevelWrap = document.getElementById('blurLevelWrap');
+        var bgImagePath = document.getElementById('bgImagePath');
+        var bgApiUrl = document.getElementById('bgApiUrl');
+        var blurToggle = document.getElementById('blurToggle');
+        var blurSlider = document.getElementById('blurSlider');
+        var blurVal = document.getElementById('blurVal');
+        var opacitySlider = document.getElementById('opacitySlider');
+        var opacityVal = document.getElementById('opacityVal');
+        var previewBox = document.getElementById('previewBox');
+        var previewBlur = document.getElementById('previewBlur');
+        var previewCard = document.getElementById('previewCard');
+        var previewBgLabel = document.getElementById('previewBgLabel');
+        var previewBlurLabel = document.getElementById('previewBlurLabel');
+        var currentType = '<?= $bgType ?>';
+        var previewApiSrc = '';
+        typeCards.forEach(function(card) {
+            card.addEventListener('click', function() {
+                typeCards.forEach(function(c) { c.classList.remove('active'); });
+                card.classList.add('active');
+                currentType = card.dataset.type;
+                imageSection.style.display = currentType === 'image' ? 'block' : 'none';
+                apiSection.style.display = currentType === 'api' ? 'block' : 'none';
+                bgBlurRow.style.display = currentType !== 'none' ? 'flex' : 'none';
+                if (currentType === 'none') blurLevelWrap.style.display = 'none';
+                else if (blurToggle.checked) blurLevelWrap.style.display = 'block';
+                updatePreview();
+            });
+        });
+        window.testApiUrl = function() { var url = bgApiUrl.value.trim(); if (!url) return; var result = document.getElementById('apiTestResult'); result.innerHTML = '<span style="color:var(--text-muted);font-size:13px">测试中...</span>'; var img = new Image(); img.onload = function() { previewApiSrc = url; result.innerHTML = '<div class="img-preview-thumb"><img src="'+url+'" style="max-width:200px;max-height:120px"></div><div style="font-size:12px;color:#16a34a;margin-top:4px">✓ API 可用</div>'; updatePreview(); }; img.onerror = function() { result.innerHTML = '<div style="font-size:12px;color:#dc2626">✗ 无法加载图片</div>'; }; img.src = url + (url.indexOf('?')>=0?'&':'?') + '_t=' + Date.now(); };
+        bgApiUrl.addEventListener('input', function() { previewApiSrc = ''; updatePreview(); });
+        blurToggle.addEventListener('change', function() { blurLevelWrap.style.display = blurToggle.checked ? 'block' : 'none'; updatePreview(); });
+        blurSlider.addEventListener('input', function() { blurVal.textContent = blurSlider.value + 'px'; updatePreview(); });
+        opacitySlider.addEventListener('input', function() { opacityVal.textContent = opacitySlider.value + '%'; updatePreview(); });
+        function updatePreview() {
+            var blur = blurToggle.checked ? parseInt(blurSlider.value) : 0;
+            var opacity = parseInt(opacitySlider.value) / 100;
+            if (currentType === 'none') { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = '无背景'; }
+            else if (currentType === 'image' && bgImagePath.value) { previewBox.style.backgroundImage = 'url(../' + bgImagePath.value + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = '自定义图片'; }
+            else if (currentType === 'api') { if (previewApiSrc) { previewBox.style.backgroundImage = 'url(' + previewApiSrc + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = 'API 图片'; } else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = bgApiUrl.value.trim() ? 'API（请先测试）' : '待配置'; } }
+            else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = '待配置'; }
+            previewBox.style.backgroundSize = 'cover'; previewBox.style.backgroundPosition = 'center';
+            previewBlur.style.backdropFilter = 'blur(' + blur + 'px)'; previewBlur.style.webkitBackdropFilter = 'blur(' + blur + 'px)';
+            previewCard.style.background = 'rgba(255,255,255,' + opacity + ')';
+            var labels = []; if (blur > 0) labels.push('模糊 ' + blur + 'px'); labels.push('卡片 ' + Math.round(opacity*100) + '%'); previewBlurLabel.textContent = labels.join(' · ');
+        }
+        window.removeBgImage = function() { if (confirm('确定移除背景图片？')) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
+        window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
+        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; });
+        <?php if ($bgType === 'api' && $bgApiUrl): ?>
+        (function() { var u=<?= json_encode($bgApiUrl) ?>; var img=new Image(); img.onload=function(){previewApiSrc=u;updatePreview();}; img.src=u; })();
+        <?php endif; ?>
+        updatePreview();
+    })();
+    </script>
+
+    <?php elseif ($tab === 'music'): ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            音乐设置
+        </div>
+        <div class="page-subtitle">配置前台音乐播放器（与超管共享配置，后保存者生效）</div>
+    </div>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            音乐播放器设置
+        </div>
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="music_save" value="1">
+            <div class="form-group">
+                <label class="form-label">网易云歌单 ID</label>
+                <input class="form-input" name="music_playlist_id" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>" placeholder="3778678">
+                <p class="form-hint">网易云音乐歌单 ID，默认 3778678 为热歌榜</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">QQ 音乐歌单 ID</label>
+                <input class="form-input" name="music_playlist_id_qq" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>" placeholder="留空则使用 QQ 热歌榜">
+                <p class="form-hint">QQ 音乐歌单 ID（前端切换到 QQ 平台时使用），留空则加载 QQ 热歌榜</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">网易云 Cookies（可选）</label>
+                <input class="form-input" name="music_cookies" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
+                <p class="form-hint">配置后可播放网易云 VIP 歌曲</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">QQ 音乐 Cookies（可选）</label>
+                <input class="form-input" name="music_cookies_qq" value="<?= htmlspecialchars($config['music_cookies_qq'] ?? '') ?>" placeholder="uin=xxx; p_skey=xxx; skey=xxx; ...">
+                <p class="form-hint">配置后可播放 QQ 音乐付费/VIP 歌曲（v2.6.0）</p>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+                <button type="submit" class="btn btn-primary">保存设置</button>
+            </div>
+        </form>
+    </div>
+
+    <?php elseif ($tab === 'banlog'): ?>
+    <?php
+    $typeLabels = ['register' => '注册', 'comment' => '评论', 'login' => '登录'];
+    $banTypes = loadBansList();
+    $loginLogs = array_reverse(loadLogsList());
+    $unauthLogs = db_all('SELECT * FROM unauthorized ORDER BY time DESC');
+    ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            封禁日志
+        </div>
+        <div class="page-subtitle">只读查看封禁与安全日志（管理操作由超管执行）</div>
+    </div>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+            封禁列表（<?= count($banTypes) ?> 条）
+        </div>
+        <?php if (empty($banTypes)): ?>
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+            <p>暂无封禁记录</p>
+        </div>
+        <?php else: ?>
+        <div class="ban-list">
+            <?php foreach ($banTypes as $ban): ?>
+            <div class="ban-item">
+                <div class="ban-item-top">
+                    <span class="ban-item-ip"><?= htmlspecialchars($ban['ip']) ?></span>
+                    <span style="font-size:0.78em;color:var(--text-muted)"><?= htmlspecialchars($ban['time'] ?? '') ?></span>
+                </div>
+                <div class="ban-item-types">
+                    <?php foreach (($ban['types'] ?? []) as $t): ?>
+                    <span class="ban-tag type-<?= $t ?>"><?= $typeLabels[$t] ?? $t ?></span>
+                    <?php endforeach; ?>
+                </div>
+                <?php if (!empty($ban['reason'])): ?>
+                <div style="font-size:0.82em;color:var(--text-muted);margin-bottom:8px">原因：<?= htmlspecialchars($ban['reason']) ?></div>
+                <?php endif; ?>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+    </div>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+            登录日志
+        </div>
+        <?php if (empty($loginLogs)): ?>
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+            <p>暂无登录日志</p>
+        </div>
+        <?php else: ?>
+        <div class="table-wrap">
+        <table>
+            <tr><th>时间</th><th>IP</th><th>操作</th></tr>
+            <?php foreach ($loginLogs as $log): ?>
+            <tr>
+                <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($log['time'] ?? '') ?></td>
+                <td><code><?= htmlspecialchars($log['ip'] ?? '') ?></code></td>
+                <td style="color:var(--text-secondary)"><?= htmlspecialchars($log['action'] ?? '') ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        </div>
+        <?php endif; ?>
+    </div>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            越权访问记录
+        </div>
+        <?php if (empty($unauthLogs)): ?>
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <p>暂无越权访问记录</p>
+        </div>
+        <?php else: ?>
+        <div class="table-wrap">
+        <table>
+            <tr><th>时间</th><th>IP</th><th>操作</th><th>用户</th></tr>
+            <?php foreach ($unauthLogs as $log): ?>
+            <tr>
+                <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($log['time'] ?? '') ?></td>
+                <td><code><?= htmlspecialchars($log['ip'] ?? '') ?></code></td>
+                <td style="color:var(--text-secondary)"><?= htmlspecialchars($log['action'] ?? '') ?></td>
+                <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($log['user'] ?? '') ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        </div>
+        <?php endif; ?>
+    </div>
+
+    <?php elseif ($tab === 'profile'): ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            个人信息
+        </div>
+        <div class="page-subtitle">修改你的账号昵称、签名与密码</div>
+    </div>
+    <?php if ($msg === 'profile_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>个人信息已保存</div><?php endif; ?>
+    <?php if ($msg === 'nick_empty'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>昵称不能为空</div><?php endif; ?>
+    <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>新密码至少 8 位，且需包含大写字母、小写字母与数字</div><?php endif; ?>
+    <?php if ($msg === 'pw_mismatch'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>两次输入的密码不一致</div><?php endif; ?>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            账号信息
+        </div>
+        <div class="table-wrap">
+        <table>
+            <tr><th style="width:120px">项目</th><th>内容</th></tr>
+            <tr><td style="color:var(--text-muted)">登录账号（QQ）</td><td><code><?= htmlspecialchars($currentUser['qq'] ?? '') ?></code>（不可修改）</td></tr>
+            <tr><td style="color:var(--text-muted)">角色</td><td>站长</td></tr>
+        </table>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+            编辑资料
+        </div>
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="profile_save" value="1">
+            <div class="form-group">
+                <label class="form-label">昵称</label>
+                <input class="form-input" name="nickname" value="<?= htmlspecialchars($currentUser['nickname'] ?? '') ?>" maxlength="20" placeholder="你的昵称">
+            </div>
+            <div class="form-group">
+                <label class="form-label">签名（选填，最多 16 字）</label>
+                <input class="form-input" name="signature" value="<?= htmlspecialchars($currentUser['signature'] ?? '') ?>" maxlength="16" placeholder="一句话介绍自己">
+            </div>
+            <div class="form-group">
+                <label class="form-label">新密码（选填，至少 8 位且含大小写字母与数字；留空不修改）</label>
+                <input class="form-input" name="password" type="password" placeholder="******">
+            </div>
+            <div class="form-group">
+                <label class="form-label">确认新密码</label>
+                <input class="form-input" name="password2" type="password" placeholder="******">
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+                <button type="submit" class="btn btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+    <?php endif; ?>
 </div>
 
 <script>

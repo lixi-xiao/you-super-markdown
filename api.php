@@ -2,21 +2,81 @@
 session_start();
 require_once __DIR__ . '/utils.php';
 header('Content-Type: application/json; charset=utf-8');
-$dataDir = './data';
-$commentDir = $dataDir . '/.comments';
-if (!is_dir($commentDir)) { mkdir($commentDir, 0755, true); }
-function loadComments($article) {
-    global $commentDir;
-    $safe = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '_', $article);
-    $file = $commentDir . '/' . $safe . '.json';
-    if (!file_exists($file)) return [];
-    $data = json_decode(file_get_contents($file), true);
-    return is_array($data) ? $data : [];
+
+// 评论树组装：把评论表（parent_id 自关联）还原为嵌套结构（前端零改动）
+// $sanitize=true 时对外脱敏：qq 置空、avatar 若为 QQ 头像 URL（含 qq 号）也置空，
+// 防止 ?action=get&article=<任意> 批量枚举评论者的真实 QQ 号（v2.6.2）
+function buildCommentTree($rows, $sanitize = false) {
+    $map = [];
+    foreach ($rows as $r) {
+        $avatar = $r['avatar'] ?? '';
+        if ($sanitize && strpos((string)$avatar, 'qlogo') !== false) $avatar = '';
+        $map[$r['id']] = [
+            'id' => $r['id'],
+            'user_id' => $r['user_id'],
+            'qq' => $sanitize ? '' : $r['qq'],
+            'nickname' => $r['nickname'],
+            'avatar' => $avatar,
+            'signature' => $r['signature'],
+            'content' => $r['content'],
+            'likes' => (int)$r['likes'],
+            'replies' => [],
+            'created_at' => $r['created_at'],
+        ];
+    }
+    $roots = [];
+    foreach ($rows as $r) {
+        if (!empty($r['parent_id']) && isset($map[$r['parent_id']])) {
+            $map[$r['parent_id']]['replies'][] = $map[$r['id']];
+        } else {
+            $roots[] = $map[$r['id']];
+        }
+    }
+    return $roots;
+}
+
+// 递归展开嵌套评论为扁平行（供写库）
+function flattenComments($comments, $article, $parentId, &$out) {
+    foreach ($comments as $c) {
+        $out[] = [
+            'id' => $c['id'] ?? bin2hex(random_bytes(8)),
+            'article' => $article,
+            'parent_id' => $parentId,
+            'user_id' => $c['user_id'] ?? '',
+            'qq' => $c['qq'] ?? '',
+            'nickname' => $c['nickname'] ?? '',
+            'avatar' => $c['avatar'] ?? '',
+            'signature' => $c['signature'] ?? '',
+            'content' => $c['content'] ?? '',
+            'likes' => (int)($c['likes'] ?? 0),
+            'created_at' => $c['created_at'] ?? '',
+        ];
+        if (!empty($c['replies']) && is_array($c['replies'])) {
+            flattenComments($c['replies'], $article, $out[count($out) - 1]['id'], $out);
+        }
+    }
+}
+
+function loadComments($article, $sanitize = false) {
+    $rows = db_all('SELECT * FROM comments WHERE article = ? ORDER BY rowid', [$article]);
+    return buildCommentTree($rows, $sanitize);
 }
 function saveComments($article, $comments) {
-    global $commentDir;
-    $safe = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '_', $article);
-    file_put_contents($commentDir . '/' . $safe . '.json', json_encode($comments, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    $flat = [];
+    flattenComments($comments, $article, null, $flat);
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        db_exec('DELETE FROM comments WHERE article = ?', [$article]);
+        $st = $pdo->prepare('INSERT INTO comments (id, article, parent_id, user_id, qq, nickname, avatar, signature, content, likes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+        foreach ($flat as $r) {
+            $st->execute([$r['id'], $r['article'], $r['parent_id'], $r['user_id'], $r['qq'], $r['nickname'], $r['avatar'], $r['signature'], $r['content'], $r['likes'], $r['created_at']]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
 }
 function getUser() { return empty($_SESSION['cmt_user']) ? null : $_SESSION['cmt_user']; }
 function validateSession() {
@@ -37,6 +97,14 @@ function validateSession() {
     session_unset();
     session_destroy();
     return null;
+}
+// v2.6.1：主页视角的登录用户 —— 超管彻底分离（OTP 入口登录的系统级角色在主页隐身，
+// 主页 check/user-status/评论一律按未登录处理；后台鉴权不受影响，超管后台仍走 validateSession/JWT）
+function validateHomeUser() {
+    $u = validateSession();
+    if (!$u) return null;
+    if (($u['role'] ?? '') === ROLE_SUPER_ADMIN) return null;
+    return $u;
 }
 function jsonOut($data, $code = 200) {
     http_response_code($code);
@@ -80,6 +148,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 if ($action === 'avatar') {
+    // v2.6.3：收紧——仅登录用户可用，防止未登录批量探测 QQ 号（配合评论脱敏，前台已无匿名头像需求）
+    if (!validateSession()) jsonOut(['success' => false, 'error' => '请先登录'], 403);
     $qq = trim($_GET['qq'] ?? '');
     if (empty($qq)) jsonOut(['success' => false, 'error' => '缺少QQ号'], 400);
     $url = getAvatarUrl($qq);
@@ -103,13 +173,10 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $clientIP = getClientIP();
     if (isIPBanned($clientIP, 'register')) jsonOut(['success' => false, 'error' => '你的 IP 已被封禁，无法注册'], 403);
-    $regRateFile = './data/.reg_rates.json';
-    $regRates = file_exists($regRateFile) ? json_decode(file_get_contents($regRateFile), true) : [];
-    if (!is_array($regRates)) $regRates = [];
-    $ipRegs = array_filter($regRates, function($r) use ($clientIP) { return ($r['ip'] ?? '') === $clientIP; });
     $regLimit = max(1, intval($siteCfg['max_registrations_per_ip'] ?? $siteCfg['reg_limit_per_ip'] ?? 3));
-    if (count($ipRegs) >= $regLimit) {
-        logAbnormal($clientIP, '频繁注册（累计' . count($ipRegs) . '次，限制' . $regLimit . '次）');
+    $ipRegs = db_rate_count('reg_rates', $clientIP, 2592000); // 30 天累计
+    if ($ipRegs >= $regLimit) {
+        logAbnormal($clientIP, '频繁注册（累计' . $ipRegs . '次，限制' . $regLimit . '次）');
         if ($siteCfg['auto_ban'] ?? false) addBan($clientIP, ['register'], '自动封禁：频繁注册');
         jsonOut(['success' => false, 'error' => '注册次数已达上限'], 429);
     }
@@ -118,7 +185,8 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $nick = trim($input['nickname'] ?? '');
     $pw = $input['password'] ?? '';
     if (empty($qq) || empty($pw)) jsonOut(['success' => false, 'error' => 'QQ号和密码不能为空'], 400);
-    if (strlen($pw) < 6) jsonOut(['success' => false, 'error' => '密码至少6位'], 400);
+    $vp = validatePassword($pw);
+    if ($vp !== true) jsonOut(['success' => false, 'error' => $vp], 400);
     if (empty($nick)) $nick = '用户' . substr($qq, -4);
     $nick = mb_substr($nick, 0, 20, 'UTF-8');
     $users = loadUsers();
@@ -132,8 +200,7 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     ];
     $users[] = $new;
     saveUsers($users);
-    $regRates[] = ['ip' => $clientIP, 't' => time()];
-    file_put_contents($regRateFile, json_encode($regRates), LOCK_EX);
+    db_rate_add('reg_rates', $clientIP);
     session_regenerate_id(true);
     $_SESSION['cmt_user'] = [
         'id' => $new['id'], 'qq' => $qq, 'nickname' => $nick,
@@ -172,21 +239,14 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             jsonOut(['success' => true, 'user' => $safeUser, 'isAdminFirstLogin' => $isAdminFirst]);
         }
     }
-    $failFile = './data/.login_fails.json';
-    $fails = file_exists($failFile) ? json_decode(file_get_contents($failFile), true) : [];
-    if (!is_array($fails)) $fails = [];
-    $now = time();
-    $fails = array_filter($fails, function($f) use ($now) { return ($now - ($f['t'] ?? 0)) < 3600; });
-    $fails[] = ['ip' => $clientIP, 't' => $now];
-    file_put_contents($failFile, json_encode($fails), LOCK_EX);
-    $ipFails = array_filter($fails, function($f) use ($clientIP) { return $f['ip'] === $clientIP; });
+    db_rate_add('login_fails', $clientIP);
+    $ipFails = db_rate_count('login_fails', $clientIP, 3600); // 1 小时窗口
     $loginCfg = loadSiteConfig();
     $maxLoginFails = max(3, intval($loginCfg['max_login_fails'] ?? 10));
-    if (count($ipFails) >= $maxLoginFails) {
-        logAbnormal($clientIP, '频繁错误登录（' . count($ipFails) . '次/小时）');
+    if ($ipFails >= $maxLoginFails) {
+        logAbnormal($clientIP, '频繁错误登录（' . $ipFails . '次/小时）');
         if ($loginCfg['auto_ban'] ?? false) addBan($clientIP, ['login'], '自动封禁：频繁错误登录');
-        $fails = array_filter($fails, function($f) use ($clientIP) { return $f['ip'] !== $clientIP; });
-        file_put_contents($failFile, json_encode(array_values($fails)), LOCK_EX);
+        db_rate_clear_ip('login_fails', $clientIP);
     }
     jsonOut(['success' => false, 'error' => 'QQ号或密码错误'], 401);
 }
@@ -195,7 +255,7 @@ if ($action === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     jsonOut(['success' => true]);
 }
 if ($action === 'check') {
-    $u = validateSession();
+    $u = validateHomeUser();
     if ($u) {
         $safeUser = $u;
         unset($safeUser['pw_hash']);
@@ -205,7 +265,19 @@ if ($action === 'check') {
     }
 }
 if ($action === 'user-status') {
-    $u = validateSession();
+    // v2.6.5：超管在主页显示「超管」身份（右侧用户区），但不提供「快捷进入管理」与「退出登录」按钮
+    $sess = validateSession();
+    if ($sess && ($sess['role'] ?? '') === ROLE_SUPER_ADMIN) {
+        jsonOut([
+            'success' => true,
+            'loggedIn' => true,
+            'isSuperAdmin' => true,
+            'user' => ['id' => $sess['id'], 'nickname' => $sess['nickname'] ?? '超管', 'role' => 'super_admin'],
+            'canAccessAdmin' => false,
+            'adminUrl' => '',
+        ]);
+    }
+    $u = validateHomeUser();
     if ($u) {
         $role = $u['role'] ?? ROLE_GUEST;
         $roleLevel = ROLE_HIERARCHY[$role] ?? 0;
@@ -236,7 +308,7 @@ if ($action === 'user-status') {
     }
 }
 if ($action === 'update_profile' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $u = validateSession();
+    $u = validateHomeUser();
     if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
     $input = json_decode(file_get_contents('php://input'), true);
     $nick = trim($input['nickname'] ?? '');
@@ -269,7 +341,10 @@ if ($action === 'admin_setup' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $pw = $input['password'] ?? '';
     if (empty($qq)) jsonOut(['success' => false, 'error' => '请填写QQ号'], 400);
     if (empty($nick)) jsonOut(['success' => false, 'error' => '请填写昵称'], 400);
-    if ($pw && strlen($pw) < 6) jsonOut(['success' => false, 'error' => '密码至少6位'], 400);
+    if ($pw) {
+        $vp = validatePassword($pw);
+        if ($vp !== true) jsonOut(['success' => false, 'error' => $vp], 400);
+    }
     $nick = mb_substr($nick, 0, 20, 'UTF-8');
     $avatarUrl = getAvatarUrl($qq);
     $users = loadUsers();
@@ -294,7 +369,8 @@ if ($action === 'admin_setup' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($action === 'get') {
     $article = $_GET['article'] ?? '';
     if (empty($article)) jsonOut(['success' => false, 'error' => '缺少文章参数'], 400);
-    $comments = loadComments($article);
+    // v2.6.2：对外脱敏评论者的 qq 与 QQ 头像 URL（防枚举真实 QQ 号）
+    $comments = loadComments($article, true);
     usort($comments, function($a, $b) { return strcmp($b['created_at'] ?? '', $a['created_at'] ?? ''); });
     jsonOut(['success' => true, 'comments' => $comments]);
 }
@@ -303,22 +379,20 @@ if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isIPBanned($clientIP, 'comment')) jsonOut(['success' => false, 'error' => '你的 IP 已被封禁，无法评论'], 403);
     $siteCfg = loadSiteConfig();
     if (!($siteCfg['comments_enabled'] ?? true)) jsonOut(['success' => false, 'error' => '评论区已关闭'], 403);
-    $u = validateSession();
+    // v2.6.5：超管身份默认不参与前台评论（可在超管后台「系统配置」开启 super_admin_comment）
+    if (($_SESSION['cmt_user']['role'] ?? '') === ROLE_SUPER_ADMIN && empty($siteCfg['super_admin_comment'])) {
+        jsonOut(['success' => false, 'error' => '超管身份不参与前台评论'], 403);
+    }
+    $u = validateHomeUser();
     if (!$u && empty($siteCfg['guest_comments_enabled'])) jsonOut(['success' => false, 'error' => '请先登录'], 401);
     if (!$u && !empty($siteCfg['guest_comments_enabled'])) {
         $u = ['id' => 'guest', 'nickname' => '访客', 'avatar' => '', 'qq' => '', 'role' => 'guest'];
     }
-    $rateFile = './data/.comment_rates.json';
-    $rates = file_exists($rateFile) ? json_decode(file_get_contents($rateFile), true) : [];
-    if (!is_array($rates)) $rates = [];
-    $now = time();
-    $rates = array_filter($rates, function($r) use ($now) { return ($now - ($r['t'] ?? 0)) < 60; });
-    $rates[] = ['ip' => $clientIP, 't' => $now];
-    file_put_contents($rateFile, json_encode($rates), LOCK_EX);
-    $ipRates = array_filter($rates, function($r) use ($clientIP) { return $r['ip'] === $clientIP; });
+    db_rate_add('comment_rates', $clientIP);
+    $ipRates = db_rate_count('comment_rates', $clientIP, 60); // 1 分钟窗口
     $maxCommentsPerMin = max(1, intval($siteCfg['max_comments_per_minute'] ?? 5));
-    if (count($ipRates) > $maxCommentsPerMin) {
-        logAbnormal($clientIP, '频繁评论（' . count($ipRates) . '条/分钟）');
+    if ($ipRates > $maxCommentsPerMin) {
+        logAbnormal($clientIP, '频繁评论（' . $ipRates . '条/分钟）');
         if ($siteCfg['auto_ban'] ?? false) addBan($clientIP, ['comment'], '自动封禁：频繁评论');
         jsonOut(['success' => false, 'error' => '评论太频繁，请稍后再试'], 429);
     }
@@ -356,8 +430,12 @@ if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($action === 'reply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $clientIP = getClientIP();
     if (isIPBanned($clientIP, 'comment')) jsonOut(['success' => false, 'error' => '你的 IP 已被封禁，无法回复'], 403);
-    $u = validateSession();
+    $u = validateHomeUser();
     $replyCfg = loadSiteConfig();
+    // v2.6.5：超管身份默认不参与前台回复（可在超管后台「系统配置」开启 super_admin_comment）
+    if (($_SESSION['cmt_user']['role'] ?? '') === ROLE_SUPER_ADMIN && empty($replyCfg['super_admin_comment'])) {
+        jsonOut(['success' => false, 'error' => '超管身份不参与前台回复'], 403);
+    }
     if (!$u && empty($replyCfg['guest_comments_enabled'])) jsonOut(['success' => false, 'error' => '请先登录'], 401);
     if (!$u && !empty($replyCfg['guest_comments_enabled'])) {
         $u = ['id' => 'guest', 'nickname' => '访客', 'avatar' => '', 'qq' => '', 'role' => 'guest'];
@@ -407,7 +485,7 @@ if ($action === 'reply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     jsonOut(['success' => false, 'error' => '父评论不存在'], 404);
 }
 if ($action === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $u = validateSession();
+    $u = validateHomeUser();
     if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
     $input = json_decode(file_get_contents('php://input'), true);
     $article = trim($input['article'] ?? '');
@@ -471,9 +549,6 @@ if ($action === 'bg_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$u || ($u['role'] ?? '') !== ROLE_SUPER_ADMIN) jsonOut(['success' => false, 'error' => '无权限'], 403);
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) jsonOut(['success' => false, 'error' => '无效的请求数据'], 400);
-    $configFile = __DIR__ . '/data/.config.json';
-    if (!is_dir(__DIR__ . '/data')) jsonOut(['success' => false, 'error' => 'data 目录不存在'], 500);
-    if (file_exists($configFile) && !is_writable($configFile)) jsonOut(['success' => false, 'error' => '配置文件不可写，请检查文件权限'], 500);
     $config = loadSiteConfig();
     $config['bg_type'] = in_array($input['bg_type'] ?? '', ['none', 'image', 'api']) ? $input['bg_type'] : 'none';
     // bg_image 仅允许站内 data/bg/ 路径或 http(s) URL，防止 CSS 值注入
@@ -484,13 +559,8 @@ if ($action === 'bg_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $config['bg_blur_enabled'] = !empty($input['bg_blur_enabled']);
     $config['bg_blur_level'] = max(0, min(50, intval($input['bg_blur_level'] ?? 0)));
     $config['bg_card_opacity'] = max(50, min(100, intval($input['bg_card_opacity'] ?? 100)));
-    $json = json_encode($config, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-    if ($json === null) jsonOut(['success' => false, 'error' => 'JSON 编码失败'], 500);
-    $written = file_put_contents($configFile, $json, LOCK_EX);
-    if ($written === false || $written === 0) jsonOut(['success' => false, 'error' => '写入失败(' . $written . ')，请检查 data/ 目录权限'], 500);
-    $verify = json_decode(file_get_contents($configFile), true);
-    if (($verify['bg_type'] ?? '') !== $config['bg_type']) jsonOut(['success' => false, 'error' => '写入验证失败'], 500);
-    jsonOut(['success' => true, 'written' => $written, 'path' => $configFile]);
+    saveSiteConfig($config);
+    jsonOut(['success' => true]);
 }
 if ($action === 'bg_config' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $config = loadSiteConfig();
@@ -528,10 +598,7 @@ if ($action === 'entry_path_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $config['author_path'] = 'author';
     }
     $config['hide_default_paths'] = !empty($input['hide_default_paths']);
-    $json = json_encode($config, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-    if ($json === null) jsonOut(['success' => false, 'error' => 'JSON 编码失败'], 500);
-    $written = file_put_contents(__DIR__ . '/data/.config.json', $json, LOCK_EX);
-    if ($written === false) jsonOut(['success' => false, 'error' => '写入失败'], 500);
+    saveSiteConfig($config);
     auditLog('config_update', 'entry_paths', '修改自定义入口路径: station=' . $config['station_path'] . ', author=' . $config['author_path']);
     jsonOut(['success' => true, 'station_path' => $config['station_path'], 'author_path' => $config['author_path']]);
 }

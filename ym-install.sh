@@ -11,24 +11,73 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_VER=$(php -r '$c = json_decode(@file_get_contents($argv[1]), true); echo $c["version"] ?? "0.0.0";' "$SCRIPT_DIR/app-config.json" 2>/dev/null || echo "0.0.0")
 if [ -z "$APP_VER" ]; then APP_VER="0.0.0"; fi
 
-# 解析命令行参数
+# 解析命令行参数（支持全自动/半自动，小白也可全部回车走默认）
 INSTALL_HFISH=true
+AUTO_YES=false
+DOMAIN_ARG=""
+WEB_ROOT_ARG=""
+EMAIL_ARG=""
+HFISH_PASSWORD_ARG=""
+HFISH_PANEL_PORT_ARG=""
+HFISH_NODE_PORT_ARG=""
 for arg in "$@"; do
     case $arg in
         --skip-hfish)
             INSTALL_HFISH=false
-            shift
+            ;;
+        --yes|-y)
+            AUTO_YES=true
+            ;;
+        --domain=*)
+            DOMAIN_ARG="${arg#*=}"
+            ;;
+        --web-root=*)
+            WEB_ROOT_ARG="${arg#*=}"
+            ;;
+        --email=*)
+            EMAIL_ARG="${arg#*=}"
+            ;;
+        --hfish-password=*)
+            HFISH_PASSWORD_ARG="${arg#*=}"
+            ;;
+        --hfish-port-panel=*)
+            HFISH_PANEL_PORT_ARG="${arg#*=}"
+            ;;
+        --hfish-port-node=*)
+            HFISH_NODE_PORT_ARG="${arg#*=}"
             ;;
         --help|-h)
             echo "用法: sudo bash ym-install.sh [选项]"
             echo ""
-            echo "选项:"
-            echo "  --skip-hfish    跳过 Hfish 蜜罐安装"
-            echo "  --help, -h      显示此帮助信息"
+            echo "选项（可与环境变量互换，参数优先）:"
+            echo "  --yes, -y          全自动模式（所有交互用默认值/自动生成，需提供 --domain）"
+            echo "  --domain=域名       站点域名（等价环境变量 YM_DOMAIN）"
+            echo "  --web-root=路径     Web 根目录（默认 /var/www/you-markdown，等价 YM_WEB_ROOT）"
+            echo "  --email=邮箱        管理员邮箱（告警通知，等价 YM_ADMIN_EMAIL）"
+            echo "  --skip-hfish       跳过 Hfish 蜜罐安装"
+            echo "  --hfish-password=密 蜜獾账户密码（留空自动生成强密码，等价 YM_HFISH_PASSWORD）"
+            echo "  --hfish-port-panel=端口  蜜獾管理面板端口（默认 4433，自动检测占用，等价 YM_HFISH_PANEL_PORT）"
+            echo "  --hfish-port-node=端口   蜜獾节点通信端口（默认 4434，等价 YM_HFISH_NODE_PORT）"
+            echo "  --help, -h         显示此帮助信息"
+            echo ""
+            echo "示例:"
+            echo "  sudo bash ym-install.sh                              # 交互式（小白默认流程）"
+            echo "  sudo bash ym-install.sh --yes --domain=blog.example.com   # 全自动"
+            echo "  YM_DOMAIN=x.example.com sudo bash ym-install.sh      # 环境变量方式"
             exit 0
             ;;
     esac
 done
+
+# 端口占用检测辅助：被占用则自动 +1 直到空闲
+pick_free_port() {
+    local port="$1"
+    while ss -tln 2>/dev/null | awk '{print $4}' | grep -q ":${port}$"; do
+        warn "端口 $port 已被占用，自动改用 $((port + 1))"
+        port=$((port + 1))
+    done
+    echo "$port"
+}
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -73,11 +122,11 @@ case $OS in
         # 检测已安装的 PHP 版本
         PHP_VER=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null || echo "8.4")
         log "检测到 PHP 版本: $PHP_VER"
-        apt-get install -y -qq nginx "php${PHP_VER}-fpm" "php${PHP_VER}-cli" "php${PHP_VER}-zip" "php${PHP_VER}-mbstring" "php${PHP_VER}-curl" certbot python3 python3-pip ufw > /dev/null 2>&1 || \
-        apt-get install -y -qq nginx libnginx-mod-http-php php-fpm php-cli php-zip php-mbstring php-curl certbot python3 python3-pip ufw > /dev/null 2>&1
+        apt-get install -y -qq nginx "php${PHP_VER}-fpm" "php${PHP_VER}-cli" "php${PHP_VER}-zip" "php${PHP_VER}-mbstring" "php${PHP_VER}-curl" "php${PHP_VER}-sqlite3" certbot python3 python3-pip ufw > /dev/null 2>&1 || \
+        apt-get install -y -qq nginx libnginx-mod-http-php php-fpm php-cli php-zip php-mbstring php-curl php-sqlite3 certbot python3 python3-pip ufw > /dev/null 2>&1
         ;;
     centos|rhel|fedora)
-        yum install -y -q nginx php php-fpm php-zip php-mbstring php-curl certbot python3 python3-pip > /dev/null 2>&1
+        yum install -y -q nginx php php-fpm php-zip php-mbstring php-curl php-pdo php-sqlite3 certbot python3 python3-pip > /dev/null 2>&1
         ;;
     *)
         warn "未识别的系统，请手动安装: nginx, php8.x, python3, certbot"
@@ -91,19 +140,38 @@ pip3 install inotify 2>/dev/null || warn "inotify 安装失败，将使用轮询
 # 1. 参数收集
 # ================================================================
 echo ""
-log "请提供以下部署信息："
+log "请提供以下部署信息（直接回车使用默认值；全自动模式 --yes 跳过本环节）"
 
-read -p "  域名 (如 youmarkdown.example.com): " DOMAIN
+# 域名：--domain / YM_DOMAIN > 交互输入（必填）
+DOMAIN="${DOMAIN_ARG:-${YM_DOMAIN:-}}"
 if [ -z "$DOMAIN" ]; then
-    err "域名不能为空"
+    if [ "$AUTO_YES" = true ]; then
+        err "全自动模式需提供域名: --domain=你的域名 (或环境变量 YM_DOMAIN)"
+    fi
+    read -p "  域名 (必填，如 youmarkdown.example.com): " DOMAIN
+    if [ -z "$DOMAIN" ]; then
+        err "域名不能为空"
+    fi
 fi
 
-read -p "  Web 根目录 (默认 /var/www/you-markdown): " WEB_ROOT
-WEB_ROOT=${WEB_ROOT:-/var/www/you-markdown}
+# Web 根目录：--web-root / YM_WEB_ROOT > 交互默认 /var/www/you-markdown
+WEB_ROOT="${WEB_ROOT_ARG:-${YM_WEB_ROOT:-}}"
+if [ -z "$WEB_ROOT" ]; then
+    if [ "$AUTO_YES" = true ]; then
+        WEB_ROOT="/var/www/you-markdown"
+    else
+        read -p "  Web 根目录 (默认 /var/www/you-markdown): " WEB_ROOT
+        WEB_ROOT=${WEB_ROOT:-/var/www/you-markdown}
+    fi
+fi
 
-read -p "  管理员邮箱 (告警通知): " ADMIN_EMAIL
+# 管理员邮箱：--email / YM_ADMIN_EMAIL > 交互（可留空，用于告警与 Let's Encrypt）
+ADMIN_EMAIL="${EMAIL_ARG:-${YM_ADMIN_EMAIL:-}}"
+if [ -z "$ADMIN_EMAIL" ] && [ "$AUTO_YES" != true ]; then
+    read -p "  管理员邮箱 (告警通知, 可留空): " ADMIN_EMAIL
+fi
 if [ -z "$ADMIN_EMAIL" ]; then
-    warn "未提供邮箱，告警功能将不可用"
+    warn "未提供邮箱，告警/Let's Encrypt 功能将不可用（可后续在超管后台配置）"
 fi
 
 echo ""
@@ -111,10 +179,13 @@ info "部署参数确认："
 echo "  域名:       $DOMAIN"
 echo "  Web 根目录: $WEB_ROOT"
 echo "  管理员邮箱: ${ADMIN_EMAIL:-未设置}"
+echo "  Hfish 蜜罐: $([ "$INSTALL_HFISH" = true ] && echo '安装' || echo '跳过（--skip-hfish）')"
 echo ""
-read -p "确认继续? (y/n): " confirm
-if [ "$confirm" != "y" ]; then
-    err "已取消"
+if [ "$AUTO_YES" != true ]; then
+    read -p "确认继续? (y/n): " confirm
+    if [ "$confirm" != "y" ]; then
+        err "已取消"
+    fi
 fi
 
 # ================================================================
@@ -128,9 +199,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 创建 Web 根目录
 mkdir -p "$WEB_ROOT"
 
-# 拷贝源码（排除不需要的文件和旧版目录）
+# 拷贝源码（排除不需要的文件和旧版目录；自身 ym-install.sh 不部署进 Web 根，
+# 纵深防御：即使 nginx 配置失误，攻击者也无法通过 Web 下载安装脚本源码）
 rsync -av --exclude='恢复.zip' --exclude='test_*.py' --exclude='__pycache__' \
-    --exclude='youyou/' "$SCRIPT_DIR/" "$WEB_ROOT/" > /dev/null 2>&1 || \
+    --exclude='youyou/' --exclude='ym-install.sh' "$SCRIPT_DIR/" "$WEB_ROOT/" > /dev/null 2>&1 || \
     cp -r "$SCRIPT_DIR/"* "$WEB_ROOT/" 2>/dev/null
 
 # 清理旧版残留目录
@@ -142,15 +214,20 @@ find "$WEB_ROOT" -type d -exec chmod 755 {} \;
 find "$WEB_ROOT" -type f -exec chmod 644 {} \;
 chmod 755 "$WEB_ROOT/admin" "$WEB_ROOT/station" "$WEB_ROOT/author" 2>/dev/null || true
 
-# data 目录可写
+# data 目录可写（775：www-data 组可写，供 CLI 只读命令无 sudo 读取 SQLite/WAL）
 if [ -d "$WEB_ROOT/data" ]; then
     chown -R www-data:www-data "$WEB_ROOT/data"
-    chmod 755 "$WEB_ROOT/data"
+    chmod 775 "$WEB_ROOT/data"
 fi
 
 # 创建必要的子目录
 mkdir -p "$WEB_ROOT/data/articles" "$WEB_ROOT/data/comments" "$WEB_ROOT/data/bg" "$WEB_ROOT/data/avatars"
 chown -R www-data:www-data "$WEB_ROOT/data"
+
+# 将调用本脚本的管理员加入 www-data 组（CLI 只读命令无需 sudo 即可读取 SQLite）
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    usermod -aG www-data "$SUDO_USER" 2>/dev/null || warn "无法将 $SUDO_USER 加入 www-data 组，只读 CLI 命令请使用 sudo"
+fi
 
 log "文件部署完成"
 
@@ -174,7 +251,7 @@ cat > "$WEB_ROOT/data/.users.json" << EOF
         "nickname": "高级管理员",
         "password": "$SUPER_PASSWORD_HASH",
         "avatar": "",
-        "signature": "系统管理员",
+        "signature": "高级管理员",
         "role": "super_admin",
         "created": "$(date '+%Y-%m-%d %H:%M:%S')"
     }
@@ -183,17 +260,7 @@ EOF
 chown www-data:www-data "$WEB_ROOT/data/.users.json"
 chmod 640 "$WEB_ROOT/data/.users.json"
 
-# 初始化角色定义
-cat > "$WEB_ROOT/data/.roles.json" << 'EOF'
-{
-    "super_admin": {"label": "高级管理员", "can": ["*"]},
-    "station_admin": {"label": "站长", "can": ["article.create","article.edit","article.delete","article.edit_any","article.delete_any","author.create","author.delete","user.view"]},
-    "author": {"label": "写作者", "can": ["article.create","article.edit_own","article.delete_own"]},
-    "user": {"label": "用户", "can": ["comment.create","profile.edit"]},
-    "guest": {"label": "访客", "can": ["article.read"]}
-}
-EOF
-chown www-data:www-data "$WEB_ROOT/data/.roles.json"
+# 角色定义已内置在 utils.php loadRoles() 的默认值中，无需单独落盘
 
 # 生成 JWT 密钥
 JWT_SECRET=$(openssl rand -hex 32)
@@ -219,7 +286,7 @@ cat > "$WEB_ROOT/data/.config.json" << EOF
 EOF
 chown www-data:www-data "$WEB_ROOT/data/.config.json"
 
-log "管理员账号已创建"
+log "高级管理员账号已创建（凭据不展示，进后台请用上方 OTP 入口或 ym-admin login）"
 
 # ================================================================
 # 4. 生成 OTP 入口
@@ -243,6 +310,14 @@ cat > "$WEB_ROOT/data/.entries.json" << EOF
 ]
 EOF
 chown www-data:www-data "$WEB_ROOT/data/.entries.json"
+
+# 将种子 JSON 数据导入 SQLite（v2.5.0 起使用 SQLite；幂等）
+log "初始化 SQLite 数据库..."
+php "$WEB_ROOT/ym-migrate" 2>&1 || warn "数据迁移失败，请手动执行: php $WEB_ROOT/ym-migrate"
+# 确保 PHP-FPM（www-data）可写 SQLite 及 WAL/SHM 文件；data 目录组可写供 CLI 只读命令无 sudo 读取
+chown -R www-data:www-data "$WEB_ROOT/data"
+chmod 775 "$WEB_ROOT/data" 2>/dev/null || true
+chmod 660 "$WEB_ROOT/data/ym.db" 2>/dev/null || true
 
 # ================================================================
 # 5. 配置 Nginx
@@ -283,15 +358,33 @@ server {
         return 403;
     }
 
-    # ACME 验证放行（certbot webroot 续期）
-    location ^~ /.well-known/ {
-        allow all;
+    # 禁止访问 SQLite 数据库（含 WAL/SHM 文件）
+    location ~ ^/data/ym\.db(-wal|-shm)?\$ {
+        deny all;
+        return 403;
+    }
+
+    # 禁止访问脚本/配置/备份等敏感文件（安装脚本、守护进程、蜜罐同步等源码不得外泄）
+    location ~* \.(sh|py|conf|bak|sql|log)\$ {
+        deny all;
+        return 403;
+    }
+
+    # 禁止访问 CLI/安装/迁移/调试文件（无后缀脚本显式封禁）
+    location ~ ^/(ym-admin|ym-install\.sh|ym-guard\.py|ym-hfish-sync\.py|ym-migrate|test\.php|debug\.php|entry_debug\.php|entry_fixed\.php)\$ {
+        deny all;
+        return 403;
     }
 
     # 禁止下载应用配置（泄露 repo/hfish 信息）
     location = /app-config.json {
         deny all;
         return 403;
+    }
+
+    # ACME 验证放行（certbot webroot 续期）
+    location ^~ /.well-known/ {
+        allow all;
     }
 
     # 禁止访问隐藏文件
@@ -458,12 +551,17 @@ install_hfish() {
 
     echo ""
     log "============================================"
-    log "  Hfish 蜜罐部署（可选安全组件）"
+    log "  Hfish 蜜罐部署（可选安全组件，小白建议默认安装）"
     log "============================================"
     echo ""
 
-    read -p "  是否安装 Hfish 蜜罐? (Y/n, 默认安装): " hfish_confirm
-    hfish_confirm=${hfish_confirm:-Y}
+    # 是否安装：--yes 默认安装；否则交互确认
+    if [ "$AUTO_YES" = true ]; then
+        hfish_confirm=Y
+    else
+        read -p "  是否安装 Hfish 蜜罐? (Y/n, 默认安装): " hfish_confirm
+        hfish_confirm=${hfish_confirm:-Y}
+    fi
     if [ "$hfish_confirm" != "Y" ] && [ "$hfish_confirm" != "y" ]; then
         info "已跳过 Hfish 蜜罐安装"
         HFISH_INSTALLED=false
@@ -474,26 +572,37 @@ install_hfish() {
     HFISH_USER=$(php -r "\$c = json_decode(@file_get_contents('$SCRIPT_DIR/app-config.json'), true); echo \$c['hfish_user'] ?? 'xiao';" 2>/dev/null)
     HFISH_USER=${HFISH_USER:-xiao}
 
-    # 蜜獾账户密码：优先 $HFISH_PASSWORD 环境变量，否则交互输入（默认与服务器登录密码一致）
-    if [ -z "${HFISH_PASSWORD:-}" ]; then
-        read -s -p "  蜜獾账户密码 (默认与服务器登录密码一致): " HFISH_PASSWORD
+    # 蜜獾账户密码：--hfish-password / YM_HFISH_PASSWORD > 交互输入（留空自动生成强密码）
+    HFISH_PASSWORD="${HFISH_PASSWORD_ARG:-${YM_HFISH_PASSWORD:-}}"
+    if [ -z "$HFISH_PASSWORD" ] && [ "$AUTO_YES" != true ]; then
+        read -s -p "  蜜獾账户密码 (留空自动生成强密码): " HFISH_PASSWORD
         echo ""
-        HFISH_PASSWORD=${HFISH_PASSWORD:-"${SERVER_PASSWORD:-}"}
     fi
-    if [ -z "${HFISH_PASSWORD:-}" ]; then
-        warn "未设置蜜獾账户密码，将使用默认强随机密码"
+    if [ -z "$HFISH_PASSWORD" ]; then
         HFISH_PASSWORD=$(openssl rand -base64 12 | tr -d '=+/')
+        HFISH_PASSWORD_GENERATED=true
     fi
-    info "蜜獾账户: $HFISH_USER"
+    info "蜜獾账户: $HFISH_USER（密码：$( [ "${HFISH_PASSWORD_GENERATED:-false}" = true ] && echo '自动生成，见完成页' || echo '已设置' )）"
 
     echo ""
-    info "配置蜜罐端口（请勿使用已占用的端口）："
+    info "配置蜜罐端口（默认值即可；若被占用会自动顺延）："
 
-    read -p "  Web 管理面板端口 (默认 4433): " HFISH_PANEL_PORT
-    HFISH_PANEL_PORT=${HFISH_PANEL_PORT:-4433}
+    # 管理面板端口：--hfish-port-panel / YM_HFISH_PANEL_PORT > 交互默认 4433 > 自动检测占用
+    HFISH_PANEL_PORT="${HFISH_PANEL_PORT_ARG:-${YM_HFISH_PANEL_PORT:-}}"
+    if [ -z "$HFISH_PANEL_PORT" ] && [ "$AUTO_YES" != true ]; then
+        read -p "  Web 管理面板端口 (默认 4433): " HFISH_PANEL_PORT
+    fi
+    HFISH_PANEL_PORT=$(pick_free_port "${HFISH_PANEL_PORT:-4433}")
 
-    read -p "  节点通信端口 (默认 4434): " HFISH_NODE_PORT
-    HFISH_NODE_PORT=${HFISH_NODE_PORT:-4434}
+    # 节点通信端口：--hfish-port-node / YM_HFISH_NODE_PORT > 交互默认 4434 > 自动检测占用且避开面板端口
+    HFISH_NODE_PORT="${HFISH_NODE_PORT_ARG:-${YM_HFISH_NODE_PORT:-}}"
+    if [ -z "$HFISH_NODE_PORT" ] && [ "$AUTO_YES" != true ]; then
+        read -p "  节点通信端口 (默认 4434): " HFISH_NODE_PORT
+    fi
+    HFISH_NODE_PORT=$(pick_free_port "${HFISH_NODE_PORT:-4434}")
+    while [ "$HFISH_NODE_PORT" = "$HFISH_PANEL_PORT" ]; do
+        HFISH_NODE_PORT=$(pick_free_port "$((HFISH_NODE_PORT + 1))")
+    done
 
     echo ""
     info "Hfish 蜜罐配置确认："
@@ -786,19 +895,21 @@ echo ""
 echo "  网站地址: https://$DOMAIN"
 echo "  管理入口: https://$DOMAIN/admin/entry/$ENTRY_TOKEN"
 echo "  一次性密码: $OTP"
-echo "  管理账号: $SUPER_QQ"
-echo "  管理密码: $SUPER_PASSWORD"
 echo ""
 echo "  ⚠️ 以上信息仅显示一次，请立即保存！"
 echo ""
+echo "  高级管理员账号已创建（凭据不展示；进后台请使用上方 OTP 入口或 ym-admin login）"
 echo "  CLI 管理工具: ym-admin login"
 echo "  守护进程: systemctl status ym-guard"
 if [ "${HFISH_INSTALLED:-false}" = true ]; then
     echo ""
     echo "  Hfish 蜜罐:"
-    echo "    假 HTTP 端口: ${HFISH_HTTP_PORT}"
-    echo "    假 SSH 端口:  ${HFISH_SSH_PORT}"
-    echo "    管理面板:     SSH 隧道访问 → ym-admin hfish-panel"
+    echo "    管理面板端口: ${HFISH_PANEL_PORT}（SSH 隧道访问 → ym-admin hfish-panel）"
+    echo "    节点通信端口: ${HFISH_NODE_PORT}"
+    echo "    蜜獾账户:     ${HFISH_USER}"
+    if [ "${HFISH_PASSWORD_GENERATED:-false}" = true ]; then
+        echo "    蜜獾密码:     $HFISH_PASSWORD"
+    fi
     echo "    查看状态:     ym-admin hfish-status"
 fi
 echo ""
@@ -811,10 +922,9 @@ cat > /root/ym-credentials.txt << EOF
 You Super Markdown 管理员凭证
 ========================
 网站: https://$DOMAIN
-管理账号: $SUPER_QQ
-管理密码: $SUPER_PASSWORD
 首次 OTP 入口: https://$DOMAIN/admin/entry/$ENTRY_TOKEN
 首次 OTP 密码: $OTP
+（高级管理员账号凭据不展示；后续管理入口请用 sudo ym-admin login 生成）
 安装时间: $(date)
 EOF
 chmod 600 /root/ym-credentials.txt

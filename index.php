@@ -28,26 +28,11 @@ function jsonOut($data, $code = 200) {
 if (!is_dir('./data/articles')) {
     mkdir('./data/articles', 0755, true);
 }
-$_siteConfig = [];
-if (file_exists('./data/.config.json')) {
-    $_siteConfig = json_decode(file_get_contents('./data/.config.json'), true) ?: [];
-}
+$_siteConfig = loadSiteConfig();
 $_siteTitle = $_siteConfig['site_title'] ?? 'You Markdown';
-// 音乐播放器仅在后台配置了 music_cookies 后显示入口（未配置则隐藏）
-$musicEnabled = !empty($_siteConfig['music_cookies']);
-$pinFile = './data/.pinned.json';
-function getPinnedList() {
-    global $pinFile;
-    if (file_exists($pinFile)) {
-        $data = json_decode(file_get_contents($pinFile), true);
-        return is_array($data) ? $data : [];
-    }
-    return [];
-}
-function savePinnedList($list) {
-    global $pinFile;
-    file_put_contents($pinFile, json_encode(array_values($list), JSON_UNESCAPED_UNICODE));
-}
+// 音乐播放器：网易云（music_cookies）或 QQ（music_cookies_qq）任一配置后显示入口（v2.6.0 起支持双平台独立开关）
+$musicEnabled = !empty($_siteConfig['music_cookies']) || !empty($_siteConfig['music_cookies_qq']);
+// 置顶列表读写由 utils.php 提供（SQLite）；此处仅作全局别名
 // 自定义入口路径路由（L1 隐藏入口扩展）
 $requestUri = $_SERVER['REQUEST_URI'] ?? '';
 $urlPath = parse_url($requestUri, PHP_URL_PATH);
@@ -321,7 +306,7 @@ if ($action === 'update') {
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="css/style.css?v=<?= filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
-<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_siteConfig['bg_api_url'] ?? '') ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>">
+<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_siteConfig['bg_api_url'] ?? '') ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($_siteTitle) ?></a></div>
     <div class="header-right">
@@ -381,6 +366,10 @@ if ($action === 'update') {
     <div class="sidebar-list" id="sidebarFileList"></div>
     <div class="sidebar-toc-list" id="sidebarTocList"></div>
 </div>
+<!-- v2.6.5 修复：折叠按钮在 sidebar 内部，收起后无恢复入口；此按钮独立于 sidebar 外，收起时可见 -->
+<button class="sidebar-restore-btn" id="sidebarRestoreBtn" onclick="toggleSidebar()" title="展开侧边栏 (S)" style="display:none" aria-label="展开侧边栏">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
+</button>
 <div class="dropdown-panel" id="searchPanel">
     <div class="dropdown-search"><input type="text" id="searchInput" placeholder="搜索文档..."></div>
     <div class="dropdown-list" id="searchResults"></div>
@@ -530,7 +519,7 @@ if ($action === 'update') {
             <div class="cmt-modal-form" id="cmtRegForm" style="display:none">
                 <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtRegQQ">
                 <input class="cmt-modal-input" type="text" placeholder="昵称" maxlength="20" id="cmtRegNick">
-                <input class="cmt-modal-input" type="password" placeholder="密码（至少6位）" id="cmtRegPw">
+                <input class="cmt-modal-input" type="password" placeholder="密码（至少8位，含大小写与数字）" id="cmtRegPw">
                 <div class="cmt-modal-err" id="cmtRegErr"></div>
                 <button class="cmt-modal-submit" id="cmtRegBtn">注册</button>
             </div>
@@ -558,7 +547,7 @@ if ($action === 'update') {
             <div class="cmt-modal-form">
                 <input class="cmt-modal-input" type="text" placeholder="设置QQ号" maxlength="15" id="cmtAdminQQ">
                 <input class="cmt-modal-input" type="text" placeholder="设置昵称" maxlength="20" id="cmtAdminNick" value="站长">
-                <input class="cmt-modal-input" type="password" placeholder="设置新密码" id="cmtAdminPw">
+                <input class="cmt-modal-input" type="password" placeholder="设置新密码（至少8位，含大小写与数字）" id="cmtAdminPw">
                 <input class="cmt-modal-input" type="password" placeholder="确认新密码" id="cmtAdminPw2">
                 <div class="cmt-modal-err" id="cmtAdminErr"></div>
                 <button class="cmt-modal-submit" id="cmtAdminSave">保存并进入</button>

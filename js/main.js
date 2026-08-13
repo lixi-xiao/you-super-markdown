@@ -850,12 +850,17 @@
         const isCollapsed = sb.style.display === 'none';
         sb.style.display = isCollapsed ? 'flex' : 'none';
         document.body.style.paddingLeft = isCollapsed ? '280px' : '0';
+        // v2.6.5：折叠按钮在 sidebar 内，收起后自身也消失；由外部 restore 按钮提供恢复入口
+        const restoreBtn = document.getElementById('sidebarRestoreBtn');
+        if (restoreBtn) restoreBtn.style.display = isCollapsed ? 'none' : 'flex';
         localStorage.setItem('md-sidebar-hidden', isCollapsed ? '0' : '1');
     }
     window.toggleSidebar = toggleSidebar;
     if (localStorage.getItem('md-sidebar-hidden') === '1') {
         const sb = document.getElementById('sidebar');
         if (sb) { sb.style.display = 'none'; document.body.style.paddingLeft = '0'; }
+        const restoreBtn = document.getElementById('sidebarRestoreBtn');
+        if (restoreBtn) restoreBtn.style.display = 'flex';
     }
     (function() {
         const isTyping = () => {
@@ -1021,7 +1026,7 @@
         const qq = cmtRegQQ.value.trim(), nick = cmtRegNick.value.trim(), pw = cmtRegPw.value;
         cmtRegErr.textContent = '';
         if (!qq || !pw) { cmtRegErr.textContent = '请填写QQ号和密码'; return; }
-        if (pw.length < 6) { cmtRegErr.textContent = '密码至少6位'; return; }
+        if (pw.length < 8 || !/[a-z]/.test(pw) || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw)) { cmtRegErr.textContent = '密码至少8位，且需包含大写字母、小写字母与数字'; return; }
         cmtRegBtn.disabled = true; cmtRegBtn.textContent = '注册中...';
         fetch('api.php?action=register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw }) })
             .then(r => r.json()).then(d => {
@@ -1045,7 +1050,7 @@
         cmtAdminErr.textContent = '';
         if (!qq) { cmtAdminErr.textContent = '请填写QQ号'; return; }
         if (!nick) { cmtAdminErr.textContent = '请填写昵称'; return; }
-        if (pw && pw.length < 6) { cmtAdminErr.textContent = '密码至少6位'; return; }
+        if (pw && (pw.length < 8 || !/[a-z]/.test(pw) || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw))) { cmtAdminErr.textContent = '密码至少8位，且需包含大写字母、小写字母与数字'; return; }
         if (pw !== pw2) { cmtAdminErr.textContent = '两次密码不一致'; return; }
         fetch('api.php?action=admin_setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw }) })
             .then(r => r.json()).then(d => {
@@ -1319,6 +1324,7 @@
         if (cmtListSection) cmtListSection.style.display = 'none';
     }
     var musicPlaylistId = document.body.dataset.musicPlaylist || '3778678';
+    var musicPlaylistIdQQ = document.body.dataset.musicPlaylistQq || '';
     var musicPlatform = 'netease';
     var musicSongs = [];
     var musicIndex = -1;
@@ -1399,8 +1405,10 @@
     }
     function loadMusicHotSongs() {
         musicLoading.textContent = '加载中...';
-        var musicApiUrl = musicPlaylistId && musicPlaylistId !== '3778678'
-            ? 'music.php?platform=' + musicPlatform + '&playlistId=' + encodeURIComponent(musicPlaylistId)
+        // v2.5.6：按平台选择歌单 ID（QQ 平台使用 music_playlist_id_qq 配置，留空则热歌榜）
+        var pid = musicPlatform === 'qq' ? musicPlaylistIdQQ : musicPlaylistId;
+        var musicApiUrl = pid && pid !== '3778678'
+            ? 'music.php?platform=' + musicPlatform + '&playlistId=' + encodeURIComponent(pid)
             : 'music.php?platform=' + musicPlatform + '&sortAll=热歌榜';
         fetch(musicApiUrl)
             .then(function(res) {
@@ -1976,7 +1984,8 @@
             if (userData) {
                 var nickname = userData.nickname || '用户';
                 var role = userData.role || 'user';
-                var roleLabel = roleLabels[role] || role;
+                // v2.6.5：超管在主页显示「超管」身份，但无登录/管理/退出入口（需到超管后台退出）
+                var roleLabel = userData.isSuperAdmin ? '超管' : (roleLabels[role] || role);
                 if (dropdownName) dropdownName.textContent = nickname;
                 if (dropdownRole) dropdownRole.textContent = roleLabel;
                 if (dropdownAvatar) {
@@ -1988,10 +1997,16 @@
                     }
                 }
                 if (dropdownLogin) dropdownLogin.style.display = 'none';
-                if (dropdownDivider) dropdownDivider.style.display = 'block';
-                if (dropdownLogout) dropdownLogout.style.display = 'flex';
-                if (dropdownAdmin) {
-                    dropdownAdmin.style.display = userData.canAccessAdmin ? 'flex' : 'none';
+                if (userData.isSuperAdmin) {
+                    if (dropdownDivider) dropdownDivider.style.display = 'none';
+                    if (dropdownLogout) dropdownLogout.style.display = 'none';
+                    if (dropdownAdmin) dropdownAdmin.style.display = 'none';
+                } else {
+                    if (dropdownDivider) dropdownDivider.style.display = 'block';
+                    if (dropdownLogout) dropdownLogout.style.display = 'flex';
+                    if (dropdownAdmin) {
+                        dropdownAdmin.style.display = userData.canAccessAdmin ? 'flex' : 'none';
+                    }
                 }
             } else {
                 if (dropdownName) dropdownName.textContent = '未登录';

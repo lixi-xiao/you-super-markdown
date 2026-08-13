@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/db.php';
 define('APP_CONFIG_FILE', __DIR__ . '/app-config.json');
 function loadAppConfig() {
     static $config = null;
@@ -31,6 +32,15 @@ function checkCsrfToken($token) {
     if (empty($_SESSION['csrf_token']) || empty($token)) return false;
     return hash_equals($_SESSION['csrf_token'], $token);
 }
+// v2.6.4：统一密码策略——至少 8 位，且必须同时包含大写字母、小写字母与数字
+// 返回 true 表示合规，否则返回错误提示字符串（供各注册/改密/建号入口统一使用）
+function validatePassword($pw) {
+    if (strlen($pw) < 8) return '密码至少 8 位';
+    if (!preg_match('/[a-z]/', $pw)) return '密码必须包含小写字母';
+    if (!preg_match('/[A-Z]/', $pw)) return '密码必须包含大写字母';
+    if (!preg_match('/[0-9]/', $pw)) return '密码必须包含数字';
+    return true;
+}
 function isPrivateHost($host) {
     $host = strtolower(trim(trim((string)$host), '[]'));
     if ($host === '') return true;
@@ -58,20 +68,33 @@ function isPrivateHost($host) {
     return false;
 }
 function loadUsers() {
-    $f = __DIR__ . '/data/.users.json';
-    if (!file_exists($f)) return [];
-    $d = json_decode(file_get_contents($f), true);
-    return is_array($d) ? $d : [];
+    return db_all('SELECT * FROM users ORDER BY rowid');
 }
 function saveUsers($users) {
-    $f = __DIR__ . '/data/.users.json';
-    file_put_contents($f, json_encode($users, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    // 全量替换（保持原函数语义：写入完整用户列表）
+    // v2.5.4：INSERT OR REPLACE 防止列表内重复 id 触发唯一约束冲突导致事务回滚
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec('DELETE FROM users');
+        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, qq, nickname, password, avatar, signature, role, station_id, created, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)');
+        foreach ($users as $u) {
+            $st->execute([
+                $u['id'] ?? '', $u['qq'] ?? '', $u['nickname'] ?? '', $u['password'] ?? '',
+                $u['avatar'] ?? '', $u['signature'] ?? '', $u['role'] ?? 'user',
+                $u['station_id'] ?? '', $u['created'] ?? '', $u['created_by'] ?? '',
+            ]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
 }
 function genId() { return bin2hex(random_bytes(8)); }
 
 function loadSiteConfig() {
-    $f = __DIR__ . '/data/.config.json';
-    if (!file_exists($f)) return [
+    $defaults = [
         'site_title' => 'You Super Markdown',
         'reg_limit_per_ip' => 3,
         'comments_enabled' => true,
@@ -86,11 +109,28 @@ function loadSiteConfig() {
         'author_path' => 'author',
         'hide_default_paths' => true,
     ];
-    $d = json_decode(file_get_contents($f), true);
-    return is_array($d) ? $d : [];
+    $rows = db_all('SELECT key, value FROM config');
+    $config = $defaults;
+    foreach ($rows as $r) {
+        $config[$r['key']] = json_decode($r['value'], true);
+    }
+    return $config;
 }
 function saveSiteConfig($config) {
-    return file_put_contents(__DIR__ . '/data/.config.json', json_encode($config, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        // v2.5.4：逐 key 增量 upsert（config 无删除场景，去掉全表 DELETE 减少写放大）
+        $st = $pdo->prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?,?)');
+        foreach ($config as $k => $v) {
+            $st->execute([$k, json_encode($v, JSON_UNESCAPED_UNICODE)]);
+        }
+        $pdo->commit();
+        return true;
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
 }
 function getStationPath() {
     $config = loadSiteConfig();
@@ -116,32 +156,54 @@ function validateCustomPath($path) {
     return true;
 }
 function loadBansList() {
-    $f = __DIR__ . '/data/.bans.json';
-    if (!file_exists($f)) return [];
-    $d = json_decode(file_get_contents($f), true);
-    return is_array($d) ? $d : [];
+    $rows = db_all('SELECT ip, types_json, reason, time FROM bans ORDER BY time DESC');
+    $bans = [];
+    foreach ($rows as $r) {
+        $bans[] = [
+            'ip' => $r['ip'],
+            'types' => json_decode($r['types_json'] ?? '[]', true) ?: [],
+            'reason' => $r['reason'] ?? '',
+            'time' => $r['time'] ?? '',
+        ];
+    }
+    return $bans;
 }
 function saveBansList($bans) {
-    file_put_contents(__DIR__ . '/data/.bans.json', json_encode($bans, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        // 全量替换（解封 = 从列表移除，必须保留删除语义）；v2.5.4 用 OR REPLACE 防重复 ip 冲突
+        $pdo->exec('DELETE FROM bans');
+        $st = $pdo->prepare('INSERT OR REPLACE INTO bans (ip, types_json, reason, time) VALUES (?,?,?,?)');
+        foreach ($bans as $b) {
+            $st->execute([
+                $b['ip'] ?? '', json_encode($b['types'] ?? [], JSON_UNESCAPED_UNICODE),
+                $b['reason'] ?? '', $b['time'] ?? '',
+            ]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
 }
 function addBan($ip, $types, $reason = '') {
-    $bans = loadBansList();
-    foreach ($bans as &$b) {
-        if ($b['ip'] === $ip) {
-            foreach ($types as $t) { if (!in_array($t, $b['types'])) $b['types'][] = $t; }
-            $b['reason'] = $reason;
-            saveBansList($bans);
-            return;
-        }
+    $existing = db_one('SELECT * FROM bans WHERE ip = ?', [$ip]);
+    if ($existing) {
+        $merged = json_decode($existing['types_json'] ?? '[]', true) ?: [];
+        foreach ($types as $t) { if (!in_array($t, $merged)) $merged[] = $t; }
+        db_exec('UPDATE bans SET types_json = ?, reason = ? WHERE ip = ?',
+            [json_encode($merged, JSON_UNESCAPED_UNICODE), $reason, $ip]);
+    } else {
+        db_exec('INSERT INTO bans (ip, types_json, reason, time) VALUES (?,?,?,?)',
+            [$ip, json_encode($types, JSON_UNESCAPED_UNICODE), $reason, date('Y-m-d H:i:s')]);
     }
-    unset($b);
-    $bans[] = ['ip' => $ip, 'types' => $types, 'reason' => $reason, 'time' => date('Y-m-d H:i:s')];
-    saveBansList($bans);
 }
 function isIPBanned($ip, $type) {
-    $bans = loadBansList();
-    foreach ($bans as $b) { if ($b['ip'] === $ip && in_array($type, $b['types'] ?? [])) return true; }
-    return false;
+    $row = db_one('SELECT types_json FROM bans WHERE ip = ?', [$ip]);
+    if (!$row) return false;
+    $types = json_decode($row['types_json'] ?? '[]', true) ?: [];
+    return in_array($type, $types, true);
 }
 function getClientIP() {
     if (!empty($_SERVER['HTTP_X_REAL_IP']) && ($_SERVER['REMOTE_ADDR'] ?? '') === '127.0.0.1') {
@@ -150,35 +212,46 @@ function getClientIP() {
     return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 }
 function loadLogsList() {
-    $f = __DIR__ . '/data/.logs.json';
-    if (!file_exists($f)) return [];
-    $d = json_decode(file_get_contents($f), true);
-    return is_array($d) ? $d : [];
+    return db_all('SELECT ip, action, time FROM logs ORDER BY time ASC');
 }
 function saveLogsList($logs) {
-    file_put_contents(__DIR__ . '/data/.logs.json', json_encode($logs, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec('DELETE FROM logs');
+        $st = $pdo->prepare('INSERT INTO logs (ip, action, time) VALUES (?,?,?)');
+        foreach ($logs as $l) {
+            $st->execute([$l['ip'] ?? '', $l['action'] ?? '', $l['time'] ?? '']);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
 }
 function logAbnormal($ip, $action) {
-    $logs = loadLogsList();
-    $logs[] = ['ip' => $ip, 'action' => $action, 'time' => date('Y-m-d H:i:s')];
-    if (count($logs) > 500) $logs = array_slice($logs, -500);
-    saveLogsList($logs);
+    db_exec('INSERT INTO logs (ip, action, time) VALUES (?,?,?)', [$ip, $action, date('Y-m-d H:i:s')]);
+    // 上限 500 条
+    $cnt = db_one('SELECT COUNT(*) AS c FROM logs')['c'] ?? 0;
+    if ($cnt > 500) {
+        db_exec('DELETE FROM logs WHERE rowid IN (SELECT rowid FROM logs ORDER BY rowid ASC LIMIT ?)', [$cnt - 500]);
+    }
 }
 function logUnauthorized($action, $ban = false) {
-    $logFile = __DIR__ . '/data/.unauthorized.json';
-    $logs = file_exists($logFile) ? json_decode(file_get_contents($logFile), true) : [];
-    if (!is_array($logs)) $logs = [];
     $ip = getClientIP();
-    $logs[] = [
-        'ip' => $ip,
-        'action' => $action,
-        'user' => $_SESSION['cmt_user']['nickname'] ?? '未登录',
-        'user_id' => $_SESSION['cmt_user']['id'] ?? '',
-        'ua' => mb_substr(htmlspecialchars($_SERVER['HTTP_USER_AGENT'] ?? '', ENT_QUOTES, 'UTF-8'), 0, 256),
-        'time' => date('Y-m-d H:i:s')
-    ];
-    if (count($logs) > 1000) $logs = array_slice($logs, -1000);
-    file_put_contents($logFile, json_encode($logs, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    db_exec('INSERT INTO unauthorized (ip, action, user, user_id, ua, time) VALUES (?,?,?,?,?,?)', [
+        $ip,
+        $action,
+        $_SESSION['cmt_user']['nickname'] ?? '未登录',
+        $_SESSION['cmt_user']['id'] ?? '',
+        mb_substr(htmlspecialchars($_SERVER['HTTP_USER_AGENT'] ?? '', ENT_QUOTES, 'UTF-8'), 0, 256),
+        date('Y-m-d H:i:s')
+    ]);
+    // 上限 1000 条
+    $cnt = db_one('SELECT COUNT(*) AS c FROM unauthorized')['c'] ?? 0;
+    if ($cnt > 1000) {
+        db_exec('DELETE FROM unauthorized WHERE rowid IN (SELECT rowid FROM unauthorized ORDER BY rowid ASC LIMIT ?)', [$cnt - 1000]);
+    }
     if ($ban) {
         $config = loadSiteConfig();
         if (!empty($config['auto_ban_unauthorized'])) {
@@ -205,7 +278,7 @@ define('ROLE_HIERARCHY', [
 ]);
 
 function loadRoles() {
-    $f = __DIR__ . '/data/.roles.json';
+    // 角色定义基本静态，从 meta 表读取覆盖（若无则用默认值）
     $defaults = [
         ROLE_SUPER_ADMIN => ['label' => '高级管理员', 'can' => ['*']],
         ROLE_STATION_ADMIN => ['label' => '站长', 'can' => ['article.create','article.edit','article.delete','article.edit_any','article.delete_any','author.create','author.delete','user.view']],
@@ -213,9 +286,12 @@ function loadRoles() {
         ROLE_USER => ['label' => '用户', 'can' => ['comment.create','profile.edit']],
         ROLE_GUEST => ['label' => '访客', 'can' => ['article.read']],
     ];
-    if (!file_exists($f)) { file_put_contents($f, json_encode($defaults, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX); return $defaults; }
-    $d = json_decode(file_get_contents($f), true);
-    return is_array($d) ? $d : $defaults;
+    $row = db_one('SELECT value FROM meta WHERE key = ?', ['roles']);
+    if ($row) {
+        $d = json_decode($row['value'], true);
+        if (is_array($d)) return $d;
+    }
+    return $defaults;
 }
 
 function checkRole($requiredRole) {
@@ -282,11 +358,12 @@ function validateJWT($token) {
 }
 
 // ============================================================
-// v2.2 审计日志 + 哈希链
+// v2.2 审计日志 + 哈希链（SQLite 存储）
 // ============================================================
-define('AUDIT_LOG_FILE', __DIR__ . '/data/.audit.json');
+// 链尾文件保留（root 只读镜像 + 守护背书依赖）；主日志存 audit 表
 define('AUDIT_CHAIN_FILE', __DIR__ . '/data/.audit_chain');
 define('AUDIT_MIRROR_DIR', '/opt/you-markdown/logs/');
+define('AUDIT_MIRROR_DB', AUDIT_MIRROR_DIR . 'ym.db');
 define('EMAIL_ALERT', '/usr/local/bin/ym-alert');
 
 function auditLog($action, $target = '', $detail = '', $result = 'success') {
@@ -303,10 +380,6 @@ function auditLog($action, $target = '', $detail = '', $result = 'success') {
         'detail' => $detail,
         'result' => $result,
     ];
-    $logs = [];
-    if (file_exists(AUDIT_LOG_FILE)) {
-        $logs = json_decode(file_get_contents(AUDIT_LOG_FILE), true) ?: [];
-    }
     $prevHash = '';
     if (file_exists(AUDIT_CHAIN_FILE)) {
         $prevHash = trim(file_get_contents(AUDIT_CHAIN_FILE));
@@ -314,28 +387,49 @@ function auditLog($action, $target = '', $detail = '', $result = 'success') {
     $entry['prev_hash'] = $prevHash;
     $entryJson = json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     $entry['hash'] = hash('sha256', $entryJson);
-    unset($entry['prev_hash']);
-    $logs[] = $entry;
-    if (count($logs) > 10000) $logs = array_slice($logs, -10000);
-    file_put_contents(AUDIT_LOG_FILE, json_encode($logs, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+
+    db_exec('INSERT INTO audit (id,ts,user_id,user_name,role,ip,action,target,detail,result,hash,prev_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [
+        $entry['id'], $entry['ts'], $entry['user_id'], $entry['user_name'], $entry['role'],
+        $entry['ip'], $entry['action'], $entry['target'], $entry['detail'], $entry['result'],
+        $entry['hash'], $prevHash,
+    ]);
+    // 上限 10000 条
+    $cnt = db_one('SELECT COUNT(*) AS c FROM audit')['c'] ?? 0;
+    if ($cnt > 10000) {
+        db_exec('DELETE FROM audit WHERE rowid IN (SELECT rowid FROM audit ORDER BY rowid ASC LIMIT ?)', [$cnt - 10000]);
+    }
     file_put_contents(AUDIT_CHAIN_FILE, $entry['hash'], LOCK_EX);
     if (is_dir(AUDIT_MIRROR_DIR)) {
-        file_put_contents(AUDIT_MIRROR_DIR . 'audit.json', json_encode($logs, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
         file_put_contents(AUDIT_MIRROR_DIR . 'audit_chain', $entry['hash'], LOCK_EX);
     }
     return $entry;
 }
 
+function loadAuditLogs() {
+    return db_all('SELECT * FROM audit ORDER BY rowid DESC');
+}
+
+function clearAuditLogs() {
+    db_exec('DELETE FROM audit');
+    file_put_contents(AUDIT_CHAIN_FILE, '', LOCK_EX);
+    if (is_dir(AUDIT_MIRROR_DIR)) {
+        file_put_contents(AUDIT_MIRROR_DIR . 'audit_chain', '', LOCK_EX);
+    }
+}
+
 function verifyAuditChain() {
-    if (!file_exists(AUDIT_LOG_FILE)) return ['valid' => true, 'count' => 0];
-    $logs = json_decode(file_get_contents(AUDIT_LOG_FILE), true) ?: [];
+    $logs = db_all('SELECT * FROM audit ORDER BY rowid ASC');
     if (empty($logs)) return ['valid' => true, 'count' => 0];
     $prevHash = '';
     for ($i = 0; $i < count($logs); $i++) {
         $entry = $logs[$i];
         $expectedHash = $entry['hash'] ?? '';
-        $checkData = $entry;
-        unset($checkData['hash']);
+        $checkData = [
+            'id' => $entry['id'], 'ts' => $entry['ts'], 'user_id' => $entry['user_id'],
+            'user_name' => $entry['user_name'], 'role' => $entry['role'], 'ip' => $entry['ip'],
+            'action' => $entry['action'], 'target' => $entry['target'], 'detail' => $entry['detail'],
+            'result' => $entry['result'],
+        ];
         $checkData['prev_hash'] = $prevHash;
         $checkJson = json_encode($checkData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $computedHash = hash('sha256', $checkJson);
@@ -348,11 +442,28 @@ function verifyAuditChain() {
 }
 
 function recoverAuditFromMirror() {
-    if (!is_dir(AUDIT_MIRROR_DIR)) return false;
-    $mirrorFile = AUDIT_MIRROR_DIR . 'audit.json';
+    if (!is_dir(AUDIT_MIRROR_DIR) || !file_exists(AUDIT_MIRROR_DB)) return false;
+    try {
+        $mpdo = new PDO('sqlite:' . AUDIT_MIRROR_DB);
+        $mpdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $rows = $mpdo->query('SELECT * FROM audit ORDER BY rowid ASC')->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        return false;
+    }
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec('DELETE FROM audit');
+        $st = $pdo->prepare('INSERT INTO audit (id,ts,user_id,user_name,role,ip,action,target,detail,result,hash,prev_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
+        foreach ($rows as $r) {
+            $st->execute([$r['id'],$r['ts'],$r['user_id'],$r['user_name'],$r['role'],$r['ip'],$r['action'],$r['target'],$r['detail'],$r['result'],$r['hash'],$r['prev_hash']]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        return false;
+    }
     $mirrorChain = AUDIT_MIRROR_DIR . 'audit_chain';
-    if (!file_exists($mirrorFile)) return false;
-    copy($mirrorFile, AUDIT_LOG_FILE);
     if (file_exists($mirrorChain)) copy($mirrorChain, AUDIT_CHAIN_FILE);
     return true;
 }
@@ -381,22 +492,114 @@ define('BACKUP_DIR', '/opt/you-markdown/backups');
 
 // 服务器挑战码校验（300 秒、单次）：匹配 code + 未过期 + 未使用，通过则原子消费
 function verifyChallenge($code) {
-    $f = __DIR__ . '/data/.challenge.json';
-    if (!file_exists($f) || empty($code)) return false;
-    $challenges = json_decode(file_get_contents($f), true);
-    if (!is_array($challenges)) return false;
+    if (empty($code)) return false;
+    $rows = db_all('SELECT id, code, expires, used FROM challenge ORDER BY rowid');
     $valid = false;
-    foreach ($challenges as $i => $c) {
-        if (strtoupper($c['code'] ?? '') === strtoupper($code) && ($c['expires'] ?? 0) > time() && empty($c['used'])) {
-            $challenges[$i]['used'] = 1;
+    $id = null;
+    foreach ($rows as $c) {
+        if (strtoupper($c['code'] ?? '') === strtoupper($code) && (int)($c['expires'] ?? 0) > time() && empty($c['used'])) {
+            $id = $c['id'];
             $valid = true;
             break;
         }
     }
-    if ($valid) {
-        file_put_contents($f, json_encode($challenges, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    if ($valid && $id !== null) {
+        db_exec('UPDATE challenge SET used = 1 WHERE id = ?', [$id]);
     }
     return $valid;
+}
+
+// ============================================================
+// OTP 入口（entries）与置顶（pinned）与频率计数封装
+// ============================================================
+function loadEntries() {
+    $rows = db_all('SELECT * FROM entries ORDER BY rowid');
+    $list = [];
+    foreach ($rows as $r) {
+        $list[] = [
+            'token' => $r['token'], 'otp_hash' => $r['otp_hash'],
+            'expires' => (int)$r['expires'], 'used' => (int)$r['used'],
+            'created' => $r['created'],
+        ];
+    }
+    return $list;
+}
+function saveEntries($entries) {
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec('DELETE FROM entries');
+        $st = $pdo->prepare('INSERT INTO entries (id, token, otp_hash, expires, used, created) VALUES (?,?,?,?,?,?)');
+        foreach ($entries as $e) {
+            $st->execute([
+                $e['id'] ?? bin2hex(random_bytes(8)),
+                $e['token'] ?? '', $e['otp_hash'] ?? '', (int)($e['expires'] ?? 0),
+                (int)($e['used'] ?? 0), $e['created'] ?? '',
+            ]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+function addEntry($token, $otpHash, $expires) {
+    db_exec('INSERT INTO entries (id, token, otp_hash, expires, used, created) VALUES (?,?,?,?,?,?)', [
+        bin2hex(random_bytes(8)), $token, $otpHash, (int)$expires, 0, date('Y-m-d H:i:s'),
+    ]);
+}
+function loadChallenges() {
+    $rows = db_all('SELECT * FROM challenge ORDER BY rowid');
+    $list = [];
+    foreach ($rows as $r) {
+        $list[] = ['code' => $r['code'], 'expires' => (int)$r['expires'], 'used' => (int)$r['used'], 'created' => (int)$r['created']];
+    }
+    return $list;
+}
+function addChallenge($code, $expires) {
+    db_exec('DELETE FROM challenge WHERE expires < ?', [time()]); // 清理过期
+    db_exec('INSERT INTO challenge (id, code, expires, used, created) VALUES (?,?,?,?,?)', [
+        bin2hex(random_bytes(8)), $code, (int)$expires, 0, time(),
+    ]);
+}
+function getPinnedList() {
+    $rows = db_all('SELECT article FROM pinned ORDER BY rowid');
+    return array_map(function($r) { return $r['article']; }, $rows);
+}
+function savePinnedList($list) {
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec('DELETE FROM pinned');
+        $st = $pdo->prepare('INSERT INTO pinned (article) VALUES (?)');
+        foreach (array_values($list) as $a) {
+            $st->execute([$a]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+// 频率计数（滑动窗口）：table 为 login_fails / reg_rates / comment_rates
+function db_rate_count($table, $ip, $window) {
+    $now = time();
+    $cutoff = $now - $window;
+    $st = db()->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE ip = ? AND t > ?");
+    $st->execute([$ip, $cutoff]);
+    return (int)($st->fetch()['c'] ?? 0);
+}
+function db_rate_add($table, $ip) {
+    db_exec("INSERT INTO {$table} (ip, t) VALUES (?,?)", [$ip, time()]);
+    // v2.5.4：改为概率清理（1/64 触发），降低每次写入的写放大；
+    // 过期记录由 db_rate_count() 的 t>cutoff 条件过滤，不影响计数判定
+    if (random_int(0, 63) === 0) {
+        $cutoff = time() - 2592000;
+        db_exec("DELETE FROM {$table} WHERE t < ?", [$cutoff]);
+    }
+}
+function db_rate_clear_ip($table, $ip) {
+    db_exec("DELETE FROM {$table} WHERE ip = ?", [$ip]);
 }
 
 function getUpdateRequest() {
@@ -462,6 +665,57 @@ function getUpdateStatus() {
         'completed_at' => $req['completed_at'] ?? null,
         'error' => $req['error'] ?? '',
     ];
+}
+
+// v2.5.5：从审计日志读取完整更新历史（audit 表 action='system_update'，按 rowid 倒序）
+// detail 格式："系统更新: v2.5.1 → v2.5.4"，解析出 from/to 版本
+function getUpdateHistory($limit = 30) {
+    $limit = max(1, min(100, (int)$limit));
+    $rows = db_all("SELECT ts, detail, result FROM audit WHERE action = 'system_update' ORDER BY rowid DESC LIMIT " . $limit);
+    $history = [];
+    foreach ($rows as $r) {
+        if (!preg_match('/v([\d.]+)\s*→\s*v([\d.]+)/', $r['detail'] ?? '', $m)) {
+            continue;
+        }
+        $history[] = [
+            'from_version' => $m[1],
+            'to_version' => $m[2],
+            // ts 形如 "2026-08-14 04:50:02.123"，截断到秒
+            'completed_at' => preg_replace('/\.\d+$/', '', $r['ts'] ?? ''),
+            'status' => ($r['result'] === 'success') ? 'completed' : ($r['result'] ?: 'failed'),
+        ];
+    }
+    return $history;
+}
+
+/**
+ * 通用列表分页 + 关键词过滤（v2.6.6 超管后台日志查看）
+ * 对全量数组做多字段模糊匹配过滤后分页，避免重复实现
+ * @param array $rows     全量数据（已按需排序）
+ * @param array $fields   参与搜索的字段名
+ * @param string $q       搜索关键词（空串不过滤）
+ * @param int $page       页码（从 1 起，自动收敛到有效范围）
+ * @param int $perPage    每页条数
+ * @return array{items:array,total:int,page:int,pages:int,per_page:int}
+ */
+function paginateList(array $rows, array $fields, string $q = '', int $page = 1, int $perPage = 50) {
+    $perPage = max(1, min(200, (int)$perPage));
+    if ($q !== '') {
+        $qLower = mb_strtolower($q);
+        $rows = array_values(array_filter($rows, function ($r) use ($fields, $qLower) {
+            foreach ($fields as $f) {
+                if (isset($r[$f]) && $r[$f] !== null && $r[$f] !== '' && mb_strpos(mb_strtolower((string)$r[$f]), $qLower) !== false) {
+                    return true;
+                }
+            }
+            return false;
+        }));
+    }
+    $total = count($rows);
+    $pages = max(1, (int)ceil($total / $perPage));
+    $page = max(1, min($pages, (int)$page));
+    $items = array_slice($rows, ($page - 1) * $perPage, $perPage);
+    return ['items' => $items, 'total' => $total, 'page' => $page, 'pages' => $pages, 'per_page' => $perPage];
 }
 
 function getBackupList() {

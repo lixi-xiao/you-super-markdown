@@ -252,6 +252,20 @@ code, pre, .markdown-body code, .markdown-body pre {
     transition: background 0.2s;
 }
 .sidebar-resize:hover { background: var(--accent); opacity: 0.5; }
+/* v2.6.5 修复：sidebar 收起后由独立的外部按钮恢复展开（折叠按钮在 sidebar 内会随之消失）；
+   按钮垂直居中于左侧边缘，避免遮挡顶部网站标题 */
+.sidebar-restore-btn {
+    position: fixed; top: 50%; left: 8px;
+    transform: translateY(-50%);
+    width: 36px; height: 36px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text-muted); cursor: pointer; z-index: 119;
+    display: none; align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    transition: color 0.2s, border-color 0.2s;
+}
+.sidebar-restore-btn:hover { color: var(--accent); border-color: var(--accent); }
+.sidebar-restore-btn svg { width: 16px; height: 16px; }
 @media (min-width: 1025px) {
     .sidebar { display: flex; }
     body { padding-left: 280px; }
@@ -1477,12 +1491,13 @@ body.bg-blur .sidebar {
     .reading-progress-text { display: none !important; }
     .kbd-help-overlay { display: none !important; }
     .sidebar-header .icon-btn { display: none !important; }
+    .sidebar-restore-btn { display: none !important; }
 }
 @media print {
     .top-bar, .sidebar, .floating-buttons, .toc-popup, .music-popup, .reading-progress,
     .share-modal-overlay, .img-lightbox, .cmt-capsule-section, .cmt-input-section,
     .comment-section, .prev-next-nav, .article-bottom-cards, .toast,
-    .sidebar-resize, .kbd-help-overlay { display: none !important; }
+    .sidebar-resize, .sidebar-restore-btn, .kbd-help-overlay { display: none !important; }
     body { padding-left: 0 !important; background: #fff !important; }
     .main-container { max-width: 100% !important; padding: 0 !important; }
     .markdown-body { box-shadow: none !important; border-radius: 0 !important; padding: 20px 0 !important; }

@@ -1,0 +1,392 @@
+#!/bin/bash
+WEB_ROOT="${YM_WEB_ROOT:-/var/www/you-markdown}"
+ENTRIES_FILE="$WEB_ROOT/data/.entries.json"
+USERS_FILE="$WEB_ROOT/data/.users.json"
+
+case "${1:-}" in
+    login)
+        ENTRY_TOKEN=$(openssl rand -base64 12 | tr -d '=+/' | cut -c1-12)
+        OTP=$(openssl rand -base64 12 | tr -d '=+/' | cut -c1-12)
+        OTP_HASH=$(php -r "echo password_hash('$OTP', PASSWORD_DEFAULT);")
+        EXPIRES=$(( $(date +%s) + 600 ))
+
+        # 使用 sudo 写入 entries 文件（追加模式）
+        php -r "
+            \$f = '$ENTRIES_FILE';
+            \$entries = file_exists(\$f) ? json_decode(file_get_contents(\$f), true) : [];
+            if (!is_array(\$entries)) \$entries = [];
+            \$entries[] = ['token'=>'$ENTRY_TOKEN','otp_hash'=>'$OTP_HASH','expires'=>$EXPIRES,'used'=>0,'created'=>date('Y-m-d H:i:s')];
+            file_put_contents(\$f, json_encode(\$entries, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
+        " 2>/dev/null
+
+        # 如果直接写入失败（权限不足），尝试 sudo
+        if [ $? -ne 0 ]; then
+            php -r "
+                \$f = '$ENTRIES_FILE';
+                \$entries = file_exists(\$f) ? json_decode(file_get_contents(\$f), true) : [];
+                if (!is_array(\$entries)) \$entries = [];
+                \$entries[] = ['token'=>'$ENTRY_TOKEN','otp_hash'=>'$OTP_HASH','expires'=>$EXPIRES,'used'=>0,'created'=>date('Y-m-d H:i:s')];
+                echo json_encode(\$entries, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT);
+            " | sudo tee "$ENTRIES_FILE" > /dev/null
+        fi
+
+        echo ""
+        echo "============================================"
+        echo "  管理入口（仅显示一次，10分钟有效）"
+        echo "============================================"
+        echo ""
+        echo "  入口 URL: https://youmarkdown.example.com/admin/entry/$ENTRY_TOKEN"
+        echo "  一次性密码: $OTP"
+        echo ""
+        echo "  ⚠️ 请立即保存！"
+        echo "============================================"
+        echo ""
+        ;;
+
+    create-station)
+        NAME="${2:-}"
+        if [ -z "$NAME" ]; then echo "用法: ym-admin create-station <站长名称>"; exit 1; fi
+        QQ="station_$(openssl rand -hex 4)"
+        PWD=$(openssl rand -base64 12 | tr -d '=+/')
+        php -r "
+            \$users = json_decode(file_get_contents('$USERS_FILE'), true);
+            \$users[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'station_admin','created'=>date('Y-m-d H:i:s')];
+            file_put_contents('$USERS_FILE', json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
+        " 2>/dev/null
+        if [ $? -ne 0 ]; then
+            php -r "
+                \$users = json_decode(file_get_contents('$USERS_FILE'), true);
+                \$users[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'station_admin','created'=>date('Y-m-d H:i:s')];
+                echo json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT);
+            " | sudo tee "$USERS_FILE" > /dev/null
+        fi
+        echo "站长账号已创建: $NAME (QQ: $QQ, 密码: $PWD)"
+        ;;
+
+    create-author)
+        NAME="${2:-}"
+        STATION_ID="${3:-}"
+        if [ -z "$NAME" ]; then echo "用法: ym-admin create-author <写作者名称> [站长ID]"; exit 1; fi
+        QQ="author_$(openssl rand -hex 4)"
+        PWD=$(openssl rand -base64 12 | tr -d '=+/')
+        php -r "
+            \$users = json_decode(file_get_contents('$USERS_FILE'), true);
+            \$users[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'author','station_id'=>'$STATION_ID','created'=>date('Y-m-d H:i:s')];
+            file_put_contents('$USERS_FILE', json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
+        " 2>/dev/null
+        if [ $? -ne 0 ]; then
+            php -r "
+                \$users = json_decode(file_get_contents('$USERS_FILE'), true);
+                \$users[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'author','station_id'=>'$STATION_ID','created'=>date('Y-m-d H:i:s')];
+                echo json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT);
+            " | sudo tee "$USERS_FILE" > /dev/null
+        fi
+        echo "写作者账号已创建: $NAME (QQ: $QQ, 密码: $PWD)"
+        ;;
+
+    revoke-user)
+        USER_ID="${2:-}"
+        if [ -z "$USER_ID" ]; then echo "用法: ym-admin revoke-user <用户ID>"; exit 1; fi
+        php -r "
+            \$users = json_decode(file_get_contents('$USERS_FILE'), true);
+            \$users = array_values(array_filter(\$users, fn(\$u) => (\$u['id']??'')!=='$USER_ID'));
+            file_put_contents('$USERS_FILE', json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
+        " 2>/dev/null
+        if [ $? -ne 0 ]; then
+            php -r "
+                \$users = json_decode(file_get_contents('$USERS_FILE'), true);
+                \$users = array_values(array_filter(\$users, fn(\$u) => (\$u['id']??'')!=='$USER_ID'));
+                echo json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT);
+            " | sudo tee "$USERS_FILE" > /dev/null
+        fi
+        echo "用户已吊销: $USER_ID"
+        ;;
+
+    backup)
+        BACKUP_DIR="/opt/you-markdown/backups"
+        mkdir -p "$BACKUP_DIR"
+        tar -czf "$BACKUP_DIR/ym-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$WEB_ROOT" data/ 2>/dev/null
+        echo "备份完成: $BACKUP_DIR"
+        ;;
+
+    status)
+        echo "守护进程: $(systemctl is-active ym-guard 2>/dev/null || echo 'unknown')"
+        echo "Nginx: $(systemctl is-active nginx 2>/dev/null || echo 'unknown')"
+        PHP_FPM_SVC="php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm"
+        echo "PHP-FPM: $(systemctl is-active $PHP_FPM_SVC 2>/dev/null || systemctl is-active php-fpm 2>/dev/null || echo 'unknown')"
+        [ -f "$WEB_ROOT/data/.users.json" ] && echo "用户数: $(php -r "echo count(json_decode(file_get_contents('$USERS_FILE'),true)?:[]);")"
+        ;;
+
+    log-verify)
+        php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$r = verifyAuditChain();
+            echo \$r['valid'] ? '审计日志哈希链校验通过 ('.\$r['count'].' 条)' : '校验失败！断裂于第 '.\$r['broken_at'].' 条';
+        "
+        ;;
+
+    challenge)
+        CODE=$(openssl rand -hex 3)
+        EXPIRES=$(date -d "+60 seconds" +%s 2>/dev/null || echo $(($(date +%s) + 60)))
+        # 保存到挑战文件
+        php -r "
+            \$f = '$WEB_ROOT/data/.challenge.json';
+            \$challenges = file_exists(\$f) ? json_decode(file_get_contents(\$f), true) : [];
+            if (!is_array(\$challenges)) \$challenges = [];
+            \$challenges[] = ['code'=>'$CODE', 'expires'=>$EXPIRES, 'used'=>0, 'created'=>time()];
+            // 清理过期条目
+            \$challenges = array_filter(\$challenges, function(\$c) { return (\$c['expires'] ?? 0) > time() && empty(\$c['used']); });
+            file_put_contents(\$f, json_encode(array_values(\$challenges), JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
+        " 2>/dev/null
+        echo "挑战码: $CODE (60秒有效)"
+        ;;
+
+    apply-update)
+        REQUEST_FILE="/tmp/ym-update-request.json"
+        if [ ! -f "$REQUEST_FILE" ]; then
+            echo "错误：未找到更新请求文件"
+            echo "请先在后台管理页面触发更新。"
+            exit 1
+        fi
+
+        echo "=== You-Markdown 系统更新 ==="
+        echo ""
+        # 确保请求文件可写（www-data 属主文件在容器环境下 root 也可能写入失败）
+        chmod 666 "$REQUEST_FILE" 2>/dev/null || true
+
+        STATUS=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['status'] ?? 'pending';")
+        if [ "$STATUS" != "pending" ]; then
+            echo "错误：更新请求状态异常 ($STATUS)"
+            exit 1
+        fi
+
+        FROM_VER=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['from_version'] ?? '';")
+        TO_VER=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['to_version'] ?? '';")
+        CHANNEL=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['channel'] ?? 'stable';")
+        PKG_PATH=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['package_path'] ?? '';")
+
+        echo "  当前版本: v$FROM_VER"
+        echo "  目标版本: v$TO_VER"
+        echo "  更新通道: $CHANNEL"
+        echo ""
+
+        # 标记进行中
+        php -r "
+            \$r = json_decode(file_get_contents('$REQUEST_FILE'), true);
+            \$r['status'] = 'in_progress';
+            \$r['started_at'] = time();
+            file_put_contents('$REQUEST_FILE', json_encode(\$r, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
+        "
+
+        # 1. 备份
+        echo "[1/6] 创建备份..."
+        BACKUP_DIR="/opt/you-markdown/backups"
+        mkdir -p "$BACKUP_DIR"
+        BACKUP_FILE="$BACKUP_DIR/pre-update-v${FROM_VER}-$(date +%s).tar.gz"
+        tar -czf "$BACKUP_FILE" -C "$WEB_ROOT" --exclude='data' --exclude='.git' . 2>/dev/null
+        echo "  备份: $BACKUP_FILE"
+
+        # 2. 停守护
+        echo "[2/6] 停止守护进程..."
+        systemctl stop ym-guard 2>/dev/null || true
+        sleep 1
+
+        # 3. 解锁母本
+        echo "[3/6] 解锁母本目录..."
+        chattr -R -i /opt/you-markdown/install-base/ 2>/dev/null || true
+
+        # 4. 应用更新
+        echo "[4/6] 应用更新文件..."
+        if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
+            echo "  使用上传的更新包: $PKG_PATH"
+            TMP_DIR=$(mktemp -d)
+            tar -xzf "$PKG_PATH" -C "$TMP_DIR" 2>/dev/null
+            if [ $? -ne 0 ]; then
+                echo "  解压失败，尝试 unzip..."
+                unzip -o "$PKG_PATH" -d "$TMP_DIR" 2>/dev/null || {
+                    echo "错误：无法解压更新包"
+                    systemctl start ym-guard 2>/dev/null || true
+                    exit 1
+                }
+            fi
+            rsync -a --delete --exclude='data/' "$TMP_DIR/" "$WEB_ROOT/" 2>/dev/null
+            rsync -a --delete --exclude='data/' "$TMP_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
+            rm -rf "$TMP_DIR"
+        else
+            echo "  从 GitHub 下载更新包..."
+            DOWNLOAD_URL="https://github.com/you-markdown/you-markdown/archive/refs/tags/v${TO_VER}.tar.gz"
+            PKG_FILE="/tmp/ym-update-download.tar.gz"
+            curl -sL -o "$PKG_FILE" "$DOWNLOAD_URL" 2>/dev/null || {
+                echo "错误：下载失败"
+                systemctl start ym-guard 2>/dev/null || true
+                exit 1
+            }
+            TMP_DIR=$(mktemp -d)
+            tar -xzf "$PKG_FILE" -C "$TMP_DIR" 2>/dev/null
+            SRC_DIR=$(find "$TMP_DIR" -maxdepth 1 -type d | tail -1)
+            if [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR" ]; then
+                rsync -a --delete --exclude='data/' "$SRC_DIR/" "$WEB_ROOT/" 2>/dev/null
+                rsync -a --delete --exclude='data/' "$SRC_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
+            fi
+            rm -rf "$TMP_DIR" "$PKG_FILE"
+        fi
+        echo "  文件更新完成"
+
+        # 5. 锁定母本
+        echo "[5/6] 锁定母本目录..."
+        chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
+
+        # 6. 重启守护
+        echo "[6/6] 重启守护进程并记录日志..."
+        php -r "
+            \$utilsFile = '$WEB_ROOT/utils.php';
+            \$content = file_get_contents(\$utilsFile);
+            \$content = preg_replace('/define\(\'APP_VERSION\',\s*\'(.*?)\'\)/', \"define('APP_VERSION', '$TO_VER')\", \$content);
+            file_put_contents(\$utilsFile, \$content, LOCK_EX);
+            copy(\$utilsFile, '/opt/you-markdown/install-base/utils.php');
+        " 2>/dev/null
+        php -r "
+            require_once '$WEB_ROOT/utils.php';
+            auditLog('system_update', '', '系统更新: v${FROM_VER} → v${TO_VER}');
+        " 2>/dev/null
+        systemctl start ym-guard 2>/dev/null || true
+        rm -f /tmp/ym-update.lock
+        php -r "
+            \$r = json_decode(file_get_contents('$REQUEST_FILE'), true);
+            \$r['status'] = 'completed';
+            \$r['completed_at'] = time();
+            file_put_contents('$REQUEST_FILE', json_encode(\$r, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
+        "
+
+        # 清理旧备份（保留最近2次）
+        echo "  清理旧备份..."
+        ls -t "$BACKUP_DIR"/pre-update-*.tar.gz 2>/dev/null | tail -n +3 | xargs rm -f 2>/dev/null || true
+
+        echo ""
+        echo "============================================"
+        echo "  更新完成！"
+        echo "  版本: v$FROM_VER → v$TO_VER"
+        echo "============================================"
+        ;;
+
+    rollback)
+        BACKUP_DIR="/opt/you-markdown/backups"
+        if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A "$BACKUP_DIR"/pre-update-*.tar.gz 2>/dev/null)" ]; then
+            echo "错误：没有可用的备份"
+            exit 1
+        fi
+
+        echo "=== 可用备份 ==="
+        echo ""
+        I=1
+        for B in $(ls -t "$BACKUP_DIR"/pre-update-*.tar.gz 2>/dev/null); do
+            BASENAME=$(basename "$B")
+            SIZE=$(du -h "$B" | cut -f1)
+            if [[ $BASENAME =~ pre-update-v([0-9.]+)-([0-9]+)\.tar\.gz ]]; then
+                VER="${BASH_REMATCH[1]}"
+                TS=$(date -d @"${BASH_REMATCH[2]}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "unknown")
+                echo "  [$I] v$VER ($TS) - $SIZE"
+            else
+                echo "  [$I] $BASENAME - $SIZE"
+            fi
+            I=$((I+1))
+        done
+        echo ""
+        echo "要回滚到哪个备份？(输入编号)"
+        read -r CHOICE
+        SELECTED=$(ls -t "$BACKUP_DIR"/pre-update-*.tar.gz 2>/dev/null | sed -n "${CHOICE}p")
+        if [ -z "$SELECTED" ]; then
+            echo "错误：无效选择"
+            exit 1
+        fi
+
+        echo ""
+        echo "正在回滚到: $(basename "$SELECTED")"
+        echo ""
+
+        echo "[1/3] 停止守护进程..."
+        systemctl stop ym-guard 2>/dev/null || true
+        sleep 1
+
+        echo "[2/3] 恢复文件..."
+        tar -xzf "$SELECTED" -C "$WEB_ROOT" 2>/dev/null
+        rsync -a --delete --exclude='data/' "$WEB_ROOT/" "/opt/you-markdown/install-base/" 2>/dev/null
+        echo "  文件恢复完成"
+
+        echo "[3/3] 重启守护进程..."
+        systemctl start ym-guard 2>/dev/null || true
+        rm -f /tmp/ym-update.lock
+
+        echo ""
+        echo "============================================"
+        echo "  回滚完成！"
+        echo "============================================"
+        ;;
+
+    hfish-panel)
+        PORTS_FILE="/opt/you-markdown/hfish-ports.conf"
+        if [ ! -f "$PORTS_FILE" ]; then
+            echo "Hfish 未安装或配置文件不存在"
+            exit 1
+        fi
+        source "$PORTS_FILE"
+        PANEL_PORT="${HFISH_PANEL_PORT:-9001}"
+        echo ""
+        echo "============================================"
+        echo "  Hfish 管理面板隧道已建立"
+        echo "============================================"
+        echo ""
+        echo "  本地访问地址: http://127.0.0.1:${PANEL_PORT}"
+        echo ""
+        echo "  请在本地浏览器中打开上述地址"
+        echo "  按 Ctrl+C 关闭隧道"
+        echo "============================================"
+        echo ""
+        ssh -L "${PANEL_PORT}:127.0.0.1:${PANEL_PORT}" -N root@127.0.0.1
+        ;;
+
+    hfish-status)
+        echo "=== Hfish 蜜罐状态 ==="
+        echo ""
+        PORTS_FILE="/opt/you-markdown/hfish-ports.conf"
+        if [ -f "$PORTS_FILE" ]; then
+            source "$PORTS_FILE"
+            echo "配置端口:"
+            echo "  假 HTTP 服务: ${HFISH_HTTP_PORT:-8080}"
+            echo "  假 SSH 服务:  ${HFISH_SSH_PORT:-2222}"
+            echo "  管理面板:     ${HFISH_PANEL_PORT:-9001} (仅 127.0.0.1)"
+        else
+            echo "  端口配置文件不存在"
+        fi
+        echo ""
+        echo "服务状态:"
+        if systemctl is-active --quiet hfish 2>/dev/null; then
+            echo "  hfish.service: 运行中"
+        else
+            echo "  hfish.service: 未运行"
+        fi
+        ;;
+
+    *)
+        echo "You-Markdown CLI 管理工具"
+        echo ""
+        echo "用法: ym-admin <命令> [参数]"
+        echo ""
+        echo "命令:"
+        echo "  login                    生成 OTP 管理入口"
+        echo "  create-station <名称>     创建站长账号"
+        echo "  create-author <名称>      创建写作者账号"
+        echo "  revoke-user <用户ID>      吊销用户"
+        echo "  backup                    备份数据"
+        echo "  status                    查看服务状态"
+        echo "  log-verify                校验审计日志哈希链"
+        echo "  challenge                 生成挑战码"
+        echo "  apply-update              执行系统更新"
+        echo "  rollback                  回滚到备份版本"
+        echo "  hfish-panel               建立 SSH 隧道访问 Hfish 管理面板"
+        echo "  hfish-status              查看 Hfish 蜜罐状态"
+        echo ""
+        echo "环境变量:"
+        echo "  YM_WEB_ROOT               Web 根目录 (默认 /var/www/you-markdown)"
+        ;;
+esac

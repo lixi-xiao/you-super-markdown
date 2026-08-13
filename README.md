@@ -414,12 +414,24 @@ OTP：Tx9#pL4!mW6y
 
 ### 监控文件
 
-守护进程使用 inotify 实时监控以下文件，一旦被修改，秒级从只读母本恢复：
+守护进程使用 inotify 实时监控以下文件（共 14 个，一旦被修改/删除，秒级从只读母本恢复）：
 
 - `index.php` — 网站首页
 - `api.php` — API 接口
 - `utils.php` — 核心工具函数
+- `admin/entry.php` — 超管 OTP 入口
+- `admin/dashboard.php` — 超管后台
+- `station/dashboard.php` — 站长后台
+- `author/dashboard.php` — 写作者后台
+- `data/.users.json` — 用户数据
+- `data/.roles.json` — 角色数据
+- `data/.config.json` — 站点配置
+- `data/.bans.json` — 封禁列表
 - `data/.audit.json` — 审计日志
+- `data/.audit_chain` — 审计哈希链尾
+- `data/.entries.json` — OTP 动态入口
+
+> 母本 `/opt/you-markdown/install-base/` 由安装/更新流程全量同步（排除 `data/`），所有监控文件均有母本副本，被篡改时逐文件秒级恢复并记录审计日志。
 
 ### 审计日志校验
 

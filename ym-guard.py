@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""You Super Markdown 文件守护进程 v2.3.3
-六层保活：systemd Restart + Watchdog + 子进程心跳 + cron五min兜底 + inotify耗尽降级 + 自校验
+"""You Super Markdown 文件守护进程（版本见 app-config.json）
+六层保活：systemd Restart + Watchdog + cron五min兜底 + inotify耗尽降级 + 自校验
 功能：
   1. inotify 监控核心文件，被篡改时秒级从母本恢复
   2. 每5分钟自动校验审计日志哈希链，断裂则从镜像恢复
@@ -32,6 +32,7 @@ CONFIG_FILE = os.path.join(WEB_ROOT, 'data', '.config.json')
 WATCHDOG_USEC = int(os.environ.get('WATCHDOG_USEC', 0)) / 1_000_000  # systemd watchdog 间隔（秒）
 
 # 核心监控文件列表（相对 WEB_ROOT 的路径）
+# 注：仅监控代码类文件；data/ 数据文件不在此列（母本排除 data/，无对照，由哈希链/镜像负责审计完整性）
 WATCH_FILES = [
     'index.php',
     'api.php',
@@ -40,13 +41,6 @@ WATCH_FILES = [
     'admin/dashboard.php',
     'station/dashboard.php',
     'author/dashboard.php',
-    'data/.users.json',
-    'data/.roles.json',
-    'data/.config.json',
-    'data/.bans.json',
-    'data/.audit.json',
-    'data/.audit_chain',
-    'data/.entries.json',
 ]
 
 # 更新锁文件
@@ -93,6 +87,16 @@ def load_app_name() -> str:
             return cfg.get('app_name', 'You Super Markdown')
     except Exception:
         return 'You Super Markdown'
+
+
+def load_version() -> str:
+    """从 app-config.json 读取版本号（唯一事实来源）"""
+    try:
+        with open(os.path.join(WEB_ROOT, 'app-config.json'), 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+            return cfg.get('version', '0.0.0')
+    except Exception:
+        return '0.0.0'
 
 
 def send_alert(alert_type: str, detail: str):
@@ -384,7 +388,7 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    log(f"{load_app_name()} 守护进程 v2.3.3 启动")
+    log(f"{load_app_name()} 守护进程 v{load_version()} 启动")
     log(f"Web 根目录: {WEB_ROOT}")
     log(f"母本目录: {INSTALL_BASE}")
 

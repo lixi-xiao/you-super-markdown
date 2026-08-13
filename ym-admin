@@ -158,6 +158,24 @@ case "${1:-}" in
             exit 1
         fi
 
+        # 失败处理统一出口：写 failed 状态 + 重锁母本 + 清理更新锁 + 重启守护
+        mark_failed() {
+            local reason="$1"
+            php -r "
+                \$f = '$REQUEST_FILE';
+                if (file_exists(\$f)) {
+                    \$r = json_decode(file_get_contents(\$f), true);
+                    \$r['status'] = 'failed';
+                    \$r['error'] = '$reason';
+                    \$r['completed_at'] = time();
+                    file_put_contents(\$f, json_encode(\$r, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
+                }
+            " 2>/dev/null
+            chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
+            rm -f /tmp/ym-update.lock
+            systemctl start ym-guard 2>/dev/null || true
+        }
+
         FROM_VER=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['from_version'] ?? '';")
         TO_VER=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['to_version'] ?? '';")
         CHANNEL=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['channel'] ?? 'stable';")
@@ -167,6 +185,13 @@ case "${1:-}" in
         echo "  目标版本: v$TO_VER"
         echo "  更新通道: $CHANNEL"
         echo ""
+
+        # 防注入：目标版本仅允许数字与点（避免 preg_replace 写入 utils.php 时破坏/注入代码）
+        if ! [[ "$TO_VER" =~ ^[0-9.]+$ ]]; then
+            echo "错误：目标版本格式非法，已中止"
+            mark_failed "目标版本格式非法"
+            exit 1
+        fi
 
         # 标记进行中
         php -r "
@@ -207,7 +232,7 @@ case "${1:-}" in
                 unzip -o "$PKG_PATH" -d "$TMP_DIR" 2>/dev/null || {
                     echo "错误：无法解压更新包"
                     rm -rf "$TMP_DIR"
-                    systemctl start ym-guard 2>/dev/null || true
+                    mark_failed "无法解压更新包"
                     exit 1
                 }
             fi
@@ -245,14 +270,14 @@ case "${1:-}" in
             if [ "$HTTP_CODE" != "200" ] || [ ! -s "$PKG_FILE" ]; then
                 echo "错误：下载失败 (HTTP ${HTTP_CODE:-无响应})"
                 rm -f "$PKG_FILE"
-                systemctl start ym-guard 2>/dev/null || true
+                mark_failed "下载失败 (HTTP ${HTTP_CODE:-无响应})"
                 exit 1
             fi
             TMP_DIR=$(mktemp -d)
             tar -xzf "$PKG_FILE" -C "$TMP_DIR" 2>/dev/null || {
                 echo "错误：更新包解压失败"
                 rm -rf "$TMP_DIR" "$PKG_FILE"
-                systemctl start ym-guard 2>/dev/null || true
+                mark_failed "更新包解压失败"
                 exit 1
             }
             # 定位包含核心文件的顶层目录
@@ -265,14 +290,14 @@ case "${1:-}" in
         if [ -z "$STAGE_DIR" ]; then
             echo "错误：更新源无效（未找到核心文件或增量清单），已中止，未修改任何文件"
             rm -rf "$TMP_DIR" "${PKG_FILE:-}" 2>/dev/null || true
-            systemctl start ym-guard 2>/dev/null || true
+            mark_failed "更新源无效（未找到核心文件或增量清单）"
             exit 1
         fi
         if [ "$PKG_TYPE" = "incremental" ]; then
             if [ ! -f "$STAGE_DIR/version.json" ]; then
                 echo "错误：增量包缺少 version.json，已中止，未修改任何文件"
                 rm -rf "$TMP_DIR" "${PKG_FILE:-}" 2>/dev/null || true
-                systemctl start ym-guard 2>/dev/null || true
+                mark_failed "增量包缺少 version.json"
                 exit 1
             fi
             echo "  增量更新：仅覆盖变更文件，不删除现有文件"
@@ -282,7 +307,7 @@ case "${1:-}" in
             if [ ! -f "$STAGE_DIR/index.php" ] && [ ! -f "$STAGE_DIR/utils.php" ]; then
                 echo "错误：全量更新源无效（缺少 index.php/utils.php），已中止，未修改任何文件"
                 rm -rf "$TMP_DIR" "${PKG_FILE:-}" 2>/dev/null || true
-                systemctl start ym-guard 2>/dev/null || true
+                mark_failed "全量更新源无效（缺少核心文件）"
                 exit 1
             fi
             rsync -a --delete --exclude='data/' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
@@ -368,9 +393,13 @@ case "${1:-}" in
         systemctl stop ym-guard 2>/dev/null || true
         sleep 1
 
+        # 解锁母本，恢复完成后重新锁定（避免 +i 只读导致 rsync 失败/母本与 web 不一致）
+        chattr -R -i /opt/you-markdown/install-base/ 2>/dev/null || true
+
         echo "[2/3] 恢复文件..."
         tar -xzf "$SELECTED" -C "$WEB_ROOT" 2>/dev/null
         rsync -a --delete --exclude='data/' "$WEB_ROOT/" "/opt/you-markdown/install-base/" 2>/dev/null
+        chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
         echo "  文件恢复完成"
 
         echo "[3/3] 重启守护进程..."

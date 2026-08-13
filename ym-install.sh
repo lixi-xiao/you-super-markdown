@@ -1,10 +1,15 @@
 #!/bin/bash
 # ================================================================
-# You Super Markdown v2.3.3 一键安装脚本
+# You Super Markdown 一键安装脚本（版本读取自 app-config.json）
 # 功能：部署源码 + 配置 Nginx + 守护进程 + 防火墙 + SSL + CLI 工具
 # 使用：sudo bash ym-install.sh
 # ================================================================
 set -e
+
+# 版本号：唯一事实来源为 app-config.json（代码禁止硬编码版本）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_VER=$(php -r '$c = json_decode(@file_get_contents($argv[1]), true); echo $c["version"] ?? "0.0.0";' "$SCRIPT_DIR/app-config.json" 2>/dev/null || echo "0.0.0")
+if [ -z "$APP_VER" ]; then APP_VER="0.0.0"; fi
 
 # 解析命令行参数
 INSTALL_HFISH=true
@@ -41,7 +46,7 @@ info() { echo -e "${CYAN}[*]${NC} $1"; }
 # ================================================================
 echo ""
 echo "============================================"
-echo "  You Super Markdown v2.3.3 安装脚本"
+echo "  You Super Markdown v${APP_VER} 安装脚本"
 echo "  纵深防御方案 — 五层防线一键部署"
 echo "============================================"
 echo ""
@@ -278,6 +283,17 @@ server {
         return 403;
     }
 
+    # ACME 验证放行（certbot webroot 续期）
+    location ^~ /.well-known/ {
+        allow all;
+    }
+
+    # 禁止下载应用配置（泄露 repo/hfish 信息）
+    location = /app-config.json {
+        deny all;
+        return 403;
+    }
+
     # 禁止访问隐藏文件
     location ~ /\\. {
         deny all;
@@ -414,8 +430,8 @@ log "守护进程已启动"
 cat > /etc/cron.d/ym-guard << EOF
 # You Super Markdown 守护进程兜底检查（每5分钟）
 */5 * * * * root /usr/bin/systemctl is-active --quiet ym-guard || /usr/bin/systemctl start ym-guard
-# 每天凌晨3点校验审计日志
-0 3 * * * root /usr/bin/python3 /opt/you-markdown/ym-guard.py --verify-only 2>/dev/null | mail -s "You Super Markdown 每日审计报告" $ADMIN_EMAIL
+# 每天凌晨3点校验审计日志（ym-admin log-verify 为只读哈希链校验）
+0 3 * * * root /usr/local/bin/ym-admin log-verify 2>/dev/null | mail -s "You Super Markdown 每日审计报告" $ADMIN_EMAIL
 EOF
 
 # ================================================================
@@ -764,7 +780,7 @@ log "CLI 管理工具已安装到 /usr/local/bin/ym-admin"
 # ================================================================
 echo ""
 echo "============================================"
-echo "  You Super Markdown v2.3.3 安装完成！"
+echo "  You Super Markdown v${APP_VER} 安装完成！"
 echo "============================================"
 echo ""
 echo "  网站地址: https://$DOMAIN"

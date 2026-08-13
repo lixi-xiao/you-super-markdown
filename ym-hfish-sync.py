@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""You Super Markdown v2.3.3 — 蜜罐(HFish)同步与自动封禁
+"""You Super Markdown — 蜜罐(HFish)同步与自动封禁（版本见 app-config.json）
 功能：
   1. 只读读取 HFish 蜜罐数据库(ip_profile 攻击者IP画像)
   2. 生成蜜罐安全快照 JSON 供超管后台展示
-  3. 攻击总次数(attack_cnt)达到阈值(默认3次)的 IP 自动封禁（登录/注册/评论）
+  3. 攻击总次数(attack_cnt)达到阈值(默认10)的 IP 自动封禁（登录/注册/评论）
+     - 内网/私有 IP 默认豁免（hfish_ban_skip_private）
 用法：
   python3 ym-hfish-sync.py            # 同步快照 + 执行封禁检查
   python3 ym-hfish-sync.py --check    # 仅检查（输出状态）
@@ -84,6 +85,18 @@ def save_bans(bans):
         json.dump(bans, f, ensure_ascii=False, indent=4)
 
 
+def is_private_ip(ip):
+    """判断 IP 是否为内网/私有地址（10/8、172.16/12、192.168/16、127/8、169.254/16）"""
+    try:
+        from ipaddress import ip_address, ip_network
+        addr = ip_address(ip)
+        return any(addr in ip_network(net) for net in [
+            '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16',
+            '127.0.0.0/8', '169.254.0.0/16', '0.0.0.0/8'])
+    except Exception:
+        return False
+
+
 def apply_ban(ip, threshold):
     """攻击次数达到阈值 → 写入封禁（登录/注册/评论），已封禁则跳过"""
     bans = load_bans()
@@ -115,11 +128,14 @@ def main():
         'attacks': sorted(attacks, key=lambda a: a['attack_cnt'], reverse=True),
     }
 
-    # 封禁检查
+    # 封禁检查（支持内网 IP 豁免，避免内网测试环境误封真实访客）
     newly_banned = []
+    skip_private = bool(cfg.get('hfish_ban_skip_private', True))
     if err is None:
         for a in attacks:
             if a['attack_cnt'] >= threshold:
+                if skip_private and is_private_ip(a['ip']):
+                    continue  # 内网/私有 IP 豁免，仅记录不自动封禁
                 if apply_ban(a['ip'], threshold):
                     newly_banned.append(a['ip'])
 

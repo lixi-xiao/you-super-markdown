@@ -39,19 +39,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $newQQ = trim($_POST['qq'] ?? '');
         $newPwd = trim($_POST['password'] ?? '');
         if ($newNick && $newQQ && $newPwd) {
-            $users[] = [
-                'id' => bin2hex(random_bytes(8)),
-                'qq' => $newQQ,
-                'nickname' => $newNick,
-                'password' => password_hash($newPwd, PASSWORD_DEFAULT),
-                'role' => ROLE_AUTHOR,
-                'station_id' => $myId,
-                'created' => date('Y-m-d H:i:s'),
-                'created_by' => $myId,
-            ];
-            file_put_contents(__DIR__ . '/../data/.users.json', json_encode($users, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
-            auditLog('author_create', $newQQ, "站长创建写作者: {$newNick}");
-            $msg = 'author_created';
+            // QQ 唯一性检查（避免同 QQ 账号登录歧义）
+            $qqExists = false;
+            foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
+            if ($qqExists) {
+                $msg = 'qq_duplicate';
+            } else {
+                $users[] = [
+                    'id' => bin2hex(random_bytes(8)),
+                    'qq' => $newQQ,
+                    'nickname' => $newNick,
+                    'password' => password_hash($newPwd, PASSWORD_DEFAULT),
+                    'role' => ROLE_AUTHOR,
+                    'station_id' => $myId,
+                    'created' => date('Y-m-d H:i:s'),
+                    'created_by' => $myId,
+                ];
+                file_put_contents(__DIR__ . '/../data/.users.json', json_encode($users, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+                auditLog('author_create', $newQQ, "站长创建写作者: {$newNick}");
+                $msg = 'author_created';
+            }
         }
     } elseif ($_POST['action'] === 'delete_author') {
         $delId = $_POST['user_id'] ?? '';
@@ -105,7 +112,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
             发表文章
         </a>
-        <a href="?logout=1" class="sidebar-link danger">
+        <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             退出登录
         </a>
@@ -115,6 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 <div class="main">
     <?php if ($msg === 'author_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者已创建</div><?php endif; ?>
     <?php if ($msg === 'author_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者已删除</div><?php endif; ?>
+    <?php if ($msg === 'qq_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
 
     <div class="page-header">
         <div class="page-title">
@@ -193,9 +201,25 @@ function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebarOverlay').classList.toggle('active');
 }
+// 登出走 POST + CSRF
+function logoutSubmit(e) {
+    e.preventDefault();
+    var fd = new FormData();
+    fd.append('logout', '1');
+    fd.append('csrf_token', '<?= generateCsrfToken() ?>');
+    fetch(window.location.href.split('?')[0], { method: 'POST', body: fd }).then(function() { location.href = '/'; });
+}
 </script>
-<?php if (isset($_GET['logout'])): ?>
-<?php auditLog('logout', $myId, '站长登出'); session_unset(); session_destroy(); header('Location: /'); exit; ?>
+<?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])): ?>
+<?php
+if (verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+    auditLog('logout', $myId, '站长登出');
+    session_unset();
+    session_destroy();
+}
+header('Location: /');
+exit;
+?>
 <?php endif; ?>
 </body>
 </html>

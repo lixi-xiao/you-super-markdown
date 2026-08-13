@@ -36,8 +36,21 @@ if (!$found) {
 
 $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        http_response_code(403);
+        exit('Forbidden');
+    }
     $otp = $_POST['otp'] ?? '';
+    // OTP 尝试限次：连续 3 次失败即销毁入口（防暴力枚举）
+    $otpFails = (int)($_SESSION['otp_fails'] ?? 0);
+    if ($otpFails >= 3) {
+        $entries[$foundIdx]['used'] = 1;
+        file_put_contents($entriesFile, json_encode($entries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+        http_response_code(404);
+        exit('Not Found');
+    }
     if (password_verify($otp, $found['otp_hash'])) {
+        $_SESSION['otp_fails'] = 0;
         // 原子消费：标记 used=1
         $entries[$foundIdx]['used'] = 1;
         file_put_contents($entriesFile, json_encode($entries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
@@ -65,6 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     } else {
+        $_SESSION['otp_fails'] = $otpFails + 1;
         $error = '密码错误';
         auditLog('login_otp_failed', '', 'OTP 验证失败');
     }
@@ -103,6 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php endif; ?>
 
             <form method="post">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <div class="entry-input-wrap">
                     <input class="entry-input" type="text" name="otp" placeholder="• • • • • •" maxlength="12" autocomplete="off" autofocus>
                     <div class="entry-input-label">一次性密码</div>

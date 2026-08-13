@@ -133,7 +133,7 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $users[] = $new;
     saveUsers($users);
     $regRates[] = ['ip' => $clientIP, 't' => time()];
-    file_put_contents($regRateFile, json_encode($regRates));
+    file_put_contents($regRateFile, json_encode($regRates), LOCK_EX);
     session_regenerate_id(true);
     $_SESSION['cmt_user'] = [
         'id' => $new['id'], 'qq' => $qq, 'nickname' => $nick,
@@ -178,7 +178,7 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $now = time();
     $fails = array_filter($fails, function($f) use ($now) { return ($now - ($f['t'] ?? 0)) < 3600; });
     $fails[] = ['ip' => $clientIP, 't' => $now];
-    file_put_contents($failFile, json_encode($fails));
+    file_put_contents($failFile, json_encode($fails), LOCK_EX);
     $ipFails = array_filter($fails, function($f) use ($clientIP) { return $f['ip'] === $clientIP; });
     $loginCfg = loadSiteConfig();
     $maxLoginFails = max(3, intval($loginCfg['max_login_fails'] ?? 10));
@@ -186,7 +186,7 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         logAbnormal($clientIP, '频繁错误登录（' . count($ipFails) . '次/小时）');
         if ($loginCfg['auto_ban'] ?? false) addBan($clientIP, ['login'], '自动封禁：频繁错误登录');
         $fails = array_filter($fails, function($f) use ($clientIP) { return $f['ip'] !== $clientIP; });
-        file_put_contents($failFile, json_encode(array_values($fails)));
+        file_put_contents($failFile, json_encode(array_values($fails)), LOCK_EX);
     }
     jsonOut(['success' => false, 'error' => 'QQ号或密码错误'], 401);
 }
@@ -314,7 +314,7 @@ if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $now = time();
     $rates = array_filter($rates, function($r) use ($now) { return ($now - ($r['t'] ?? 0)) < 60; });
     $rates[] = ['ip' => $clientIP, 't' => $now];
-    file_put_contents($rateFile, json_encode($rates));
+    file_put_contents($rateFile, json_encode($rates), LOCK_EX);
     $ipRates = array_filter($rates, function($r) use ($clientIP) { return $r['ip'] === $clientIP; });
     $maxCommentsPerMin = max(1, intval($siteCfg['max_comments_per_minute'] ?? 5));
     if (count($ipRates) > $maxCommentsPerMin) {
@@ -476,7 +476,10 @@ if ($action === 'bg_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (file_exists($configFile) && !is_writable($configFile)) jsonOut(['success' => false, 'error' => '配置文件不可写，请检查文件权限'], 500);
     $config = loadSiteConfig();
     $config['bg_type'] = in_array($input['bg_type'] ?? '', ['none', 'image', 'api']) ? $input['bg_type'] : 'none';
-    $config['bg_image'] = trim($input['bg_image'] ?? '');
+    // bg_image 仅允许站内 data/bg/ 路径或 http(s) URL，防止 CSS 值注入
+    $bgImage = trim($input['bg_image'] ?? '');
+    if ($bgImage !== '' && strpos($bgImage, 'data/bg/') !== 0 && !preg_match('#^https?://#i', $bgImage)) $bgImage = '';
+    $config['bg_image'] = $bgImage;
     $config['bg_api_url'] = trim($input['bg_api_url'] ?? '');
     $config['bg_blur_enabled'] = !empty($input['bg_blur_enabled']);
     $config['bg_blur_level'] = max(0, min(50, intval($input['bg_blur_level'] ?? 0)));

@@ -1,12 +1,13 @@
 {
   "app_name": "You Super Markdown",
-  "version": "2.3.3",
+  "version": "2.4.0",
   "repo_owner": "",
   "repo_name": "",
   "repo_url": "",
   "repo_api_url": "",
   "docs_url": "",
   "hfish_user": "xiao",
-  "hfish_ban_threshold": 3,
+  "hfish_ban_threshold": 10,
+  "hfish_ban_skip_private": true,
   "hfish_db_path": "/usr/share/hfish/database/hfish.db"
 }

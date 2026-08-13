@@ -1,6 +1,6 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
+// 同源调用无需 CORS；不输出跨域头，公网模式下避免任意来源滥用（见 14.10 公网/内网模式）
 
 // 加载配置
 $configFile = __DIR__ . '/data/.config.json';

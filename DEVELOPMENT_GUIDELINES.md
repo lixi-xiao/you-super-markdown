@@ -8,7 +8,7 @@
 
 ```
 f:\测试白盒\
-├── README.md                      # 项目使用指南（v2.3.0）
+├── README.md                      # 项目使用指南（v2.3.3）
 ├── DEVELOPMENT_GUIDELINES.md      # 本开发规范（唯一权威）
 ├── test_development\              # ★ 主库（唯一开发源，Git 管理）
 │   ├── 全部源码 + ym-* 脚本 + app-config.json
@@ -16,8 +16,8 @@ f:\测试白盒\
 ├── test_development copy\         # 备份副本（仅对照，不直接开发）
 └── update-package\                # ★ 更新包统一存放目录（唯一）
     ├── version.json               # 最新版本号
-    ├── you-super-markdown-v2.3.0-full.tar.gz
-    ├── you-super-markdown-v2.2.1-to-v2.3.0-inc.tar.gz
+    ├── you-super-markdown-v2.3.3-full.tar.gz
+    ├── you-super-markdown-v2.3.0-to-v2.3.3-inc.tar.gz
     └── ...（历史包）
 ```
 
@@ -121,8 +121,8 @@ you-markdown/
 
 | 类型 | 命名 | 示例 |
 |------|------|------|
-| 全量包 | `you-super-markdown-v<版本>-full.tar.gz` | `you-super-markdown-v2.3.0-full.tar.gz` |
-| 增量包 | `you-super-markdown-v<from>-to-v<to>-inc.tar.gz` | `you-super-markdown-v2.2.1-to-v2.3.0-inc.tar.gz` |
+| 全量包 | `you-super-markdown-v<版本>-full.tar.gz` | `you-super-markdown-v2.3.3-full.tar.gz` |
+| 增量包 | `you-super-markdown-v<from>-to-v<to>-inc.tar.gz` | `you-super-markdown-v2.3.0-to-v2.3.3-inc.tar.gz` |
 
 ### 4.3 全量包要求
 

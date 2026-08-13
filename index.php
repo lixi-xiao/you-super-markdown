@@ -33,6 +33,8 @@ if (file_exists('./data/.config.json')) {
     $_siteConfig = json_decode(file_get_contents('./data/.config.json'), true) ?: [];
 }
 $_siteTitle = $_siteConfig['site_title'] ?? 'You Markdown';
+// 音乐播放器仅在后台配置了 music_cookies 后显示入口（未配置则隐藏）
+$musicEnabled = !empty($_siteConfig['music_cookies']);
 $pinFile = './data/.pinned.json';
 function getPinnedList() {
     global $pinFile;
@@ -437,7 +439,9 @@ if ($action === 'update') {
 </main>
 <div class="floating-buttons" id="floatingButtons" style="display:none;">
     <button class="float-btn" id="floatTocBtn" title="目录"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <?php if ($musicEnabled): ?>
     <button class="float-btn" id="floatMusicBtn" title="音乐"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></button>
+    <?php endif; ?>
     <button class="float-btn" id="floatHomeBtn" title="返回主页"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></button>
     <button class="float-btn" id="scrollToTopBtn" title="回到顶部"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
 </div>

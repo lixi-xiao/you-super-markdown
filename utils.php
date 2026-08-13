@@ -1,5 +1,19 @@
 <?php
-define('APP_VERSION', '2.0.0');
+define('APP_CONFIG_FILE', __DIR__ . '/app-config.json');
+function loadAppConfig() {
+    static $config = null;
+    if ($config !== null) return $config;
+    $config = [];
+    if (file_exists(APP_CONFIG_FILE)) {
+        $config = json_decode(file_get_contents(APP_CONFIG_FILE), true) ?: [];
+    }
+    return $config;
+}
+function appConfig($key, $default = '') {
+    $config = loadAppConfig();
+    return (isset($config[$key]) && $config[$key] !== '') ? $config[$key] : $default;
+}
+define('APP_VERSION', appConfig('version', '2.3.3'));
 function generateCsrfToken() {
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -57,7 +71,7 @@ function genId() { return bin2hex(random_bytes(8)); }
 function loadSiteConfig() {
     $f = __DIR__ . '/data/.config.json';
     if (!file_exists($f)) return [
-        'site_title' => 'You Markdown',
+        'site_title' => 'You Super Markdown',
         'reg_limit_per_ip' => 3,
         'comments_enabled' => true,
         'auto_ban' => true,
@@ -173,7 +187,7 @@ function logUnauthorized($action, $ban = false) {
     }
 }
 // ============================================================
-// v2.0 五层角色体系
+// v2.2 五层角色体系
 // ============================================================
 define('ROLE_SUPER_ADMIN', 'super_admin');
 define('ROLE_STATION_ADMIN', 'station_admin');
@@ -231,7 +245,7 @@ function getCurrentUserId() {
 }
 
 // ============================================================
-// v2.0 JWT 认证
+// v2.2 JWT 认证
 // ============================================================
 function getJWTSecret() {
     $f = __DIR__ . '/data/.jwt_secret';
@@ -267,7 +281,7 @@ function validateJWT($token) {
 }
 
 // ============================================================
-// v2.0 审计日志 + 哈希链
+// v2.2 审计日志 + 哈希链
 // ============================================================
 define('AUDIT_LOG_FILE', __DIR__ . '/data/.audit.json');
 define('AUDIT_CHAIN_FILE', __DIR__ . '/data/.audit_chain');
@@ -346,7 +360,7 @@ function sendAlert($type, $detail) {
     $config = loadSiteConfig();
     $adminEmail = $config['admin_email'] ?? '';
     if (!$adminEmail || !file_exists(EMAIL_ALERT)) return;
-    $site = $config['site_title'] ?? 'You-Markdown';
+    $site = $config['site_title'] ?? 'You Super Markdown';
     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
     $subject = "[{$site} 告警] {$type}";
     $body = "时间：" . date('Y-m-d H:i:s') . "\n"
@@ -358,7 +372,7 @@ function sendAlert($type, $detail) {
 }
 
 // ============================================================
-// v2.0 在线更新辅助函数
+// v2.2 在线更新辅助函数
 // ============================================================
 define('UPDATE_REQUEST_FILE', '/tmp/ym-update-request.json');
 define('UPDATE_LOCK_FILE', '/tmp/ym-update.lock');
@@ -441,14 +455,27 @@ function getBackupList() {
 }
 
 function checkForUpdates($channel = 'stable') {
+    // 从配置读取仓库 API 地址，留空则跳过更新检查
+    $apiBase = appConfig('repo_api_url', '');
+    if ($apiBase === '') {
+        return [
+            'available' => false,
+            'latest_version' => APP_VERSION,
+            'current_version' => APP_VERSION,
+            'release_notes' => '',
+            'download_url' => '',
+            'published_at' => '',
+            'source' => 'local',
+        ];
+    }
     // beta 通道查询 releases 列表（含 pre-release），stable 查询 latest
     $url = $channel === 'beta'
-        ? "https://api.github.com/repos/you-markdown/you-markdown/releases?per_page=10"
-        : "https://api.github.com/repos/you-markdown/you-markdown/releases/latest";
+        ? rtrim($apiBase, '/') . "/releases?per_page=10"
+        : rtrim($apiBase, '/') . "/releases/latest";
     $context = stream_context_create([
         'http' => [
             'method' => 'GET',
-            'header' => "User-Agent: You-Markdown/" . APP_VERSION . "\r\n",
+            'header' => "User-Agent: " . appConfig('app_name', 'You Super Markdown') . "/" . APP_VERSION . "\r\n",
             'timeout' => 10,
         ],
     ]);

@@ -1338,15 +1338,18 @@
         } catch(e) {}
         return null;
     }
-    floatMusicBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        musicPopup.classList.toggle('active');
-        tocPopup.classList.remove('active');
-        if (!musicLoaded) { musicLoaded = true; loadMusicHotSongs(); }
-    });
-    document.addEventListener('click', function(e) {
-        if (!musicPopup.contains(e.target) && !floatMusicBtn.contains(e.target)) musicPopup.classList.remove('active');
-    });
+    // 音乐按钮仅在后台配置 music_cookies 后渲染，未配置时跳过音乐初始化
+    if (floatMusicBtn && musicPopup) {
+        floatMusicBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            musicPopup.classList.toggle('active');
+            tocPopup.classList.remove('active');
+            if (!musicLoaded) { musicLoaded = true; loadMusicHotSongs(); }
+        });
+        document.addEventListener('click', function(e) {
+            if (!musicPopup.contains(e.target) && !floatMusicBtn.contains(e.target)) musicPopup.classList.remove('active');
+        });
+    }
     if (musicListToggle) musicListToggle.addEventListener('click', function(e) {
         e.stopPropagation();
         musicListOpen = !musicListOpen;

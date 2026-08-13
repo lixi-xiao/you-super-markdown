@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""You Super Markdown 文件守护进程 v2.3.0
+"""You Super Markdown 文件守护进程 v2.3.3
 六层保活：systemd Restart + Watchdog + 子进程心跳 + cron五min兜底 + inotify耗尽降级 + 自校验
 功能：
   1. inotify 监控核心文件，被篡改时秒级从母本恢复
@@ -384,7 +384,7 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    log(f"{load_app_name()} 守护进程 v2.3.0 启动")
+    log(f"{load_app_name()} 守护进程 v2.3.3 启动")
     log(f"Web 根目录: {WEB_ROOT}")
     log(f"母本目录: {INSTALL_BASE}")
 

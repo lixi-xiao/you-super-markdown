@@ -127,7 +127,7 @@ case "${1:-}" in
 
     challenge)
         CODE=$(openssl rand -hex 3)
-        EXPIRES=$(date -d "+60 seconds" +%s 2>/dev/null || echo $(($(date +%s) + 60)))
+        EXPIRES=$(date -d "+300 seconds" +%s 2>/dev/null || echo $(($(date +%s) + 300)))
         # 保存到挑战文件
         php -r "
             \$f = '$WEB_ROOT/data/.challenge.json';
@@ -138,7 +138,7 @@ case "${1:-}" in
             \$challenges = array_filter(\$challenges, function(\$c) { return (\$c['expires'] ?? 0) > time() && empty(\$c['used']); });
             file_put_contents(\$f, json_encode(array_values(\$challenges), JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
         " 2>/dev/null
-        echo "挑战码: $CODE (60秒有效)"
+        echo "挑战码: $CODE (300秒有效)"
         ;;
 
     apply-update)
@@ -149,10 +149,8 @@ case "${1:-}" in
             exit 1
         fi
 
-        echo "=== You-Markdown 系统更新 ==="
+        echo "=== You Super Markdown 系统更新 ==="
         echo ""
-        # 确保请求文件可写（www-data 属主文件在容器环境下 root 也可能写入失败）
-        chmod 666 "$REQUEST_FILE" 2>/dev/null || true
 
         STATUS=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['status'] ?? 'pending';")
         if [ "$STATUS" != "pending" ]; then
@@ -197,6 +195,9 @@ case "${1:-}" in
 
         # 4. 应用更新
         echo "[4/6] 应用更新文件..."
+        STAGE_DIR=""
+        TMP_DIR=""
+        PKG_TYPE="full"
         if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
             echo "  使用上传的更新包: $PKG_PATH"
             TMP_DIR=$(mktemp -d)
@@ -205,31 +206,89 @@ case "${1:-}" in
                 echo "  解压失败，尝试 unzip..."
                 unzip -o "$PKG_PATH" -d "$TMP_DIR" 2>/dev/null || {
                     echo "错误：无法解压更新包"
+                    rm -rf "$TMP_DIR"
                     systemctl start ym-guard 2>/dev/null || true
                     exit 1
                 }
             fi
-            rsync -a --delete --exclude='data/' "$TMP_DIR/" "$WEB_ROOT/" 2>/dev/null
-            rsync -a --delete --exclude='data/' "$TMP_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
-            rm -rf "$TMP_DIR"
+            # 定位包含核心文件的目录（兼容带顶层目录的更新包）
+            if [ -f "$TMP_DIR/index.php" ] || [ -f "$TMP_DIR/utils.php" ]; then
+                STAGE_DIR="$TMP_DIR"
+            else
+                INNER=$(find "$TMP_DIR" -mindepth 1 -maxdepth 2 \( -name index.php -o -name utils.php \) 2>/dev/null | head -1)
+                if [ -n "$INNER" ]; then
+                    STAGE_DIR=$(dirname "$INNER")
+                fi
+            fi
+            # 增量包识别：无核心文件但带 version.json 且 type=incremental
+            if [ -z "$STAGE_DIR" ]; then
+                VFILE=$(find "$TMP_DIR" -maxdepth 3 -name version.json 2>/dev/null | head -1)
+                if [ -n "$VFILE" ]; then
+                    PTYPE=$(php -r "\$v = json_decode(@file_get_contents('$VFILE'), true); echo \$v['type'] ?? '';" 2>/dev/null)
+                    if [ "$PTYPE" = "incremental" ]; then
+                        PKG_TYPE="incremental"
+                        STAGE_DIR=$(dirname "$VFILE")
+                    fi
+                fi
+            fi
         else
-            echo "  从 GitHub 下载更新包..."
-            DOWNLOAD_URL="https://github.com/you-markdown/you-markdown/archive/refs/tags/v${TO_VER}.tar.gz"
+            REPO_URL=$(php -r "\$c = json_decode(@file_get_contents('$WEB_ROOT/app-config.json'), true); echo \$c['repo_url'] ?? '';" 2>/dev/null)
+            if [ -z "$REPO_URL" ]; then
+                echo "错误：未配置仓库地址（app-config.json 的 repo_url 为空）"
+                systemctl start ym-guard 2>/dev/null || true
+                exit 1
+            fi
+            echo "  从仓库下载更新包..."
+            DOWNLOAD_URL="${REPO_URL%/}/archive/refs/tags/v${TO_VER}.tar.gz"
             PKG_FILE="/tmp/ym-update-download.tar.gz"
-            curl -sL -o "$PKG_FILE" "$DOWNLOAD_URL" 2>/dev/null || {
-                echo "错误：下载失败"
+            HTTP_CODE=$(curl -sL -o "$PKG_FILE" -w '%{http_code}' "$DOWNLOAD_URL" 2>/dev/null)
+            if [ "$HTTP_CODE" != "200" ] || [ ! -s "$PKG_FILE" ]; then
+                echo "错误：下载失败 (HTTP ${HTTP_CODE:-无响应})"
+                rm -f "$PKG_FILE"
+                systemctl start ym-guard 2>/dev/null || true
+                exit 1
+            fi
+            TMP_DIR=$(mktemp -d)
+            tar -xzf "$PKG_FILE" -C "$TMP_DIR" 2>/dev/null || {
+                echo "错误：更新包解压失败"
+                rm -rf "$TMP_DIR" "$PKG_FILE"
                 systemctl start ym-guard 2>/dev/null || true
                 exit 1
             }
-            TMP_DIR=$(mktemp -d)
-            tar -xzf "$PKG_FILE" -C "$TMP_DIR" 2>/dev/null
-            SRC_DIR=$(find "$TMP_DIR" -maxdepth 1 -type d | tail -1)
-            if [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR" ]; then
-                rsync -a --delete --exclude='data/' "$SRC_DIR/" "$WEB_ROOT/" 2>/dev/null
-                rsync -a --delete --exclude='data/' "$SRC_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
+            # 定位包含核心文件的顶层目录
+            SRC_DIR=$(find "$TMP_DIR" -mindepth 1 -maxdepth 2 \( -name index.php -o -name utils.php \) -exec dirname {} \; 2>/dev/null | head -1)
+            if [ -n "$SRC_DIR" ]; then
+                STAGE_DIR="$SRC_DIR"
             fi
-            rm -rf "$TMP_DIR" "$PKG_FILE"
         fi
+        # 双保险：全量包必须含核心文件；增量包必须含 version.json（绝不使用 --delete 清空目标）
+        if [ -z "$STAGE_DIR" ]; then
+            echo "错误：更新源无效（未找到核心文件或增量清单），已中止，未修改任何文件"
+            rm -rf "$TMP_DIR" "${PKG_FILE:-}" 2>/dev/null || true
+            systemctl start ym-guard 2>/dev/null || true
+            exit 1
+        fi
+        if [ "$PKG_TYPE" = "incremental" ]; then
+            if [ ! -f "$STAGE_DIR/version.json" ]; then
+                echo "错误：增量包缺少 version.json，已中止，未修改任何文件"
+                rm -rf "$TMP_DIR" "${PKG_FILE:-}" 2>/dev/null || true
+                systemctl start ym-guard 2>/dev/null || true
+                exit 1
+            fi
+            echo "  增量更新：仅覆盖变更文件，不删除现有文件"
+            rsync -a --exclude='data/' --exclude='version.json' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
+            rsync -a --exclude='data/' --exclude='version.json' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
+        else
+            if [ ! -f "$STAGE_DIR/index.php" ] && [ ! -f "$STAGE_DIR/utils.php" ]; then
+                echo "错误：全量更新源无效（缺少 index.php/utils.php），已中止，未修改任何文件"
+                rm -rf "$TMP_DIR" "${PKG_FILE:-}" 2>/dev/null || true
+                systemctl start ym-guard 2>/dev/null || true
+                exit 1
+            fi
+            rsync -a --delete --exclude='data/' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
+            rsync -a --delete --exclude='data/' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
+        fi
+        rm -rf "$TMP_DIR" 2>/dev/null || true
         echo "  文件更新完成"
 
         # 5. 锁定母本
@@ -240,10 +299,11 @@ case "${1:-}" in
         echo "[6/6] 重启守护进程并记录日志..."
         php -r "
             \$utilsFile = '$WEB_ROOT/utils.php';
+            if (!file_exists(\$utilsFile)) { echo 'utils.php 不存在，跳过版本号更新'; exit; }
             \$content = file_get_contents(\$utilsFile);
             \$content = preg_replace('/define\(\'APP_VERSION\',\s*\'(.*?)\'\)/', \"define('APP_VERSION', '$TO_VER')\", \$content);
             file_put_contents(\$utilsFile, \$content, LOCK_EX);
-            copy(\$utilsFile, '/opt/you-markdown/install-base/utils.php');
+            @copy(\$utilsFile, '/opt/you-markdown/install-base/utils.php');
         " 2>/dev/null
         php -r "
             require_once '$WEB_ROOT/utils.php';
@@ -330,7 +390,7 @@ case "${1:-}" in
             exit 1
         fi
         source "$PORTS_FILE"
-        PANEL_PORT="${HFISH_PANEL_PORT:-9001}"
+        PANEL_PORT="${HFISH_PANEL_PORT:-4433}"
         echo ""
         echo "============================================"
         echo "  Hfish 管理面板隧道已建立"
@@ -352,9 +412,9 @@ case "${1:-}" in
         if [ -f "$PORTS_FILE" ]; then
             source "$PORTS_FILE"
             echo "配置端口:"
-            echo "  假 HTTP 服务: ${HFISH_HTTP_PORT:-8080}"
-            echo "  假 SSH 服务:  ${HFISH_SSH_PORT:-2222}"
-            echo "  管理面板:     ${HFISH_PANEL_PORT:-9001} (仅 127.0.0.1)"
+            echo "  管理面板: ${HFISH_PANEL_PORT:-4433}"
+            echo "  节点通信: ${HFISH_NODE_PORT:-4434}"
+            echo "  蜜獾账户: ${HFISH_USER:-xiao}"
         else
             echo "  端口配置文件不存在"
         fi
@@ -368,7 +428,7 @@ case "${1:-}" in
         ;;
 
     *)
-        echo "You-Markdown CLI 管理工具"
+        echo "You Super Markdown CLI 管理工具"
         echo ""
         echo "用法: ym-admin <命令> [参数]"
         echo ""

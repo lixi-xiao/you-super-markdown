@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""You Super Markdown v2.3.0 — 蜜罐(HFish)同步与自动封禁
+"""You Super Markdown v2.3.3 — 蜜罐(HFish)同步与自动封禁
 功能：
   1. 只读读取 HFish 蜜罐数据库(ip_profile 攻击者IP画像)
   2. 生成蜜罐安全快照 JSON 供超管后台展示

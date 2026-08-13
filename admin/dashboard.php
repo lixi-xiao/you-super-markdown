@@ -1734,18 +1734,31 @@ $banMsg = $_GET['bmsg'] ?? '';
             });
         }
 
-        // 加载更新历史
-        loadBackupHistory();
+        // 加载更新历史（初始页码/每页条数/搜索词由下方 IIFE 从 URL 恢复）
+        loadBackupHistory(backupInitPage);
     });
 
     var backupSearchQ = '';
     var backupPerPage = 20;
-    // v2.6.6 同次更新：初始每页条数从 URL 的 per_page 读取，修复"选择每页条数后刷新被重置为 20"的 bug
+    var backupInitPage = 1;
+    // v2.6.6 同次更新：初始每页条数/页码/搜索词从 URL 读取，修复"选择每页条数后刷新被重置为 20"的 bug
     (function() {
-        var m = (location.search || '').match(/[?&]per_page=(\d+)/);
-        if (m) {
-            var v = parseInt(m[1], 10);
+        var qs = location.search || '';
+        var mPer = qs.match(/[?&]per_page=(\d+)/);
+        if (mPer) {
+            var v = parseInt(mPer[1], 10);
             if (v === 10 || v === 20 || v === 50 || v === 100) backupPerPage = v;
+        }
+        var mPg = qs.match(/[?&]page=(\d+)/);
+        if (mPg) {
+            var p = parseInt(mPg[1], 10);
+            if (p > 0) backupInitPage = p;
+        }
+        var mQ = qs.match(/[?&]q=([^&]*)/);
+        if (mQ) {
+            backupSearchQ = decodeURIComponent(mQ[1].replace(/\+/g, ' '));
+            var inp = document.getElementById('backupSearchInput');
+            if (inp) inp.value = backupSearchQ;
         }
     })();
     function loadBackupHistory(page, q, perPage) {
@@ -1773,6 +1786,12 @@ $banMsg = $_GET['bmsg'] ?? '';
                 }
                 list.innerHTML = html;
                 renderBackupPager(d);
+                // 同步 URL（replaceState 不触发跳转），刷新/分享后可恢复当前页码/条数/搜索词
+                if (history.replaceState) {
+                    var stateQs = 'tab=update&page=' + encodeURIComponent(page) + '&per_page=' + encodeURIComponent(backupPerPage);
+                    if (backupSearchQ !== '') stateQs += '&q=' + encodeURIComponent(backupSearchQ);
+                    history.replaceState(null, '', '<?= $_SERVER['SCRIPT_NAME'] ?>?' + stateQs);
+                }
             })
             .catch(function() {
                 list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85em">加载失败</p>';
@@ -1848,14 +1867,18 @@ $banMsg = $_GET['bmsg'] ?? '';
             if (btn && btn.type === 'button') {
                 var inp = btn.previousElementSibling;
                 if (inp && inp.dataset && inp.dataset.pgUrl && inp.value) {
-                    location.href = inp.dataset.pgUrl.replace('__PG__', inp.value);
+                    loadBackupHistory(parseInt(inp.value, 10));
                 }
             }
         };
         pager.onchange = function(e) {
             var t = e.target;
-            if (t && t.dataset && t.dataset.ppUrl) location.href = t.dataset.ppUrl.replace('__PP__', t.value);
-            else if (t && t.dataset && t.dataset.pgUrl && t.value) location.href = t.dataset.pgUrl.replace('__PG__', t.value);
+            if (t && t.dataset && t.dataset.ppUrl) {
+                // 每页条数切换：AJAX 重新加载（禁止整页跳转到 ajax=update_history 接口，否则浏览器显示原始 JSON）
+                loadBackupHistory(1, undefined, parseInt(t.value, 10));
+            } else if (t && t.dataset && t.dataset.pgUrl && t.value) {
+                loadBackupHistory(parseInt(t.value, 10));
+            }
         };
     }
     </script>

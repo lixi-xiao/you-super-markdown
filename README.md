@@ -1,4 +1,4 @@
-# You-Markdown v2.0 使用指南
+# You Super Markdown v2.3.0 使用指南
 
 > 基于 PHP 的轻量级 Markdown 在线阅读器，集成五层纵深防御体系。
 
@@ -6,7 +6,7 @@
 
 ## 一、项目简介
 
-You-Markdown 是一个基于 PHP 的在线 Markdown 阅读平台，支持文章发布、评论互动、音乐播放、多角色权限管理。v2.0 版本围绕"纵深防御"对系统进行了全面重构，在保持原有功能的基础上，从架构层面消除了 20 个已知漏洞。
+You Super Markdown 是一个基于 PHP 的在线 Markdown 阅读平台，支持文章发布、评论互动、音乐播放、多角色权限管理。v2.3.0 版本围绕"纵深防御"对系统进行了全面重构，在保持原有功能的基础上，从架构层面消除了 20 个已知漏洞，并新增**蜜罐安全联动**（超管后台查看蜜罐攻击日志 + 触发蜜罐行为自动封禁）。
 
 ***
 
@@ -21,7 +21,8 @@ You-Markdown 是一个基于 PHP 的在线 Markdown 阅读平台，支持文章�
 - 操作审计日志（哈希链防篡改 + 自动校验）
 - 文件守护进程（inotify 监控 + 母本自动恢复）
 - 邮件告警通知
-- 在线更新（需确认码验证）
+- 在线更新（需挑战码验证）
+- 蜜罐安全联动（攻击日志查看 + 触发自动封禁，v2.3.0 新增）
 
 ***
 
@@ -43,24 +44,17 @@ You-Markdown 是一个基于 PHP 的在线 Markdown 阅读平台，支持文章�
 you-markdown/
 ├── index.php              # 网站首页 / 文章阅读
 ├── api.php                # REST API 接口
-├── utils.php              # 核心工具函数（角色、JWT、日志、CSRF）
+├── utils.php              # 核心工具函数（角色、JWT、日志、CSRF、更新）
 ├── sc.php                 # Markdown 编辑器
 ├── 404.php                # 404 页面
 ├── music.php              # 音乐播放路由
 ├── admin/                 # 高级管理员后台
 │   ├── entry.php          # OTP 动态入口验证页
-│   └── dashboard.php      # 高级管理员后台
+│   └── dashboard.php      # 高级管理员后台（含蜜罐安全页签）
 ├── station/               # 站长后台（路径可通过配置自定义）
 │   └── dashboard.php      # 站长后台（管理写作者）
 ├── author/                # 写作者后台（路径可通过配置自定义）
 │   └── dashboard.php      # 写作者后台（管理自己的文章）
-├── youyou/                # 旧版后台（兼容保留）
-│   ├── index.php          # 文章管理
-│   ├── config.php         # 网站配置
-│   ├── background.php     # 背景设置
-│   ├── bans.php           # 封禁管理
-│   ├── logs.php           # 日志查看
-│   └── update.php         # 在线更新
 ├── data/                  # 数据目录（Nginx 已隔离）
 │   ├── .users.json        # 用户数据
 │   ├── .config.json       # 站点配置
@@ -68,6 +62,7 @@ you-markdown/
 │   ├── .logs.json         # 操作日志
 │   ├── .unauthorized.json # 越权日志
 │   ├── .audit.json        # 审计日志（哈希链）
+│   ├── .hfish_snapshot.json # 蜜罐安全快照（v2.3.0）
 │   ├── articles/          # 文章目录
 │   ├── comments/          # 评论数据
 │   ├── bg/                # 背景图片
@@ -78,8 +73,11 @@ you-markdown/
 ├── music/                 # 音乐平台接口
 │   ├── qq.php             # QQ 音乐
 │   └── netease.php        # 网易云音乐
-├── ym-guard.py            # 文件守护进程
+├── ym-guard.py            # 文件守护进程（含蜜罐周期同步）
+├── ym-hfish-sync.py       # 蜜罐同步与自动封禁脚本（v2.3.0）
 ├── ym-install.sh          # 一键安装脚本
+├── ym-admin               # CLI 管理工具
+├── app-config.json        # 全局配置（版本号、仓库地址、蜜罐参数）
 └── nginx-site.conf        # Nginx 配置模板
 ```
 
@@ -116,17 +114,18 @@ sudo bash ym-install.sh
 8. 部署守护进程（systemd + cron 兜底）
 9. 配置防火墙（ufw）
 10. 安装 CLI 管理工具
+11. （可选）部署 Hfish 蜜罐
 
 安装完成后终端会输出类似：
 
 ```
 ========================================
   安装完成！
-  
+
   网站地址：https://your-domain.com
   管理入口：https://your-domain.com/admin/entry/a3Bf9xQ2mZ1k
   一次性密码：Kx9#mZ2!pTq8
-  
+
   ⚠️ 以上信息仅显示一次，请立即保存！
 ========================================
 ```
@@ -154,7 +153,7 @@ sudo chown -R www-data:www-data /var/www/you-markdown/data
 
 ```bash
 cd /var/www/you-markdown
-php -r "
+sudo php -r "
 require_once 'utils.php';
 \$users = [];
 \$users[] = [
@@ -194,7 +193,7 @@ sudo pip3 install watchdog
 # 创建 systemd 服务
 sudo tee /etc/systemd/system/ym-guard.service << 'EOF'
 [Unit]
-Description=You-Markdown File Guard
+Description=You Super Markdown File Guard
 After=network.target
 Before=nginx.service
 
@@ -245,7 +244,7 @@ sudo systemctl enable --now ym-guard
 | 网站配置        |   ✅   |  —  |  —  |  —  |  —  |
 | 网站背景        |   ✅   |  —  |  —  |  —  |  —  |
 | 封禁管理        |   ✅   |  —  |  —  |  —  |  —  |
-| 查看日志        |   ✅   |  —  |  —  |  —  |  —  |
+| 查看日志（含蜜罐）    |   ✅   |  —  |  —  |  —  |  —  |
 | 在线更新        |   ✅   |  —  |  —  |  —  |  —  |
 
 ***
@@ -260,7 +259,7 @@ sudo systemctl enable --now ym-guard
 
 1. SSH 登录服务器，执行：
    ```bash
-   ym-admin login
+   sudo ym-admin login
    ```
 2. 终端输出：
    ```
@@ -282,15 +281,15 @@ sudo systemctl enable --now ym-guard
 
 ### 自定义入口路径（L1 扩展）
 
-v2.0 支持自定义站长和写作者后台的 URL 路径前缀，进一步加强隐藏入口防御。
+v2.3.0 支持自定义站长和写作者后台的 URL 路径前缀，进一步加强隐藏入口防御。
 
 **配置方式：**
 
 1. **通过后台 UI**：高级管理员登录后台 → 系统配置 → 自定义入口路径
 2. **通过 CLI**：
    ```bash
-   ym-admin set-paths my-station my-writer
-   ym-admin show-paths          # 查看当前配置
+   sudo ym-admin set-paths my-station my-writer
+   ym-admin show-paths          # 查看当前配置（只读，无需 sudo）
    ```
 
 **规则：**
@@ -314,6 +313,7 @@ v2.0 支持自定义站长和写作者后台的 URL 路径前缀，进一步加�
 | ---- | ------------------------ |
 | 人员管理 | 创建/删除站长、创建/删除写作者、封禁/解封用户 |
 | 安全监控 | 查看登录日志、越权日志、审计日志（哈希链校验）  |
+| 蜜罐安全 | 查看蜜罐攻击日志、立即同步、自动封禁状态（v2.3.0） |
 | 系统配置 | 网站标题、注册开关、访客评论开关、更新通道    |
 | 守护进程 | 查看守护状态、手动触发校验、查看母本状态     |
 | 在线更新 | 检查更新、挑战验证、上传更新包、执行更新、回滚 |
@@ -349,35 +349,37 @@ v2.0 支持自定义站长和写作者后台的 URL 路径前缀，进一步加�
 ### 命令列表
 
 ```bash
-ym-admin login              # 生成新的 OTP 入口（管理员登录用）
-ym-admin create-station 名称  # 创建站长账号
-ym-admin create-author 名称   # 创建写作者账号
-ym-admin revoke-user 用户ID   # 吊销某用户
-ym-admin backup             # 备份 data 目录到 /opt/you-markdown/backups/
-ym-admin status             # 查看守护进程 + 服务状态
-ym-admin log-verify         # 手动触发审计日志哈希链校验
-ym-admin challenge          # 生成 6 位挑战码（60 秒有效）
-ym-admin apply-update       # 执行系统更新（从 Web 后台触发后执行）
-ym-admin rollback           # 回滚到上一次更新前的备份
-ym-admin reset-admin        # 重置超级管理员密码
-ym-admin set-paths <站长> <作者>  # 设置自定义后台入口路径
-ym-admin show-paths          # 查看当前入口路径配置
-ym-admin hfish-panel         # 建立 SSH 隧道访问 Hfish 管理面板
-ym-admin hfish-status        # 查看 Hfish 蜜罐状态
+sudo ym-admin login              # 生成新的 OTP 入口（管理员登录用）
+sudo ym-admin create-station 名称  # 创建站长账号
+sudo ym-admin create-author 名称   # 创建写作者账号
+sudo ym-admin revoke-user 用户ID   # 吊销某用户
+sudo ym-admin backup             # 备份 data 目录到 /opt/you-markdown/backups/
+ym-admin status                  # 查看守护进程 + 服务状态（只读，无需 sudo）
+ym-admin log-verify              # 手动触发审计日志哈希链校验（只读，无需 sudo）
+sudo ym-admin challenge          # 生成 6 位挑战码（300 秒有效）
+sudo ym-admin apply-update       # 执行系统更新（从 Web 后台触发后执行）
+sudo ym-admin rollback           # 回滚到上一次更新前的备份
+sudo ym-admin reset-admin        # 重置超级管理员密码
+sudo ym-admin set-paths <站长> <作者>  # 设置自定义后台入口路径
+ym-admin show-paths              # 查看当前入口路径配置（只读，无需 sudo）
+ym-admin hfish-panel             # 建立 SSH 隧道访问 Hfish 管理面板（只读，无需 sudo）
+ym-admin hfish-status            # 查看 Hfish 蜜罐状态（只读，无需 sudo）
 ```
+
+> 💡 **权限说明**：`ym-admin` 中所有「写操作」命令都需要加 `sudo` 执行（普通用户无权写 `/var/www/you-markdown/data/` 或 `/opt/you-markdown/`），包括：`login`、`create-station`、`create-author`、`revoke-user`、`backup`、`challenge`、`apply-update`、`rollback`、`reset-admin`、`set-paths`。只读命令（`status`、`log-verify`、`show-paths`、`hfish-panel`、`hfish-status`）无需 `sudo`。
 
 ### 使用示例
 
 ```bash
 # 创建站长
-$ ym-admin create-station 张三
+$ sudo ym-admin create-station 张三
 站长账号已创建：
   QQ号：station_zhangsan
   密码：aB3xK9mZ2pQ
   角色：station_admin
 
 # 创建写作者（归属某个站长）
-$ ym-admin create-author 李四 --station station_zhangsan
+$ sudo ym-admin create-author 李四 --station station_zhangsan
 写作者账号已创建：
   QQ号：author_lisi
   密码：qW5yJ8nR1tE
@@ -385,7 +387,7 @@ $ ym-admin create-author 李四 --station station_zhangsan
   所属站长：station_zhangsan
 
 # 生成登录入口
-$ ym-admin login
+$ sudo ym-admin login
 入口 URL：https://your-domain.com/admin/entry/Xk7Mp2QvR9zN
 OTP：Tx9#pL4!mW6y
 ⚠️ 以上信息仅显示一次，10 分钟内有效！
@@ -397,7 +399,7 @@ OTP：Tx9#pL4!mW6y
 
 ### 概况
 
-`ym-guard.py` 是独立于 PHP 的 Python 守护进程，提供文件完整性保护和审计日志校验。
+`ym-guard.py` 是独立于 PHP 的 Python 守护进程，提供文件完整性保护、审计日志校验和蜜罐周期同步。
 
 **六层保活机制：**
 
@@ -427,6 +429,14 @@ OTP：Tx9#pL4!mW6y
 2. 发现断裂 → 从 `/opt/you-markdown/logs/audit.json` 镜像恢复
 3. 恢复成功 → 写一条"恢复成功"日志 + 邮件通知超管
 4. 恢复失败 → 邮件告警
+
+### 蜜罐周期同步（v2.3.0）
+
+守护进程每 5 分钟自动运行 `ym-hfish-sync.py`：
+
+1. 只读读取 Hfish 蜜罐数据库（`ip_profile` 攻击者画像）
+2. 生成蜜罐快照 `data/.hfish_snapshot.json` 供超管后台展示
+3. 攻击总次数达到阈值（默认 3 次）的 IP 自动封禁登录/注册/评论
 
 ### 更新锁机制
 
@@ -465,7 +475,7 @@ systemctl status ym-guard
 
 ### 概况
 
-Hfish 是一个开源的蜜罐平台，部署在服务器上用于诱捕和检测攻击行为。You-Markdown v2.0 可选集成 Hfish，在安装脚本中一键部署。
+Hfish 是一个开源的蜜罐平台，部署在服务器上用于诱捕和检测攻击行为。You Super Markdown v2.3.0 可选集成 Hfish，在安装脚本中一键部署。**v2.3.0 新增蜜罐安全联动：超管后台可查看蜜罐攻击日志，攻击次数达到阈值（默认 3 次）的 IP 将自动封禁登录/注册/评论。**
 
 ### 安装
 
@@ -493,6 +503,31 @@ ym-admin hfish-panel
 ym-admin hfish-status
 ```
 
+### v2.3.0 蜜罐安全联动
+
+v2.3.0 新增超管后台「蜜罐安全」页签与蜜罐触发自动封禁机制：
+
+1. **蜜罐日志查看**：超管后台侧边栏点击「蜜罐安全」，可查看蜜罐攻击日志（攻击 IP / 攻击次数 / 攻击行为 / 命中蜜罐 / UA / 最近时间 / 封禁状态），数据来自蜜罐数据库的只读快照。
+2. **立即同步**：点击「立即同步」按钮手动刷新蜜罐数据并执行封禁检查（需要 CSRF Token，同步操作会写入操作审计日志）。
+3. **触发蜜罐自动封禁**：攻击者的蜜罐攻击总次数达到阈值（默认 3 次，可在 `app-config.json` 的 `hfish_ban_threshold` 调整）时，该 IP 自动封禁登录、注册、评论（写入 `data/.bans.json`）。已封禁 IP 不会重复封禁。
+4. **自动同步机制**：文件守护进程 `ym-guard.py` 每 5 分钟自动运行蜜罐同步脚本 `ym-hfish-sync.py`（只读读取蜜罐数据库，不修改蜜罐数据），保证封禁及时生效。
+
+**相关配置（`app-config.json`）**：
+
+```json
+{
+  "hfish_user": "xiao",
+  "hfish_ban_threshold": 3,
+  "hfish_db_path": "/usr/share/hfish/database/hfish.db"
+}
+```
+
+**手动同步命令**：
+
+```bash
+sudo python3 /var/www/you-markdown/ym-hfish-sync.py
+```
+
 ### 安全注意事项
 
 - 蜜罐端口在安装时交互配置，不在源码中硬编码
@@ -506,7 +541,7 @@ ym-admin hfish-status
 
 ### CSRF 防护
 
-所有 POST 表单提交均需携带 CSRF Token。Token 由 `random_bytes(32)` 生成，存储在 session 中，表单提交后立即消费，防重放。
+所有 POST 表单提交均需携带 CSRF Token。Token 由 `random_bytes(32)` 生成，存储在 session 中；页面内可多次操作的操作使用非消费型校验，单次高敏操作使用消费型校验。
 
 ### JWT 会话管理
 
@@ -547,7 +582,7 @@ location ~ ^/data/.*\.json$ {
 
 ### 审计日志
 
-所有操作（包括登录、评论、文章创建/编辑、配置修改、用户管理）全部记录到 `data/.audit.json`。每条日志包含：
+所有操作（包括登录、评论、文章创建/编辑、配置修改、用户管理、蜜罐同步）全部记录到 `data/.audit.json`。每条日志包含：
 
 - 时间（精确到毫秒）
 - 操作人（ID + 角色）
@@ -561,7 +596,7 @@ location ~ ^/data/.*\.json$ {
 
 ***
 
-## 十一、在线更新
+## 十二、在线更新
 
 在线更新采用 **Web 后台发起 + SSH 确认 + CLI 执行** 的混合模式，确保安全可控。
 
@@ -574,23 +609,23 @@ location ~ ^/data/.*\.json$ {
     → 检测最新版本
  ② 点击"执行更新"
     → 弹出挑战码输入框
-                                  ③ ym-admin challenge
-                                     → 生成 6 位确认码（60 秒有效）
+                                  ③ sudo ym-admin challenge
+                                     → 生成 6 位确认码（300 秒有效）
  ④ 输入确认码
     → 验证通过
     → 写入更新请求 + 守护进程休眠标志
-    → 显示"请在 SSH 中执行：ym-admin apply-update"
-                                  ⑤ ym-admin apply-update
+    → 显示"请在 SSH 中执行：sudo ym-admin apply-update"
+                                  ⑤ sudo ym-admin apply-update
                                      → 自动完成 6 步：
                                        1. 备份 Web 目录（保留最近 2 次）
                                        2. 停止守护进程
                                        3. 解锁母本目录
-                                       4. 应用更新（GitHub 或上传包）
+                                       4. 应用更新（上传包或仓库）
                                        5. 锁定母本 + 重启守护进程
                                        6. 记录审计日志
  ⑥ 轮询更新状态
     → 显示"更新成功"
-    → 显示版本变更: v2.0.0 → v2.1.0
+    → 显示版本变更: v2.2.4 → v2.3.0
     → 3 秒后自动刷新页面
 ```
 
@@ -599,14 +634,16 @@ location ~ ^/data/.*\.json$ {
 | 方式 | 触发方式 | 适用场景 |
 |------|---------|---------|
 | **GitHub 拉取** | 后台点击"检查更新"自动检测 | 有外网访问权限的服务器 |
-| **手动上传 ZIP** | 后台选择更新包文件上传 | 内网服务器或需要离线更新 |
+| **手动上传 ZIP/tar.gz** | 后台选择更新包文件上传 | 内网服务器或需要离线更新 |
 
 ### 包类型
 
 | 类型 | 文件名约定 | 说明 |
 |------|-----------|------|
-| 全量包 | `you-markdown-v2.1.0-full.tar.gz` | 包含所有文件，直接覆盖 |
-| 增量包 | `you-markdown-v2.0.0-to-v2.1.0-inc.tar.gz` | 仅包含变更文件，逐个覆盖 |
+| 全量包 | `you-super-markdown-v2.3.0-full.tar.gz` | 包含所有文件，直接覆盖（含 `version.json`） |
+| 增量包 | `you-super-markdown-v2.2.1-to-v2.3.0-inc.tar.gz` | 仅包含变更文件 + `version.json`（`{"version":"2.3.0","type":"incremental","from":"2.2.1"}`），应用时**覆盖式合并**：只更新包内文件，不删除现有文件 |
+
+> ⚠️ **注意**：应用增量包需要支持增量识别的 `ym-admin`（v2.3.0 及以上版本）。若服务器仍是旧版 `ym-admin`，请先全量升级至 v2.3.0 或手动替换 `/usr/local/bin/ym-admin`。
 
 ### 回滚机制
 
@@ -623,10 +660,10 @@ location ~ ^/data/.*\.json$ {
 手动回滚：
 
 ```bash
-ym-admin rollback
+sudo ym-admin rollback
 # 列出可用备份：
-#   [1] v2.0.0 (2026-08-13 10:30:00) - 12.3M
-#   [2] v1.9.0 (2026-08-10 15:22:00) - 11.8M
+#   [1] v2.2.4 (2026-08-14 01:00:00) - 12.3M
+#   [2] v2.2.1 (2026-08-13 10:30:00) - 11.8M
 # 输入编号选择要回滚的版本
 ```
 
@@ -642,20 +679,20 @@ ym-admin rollback
 ### SSH 手动更新（兜底）
 
 ```bash
-systemctl stop ym-guard
+sudo systemctl stop ym-guard
 # ... 部署新版本 ...
-cp -r /var/www/you-markdown/* /opt/you-markdown/install-base/
-chattr -R +i /opt/you-markdown/install-base/
-systemctl start ym-guard
+sudo cp -r /var/www/you-markdown/* /opt/you-markdown/install-base/
+sudo chattr -R +i /opt/you-markdown/install-base/
+sudo systemctl start ym-guard
 ```
 
 ***
 
-## 十二、常见问题
+## 十三、常见问题
 
 **Q: 忘记了高级管理员密码怎么办？**
 
-高级管理员不使用固定密码，通过 SSH 执行 `ym-admin login` 生成新的 OTP 入口即可登录。
+高级管理员不使用固定密码，通过 SSH 执行 `sudo ym-admin login` 生成新的 OTP 入口即可登录。
 
 **Q: 站长/写作者忘记了密码怎么办？**
 
@@ -689,29 +726,44 @@ sudo cp /opt/you-markdown/install-base/index.php /var/www/you-markdown/index.php
 或者通过 CLI：
 
 ```bash
-ym-admin create-station 站长名称
+sudo ym-admin create-station 站长名称
 ```
 
 **Q: 如何启用/禁用访客评论？**
 
 高级管理员登录后台 → 系统配置 → 访客评论开关。
 
+**Q: 蜜罐攻击次数达到多少会封禁？**
+
+默认 3 次（`app-config.json` 的 `hfish_ban_threshold`），达到后自动封禁登录/注册/评论，可在超管后台「蜜罐安全」页查看。
+
 **Q: 如何从旧版本迁移？**
 
 1. 备份旧版 `data/` 目录
 2. 部署新版项目文件
 3. 将备份的 `data/` 复制回去
-4. 运行 `ym-admin reset-admin` 重新创建超级管理员
+4. 运行 `sudo ym-admin reset-admin` 重新创建超级管理员
 
 ***
 
-## 十三、配置参考
+## 十四、配置参考
+
+### 全局配置（app-config.json）
+
+| 配置项 | 默认值 | 说明 |
+| ------ | ------ | ---- |
+| `app_name` | `You Super Markdown` | 应用名称 |
+| `version` | `2.3.0` | 当前版本（唯一事实来源） |
+| `repo_owner` / `repo_name` / `repo_url` | 空 | GitHub 仓库信息（在线更新用） |
+| `hfish_user` | `xiao` | Hfish 蜜罐管理账户 |
+| `hfish_ban_threshold` | `3` | 蜜罐攻击次数封禁阈值 |
+| `hfish_db_path` | `/usr/share/hfish/database/hfish.db` | 蜜罐数据库路径 |
 
 ### 站点配置项（data/.config.json）
 
 | 配置项                      | 类型     | 默认值            | 说明                   |
 | ------------------------ | ------ | -------------- | -------------------- |
-| `site_title`             | string | `You Markdown` | 网站标题                 |
+| `site_title`             | string | `You Super Markdown` | 网站标题                 |
 | `guest_comments_enabled` | bool   | `false`        | 是否允许访客评论             |
 | `registration_enabled`   | bool   | `true`         | 是否允许新用户注册            |
 | `update_channel`         | string | `stable`       | 更新通道（stable/beta）    |
@@ -727,4 +779,3 @@ ym-admin create-station 站长名称
 | `station_path`           | string | `station`      | 站长后台 URL 路径前缀        |
 | `author_path`            | string | `author`       | 写作者后台 URL 路径前缀       |
 | `hide_default_paths`     | bool   | `true`         | 自定义路径生效后隐藏默认路径       |
-

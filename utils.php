@@ -78,13 +78,14 @@ function saveUsers($users) {
     $pdo->beginTransaction();
     try {
         $pdo->exec('DELETE FROM users');
-        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, qq, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
+        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, qq, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled, last_login, login_count) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
         foreach ($users as $u) {
             $st->execute([
                 $u['id'] ?? '', $u['qq'] ?? '', $u['nickname'] ?? '', $u['password'] ?? '',
                 $u['avatar'] ?? '', $u['signature'] ?? '', $u['role'] ?? 'user',
                 $u['station_id'] ?? '', $u['created'] ?? '', $u['created_by'] ?? '',
                 $u['email'] ?? '', (int)($u['disabled'] ?? 0),
+                $u['last_login'] ?? '', (int)($u['login_count'] ?? 0),
             ]);
         }
         $pdo->commit();
@@ -94,6 +95,19 @@ function saveUsers($users) {
     }
 }
 function genId() { return bin2hex(random_bytes(8)); }
+
+/** v2.11.5：生成随机强密码（符合统一策略：至少 8 位且同时包含大小写字母与数字；用于超管重置用户密码） */
+function randomPassword($len = 12) {
+    $lower = 'abcdefghijkmnpqrstuvwxyz';
+    $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    $digits = '23456789';
+    $pwd = $lower[random_int(0, strlen($lower) - 1)]
+        . $upper[random_int(0, strlen($upper) - 1)]
+        . $digits[random_int(0, strlen($digits) - 1)];
+    $pool = $lower . $upper . $digits;
+    for ($i = 3; $i < $len; $i++) $pwd .= $pool[random_int(0, strlen($pool) - 1)];
+    return str_shuffle($pwd);
+}
 
 function loadSiteConfig() {
     $defaults = [
@@ -1798,6 +1812,8 @@ function webauthn_login_complete($input, $qq) {
     }
     if (!$u) return ['ok' => false, 'err' => '账号不存在'];
     session_regenerate_id(true);
+    // v2.11.5：设备登录同样记录最后登录时间与次数
+    db_exec('UPDATE users SET last_login = ?, login_count = login_count + 1 WHERE id = ?', [date('Y-m-d H:i:s'), $u['id']]);
     $_SESSION['cmt_user'] = [
         'id' => $u['id'], 'qq' => $u['qq'],
         'nickname' => $u['nickname'] ?? '',

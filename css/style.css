@@ -1735,7 +1735,6 @@ kbd {
     flex-direction: column;
     gap: 12px;
 }
-.cmt-reg-verify .captcha-box { margin-top: 2px; }
 .cmt-reg-email-row { display: flex; gap: 8px; }
 .cmt-reg-email-row .cmt-modal-input { flex: 1; min-width: 0; }
 /* v2.10.2：注册表单统一设计——分组标题（分隔线）+ 验证区浅色内嵌分层 */
@@ -1818,46 +1817,88 @@ kbd {
 .cmt-user-link:hover .cmt-reply-name { color: var(--accent); }
 .cmt-user-link:hover .cmt-avatar-img { opacity: 0.82; }
 .captcha-box { margin-top: 10px; }
-.captcha-slider {
-    position: relative;
-    height: 44px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--code-bg);
-    overflow: hidden;
-    user-select: none;
-    -webkit-user-select: none;
-    touch-action: none;
-}
-.captcha-track { position: absolute; inset: 0; }
-.captcha-dot {
+/* ===== v2.11.0：滑块人机验证已彻底移除；以下为登录框新样式（密码可见性 / 设备快速登录 / 设备管理） ===== */
+.cmt-pw-row { position: relative; width: 100%; }
+.cmt-pw-row .cmt-modal-input.cmt-pw-input { padding-right: 44px; }
+.cmt-pw-toggle {
     position: absolute;
+    right: 4px;
     top: 50%;
-    width: 14px;
-    height: 14px;
-    margin: -7px 0 0 -7px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 0 4px var(--accent-light);
-    pointer-events: none;
+    transform: translateY(-50%);
+    width: 34px;
+    height: 34px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    color: var(--text-muted);
+    border-radius: 8px;
 }
-.captcha-thumb {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 46px;
-    height: 100%;
+.cmt-pw-toggle:hover { background: var(--hover-bg); color: var(--text); }
+.cmt-device-login { margin-top: 8px; width: 100%; }
+.cmt-device-btn {
+    width: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--surface);
-    border-right: 1px solid var(--border);
-    cursor: grab;
+    gap: 8px;
+    padding: 10px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
     color: var(--text-secondary);
-    font-size: 16px;
-    touch-action: none;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
 }
-.captcha-thumb.dragging { cursor: grabbing; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
-.captcha-thumb.passed { background: hsl(var(--accent-hue), var(--accent-sat), 45%); color: #fff; border-right: none; cursor: default; }
-.captcha-hint { margin-top: 6px; font-size: 12px; color: var(--text-muted); text-align: center; }
-.captcha-hint.ok { color: hsl(var(--accent-hue), var(--accent-sat), 40%); }
+.cmt-device-btn svg { width: 16px; height: 16px; }
+.cmt-device-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.cmt-profile-devices { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.cmt-profile-sec-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.cmt-device-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.cmt-device-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--code-bg);
+}
+.cmt-device-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cmt-device-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.cmt-device-meta { font-size: 11px; color: var(--text-muted); }
+.cmt-device-del {
+    flex-shrink: 0;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--danger, #e5484d);
+    font-size: 12px;
+    cursor: pointer;
+}
+.cmt-device-del:hover { background: rgba(229,72,77,0.08); border-color: var(--danger, #e5484d); }
+.cmt-device-empty { font-size: 12px; color: var(--text-muted); padding: 6px 2px; }
+.cmt-device-add {
+    width: 100%;
+    padding: 9px;
+    border: 1px dashed var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.cmt-device-add:hover { opacity: 0.85; }

@@ -115,7 +115,7 @@ if (isset($_POST['save_verify_config'])) {
         exit;
     }
     $config['email_verify_enabled'] = !empty($_POST['email_verify_enabled']);
-    $config['captcha_enabled'] = !empty($_POST['captcha_enabled']);
+    // v2.11.0：滑块人机验证已彻底移除（captcha_enabled 配置删除）
     $config['author_dual_verify_enabled'] = !empty($_POST['author_dual_verify_enabled']);
     $config['verify_code_ttl'] = max(60, (int)($_POST['verify_code_ttl'] ?? 300));
     $config['confirm_link_ttl'] = max(300, (int)($_POST['confirm_link_ttl'] ?? 86400));
@@ -2359,13 +2359,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                     </div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">滑块人机验证</label>
-                    <div class="form-check">
-                        <input type="checkbox" name="captcha_enabled" id="ev_captcha" value="1" <?= !empty($config['captcha_enabled']) ? 'checked' : '' ?>>
-                        <label for="ev_captcha">注册与站长创建写作者时启用滑块验证</label>
-                    </div>
-                </div>
-                <div class="form-group">
+                    <!-- v2.11.0：滑块人机验证已彻底移除（原 captcha_enabled 开关删除） -->
                     <label class="form-label">写作者双重确认</label>
                     <div class="form-check">
                         <input type="checkbox" name="author_dual_verify_enabled" id="ev_dual" value="1" <?= !empty($config['author_dual_verify_enabled']) ? 'checked' : '' ?>>

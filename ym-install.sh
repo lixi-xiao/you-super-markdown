@@ -232,9 +232,10 @@ if [ "$AUTO_YES" != true ] && [ -z "$VERIFY_MODE_ARG" ]; then
 fi
 if [ "$VERIFY_MODE" != "test" ]; then VERIFY_MODE="production"; fi
 if [ "$VERIFY_MODE" = "production" ]; then
-    VERIFY_EMAIL_FLAG=true; VERIFY_CAPTCHA_FLAG=true; VERIFY_DUAL_FLAG=true
+    # v2.11.0：滑块人机验证已彻底移除（VERIFY_CAPTCHA_FLAG 删除），仅邮箱验证 + 双重确认
+    VERIFY_EMAIL_FLAG=true; VERIFY_DUAL_FLAG=true
 else
-    VERIFY_EMAIL_FLAG=false; VERIFY_CAPTCHA_FLAG=false; VERIFY_DUAL_FLAG=false
+    VERIFY_EMAIL_FLAG=false; VERIFY_DUAL_FLAG=false
 fi
 
 echo ""
@@ -358,7 +359,6 @@ cat > "$WEB_ROOT/data/.config.json" << EOF
     "author_path": "author",
     "hide_default_paths": true,
     "email_verify_enabled": ${VERIFY_EMAIL_FLAG},
-    "captcha_enabled": ${VERIFY_CAPTCHA_FLAG},
     "author_dual_verify_enabled": ${VERIFY_DUAL_FLAG},
     "verify_code_ttl": 300,
     "confirm_link_ttl": 86400,

@@ -306,7 +306,7 @@ if ($action === 'update') {
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="css/style.css?v=<?= filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
-<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-reg-captcha="<?= !empty($_siteConfig['captcha_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_siteConfig['bg_api_url'] ?? '') ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
+<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_siteConfig['bg_api_url'] ?? '') ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($_siteTitle) ?></a></div>
     <div class="header-right">
@@ -511,10 +511,21 @@ if ($action === 'update') {
         <div class="cmt-modal-head"><div class="cmt-modal-title" id="cmtAuthTitle">登录</div></div>
         <div class="cmt-modal-body cmt-auth-slide" id="cmtAuthSlide">
             <div class="cmt-modal-form" id="cmtLoginForm">
-                <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtLoginQQ">
-                <input class="cmt-modal-input" type="password" placeholder="密码" id="cmtLoginPw">
+                <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtLoginQQ" autocomplete="username">
+                <div class="cmt-pw-row">
+                    <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="密码" id="cmtLoginPw" autocomplete="current-password">
+                    <button type="button" class="cmt-pw-toggle" id="cmtLoginPwToggle" tabindex="-1" title="显示/隐藏密码">👁</button>
+                </div>
                 <div class="cmt-modal-err" id="cmtLoginErr"></div>
                 <button class="cmt-modal-submit" id="cmtLoginBtn">登录</button>
+                <!-- v2.11.0：设备快速登录（电脑 Windows Hello PIN / 手机指纹） -->
+                <div class="cmt-device-login" id="cmtDeviceLoginRow" style="display:none">
+                    <button type="button" class="cmt-device-btn" id="cmtDeviceLoginBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                        使用设备快速登录（PIN / 指纹）
+                    </button>
+                    <div class="cmt-modal-err" id="cmtDeviceLoginErr"></div>
+                </div>
             </div>
             <div class="cmt-modal-form cmt-reg-form" id="cmtRegForm" style="display:none">
                 <!-- v2.10.2：注册表单统一设计——账号信息 / 身份验证分组分层 -->
@@ -529,14 +540,6 @@ if ($action === 'update') {
                         <button type="button" class="cmt-code-btn" id="cmtRegSendCode">获取验证码</button>
                     </div>
                     <input class="cmt-modal-input" type="text" placeholder="邮箱验证码（6位）" maxlength="6" id="cmtRegCode">
-                    <div class="captcha-box" id="cmtRegCaptchaBox">
-                        <div class="captcha-slider" id="cmtRegSlider">
-                            <div class="captcha-track" id="cmtRegTrack"></div>
-                            <div class="captcha-dot" id="cmtRegDot"></div>
-                            <div class="captcha-thumb" id="cmtRegThumb"><span>→</span></div>
-                        </div>
-                        <div class="captcha-hint" id="cmtRegCaptchaHint">拖动滑块对准圆点完成验证</div>
-                    </div>
                 </div>
                 <div class="cmt-modal-err" id="cmtRegErr"></div>
                 <button class="cmt-modal-submit" id="cmtRegBtn">注册</button>
@@ -573,6 +576,13 @@ if ($action === 'update') {
                     <input class="cmt-modal-input" type="text" placeholder="邮箱验证码（6位）" maxlength="6" id="cmtEditEmailCode">
                     <div class="cmt-modal-err" id="cmtEmailErr"></div>
                     <button class="cmt-modal-submit cmt-email-confirm" id="cmtEmailSave">确认绑定</button>
+                </div>
+                <!-- v2.11.0：设备快速登录管理（绑定/解绑，电脑 PIN / 手机指纹） -->
+                <div class="cmt-profile-devices" id="cmtDevicesWrap">
+                    <div class="cmt-profile-sec-title">设备快速登录</div>
+                    <div class="cmt-device-list" id="cmtDeviceList"></div>
+                    <button type="button" class="cmt-device-add" id="cmtDeviceBindBtn">＋ 绑定当前设备（PIN / 指纹）</button>
+                    <div class="cmt-modal-err" id="cmtDeviceErr"></div>
                 </div>
             </div>
         </div>

@@ -923,15 +923,19 @@
     const cmtRegEmail = document.getElementById('cmtRegEmail');
     const cmtRegSendCode = document.getElementById('cmtRegSendCode');
     const cmtRegCode = document.getElementById('cmtRegCode');
-    const cmtRegCaptchaBox = document.getElementById('cmtRegCaptchaBox');
     const regVerifyOn = (document.body.getAttribute('data-reg-verify') === '1');
-    const regCaptchaOn = (document.body.getAttribute('data-reg-captcha') === '1');
+    // v2.11.0：滑块人机验证已彻底移除（cmtRegCaptchaBox / regCaptchaOn 删除）
     // v2.10.0：邮箱验证开关（控制前台个人设置里的邮箱绑定/更换入口）与 CSRF token
     const emailChangeOn = (document.body.getAttribute('data-email-change') === '1');
     const csrfToken = document.body.getAttribute('data-csrf') || '';
     const cmtSwitchText = document.getElementById('cmtSwitchText');
     const cmtSwitchBtn = document.getElementById('cmtSwitchBtn');
     const cmtProfileModal = document.getElementById('cmtProfileModal');
+    // v2.11.0：设备快速登录（WebAuthn）控件
+    const cmtDevicesWrap = document.getElementById('cmtDevicesWrap');
+    const cmtDeviceList = document.getElementById('cmtDeviceList');
+    const cmtDeviceBindBtn = document.getElementById('cmtDeviceBindBtn');
+    const cmtDeviceErr = document.getElementById('cmtDeviceErr');
     const cmtEditNick = document.getElementById('cmtEditNick');
     const cmtEditSign = document.getElementById('cmtEditSign');
     const cmtProfileErr = document.getElementById('cmtProfileErr');
@@ -1012,6 +1016,13 @@
             if (emailErr) emailErr.textContent = '';
             const sendBtn = document.getElementById('cmtEmailSendCode');
             if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '获取验证码'; }
+            // v2.11.0：打开编辑资料时刷新设备快速登录列表
+            if (cmtDevicesWrap && deviceLoginSupported()) {
+                cmtDevicesWrap.style.display = 'block';
+                cmtLoadDevices();
+            } else if (cmtDevicesWrap) {
+                cmtDevicesWrap.style.display = 'none';
+            }
             cmtOpenModal(cmtProfileModal);
         }
     });
@@ -1041,6 +1052,61 @@
         if (cmtLoginErr) cmtLoginErr.textContent = '';
         if (cmtRegErr) cmtRegErr.textContent = '';
     }
+    // ---- v2.11.0：登录逻辑优化——回车提交、密码可见性、失败锁定倒计时、设备快速登录 ----
+    // WebAuthn base64url 编码（ArrayBuffer → 字符串）
+    function webauthnB64url(buf) {
+        const bytes = new Uint8Array(buf);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    function deviceLoginSupported() {
+        return typeof window.PublicKeyCredential !== 'undefined'
+            && typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function';
+    }
+    const cmtLoginPwToggle = document.getElementById('cmtLoginPwToggle');
+    const cmtDeviceLoginRow = document.getElementById('cmtDeviceLoginRow');
+    const cmtDeviceLoginBtn = document.getElementById('cmtDeviceLoginBtn');
+    const cmtDeviceLoginErr = document.getElementById('cmtDeviceLoginErr');
+    if (cmtLoginQQ) cmtLoginQQ.addEventListener('keydown', (e) => { if (e.key === 'Enter' && cmtLoginBtn) cmtLoginBtn.click(); });
+    if (cmtLoginPw) cmtLoginPw.addEventListener('keydown', (e) => { if (e.key === 'Enter' && cmtLoginBtn) cmtLoginBtn.click(); });
+    if (cmtLoginPwToggle && cmtLoginPw) cmtLoginPwToggle.addEventListener('click', () => {
+        const isPw = cmtLoginPw.type === 'password';
+        cmtLoginPw.type = isPw ? 'text' : 'password';
+        cmtLoginPwToggle.textContent = isPw ? '🙈' : '👁';
+    });
+    // 登录弹窗显示设备快速登录入口（仅当平台认证器支持 PIN/指纹时）
+    if (cmtDeviceLoginRow && deviceLoginSupported()) {
+        PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(ok => {
+            if (ok) cmtDeviceLoginRow.style.display = 'block';
+        }).catch(() => {});
+    }
+    if (cmtDeviceLoginBtn) cmtDeviceLoginBtn.addEventListener('click', async () => {
+        const qq = cmtLoginQQ.value.trim();
+        cmtDeviceLoginErr.textContent = '';
+        if (!qq) { cmtDeviceLoginErr.textContent = '请先输入QQ号'; return; }
+        try {
+            const r0 = await fetch('api.php?action=webauthn_login_begin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq }) });
+            const d0 = await r0.json();
+            if (!d0.success) { cmtDeviceLoginErr.textContent = d0.error || '设备登录不可用'; return; }
+            const opts = d0.options;
+            if (!opts.allowCredentials || opts.allowCredentials.length === 0) { cmtDeviceLoginErr.textContent = '该账号未绑定设备，请先用密码登录，再在「编辑资料」中绑定'; return; }
+            const cred = await navigator.credentials.get({ publicKey: opts });
+            const assertion = {
+                id: cred.id,
+                clientDataJSON: webauthnB64url(cred.response.clientDataJSON),
+                authenticatorData: webauthnB64url(cred.response.authenticatorData),
+                signature: webauthnB64url(cred.response.signature)
+            };
+            const r1 = await fetch('api.php?action=webauthn_login_complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ qq: qq }, assertion)) });
+            const d1 = await r1.json();
+            if (d1.success) { cmtUser = d1.user; cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); }
+            else cmtDeviceLoginErr.textContent = d1.error || '设备验证失败';
+        } catch (e) {
+            if (e && e.name === 'NotAllowedError') cmtDeviceLoginErr.textContent = '已取消验证';
+            else cmtDeviceLoginErr.textContent = '设备验证失败（' + ((e && e.message) || '未知错误') + '）';
+        }
+    });
     if (cmtLoginBtn) cmtLoginBtn.addEventListener('click', () => {
         const qq = cmtLoginQQ.value.trim(), pw = cmtLoginPw.value;
         cmtLoginErr.textContent = '';
@@ -1057,93 +1123,31 @@
                         setTimeout(function() { location.reload(); }, 600);
                         return;
                     }
-                    cmtLoginErr.textContent = d.error || '登录失败';
+                    // v2.11.0：锁定（429）时显示剩余秒数倒计时
+                    if (d.locked_seconds > 0) {
+                        let left = d.locked_seconds;
+                        const fmt = () => '登录失败次数过多，请 ' + Math.floor(left / 60) + ' 分 ' + (left % 60) + ' 秒后重试';
+                        cmtLoginErr.textContent = fmt();
+                        const t = setInterval(() => {
+                            left--;
+                            if (left <= 0) { clearInterval(t); cmtLoginErr.textContent = ''; }
+                            else cmtLoginErr.textContent = fmt();
+                        }, 1000);
+                    } else {
+                        cmtLoginErr.textContent = d.error || '登录失败';
+                    }
                 }
             }).catch(() => { cmtLoginErr.textContent = '网络错误'; })
             .finally(() => { cmtLoginBtn.disabled = false; cmtLoginBtn.textContent = '登录'; });
     });
-    // ---- v2.9.0 滑块人机验证组件（对准随机圆点，误差≤3%） ----
-    function initYMCaptcha(box) {
-        const slider = box.querySelector('.captcha-slider');
-        const thumb = box.querySelector('.captcha-thumb');
-        const dot = box.querySelector('.captcha-dot');
-        const hint = box.querySelector('.captcha-hint');
-        const state = { id: '', target: 0, passed: false };
-        const thumbW = 46;
-        let dragging = false, curPct = 0;
-
-        function refresh() {
-            state.id = ''; state.passed = false; curPct = 0;
-            thumb.classList.remove('passed', 'dragging');
-            thumb.style.left = '0px';
-            dot.style.left = '0%';
-            hint.textContent = '拖动滑块对准圆点完成验证';
-            hint.classList.remove('ok');
-            fetch('api.php?action=captcha_new')
-                .then(r => r.json())
-                .then(d => {
-                    if (d.success) {
-                        state.id = d.captcha_id;
-                        state.target = d.captcha_pos;
-                        dot.style.left = (state.target / 10) + '%';
-                    }
-                })
-                .catch(() => {});
-        }
-        function setPos(clientX) {
-            const rect = slider.getBoundingClientRect();
-            let pct = (clientX - rect.left) / rect.width * 100;
-            pct = Math.max(0, Math.min(100, pct));
-            curPct = pct;
-            thumb.style.left = (pct / 100 * (rect.width - thumbW)) + 'px';
-        }
-        function release() {
-            if (!dragging) return;
-            dragging = false;
-            thumb.classList.remove('dragging');
-            if (!state.id) { hint.textContent = '验证码加载失败，请重试'; return; }
-            if (Math.abs(Math.round(curPct * 10) - state.target) <= 30) {
-                state.passed = true;
-                thumb.classList.add('passed');
-                thumb.innerHTML = '<span>✓</span>';
-                hint.textContent = '验证通过';
-                hint.classList.add('ok');
-            } else {
-                refresh();
-            }
-        }
-        thumb.addEventListener('pointerdown', (e) => {
-            if (state.passed) return;
-            dragging = true;
-            thumb.classList.add('dragging');
-            thumb.setPointerCapture(e.pointerId);
-            setPos(e.clientX);
-        });
-        thumb.addEventListener('pointermove', (e) => { if (dragging) setPos(e.clientX); });
-        thumb.addEventListener('pointerup', release);
-        thumb.addEventListener('pointercancel', release);
-        return {
-            refresh,
-            result: () => state.passed ? { id: state.id, pos: Math.round(curPct * 10) } : null
-        };
-    }
-
-    let cmtRegCaptcha = null;
+    // ---- v2.11.0：滑块人机验证组件已彻底移除 ----
     function cmtRegShowVerify() {
         if (cmtRegVerifyBox) cmtRegVerifyBox.style.display = 'flex';
-        // v2.10.0：captcha 开关关闭时隐藏滑块容器（邮箱验证码输入保留）
-        if (cmtRegCaptchaBox) cmtRegCaptchaBox.style.display = regCaptchaOn ? '' : 'none';
-        if (regCaptchaOn && cmtRegCaptchaBox) {
-            if (!cmtRegCaptcha) cmtRegCaptcha = initYMCaptcha(cmtRegCaptchaBox);
-            cmtRegCaptcha.refresh();
-        }
     }
-    // 切到注册时按开关显示验证区块
+    // 切到注册时显示验证区块
     if (cmtSwitchBtn) {
         const sw = cmtSwitchBtn;
         sw.addEventListener('click', () => {
-            // v2.10.0 修复：原切换逻辑带 200ms 滑出动画后才切表单，50ms 检查过早导致验证区块永不显示；
-            // 对齐为 250ms（动画 200ms 完成后），同时按开关决定显示/隐藏
             setTimeout(() => {
                 if (cmtRegForm && cmtRegForm.style.display !== 'none') {
                     if (regVerifyOn) cmtRegShowVerify(); else if (cmtRegVerifyBox) cmtRegVerifyBox.style.display = 'none';
@@ -1157,13 +1161,11 @@
         const email = cmtRegEmail.value.trim();
         const re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
         if (!re.test(email)) { cmtRegErr.textContent = '请输入正确的邮箱'; return; }
-        const captcha = cmtRegCaptcha ? cmtRegCaptcha.result() : null;
-        if (regCaptchaOn && !captcha) { cmtRegErr.textContent = '请先完成滑块验证'; return; }
         cmtRegErr.textContent = '';
         cmtRegSendCode.disabled = true;
         fetch('api.php?action=send_register_code', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, captcha_id: captcha ? captcha.id : '', captcha_pos: captcha ? captcha.pos : 0 })
+            body: JSON.stringify({ email })
         }).then(r => r.json()).then(d => {
             if (d.success) {
                 cmtRegErr.textContent = '';
@@ -1185,22 +1187,81 @@
         const qq = cmtRegQQ.value.trim(), nick = cmtRegNick.value.trim(), pw = cmtRegPw.value;
         const email = regVerifyOn ? cmtRegEmail.value.trim() : '';
         const code = regVerifyOn ? cmtRegCode.value.trim() : '';
-        const captcha = cmtRegCaptcha ? cmtRegCaptcha.result() : null;
         cmtRegErr.textContent = '';
         if (!qq || !pw) { cmtRegErr.textContent = '请填写QQ号和密码'; return; }
         if (pw.length < 8 || !/[a-z]/.test(pw) || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw)) { cmtRegErr.textContent = '密码至少8位，且需包含大写字母、小写字母与数字'; return; }
         if (regVerifyOn) {
             if (!email) { cmtRegErr.textContent = '请填写邮箱'; return; }
             if (!code) { cmtRegErr.textContent = '请填写邮箱验证码'; return; }
-            if (regCaptchaOn && !captcha) { cmtRegErr.textContent = '请先完成滑块验证'; return; }
         }
         cmtRegBtn.disabled = true; cmtRegBtn.textContent = '注册中...';
-        fetch('api.php?action=register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw, email, code, captcha_id: captcha ? captcha.id : '', captcha_pos: captcha ? captcha.pos : 0 }) })
+        fetch('api.php?action=register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw, email, code }) })
             .then(r => r.json()).then(d => {
                 if (d.success) { cmtUser = d.user; cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); }
                 else { cmtRegErr.textContent = d.error || '注册失败'; }
             }).catch(() => { cmtRegErr.textContent = '网络错误'; })
             .finally(() => { cmtRegBtn.disabled = false; cmtRegBtn.textContent = '注册'; });
+    });
+    // ---- v2.11.0：设备快速登录管理（列表 / 绑定 / 解绑） ----
+    function cmtLoadDevices() {
+        if (!cmtDeviceList) return;
+        fetch('api.php?action=webauthn_devices', { method: 'POST' })
+            .then(r => r.json()).then(d => {
+                if (!d.success) return;
+                if (!d.devices || d.devices.length === 0) {
+                    cmtDeviceList.innerHTML = '<div class="cmt-device-empty">未绑定设备</div>';
+                    return;
+                }
+                cmtDeviceList.innerHTML = d.devices.map(dev => {
+                    const last = dev.last_used ? new Date(dev.last_used * 1000).toLocaleString() : '从未使用';
+                    return '<div class="cmt-device-item">'
+                        + '<div class="cmt-device-info"><span class="cmt-device-name">' + escapeHTML(dev.device_name) + '</span>'
+                        + '<span class="cmt-device-meta">最近使用 ' + last + '</span></div>'
+                        + '<button class="cmt-device-del" data-id="' + dev.id + '">解绑</button></div>';
+                }).join('');
+                cmtDeviceList.querySelectorAll('.cmt-device-del').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        if (!window.confirm('确定解绑该设备？')) return;
+                        fetch('api.php?action=webauthn_device_remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device_id: btn.dataset.id }) })
+                            .then(r => r.json()).then(dd => {
+                                if (dd.success) { cmtLoadDevices(); if (cmtDeviceErr) cmtDeviceErr.textContent = ''; }
+                                else if (cmtDeviceErr) cmtDeviceErr.textContent = dd.error || '解绑失败';
+                            }).catch(() => { if (cmtDeviceErr) cmtDeviceErr.textContent = '网络错误'; });
+                    });
+                });
+            }).catch(() => {});
+    }
+    if (cmtDeviceBindBtn) cmtDeviceBindBtn.addEventListener('click', async () => {
+        if (cmtDeviceErr) cmtDeviceErr.textContent = '';
+        try {
+            const r0 = await fetch('api.php?action=webauthn_register_begin', { method: 'POST' });
+            const d0 = await r0.json();
+            if (!d0.success) { if (cmtDeviceErr) cmtDeviceErr.textContent = d0.error || '无法开始绑定'; return; }
+            // 设备名：按 UA 简化（不采集/上传精确设备标识，隐私友好）
+            let devName = '平台认证器（PIN/指纹）';
+            if (navigator.userAgent) {
+                const m = navigator.userAgent.match(/Windows NT (\d+\.\d+)/);
+                if (m) devName = 'Windows 电脑';
+                else if (/Android/i.test(navigator.userAgent)) devName = 'Android 手机';
+                else if (/iPhone|iPad/i.test(navigator.userAgent)) devName = 'iPhone / iPad';
+                else if (/Macintosh/i.test(navigator.userAgent)) devName = 'macOS';
+                else if (/Linux/i.test(navigator.userAgent)) devName = 'Linux 设备';
+            }
+            const cred = await navigator.credentials.create({ publicKey: d0.options });
+            const att = {
+                id: cred.id,
+                clientDataJSON: webauthnB64url(cred.response.clientDataJSON),
+                attestationObject: webauthnB64url(cred.response.attestationObject),
+                device_name: devName
+            };
+            const r1 = await fetch('api.php?action=webauthn_register_complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(att) });
+            const d1 = await r1.json();
+            if (d1.success) { cmtLoadDevices(); if (cmtDeviceErr) cmtDeviceErr.textContent = ''; showToast('设备已绑定'); }
+            else if (cmtDeviceErr) cmtDeviceErr.textContent = d1.error || '绑定失败';
+        } catch (e) {
+            if (e && e.name === 'NotAllowedError') { if (cmtDeviceErr) cmtDeviceErr.textContent = '已取消绑定'; }
+            else if (cmtDeviceErr) cmtDeviceErr.textContent = '绑定失败（' + ((e && e.message) || '未知错误') + '）';
+        }
     });
     if (cmtProfileSave) cmtProfileSave.addEventListener('click', () => {
         const nick = cmtEditNick.value.trim(), sign = cmtEditSign.value.trim();

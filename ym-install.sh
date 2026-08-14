@@ -644,7 +644,8 @@ PORTCONF
         fi
         # 自动配置蜜獾账户：名称改为 hfish_user，密码与服务器一致
         configure_hfish_account "$HFISH_USER" "$HFISH_PASSWORD"
-        info "Hfish 管理面板: https://$DOMAIN:$HFISH_PANEL_PORT"
+        # 设计指标：管理面板仅本机可访问，需经 SSH 隧道（ym-admin hfish-panel），不提供公网 URL
+        info "Hfish 管理面板: 仅本机访问（SSH 隧道 → sudo ym-admin hfish-panel）"
         info "蜜獾账户: $HFISH_USER（密码已配置，登录后请妥善保管）"
     else
         warn "Hfish 服务启动失败，请检查: systemctl status hfish"
@@ -652,11 +653,17 @@ PORTCONF
     fi
 
     # 防火墙配置
+    # 设计指标：管理面板端口（HFISH_PANEL_PORT）不开放公网，仅经 ym-admin hfish-panel SSH 隧道本机访问；
+    # 节点通信端口为蜜罐诱饵/节点通道，需公网可达才能捕获攻击者（蜜罐本意：故意暴露的诱饵），故放行
     log "配置 Hfish 防火墙规则..."
-    ufw allow ${HFISH_PANEL_PORT}/tcp comment 'Hfish web panel' > /dev/null 2>&1 || true
-    ufw allow ${HFISH_NODE_PORT}/tcp comment 'Hfish node' > /dev/null 2>&1 || true
+    ufw allow "${HFISH_NODE_PORT}/tcp" comment 'Hfish node' > /dev/null 2>&1 || true
+    # 清理历史残留：旧版安装脚本（≤v2.2.x）曾把面板端口放行到公网，
+    # 此处主动删除（默认 4433 + 当前面板端口），确保旧服务器升级/重装后面板仍仅经 SSH 隧道本机可达
+    for _p in "${HFISH_PANEL_PORT}" 4433; do
+        ufw delete allow "${_p}/tcp" > /dev/null 2>&1 || true
+    done
     ufw reload > /dev/null 2>&1 || true
-    log "Hfish 防火墙规则已配置"
+    log "Hfish 防火墙规则已配置（管理面板端口 ${HFISH_PANEL_PORT} 不开放公网，仅 SSH 隧道访问）"
 }
 
 # 自动配置蜜獾账户（用户名 + 密码，bcrypt 存储，兼容 HFish Go 校验）

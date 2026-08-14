@@ -400,9 +400,20 @@ function auditLog($action, $target = '', $detail = '', $result = 'success') {
         'detail' => $detail,
         'result' => $result,
     ];
+    // v2.8.1 修复（踩坑 #25）：prev_hash 以 audit 表最后一条 hash 为唯一真源，
+    // 不再信任 .audit_chain 链尾文件——镜像背书与链尾文件独立更新可能错位，
+    // 恢复审计表后链尾文件残留旧值会导致下一条记录断链。链尾文件仅作冗余备份照常刷新。
     $prevHash = '';
-    if (file_exists(AUDIT_CHAIN_FILE)) {
-        $prevHash = trim(file_get_contents(AUDIT_CHAIN_FILE));
+    try {
+        $last = db_one('SELECT hash FROM audit ORDER BY rowid DESC LIMIT 1');
+        if ($last && !empty($last['hash'])) {
+            $prevHash = $last['hash'];
+        }
+    } catch (Exception $e) {
+        // 表异常时兜底读链尾文件（不应发生，仅防御）
+        if (file_exists(AUDIT_CHAIN_FILE)) {
+            $prevHash = trim(file_get_contents(AUDIT_CHAIN_FILE));
+        }
     }
     $entry['prev_hash'] = $prevHash;
     $entryJson = json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -483,8 +494,20 @@ function recoverAuditFromMirror() {
         $pdo->rollBack();
         return false;
     }
-    $mirrorChain = AUDIT_MIRROR_DIR . 'audit_chain';
-    if (file_exists($mirrorChain)) copy($mirrorChain, AUDIT_CHAIN_FILE);
+    // v2.8.1 修复（踩坑 #25）：恢复后必须把链尾文件校正为恢复后表尾 hash，
+    // 不可 copy 镜像 audit_chain——镜像 ym.db 与 audit_chain 文件由不同时机更新（背书/写日志）可能错位，
+    // 残留旧链尾会导致下一条记录断链。
+    try {
+        $last = $pdo->query('SELECT hash FROM audit ORDER BY rowid DESC LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+        $tail = ($last && !empty($last['hash'])) ? $last['hash'] : '';
+        file_put_contents(AUDIT_CHAIN_FILE, $tail, LOCK_EX);
+        if (is_dir(AUDIT_MIRROR_DIR)) {
+            @file_put_contents(AUDIT_MIRROR_DIR . 'audit_chain', $tail, LOCK_EX);
+        }
+    } catch (Exception $e) {
+        // 链尾刷新失败不应判定恢复失败（表已恢复），仅记录
+        error_log('recoverAuditFromMirror 链尾刷新失败: ' . $e->getMessage());
+    }
     return true;
 }
 

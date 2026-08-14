@@ -8,6 +8,14 @@ if (!checkRole(ROLE_STATION_ADMIN)) {
     exit;
 }
 
+// v2.7.2：账号被删/吊销后会话立即失效（防已删账号凭残留 Session 继续访问后台）
+if (!validateBackendUser()) {
+    session_unset();
+    session_destroy();
+    header('Location: /?admin_login=1&expired=1');
+    exit;
+}
+
 // 自定义入口路径验证：hide_default_paths 开启时，拒绝通过默认路径访问
 $config = loadSiteConfig();
 if (!empty($config['hide_default_paths'])) {

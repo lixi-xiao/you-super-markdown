@@ -39,11 +39,11 @@ $tab = $_GET['tab'] ?? 'articles';
 if (!in_array($tab, ['articles', 'profile'], true)) $tab = 'articles';
 $msg = $_GET['msg'] ?? '';
 
-// v2.6.3：写作者修改个人信息（昵称/签名/新密码）
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['profile_save']) && !isset($_POST['logout'])) {
+// v2.6.3：写作者修改个人信息（昵称/签名/新密码）；v2.10.0：扩展头像上传 + 邮箱更换
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         $msg = 'csrf_error';
-    } else {
+    } elseif (isset($_POST['profile_save'])) {
         $nick = trim($_POST['nickname'] ?? '');
         $sign = trim($_POST['signature'] ?? '');
         $newPw = $_POST['password'] ?? '';
@@ -73,6 +73,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['profile_save']) && !i
             if ($newPw !== '') $_SESSION['cmt_user']['pw_hash'] = password_hash($newPw, PASSWORD_DEFAULT);
             auditLog('profile_update', $myId, '写作者修改个人信息');
             $msg = 'profile_saved';
+        }
+    } elseif (isset($_POST['email_change'])) {
+        // v2.10.0：更换绑定邮箱（受 email_verify_enabled 开关控制，后台关闭则表单不渲染）
+        $cfg = loadSiteConfig();
+        if (empty($cfg['email_verify_enabled'])) {
+            $msg = 'email_disabled';
+        } else {
+            $newEmail = trim($_POST['email_new'] ?? '');
+            $code = trim($_POST['email_code'] ?? '');
+            if (!email_valid($newEmail)) {
+                $msg = 'email_invalid';
+            } elseif (email_exists($newEmail)) {
+                $msg = 'email_taken';
+            } else {
+                [$ok, $verr] = email_code_verify($newEmail, $code, 'email_change');
+                if (!$ok) {
+                    $msg = 'email_code_bad';
+                } else {
+                    $users = loadUsers();
+                    foreach ($users as &$usr) {
+                        if ($usr['id'] === $myId) { $usr['email'] = $newEmail; break; }
+                    }
+                    unset($usr);
+                    saveUsers($users);
+                    $_SESSION['cmt_user']['email'] = $newEmail;
+                    auditLog('email_change', $myId, '写作者更换绑定邮箱为 ' . $newEmail);
+                    $msg = 'email_saved';
+                }
+            }
+        }
+    } elseif (isset($_POST['avatar_upload'])) {
+        // v2.10.0：头像上传（JPG/PNG/WEBP ≤2MB）
+        [$ok, $res] = avatar_upload($myId, $_FILES['avatar'] ?? null);
+        if ($ok) {
+            auditLog('avatar_update', $myId, '写作者更新头像');
+            $msg = 'avatar_saved';
+        } else {
+            $msg = 'avatar_fail';
         }
     }
     header("Location: dashboard.php?msg={$msg}&tab={$tab}");
@@ -206,8 +244,19 @@ if (is_dir($articlesDir)) {
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             个人信息
         </div>
-        <div class="page-subtitle">修改你的账号昵称、签名与密码</div>
+        <div class="page-subtitle">修改你的账号头像、昵称、签名、密码与绑定邮箱</div>
     </div>
+    <?php if ($msg === 'profile_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>个人信息已保存</div><?php endif; ?>
+    <?php if ($msg === 'avatar_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>头像已更新</div><?php endif; ?>
+    <?php if ($msg === 'avatar_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>头像上传失败（仅支持 JPG/PNG/WEBP，≤2MB，且 data/avatars/ 需可写）</div><?php endif; ?>
+    <?php if ($msg === 'email_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>绑定邮箱已更新</div><?php endif; ?>
+    <?php if ($msg === 'email_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱格式不正确</div><?php endif; ?>
+    <?php if ($msg === 'email_taken'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该邮箱已被其他账号使用</div><?php endif; ?>
+    <?php if ($msg === 'email_code_bad'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>验证码不正确或已过期</div><?php endif; ?>
+    <?php if ($msg === 'email_disabled'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱验证已关闭，无法更换邮箱</div><?php endif; ?>
+    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>请求已过期，请重试</div><?php endif; ?>
+    <?php $myAvatar = $currentUser['avatar'] ?? '';
+          $avatarSrc = ($myAvatar !== '' && strpos($myAvatar, 'data/') === 0) ? '../' . $myAvatar : ($myAvatar !== '' ? $myAvatar : '../api.php?action=avatar&qq=' . urlencode($currentUser['qq'] ?? '')); ?>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -217,10 +266,59 @@ if (is_dir($articlesDir)) {
         <table>
             <tr><th style="width:120px">项目</th><th>内容</th></tr>
             <tr><td style="color:var(--text-muted)">登录账号（QQ）</td><td><code><?= htmlspecialchars($currentUser['qq'] ?? '') ?></code>（不可修改）</td></tr>
+            <tr><td style="color:var(--text-muted)">绑定邮箱</td><td><?= htmlspecialchars($currentUser['email'] ?? '未绑定') ?></td></tr>
             <tr><td style="color:var(--text-muted)">角色</td><td>写作者</td></tr>
         </table>
         </div>
     </div>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            头像
+        </div>
+        <form method="post" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="avatar_upload" value="1">
+            <div class="dash-avatar-row">
+                <div class="dash-avatar"><img src="<?= htmlspecialchars($avatarSrc) ?>" alt="" onerror="this.style.display='none'"></div>
+                <div style="flex:1">
+                    <div class="form-group">
+                        <input class="form-input" type="file" name="avatar" accept="image/jpeg,image/png,image/webp">
+                    </div>
+                    <div class="form-hint">支持 JPG / PNG / WEBP，≤2MB；上传后立即生效</div>
+                </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+                <button type="submit" class="btn btn-primary">上传头像</button>
+            </div>
+        </form>
+    </div>
+    <?php if (!empty($config['email_verify_enabled'])): ?>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            更换绑定邮箱
+        </div>
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="email_change" value="1">
+            <div class="form-group">
+                <label class="form-label">新邮箱地址</label>
+                <div class="form-row">
+                    <input class="form-input" type="email" name="email_new" placeholder="输入新的邮箱地址">
+                    <button type="button" class="btn" id="dashEmailSend">获取验证码</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">邮箱验证码（6位）</label>
+                <input class="form-input" type="text" name="email_code" maxlength="6" placeholder="输入邮件中的验证码">
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+                <button type="submit" class="btn btn-primary">确认更换</button>
+            </div>
+        </form>
+    </div>
+    <?php endif; ?>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
@@ -266,6 +364,39 @@ function logoutSubmit(e) {
     fd.append('csrf_token', '<?= generateCsrfToken() ?>');
     fetch(window.location.href.split('?')[0], { method: 'POST', body: fd }).then(function() { location.href = '/'; });
 }
+// v2.10.0：更换绑定邮箱——发送验证码（60s 倒计时）
+(function() {
+    var sendBtn = document.getElementById('dashEmailSend');
+    if (!sendBtn) return;
+    sendBtn.addEventListener('click', function() {
+        var emailInput = document.querySelector('input[name=email_new]');
+        if (!emailInput) return;
+        var email = emailInput.value.trim();
+        var re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+        if (!re.test(email)) { alert('请输入正确的邮箱'); return; }
+        var csrfEl = document.querySelector('input[name=csrf_token]');
+        var csrf = csrfEl ? csrfEl.value : '';
+        sendBtn.disabled = true;
+        fetch('../api.php?action=send_email_change_code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            body: JSON.stringify({ email: email })
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.success) {
+                var left = 60;
+                sendBtn.textContent = left + 's 后重发';
+                var t = setInterval(function() {
+                    left--;
+                    if (left <= 0) { clearInterval(t); sendBtn.textContent = '获取验证码'; sendBtn.disabled = false; }
+                    else sendBtn.textContent = left + 's 后重发';
+                }, 1000);
+            } else {
+                alert(d.error || '发送失败');
+                sendBtn.disabled = false;
+            }
+        }).catch(function() { alert('网络错误'); sendBtn.disabled = false; });
+    });
+})();
 </script>
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])): ?>
 <?php

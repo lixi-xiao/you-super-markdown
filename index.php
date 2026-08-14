@@ -306,7 +306,7 @@ if ($action === 'update') {
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="css/style.css?v=<?= filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
-<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-reg-captcha="<?= !empty($_siteConfig['captcha_enabled']) ? '1' : '0' ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_siteConfig['bg_api_url'] ?? '') ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
+<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-reg-captcha="<?= !empty($_siteConfig['captcha_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_siteConfig['bg_api_url'] ?? '') ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($_siteTitle) ?></a></div>
     <div class="header-right">
@@ -547,10 +547,30 @@ if ($action === 'update') {
         <div class="cmt-modal-head"><div class="cmt-modal-title">编辑资料</div></div>
         <div class="cmt-modal-body">
             <div class="cmt-modal-form">
+                <!-- v2.10.0：头像自定义（JPG/PNG/WEBP ≤2MB，选文件后立即上传） -->
+                <div class="cmt-profile-avatar-row">
+                    <div class="cmt-profile-avatar" id="cmtProfileAvatar"></div>
+                    <div class="cmt-profile-avatar-side">
+                        <label class="cmt-avatar-btn" for="cmtAvatarFile">上传头像</label>
+                        <input type="file" id="cmtAvatarFile" accept="image/jpeg,image/png,image/webp" style="display:none">
+                        <div class="cmt-profile-avatar-tip">JPG / PNG / WEBP，≤2MB</div>
+                    </div>
+                </div>
                 <input class="cmt-modal-input" type="text" placeholder="昵称" maxlength="20" id="cmtEditNick">
                 <input class="cmt-modal-input" type="text" placeholder="签名（选填，最多16字）" maxlength="16" id="cmtEditSign">
                 <div class="cmt-modal-err" id="cmtProfileErr"></div>
                 <button class="cmt-modal-submit" id="cmtProfileSave">保存</button>
+                <!-- v2.10.0：邮箱绑定/更换（超管关闭邮箱验证后整体隐藏，基础资料编辑不受影响） -->
+                <div class="cmt-profile-email" id="cmtProfileEmailWrap" style="display:none">
+                    <div class="cmt-profile-sec-title">邮箱绑定</div>
+                    <div class="cmt-modal-input-row">
+                        <input class="cmt-modal-input" type="email" placeholder="输入新邮箱" id="cmtEditEmail">
+                        <button type="button" class="cmt-code-btn" id="cmtEmailSendCode">获取验证码</button>
+                    </div>
+                    <input class="cmt-modal-input" type="text" placeholder="邮箱验证码（6位）" maxlength="6" id="cmtEditEmailCode">
+                    <div class="cmt-modal-err" id="cmtEmailErr"></div>
+                    <button class="cmt-modal-submit cmt-email-confirm" id="cmtEmailSave">确认绑定</button>
+                </div>
             </div>
         </div>
     </div>

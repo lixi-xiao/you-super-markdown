@@ -757,6 +757,75 @@ function email_valid($email) {
 }
 
 /**
+ * 头像上传（v2.10.0）。
+ * 校验：仅 JPG/PNG/WEBP、≤2MB、真实图像（getimagesize 双重校验，防伪装可执行文件）。
+ * 保存到 data/avatars/{userId}.{ext}，覆盖旧头像并清理同名异扩展残留，更新 users.avatar 与当前 session。
+ * @return array [bool, mixed] 成功返回 [true, url]，失败返回 [false, 原因]
+ */
+function avatar_upload($userId, $file) {
+    if (!is_string($userId) || $userId === '') return [false, '用户标识无效'];
+    if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        return [false, '未收到有效的文件'];
+    }
+    if ((int)($file['size'] ?? 0) > 2 * 1024 * 1024) return [false, '图片不能超过 2MB'];
+    $tmp = $file['tmp_name'] ?? '';
+    if (!is_file($tmp)) return [false, '文件读取失败'];
+    $info = @getimagesize($tmp);
+    if (!$info) return [false, '文件不是有效的图片'];
+    $extMap = [IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_WEBP => 'webp'];
+    if (!isset($extMap[$info[2]])) return [false, '仅支持 JPG / PNG / WEBP 格式'];
+    $ext = $extMap[$info[2]];
+    $dir = __DIR__ . '/data/avatars/';
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    $name = preg_replace('/[^a-f0-9]/i', '', $userId); // 用户 id 为 hex，固定安全文件名
+    $dest = $dir . $name . '.' . $ext;
+    if (!move_uploaded_file($tmp, $dest) && !@copy($tmp, $dest)) {
+        return [false, '头像保存失败（请检查 data/avatars/ 目录权限）'];
+    }
+    @chmod($dest, 0644);
+    // 清理同名旧头像（其他扩展名），避免脏文件残留
+    foreach (['jpg', 'png', 'webp'] as $e) {
+        if ($e !== $ext && file_exists($dir . $name . '.' . $e)) @unlink($dir . $name . '.' . $e);
+    }
+    $url = 'data/avatars/' . $name . '.' . $ext . '?v=' . time();
+    $users = loadUsers();
+    foreach ($users as &$u) {
+        if ($u['id'] === $userId) { $u['avatar'] = $url; break; }
+    }
+    unset($u);
+    saveUsers($users);
+    if (!empty($_SESSION['cmt_user']['id']) && $_SESSION['cmt_user']['id'] === $userId) {
+        $_SESSION['cmt_user']['avatar'] = $url;
+    }
+    return [true, $url];
+}
+
+/**
+ * 用户公开详情（v2.10.0）：个人详情页数据。
+ * 排除超管：超管无公开页面，返回 null。
+ * @return array|null ['id','qq','nickname','avatar','signature','created','role']
+ */
+function get_public_user($id) {
+    if (!is_string($id) || $id === '') return null;
+    $users = loadUsers();
+    foreach ($users as $u) {
+        if ($u['id'] === $id) {
+            if (($u['role'] ?? '') === ROLE_SUPER_ADMIN) return null;
+            return [
+                'id' => $u['id'],
+                'qq' => $u['qq'] ?? '',
+                'nickname' => $u['nickname'] ?? '',
+                'avatar' => $u['avatar'] ?? '',
+                'signature' => $u['signature'] ?? '',
+                'created' => $u['created'] ?? '',
+                'role' => $u['role'] ?? ROLE_USER,
+            ];
+        }
+    }
+    return null;
+}
+
+/**
  * 滑块验证：生成随机目标位置（60.0%~95.0%，千分位）存 session，返回 [id, pos]。
  * 前端渲染滑块轨道 + 随机小圆点标记，用户拖动滑块对准标记；提交后后端校验误差 ≤3.0%。
  */
@@ -822,7 +891,13 @@ function email_code_send($email, $purpose, $target = '', $operatorRole = '', $li
     }
     $body .= "若非本人操作，请忽略本邮件。\n时间：{$now}";
     // v2.9.0：验证码邮件用专用大号展示模板（3-3 分组 / 有效期徽标 / 防泄露提示 / 自助验证链接）
-    $purposeLabel = ($purpose === 'author_verify') ? '写作者邮箱验证' : '注册邮箱验证';
+    // v2.10.0：purpose 扩展 email_change（更换绑定邮箱），统一走同一模板
+    $purposeLabels = [
+        'register' => '注册邮箱验证',
+        'author_verify' => '写作者邮箱验证',
+        'email_change' => '更换绑定邮箱验证',
+    ];
+    $purposeLabel = $purposeLabels[$purpose] ?? '邮箱验证';
     $html = renderMailCode($site, $purposeLabel, $code, intdiv($ttl, 60), [
         'server' => $_SERVER['HTTP_HOST'] ?? 'localhost',
         'time' => $now,

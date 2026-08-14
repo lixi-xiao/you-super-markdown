@@ -57,6 +57,7 @@ WATCH_FILES = [
     'author/dashboard.php',
     'verify-author.php',    # v2.9.0：写作者邮箱自助验证（创建写作者链路，防篡改）
     'verify-confirm.php',   # v2.9.0：超管邮件确认（创建写作者链路，防篡改）
+    'user.php',             # v2.10.0：用户个人详情页（评论区点击头像/昵称进入，防篡改）
 ]
 
 # 更新锁文件

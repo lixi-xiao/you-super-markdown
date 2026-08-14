@@ -696,6 +696,30 @@ function renderMailCode($site, $purposeLabel, $code, $ttlMin, $extra = []) {
     return $out;
 }
 
+// quoted-printable 编码（v2.10.2）：非 ASCII/特殊字符转 =XX，软折行 76 字符，CRLF 行尾；
+// 用于邮件纯文本 part（替代 8bit，规避 163 等客户端显示原始源码的问题）
+function mailQpEncode($str) {
+    $hex = '0123456789ABCDEF';
+    $str = preg_replace('/\r\n/', "\n", (string)$str);
+    $lines = explode("\n", $str);
+    $out = [];
+    foreach ($lines as $line) {
+        $enc = '';
+        $l = strlen($line);
+        for ($i = 0; $i < $l; $i++) {
+            $o = ord($line[$i]);
+            // 可打印 ASCII（除 '=' 与行尾空格）原样保留
+            if ($o === 32 || ($o >= 33 && $o <= 60) || ($o >= 62 && $o <= 126)) {
+                $enc .= $line[$i];
+            } else {
+                $enc .= '=' . $hex[($o >> 4) & 15] . $hex[$o & 15];
+            }
+        }
+        $out[] = wordwrap($enc, 76, "=\r\n", true);
+    }
+    return implode("\r\n", $out);
+}
+
 // 轻量 SMTP 客户端（AUTH LOGIN + MAIL/RCPT/DATA），返回 [success, error]
 function sendSmtpMail($to, $subject, $body, $htmlBody = '') {
     $s = getSmtpConfig();
@@ -746,18 +770,22 @@ function sendSmtpMail($to, $subject, $body, $htmlBody = '') {
     if (substr($r, 0, 3) !== '354') { fclose($fp); return [false, 'DATA 被拒: ' . trim($r)]; }
     $encSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
     $textBody = str_replace("\r\n", "\n", $body);
+    // v2.10.2：邮件正文编码兼容性修复——HTML 用 base64、纯文本用 quoted-printable，
+    // 替代 8bit + 单行超长（163 等客户端对 8bit 长行会直接显示原始 MIME 源码）
+    $qpText = mailQpEncode($textBody);
     if ($htmlBody !== '') {
-        // multipart/alternative：HTML 版 + 纯文本版（老客户端可见纯文本）
+        // multipart/alternative：HTML 版（base64）+ 纯文本版（quoted-printable，老客户端可见纯文本）
         $boundary = '----=_Part_' . bin2hex(random_bytes(8));
+        $b64Html = chunk_split(base64_encode($htmlBody), 76, "\r\n");
         $msg = "From: {$from}\r\nTo: {$to}\r\nSubject: {$encSubject}\r\nDate: " . date('r')
             . "\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"{$boundary}\"\r\n\r\n"
-            . "--{$boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" . $textBody . "\r\n"
-            . "--{$boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" . $htmlBody . "\r\n"
+            . "--{$boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" . $qpText . "\r\n"
+            . "--{$boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . $b64Html . "\r\n"
             . "--{$boundary}--\r\n";
     } else {
         $msg = "From: {$from}\r\nTo: {$to}\r\nSubject: {$encSubject}\r\nDate: " . date('r')
-            . "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
-            . $textBody;
+            . "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n"
+            . $qpText;
     }
     fwrite($fp, str_replace("\n", "\r\n", $msg) . "\r\n.\r\n");
     $r = fgets($fp, 512);

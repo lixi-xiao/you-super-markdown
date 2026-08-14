@@ -516,11 +516,14 @@ if ($action === 'update') {
                 <div class="cmt-modal-err" id="cmtLoginErr"></div>
                 <button class="cmt-modal-submit" id="cmtLoginBtn">登录</button>
             </div>
-            <div class="cmt-modal-form" id="cmtRegForm" style="display:none">
+            <div class="cmt-modal-form cmt-reg-form" id="cmtRegForm" style="display:none">
+                <!-- v2.10.2：注册表单统一设计——账号信息 / 身份验证分组分层 -->
+                <div class="cmt-sec-title"><span>账号信息</span></div>
                 <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtRegQQ">
                 <input class="cmt-modal-input" type="text" placeholder="昵称" maxlength="20" id="cmtRegNick">
                 <input class="cmt-modal-input" type="password" placeholder="密码（至少8位，含大小写与数字）" id="cmtRegPw">
                 <div class="cmt-reg-verify" id="cmtRegVerifyBox" style="display:none">
+                    <div class="cmt-sec-title"><span>身份验证</span></div>
                     <div class="cmt-reg-email-row">
                         <input class="cmt-modal-input" type="email" placeholder="邮箱（用于验证）" id="cmtRegEmail">
                         <button type="button" class="cmt-code-btn" id="cmtRegSendCode">获取验证码</button>

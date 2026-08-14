@@ -1726,9 +1726,34 @@ kbd {
    v2.9.0 注册验证：邮箱验证码 + 滑块人机验证
    与既有设计语言一致（CSS 变量 / 圆角 / 品牌色 / 44px 触控）
    ============================================================ */
-.cmt-reg-verify { margin-top: 4px; }
+.cmt-reg-verify {
+    margin-top: 2px;
+    padding: 14px 14px 16px;
+    background: var(--accent-light);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    flex-direction: column;
+    gap: 12px;
+}
+.cmt-reg-verify .captcha-box { margin-top: 2px; }
 .cmt-reg-email-row { display: flex; gap: 8px; }
 .cmt-reg-email-row .cmt-modal-input { flex: 1; min-width: 0; }
+/* v2.10.2：注册表单统一设计——分组标题（分隔线）+ 验证区浅色内嵌分层 */
+.cmt-sec-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+.cmt-sec-title:first-child { margin-top: 0; }
+.cmt-sec-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.cmt-reg-form { gap: 12px; }
+.cmt-reg-form .cmt-modal-submit { margin-top: 2px; }
+.cmt-reg-verify .cmt-sec-title::after { background: hsla(var(--accent-hue), var(--accent-sat), 50%, 0.16); }
 .cmt-code-btn {
     flex: 0 0 auto;
     min-height: 44px;

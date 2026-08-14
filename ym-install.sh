@@ -461,10 +461,28 @@ find "$INSTALL_BASE" -type f -exec chmod 644 {} \;
 # chattr +i 锁定母本
 chattr -R +i "$INSTALL_BASE" 2>/dev/null || warn "chattr 不可用，母本未锁定（建议安装 e2fsprogs）"
 
-# 创建日志镜像目录
+# 创建日志镜像目录（chattr +i 锁定，防 PHP 权限/未知 bug 篡改审计镜像）
 mkdir -p /opt/you-markdown/logs
 chown www-data:www-data /opt/you-markdown/logs
 chmod 750 /opt/you-markdown/logs
+
+# 创建自动备份目录（数据库 30 分钟备份 / 文章每日备份）并 chattr +i 锁定
+# 备份目录与母本同理念：root 锁定，守护进程写入时临时解锁→重锁，PHP 权限不可篡改
+mkdir -p /opt/you-markdown/backups/db /opt/you-markdown/backups/articles
+chown root:www-data /opt/you-markdown/backups /opt/you-markdown/backups/db /opt/you-markdown/backups/articles
+chmod 775 /opt/you-markdown/backups /opt/you-markdown/backups/db /opt/you-markdown/backups/articles
+chattr -R +i /opt/you-markdown/backups/db /opt/you-markdown/backups/articles 2>/dev/null || warn "chattr 不可用，备份目录未锁定（建议安装 e2fsprogs）"
+chattr +i /opt/you-markdown/logs 2>/dev/null || warn "chattr 不可用，日志镜像目录未锁定（建议安装 e2fsprogs）"
+
+# 初始化自动备份配置（默认：库 30 分钟 / 文章保留 7 份 / 手动备份保留 5 份，后台可改）
+cat > /opt/you-markdown/backup.conf << 'BACKUPCONF'
+# 自动备份配置（守护进程 ym-guard.py 读取；超管后台/SSH 可改）
+DB_BACKUP_INTERVAL_MIN=30
+ARTICLE_BACKUP_KEEP=7
+MANUAL_BACKUP_KEEP=5
+BACKUPCONF
+chown root:www-data /opt/you-markdown/backup.conf
+chmod 664 /opt/you-markdown/backup.conf
 
 # 安装守护进程脚本
 cp "$SCRIPT_DIR/ym-guard.py" /opt/you-markdown/ym-guard.py

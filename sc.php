@@ -172,19 +172,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
         }
 
         if (!$isZip && !empty($url) && empty($content)) {
-            $urlParts = parse_url($url);
-            $scheme = strtolower($urlParts['scheme'] ?? '');
-            $host = $urlParts['host'] ?? '';
-            if (!in_array($scheme, ['http', 'https'], true) || empty($host)) {
-                $editError = '仅支持 http/https 链接';
-            } elseif (isPrivateHost($host)) {
-                $editError = '禁止访问内网地址';
-            } else {
-                $ctx = stream_context_create(['http' => ['timeout' => 10], 'https' => ['timeout' => 10]]);
-                $fetched = @file_get_contents($url, false, $ctx);
-                if ($fetched === false) { $editError = '无法从该链接获取内容'; }
-                else { $content = $fetched; }
-            }
+            // v3.0.6：SSRF 安全抓取——一次解析 + pin 解析后 IP 直连（Host/SNI 保留原域名），
+            // 消除"先 gethostbyname 校验、后 file_get_contents 二次解析"的 DNS rebinding TOCTOU；内网/未识别默认拒绝
+            $fetched = fetchHttpContent($url);
+            if ($fetched === false) { $editError = '无法从该链接获取内容'; }
+            else { $content = $fetched; }
         }
 
         if (empty($content) && !$editError) { $editError = '请提供 Markdown 内容'; }
@@ -278,7 +270,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>文档管理 - <?= htmlspecialchars($siteTitle) ?></title>
 <meta name="csrf-token" content="<?= htmlspecialchars(generateCsrfToken()) ?>">
-<link rel="stylesheet" href="css/admin.css">
+<link rel="stylesheet" href="css/admin.css?v=<?= @filemtime(__DIR__ . '/css/admin.css') ?>">
 </head>
 <body>
 

@@ -655,7 +655,7 @@ $banMsg = $_GET['bmsg'] ?? '';
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>高级管理员后台 - <?= htmlspecialchars($siteTitle) ?></title>
-<link rel="stylesheet" href="../css/admin.css">
+<link rel="stylesheet" href="../css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
 </head>
 <body>
 
@@ -859,7 +859,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             用户管理
         </div>
-        <div class="page-subtitle">创建和管理用户账号</div>
+        <div class="page-subtitle">管理站长 / 写作者 / 普通用户：查看详情、修改权限、归属设置、禁用启用、重置密码与删除（敏感操作需 SSH 挑战码）</div>
     </div>
     <?php
     $users = loadUsers();
@@ -903,11 +903,9 @@ $banMsg = $_GET['bmsg'] ?? '';
     </div>
 
     <?php
-    // ===== v2.11.5：用户分组 + 关联统计（评论/文章/设备/登录） =====
+    // ===== v2.11.5：用户分组 + 关联统计（评论/文章/登录） =====
     $statComments = [];
     foreach (db_all('SELECT user_id, COUNT(*) c FROM comments GROUP BY user_id') as $r) $statComments[$r['user_id']] = (int)$r['c'];
-    $statDevices = [];
-    foreach (db_all('SELECT user_id, COUNT(*) c FROM webauthn_credentials GROUP BY user_id') as $r) $statDevices[$r['user_id']] = (int)$r['c'];
     $statArticles = [];
     if (is_dir(__DIR__ . '/../data/articles')) {
         foreach (glob(__DIR__ . '/../data/articles/*.md') as $af) {
@@ -929,11 +927,20 @@ $banMsg = $_GET['bmsg'] ?? '';
         elseif ($r === ROLE_AUTHOR) $groupAuthors[] = $uu;
         else $groupUsers[] = $uu;
     }
-    function ymUserDetail($u, $stationNames, $statComments, $statArticles, $statDevices) {
+    function ymUserDetail($u, $stationNames, $statComments, $statArticles) {
+        // v3.0.5：归属统一以超管为顶级——站长归属=超管；写作者未指定站长时归属=超管
+        $role = $u['role'] ?? 'user';
+        if ($role === ROLE_STATION_ADMIN) {
+            $stationLabel = '超管';
+        } elseif ($role === ROLE_AUTHOR) {
+            $stationLabel = $stationNames[$u['station_id'] ?? ''] ?? '超管';
+        } else {
+            $stationLabel = '';
+        }
         return [
             'nickname' => $u['nickname'] ?? '', 'qq' => $u['qq'] ?? '',
-            'email' => $u['email'] ?? '未绑定', 'role' => $u['role'] ?? 'user',
-            'station' => $stationNames[$u['station_id'] ?? ''] ?? '未归属',
+            'email' => $u['email'] ?? '未绑定', 'role' => $role,
+            'station' => $stationLabel,
             'disabled' => !empty($u['disabled']),
             'created' => $u['created'] ?? '', 'created_by' => $u['created_by'] ?? '',
             'signature' => $u['signature'] ?? '',
@@ -941,7 +948,6 @@ $banMsg = $_GET['bmsg'] ?? '';
             'login_count' => (int)($u['login_count'] ?? 0),
             'comments' => $statComments[$u['id']] ?? 0,
             'articles' => $statArticles[$u['id']] ?? 0,
-            'devices' => $statDevices[$u['id']] ?? 0,
         ];
     }
     function ymStatusBadge($u) {
@@ -953,40 +959,54 @@ $banMsg = $_GET['bmsg'] ?? '';
         $uid = htmlspecialchars($u['id']);
         $isAuthor = ($u['role'] ?? '') === ROLE_AUTHOR;
         $name = htmlspecialchars($u['nickname'] ?? '');
+        $qq = htmlspecialchars($u['qq'] ?? '');
+        $roleKey = (string)($u['role'] ?? 'user');
+        $roleLabel = ['station_admin' => '站长', 'author' => '写作者', 'user' => '普通用户'][$roleKey] ?? '普通用户';
+        $initial = htmlspecialchars(mb_strlen($u['nickname'] ?? '') ? mb_substr((string)$u['nickname'], 0, 1) : '?');
+        $statusTxt = !empty($u['disabled']) ? '已禁用' : '正常';
+        $statusColor = !empty($u['disabled']) ? 'var(--danger)' : 'var(--text-muted)';
         $tok = htmlspecialchars(generateCsrfToken());
-        $h = '<div class="user-op-menu"><button type="button" class="btn user-op-btn" data-op-toggle title="管理用户">⋯</button><div class="user-op-dropdown" style="display:none">';
+        // v3.0.3~v3.0.5：⋯ 按钮（SVG 竖排三点）+ 隐藏 template（内容注入单例 userOpModal 独立弹窗展示）
+        $h = '<button type="button" class="user-op-btn" data-op-target="uop-' . $uid . '" title="管理用户"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>';
+        $h .= '<template id="uop-' . $uid . '">';
+        // 用户信息头（头像按角色色光环）
+        $h .= '<div class="user-op-modal-user"><div class="user-op-avatar role-' . htmlspecialchars($roleKey) . '">' . $initial . '</div><div><div class="user-op-user-name">' . $name . '</div><div class="user-op-user-meta"><span>UID: ' . $qq . '</span><span class="role-badge role-' . htmlspecialchars($roleKey) . '">' . $roleLabel . '</span><span style="color:' . $statusColor . '">' . $statusTxt . '</span></div></div></div>';
         // 查看详情（只读，无需挑战码）
-        $h .= '<button type="button" class="user-op-item" data-detail=\'' . htmlspecialchars(json_encode($detail, JSON_UNESCAPED_UNICODE), ENT_QUOTES) . '\' onclick="ymOpenUserDetail(this)">查看详情</button>';
-        // 修改权限
+        $h .= '<button type="button" class="user-op-item" data-detail=\'' . htmlspecialchars(json_encode($detail, JSON_UNESCAPED_UNICODE), ENT_QUOTES) . '\' onclick="ymOpenUserDetail(this)"><span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span><span class="user-op-txt">查看详情</span></button>';
+        // 权限设置
+        $h .= '<div class="user-op-sep"></div><div class="user-op-head">权限设置</div>';
         $h .= '<form method="post" class="need-challenge"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="set_user_role"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
-        $h .= '<div class="user-op-row"><span class="user-op-label">权限</span><select class="form-select" name="role" style="flex:1">';
+        $h .= '<div class="user-op-form"><div class="user-op-row"><span class="user-op-label">角色</span><select class="form-select" name="role">';
         foreach ([ROLE_STATION_ADMIN => '站长', ROLE_AUTHOR => '写作者', ROLE_USER => '普通用户'] as $rv => $rl) {
             $sel = ($u['role'] ?? '') === $rv ? ' selected' : '';
             $h .= '<option value="' . $rv . '"' . $sel . '>' . $rl . '</option>';
         }
-        $h .= '</select><button type="submit" class="btn btn-sm">保存</button></div></form>';
-        // 设置归属站长（仅写作者）
+        $h .= '</select><button type="submit" class="user-op-save">保存</button></div></div></form>';
+        // 归属设置（仅写作者）
         if ($isAuthor) {
+            $h .= '<div class="user-op-sep"></div><div class="user-op-head">归属设置</div>';
             $h .= '<form method="post" class="need-challenge"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="set_user_station"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
-            $h .= '<div class="user-op-row"><span class="user-op-label">归属</span><select class="form-select" name="station_id" style="flex:1">';
-            $h .= '<option value="">未指定</option>';
+            $h .= '<div class="user-op-form"><div class="user-op-row"><span class="user-op-label">站长</span><select class="form-select" name="station_id">';
+            $h .= '<option value="">超管</option>';
             foreach ($stationNames as $sid => $sname) {
                 $sel = ($u['station_id'] ?? '') === $sid ? ' selected' : '';
                 $h .= '<option value="' . htmlspecialchars($sid) . '"' . $sel . '>' . htmlspecialchars($sname) . '</option>';
             }
-            $h .= '</select><button type="submit" class="btn btn-sm">保存</button></div></form>';
+            $h .= '</select><button type="submit" class="user-op-save">保存</button></div></div></form>';
         }
         // 禁用/启用
         $confirm = !empty($u['disabled']) ? '确认启用 ' . $name . ' ？' : '确认禁用 ' . $name . ' ？禁用后该用户无法登录/评论，已登录会话立即失效';
+        $h .= '<div class="user-op-sep"></div>';
         $h .= '<form method="post" class="need-challenge" data-confirm="' . htmlspecialchars($confirm, ENT_QUOTES) . '"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="set_user_disabled"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="disabled" value="' . (!empty($u['disabled']) ? '0' : '1') . '"><input type="hidden" name="challenge_code">';
-        $h .= '<button type="submit" class="user-op-item">' . (!empty($u['disabled']) ? '启用账号' : '禁用账号') . '</button></form>';
+        $h .= '<button type="submit" class="user-op-item">' . (!empty($u['disabled']) ? '<span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg></span><span class="user-op-txt">启用账号</span>' : '<span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="18" y1="8" x2="23" y2="13"/><line x1="23" y1="8" x2="18" y2="13"/></svg></span><span class="user-op-txt">禁用账号</span>') . '</button></form>';
         // 重置密码
         $h .= '<form method="post" class="need-challenge" data-confirm="确认重置 ' . $name . ' 的密码？将生成随机强密码并仅显示一次"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="reset_password"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
-        $h .= '<button type="submit" class="user-op-item">重置密码</button></form>';
+        $h .= '<button type="submit" class="user-op-item"><span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span><span class="user-op-txt">重置密码</span></button></form>';
         // 删除
+        $h .= '<div class="user-op-sep"></div>';
         $h .= '<form method="post" class="need-challenge" data-confirm="确定删除 ' . $name . '？"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="delete_user"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
-        $h .= '<button type="submit" class="user-op-item danger">删除用户</button></form>';
-        $h .= '</div></div>';
+        $h .= '<button type="submit" class="user-op-item danger"><span class="user-op-ic"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></span><span class="user-op-txt">删除用户</span></button></form>';
+        $h .= '</template>';
         return $h;
     }
     ?>
@@ -995,7 +1015,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            系统管理员（<?= count($superAdmins) ?>）
+            系统管理员<span class="card-badge"><?= count($superAdmins) ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th>昵称</th><th>UID（QQ）</th><th>角色</th><th>状态</th><th>创建时间</th></tr>
@@ -1015,7 +1035,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-            站长（<?= count($groupStations) ?>）
+            站长<span class="card-badge"><?= count($groupStations) ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th>昵称</th><th>UID（QQ）</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
@@ -1025,7 +1045,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
                 <td><?= ymStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
-                <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles, $statDevices)) ?></td>
+                <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
             </tr>
             <?php endforeach; ?>
         </table></div>
@@ -1035,7 +1055,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
-            写作者（<?= count($groupAuthors) ?>）
+            写作者<span class="card-badge"><?= count($groupAuthors) ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th>昵称</th><th>UID（QQ）</th><th>归属站长</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
@@ -1043,10 +1063,10 @@ $banMsg = $_GET['bmsg'] ?? '';
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
                 <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
-                <td style="color:var(--text-secondary)"><?= htmlspecialchars($stationNames[$u['station_id'] ?? ''] ?? '未归属') ?></td>
+                <td style="color:var(--text-secondary)"><?= htmlspecialchars($stationNames[$u['station_id'] ?? ''] ?? '超管') ?></td>
                 <td><?= ymStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
-                <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles, $statDevices)) ?></td>
+                <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
             </tr>
             <?php endforeach; ?>
         </table></div>
@@ -1056,7 +1076,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-            普通用户（<?= count($groupUsers) ?>）
+            普通用户<span class="card-badge"><?= count($groupUsers) ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th>昵称</th><th>UID（QQ）</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
@@ -1066,7 +1086,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
                 <td><?= ymStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
-                <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles, $statDevices)) ?></td>
+                <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
             </tr>
             <?php endforeach; ?>
         </table></div>
@@ -1832,41 +1852,6 @@ $banMsg = $_GET['bmsg'] ?? '';
         </div>
     </div>
 
-    <!-- 挑战码弹窗 -->
-    <div class="modal-overlay" id="challengeModal" style="display:none" onclick="if(event.target===this)closeChallengeModal()">
-        <div class="modal-box" style="max-width:420px">
-            <div class="modal-head">
-                <div class="modal-title">安全验证</div>
-                <button class="modal-close" onclick="closeChallengeModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <p style="color:var(--text-secondary);margin-bottom:16px">请在 SSH 中执行以下命令生成确认码：</p>
-                <div class="code-block">ym-admin challenge</div>
-                <div style="margin-top:16px">
-                    <label class="form-label">输入 6 位确认码</label>
-                    <input class="form-input" type="text" id="challengeCodeInput" placeholder="例如: A3B9F2" maxlength="6" style="text-transform:uppercase;letter-spacing:4px;font-size:1.2em;text-align:center" autocomplete="off">
-                </div>
-                <div style="margin-top:8px;color:var(--text-muted);font-size:0.82em">确认码 300 秒有效，每次操作后自动失效</div>
-                <div id="challengeError" style="color:var(--danger);margin-top:8px;display:none"></div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeChallengeModal()">取消</button>
-                <button class="btn btn-primary" onclick="submitChallenge()" id="submitChallengeBtn">确认并更新</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- v2.11.5：用户详情弹窗（只读，展示完整资料 + 关联统计） -->
-    <div class="modal-overlay" id="userDetailModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
-        <div class="modal-box user-detail-box">
-            <div class="modal-head">
-                <div class="modal-title" id="udTitle">用户详情</div>
-                <button class="modal-close" onclick="document.getElementById('userDetailModal').style.display='none'">&times;</button>
-            </div>
-            <div class="modal-body" id="udBody"></div>
-        </div>
-    </div>
-
     <!-- 手动更新（始终可见） -->
     <div class="card">
         <div class="card-title"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>手动更新</div>
@@ -2512,7 +2497,14 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <tr><td style="color:var(--text-muted)">发信账号</td>
                     <td><input class="form-input" style="width:220px" type="text" name="smtp_user" value="<?= htmlspecialchars($smtpCfg['user']) ?>" placeholder="如 xxx@163.com" required></td></tr>
                 <tr><td style="color:var(--text-muted)">授权码</td>
-                    <td><input class="form-input" style="width:220px" type="password" name="smtp_pass" value="<?= htmlspecialchars($smtpCfg['pass']) ?>" placeholder="邮箱网页端生成的客户端授权码" autocomplete="off"></td></tr>
+                    <td><?php $smtpPassSrc = smtpPassSource(); ?>
+                        <?php if ($smtpPassSrc === 'env'): ?>
+                        <span style="color:#34c759;font-size:0.85em">✅ 已通过服务器环境变量 <code>YM_SMTP_PASS</code> 注入（php-fpm 配置，Web 端不可见；修改需在服务器操作）</span>
+                        <?php elseif ($smtpPassSrc === 'config'): ?>
+                        <span style="color:#f59e0b;font-size:0.85em">⚠️ 使用 config 表密文兜底。建议迁移到环境变量：在 php-fpm pool 配置添加 <code>env[YM_SMTP_PASS] = "授权码"</code> 后 <code>systemctl reload php8.3-fpm</code></span>
+                        <?php else: ?>
+                        <span style="color:#ef4444;font-size:0.85em">❌ 未配置密码。请在服务器 php-fpm pool 配置添加 <code>env[YM_SMTP_PASS] = "授权码"</code>（独立专用发信账号），并 <code>systemctl reload php8.3-fpm</code></span>
+                        <?php endif; ?></td></tr>
                 <tr><td style="color:var(--text-muted)">发件人（可空=账号）</td>
                     <td><input class="form-input" style="width:220px" type="text" name="smtp_from" value="<?= htmlspecialchars($smtpCfg['from']) ?>" placeholder="留空则用发信账号"></td></tr>
             </table>
@@ -2696,22 +2688,67 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php endif; ?>
 </div>
 
+    <!-- 挑战码弹窗（全局：tab 链外，所有 tab 的敏感操作均可弹出） -->
+    <div class="modal-overlay" id="challengeModal" style="display:none" onclick="if(event.target===this)closeChallengeModal()">
+        <div class="modal-box" style="max-width:420px">
+            <div class="modal-head">
+                <div class="modal-title">安全验证</div>
+                <button class="modal-close" onclick="closeChallengeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color:var(--text-secondary);margin-bottom:16px">请在 SSH 中执行以下命令生成确认码：</p>
+                <div class="code-block">ym-admin challenge</div>
+                <div style="margin-top:16px">
+                    <label class="form-label">输入 6 位确认码</label>
+                    <input class="form-input" type="text" id="challengeCodeInput" placeholder="例如: A3B9F2" maxlength="6" style="text-transform:uppercase;letter-spacing:4px;font-size:1.2em;text-align:center" autocomplete="off">
+                </div>
+                <div style="margin-top:8px;color:var(--text-muted);font-size:0.82em">确认码 300 秒有效，每次操作后自动失效</div>
+                <div id="challengeError" style="color:var(--danger);margin-top:8px;display:none"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeChallengeModal()">取消</button>
+                <button class="btn btn-primary" onclick="submitChallenge()" id="submitChallengeBtn">确认并更新</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- v2.11.5：用户详情弹窗（只读，展示完整资料 + 关联统计） -->
+    <div class="modal-overlay" id="userDetailModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+        <div class="modal-box user-detail-box">
+            <div class="modal-head">
+                <div class="modal-title" id="udTitle">用户详情</div>
+                <button class="modal-close" onclick="document.getElementById('userDetailModal').style.display='none'">&times;</button>
+            </div>
+            <div class="modal-body" id="udBody"></div>
+        </div>
+    </div>
+
+    <!-- v3.0.3：用户操作独立菜单弹窗（⋯ → 单例 modal，与弹窗体系统一） -->
+    <div class="modal-overlay" id="userOpModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+        <div class="modal-box user-op-modal-box">
+            <div class="modal-head">
+                <div class="modal-title">用户管理</div>
+                <button class="modal-close" onclick="document.getElementById('userOpModal').style.display='none'">&times;</button>
+            </div>
+            <div class="modal-body" id="userOpBody"></div>
+        </div>
+    </div>
+
 <script>
 // 敏感操作挑战码统一处理：提交前弹出确认码输入（SSH: sudo ym-admin challenge）
-(function() {
-    document.querySelectorAll('form.need-challenge').forEach(function(f) {
-        f.addEventListener('submit', function(e) {
-            e.preventDefault();
-            if (f.dataset.confirm && !confirm(f.dataset.confirm)) return;
-            var code = prompt('请在 SSH 中执行 sudo ym-admin challenge 获取 6 位确认码后输入：');
-            if (!code) return;
-            var hid = f.querySelector('input[name="challenge_code"]');
-            if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = 'challenge_code'; f.appendChild(hid); }
-            hid.value = code.trim().toUpperCase();
-            f.submit();
-        });
-    });
-})();
+// v3.0.3：改为事件委托（document submit），支持动态注入的 need-challenge 表单（用户操作弹窗）
+document.addEventListener('submit', function(e) {
+    var f = e.target;
+    if (!f || !f.classList || !f.classList.contains('need-challenge')) return;
+    e.preventDefault();
+    if (f.dataset.confirm && !confirm(f.dataset.confirm)) return;
+    var code = prompt('请在 SSH 中执行 sudo ym-admin challenge 获取 6 位确认码后输入：');
+    if (!code) return;
+    var hid = f.querySelector('input[name="challenge_code"]');
+    if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = 'challenge_code'; f.appendChild(hid); }
+    hid.value = code.trim().toUpperCase();
+    f.submit();
+});
 // 登出走 POST + CSRF（防 GET 登出被 CSRF 利用）
 function logoutSubmit(e) {
     e.preventDefault();
@@ -2724,22 +2761,19 @@ function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebarOverlay').classList.toggle('active');
 }
-// v2.11.5：用户操作二级菜单（⋯ 展开 / 点击外部关闭）
+// v3.0.3：用户操作独立菜单弹窗（⋯ → 单例 userOpModal，注入 template 内容）
 (function() {
-    document.querySelectorAll('.user-op-menu').forEach(function(menu) {
-        var btn = menu.querySelector('[data-op-toggle]');
-        var dd = menu.querySelector('.user-op-dropdown');
-        if (!btn || !dd) return;
-        btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            var open = dd.style.display === 'block';
-            document.querySelectorAll('.user-op-dropdown').forEach(function(d) { d.style.display = 'none'; });
-            dd.style.display = open ? 'none' : 'block';
-        });
-        dd.addEventListener('click', function(e) { e.stopPropagation(); });
-    });
-    document.addEventListener('click', function() {
-        document.querySelectorAll('.user-op-dropdown').forEach(function(d) { d.style.display = 'none'; });
+    var opModal = document.getElementById('userOpModal');
+    var opBody = document.getElementById('userOpBody');
+    if (!opModal || !opBody) return;
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest ? e.target.closest('[data-op-target]') : null;
+        if (!btn) return;
+        e.stopPropagation();
+        var tpl = document.getElementById(btn.getAttribute('data-op-target'));
+        if (!tpl) return;
+        opBody.innerHTML = tpl.innerHTML;
+        opModal.style.display = 'flex';
     });
 })();
 // v2.11.5：用户详情弹窗（展示完整资料 + 关联统计）
@@ -2751,14 +2785,17 @@ function ymEsc(s) {
 function ymOpenUserDetail(btn) {
     var d = {};
     try { d = JSON.parse(btn.getAttribute('data-detail') || '{}'); } catch (e) { return; }
+    // v3.0.5：详情弹窗在二级菜单之上打开——先收起操作菜单，避免被其遮罩挡住
+    var opModal = document.getElementById('userOpModal');
+    if (opModal) opModal.style.display = 'none';
     var roleMap = { 'super_admin': '系统管理员', 'station_admin': '站长', 'author': '写作者', 'user': '普通用户' };
     var base = [
         ['昵称', d.nickname], ['UID（QQ）', d.qq], ['邮箱', d.email],
-        ['角色', roleMap[d.role] || d.role], ['归属站长', d.station],
+        ['角色', roleMap[d.role] || d.role], ['归属站长', d.station || '—'],
         ['状态', d.disabled ? '已禁用' : '正常'], ['创建时间', d.created], ['创建者', d.created_by || '—'],
         ['签名', d.signature || '—'], ['最后登录', d.last_login]
     ];
-    var stats = [['登录次数', d.login_count], ['评论数', d.comments], ['文章数', d.articles], ['绑定设备', d.devices]];
+    var stats = [['登录次数', d.login_count], ['评论数', d.comments], ['文章数', d.articles]];
     var h = '<div class="user-detail-grid">';
     base.forEach(function(r) {
         h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + ymEsc(r[1]) + '</span></div>';

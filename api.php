@@ -3,6 +3,9 @@ session_start();
 require_once __DIR__ . '/utils.php';
 header('Content-Type: application/json; charset=utf-8');
 
+// v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
+security_check();
+
 // 评论树组装：把评论表（parent_id 自关联）还原为嵌套结构（前端零改动）
 // $sanitize=true 时对外脱敏：qq 置空、avatar 若为 QQ 头像 URL（含 qq 号）也置空，
 // 防止 ?action=get&article=<任意> 批量枚举评论者的真实 QQ 号（v2.6.2）
@@ -380,66 +383,7 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     jsonOut(['success' => false, 'error' => 'QQ号或密码错误'], 401);
 }
 
-// ===== v2.11.0：WebAuthn 设备认证（可选快速登录：电脑 PIN / 手机指纹） =====
-if ($action === 'webauthn_register_begin' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $u = validateHomeUser();
-    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
-    jsonOut(['success' => true, 'options' => webauthn_register_begin($u)]);
-}
-if ($action === 'webauthn_register_complete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $u = validateHomeUser();
-    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
-    $input = json_decode(file_get_contents('php://input'), true);
-    $deviceName = trim($input['device_name'] ?? '') ?: '平台认证器（PIN/指纹）';
-    $r = webauthn_register_complete($input, $u['id'], $deviceName);
-    if (!$r['ok']) jsonOut(['success' => false, 'error' => $r['err']], 400);
-    jsonOut(['success' => true]);
-}
-if ($action === 'webauthn_login_begin' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $qq = trim($input['qq'] ?? '');
-    if ($qq === '') jsonOut(['success' => false, 'error' => 'QQ号不能为空'], 400);
-    // 隐私：不泄露账号是否存在——无绑定凭据时返回空 allowCredentials（前端提示「该账号未绑定设备」）
-    jsonOut(['success' => true, 'options' => webauthn_login_begin($qq)]);
-}
-if ($action === 'webauthn_login_complete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $qq = trim($input['qq'] ?? '');
-    if ($qq === '') jsonOut(['success' => false, 'error' => 'QQ号不能为空'], 400);
-    $r = webauthn_login_complete($input, $qq);
-    if (!$r['ok']) jsonOut(['success' => false, 'error' => $r['err']], 400);
-    jsonOut(['success' => true, 'user' => $r['user']]);
-}
-if ($action === 'webauthn_devices' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $u = validateHomeUser();
-    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
-    jsonOut(['success' => true, 'devices' => webauthn_list_devices($u['id'])]);
-}
-if ($action === 'webauthn_device_remove' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $u = validateHomeUser();
-    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
-    $input = json_decode(file_get_contents('php://input'), true);
-    $deviceId = (int)($input['device_id'] ?? 0);
-    if ($deviceId <= 0) jsonOut(['success' => false, 'error' => '参数错误'], 400);
-    webauthn_remove_device($u['id'], $deviceId);
-    auditLog('webauthn_unbind', $u['id'], '解绑设备 #' . $deviceId);
-    jsonOut(['success' => true]);
-}
-if ($action === 'webauthn_device_rename' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $u = validateHomeUser();
-    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
-    $input = json_decode(file_get_contents('php://input'), true);
-    $deviceId = (int)($input['device_id'] ?? 0);
-    $name = trim((string)($input['device_name'] ?? ''));
-    if ($deviceId <= 0 || $name === '' || mb_strlen($name) > 30) jsonOut(['success' => false, 'error' => '参数错误（名称 ≤30 字）'], 400);
-    if (!webauthn_rename_device($u['id'], $deviceId, $name)) jsonOut(['success' => false, 'error' => '重命名失败'], 400);
-    jsonOut(['success' => true, 'devices' => webauthn_list_devices($u['id'])]);
-}
+
 if ($action === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // v2.10.2：超管也可在主页退出——与超管后台 logout 一致：吊销 JWT（jti 黑名单）+ 销毁会话 + 清 cookie
     revokeCurrentJWT();

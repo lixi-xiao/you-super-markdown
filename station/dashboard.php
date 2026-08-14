@@ -42,6 +42,35 @@ if (!in_array($tab, ['authors', 'background', 'music', 'banlog', 'profile'], tru
 // 站长只能管理自己的写作者
 $myAuthors = array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_AUTHOR && ($u['station_id'] ?? '') === $myId);
 
+// v3.0.6：名下写作者关联统计（评论数/文章数）——详情数据仅在渲染本站长名下写作者时生成并嵌入页面，
+// 无独立查询接口、无 user_id 参数遍历面（防越权 / 防枚举他人数据）
+$st_statComments = [];
+foreach (db_all('SELECT user_id, COUNT(*) c FROM comments GROUP BY user_id') as $r) $st_statComments[$r['user_id']] = (int)$r['c'];
+$st_statArticles = [];
+if (is_dir(__DIR__ . '/../data/articles')) {
+    foreach (glob(__DIR__ . '/../data/articles/*.md') as $af) {
+        $raw = @file_get_contents($af);
+        if ($raw && preg_match('/<!--META(.*?)-->/s', $raw, $am)) {
+            $meta = json_decode(trim($am[1]), true) ?: [];
+            $aid = $meta['author_id'] ?? '';
+            if ($aid !== '') $st_statArticles[$aid] = ($st_statArticles[$aid] ?? 0) + 1;
+        }
+    }
+}
+$stMyNick = $currentUser['nickname'] ?? '';
+function stAuthorDetail($a, $statComments, $statArticles, $myNick) {
+    return [
+        'nickname' => $a['nickname'] ?? '', 'qq' => maskQQ($a['qq'] ?? ''),
+        'email' => $a['email'] ?? '未绑定', 'station' => $myNick,
+        'disabled' => !empty($a['disabled']),
+        'created' => $a['created'] ?? '', 'signature' => $a['signature'] ?? '',
+        'last_login' => $a['last_login'] ?? '从未登录',
+        'login_count' => (int)($a['login_count'] ?? 0),
+        'comments' => $statComments[$a['id']] ?? 0,
+        'articles' => $statArticles[$a['id']] ?? 0,
+    ];
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         $msg = 'csrf_error';
@@ -264,7 +293,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>站长后台 - <?= htmlspecialchars($siteTitle) ?></title>
-<link rel="stylesheet" href="../css/admin.css">
+<link rel="stylesheet" href="../css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
 </head>
 <body>
 
@@ -406,6 +435,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <td style="color:var(--text-muted)"><?= htmlspecialchars(maskQQ($a['qq'] ?? '')) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['created'] ?? '') ?></td>
                 <td>
+                    <button type="button" class="btn-link" onclick="stOpenDetail(this)" data-detail='<?= htmlspecialchars(json_encode(stAuthorDetail($a, $st_statComments, $st_statArticles, $stMyNick), JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>'>查看参数</button>
                     <form method="post" style="display:inline" onsubmit="return confirm('确定删除 <?= htmlspecialchars($a['nickname'] ?? '') ?>？')">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="action" value="delete_author">
@@ -823,18 +853,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             </div>
         </form>
     </div>
-    <!-- v2.11.3：站长端设备快速登录管理（电脑 PIN / 手机指纹） -->
-    <div class="card">
-        <div class="card-title">
-            <svg viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-            设备快速登录
-        </div>
-        <div class="form-hint">绑定后可用电脑 PIN / 手机指纹免密登录；服务端只保存公钥，不保存生物特征</div>
-        <div class="dash-device-list" id="dashDeviceList"></div>
-        <button type="button" class="btn" id="dashDeviceBindBtn">＋ 绑定当前设备（PIN / 指纹）</button>
-        <div class="msg msg-error" id="dashDeviceErr" style="display:none;margin-top:10px"></div>
-    </div>
     <?php endif; ?>
+</div>
+
+<!-- v3.0.6：名下写作者参数弹窗（骨架放 tab 条件链外，所有 tab 可用；数据为服务端已过滤的本站长名下写作者） -->
+<div class="modal-overlay" id="stDetailModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box user-detail-box">
+        <div class="modal-head">
+            <div class="modal-title" id="stDetailTitle">写作者参数</div>
+            <button class="modal-close" onclick="document.getElementById('stDetailModal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body" id="stDetailBody"></div>
+    </div>
 </div>
 
 <script>
@@ -883,114 +913,35 @@ function logoutSubmit(e) {
         }).catch(function() { alert('网络错误'); sendBtn.disabled = false; });
     });
 })();
-// v2.11.3：设备快速登录管理（绑定 / 列表 / 重命名 / 解绑）
-(function() {
-    var listEl = document.getElementById('dashDeviceList');
-    var bindBtn = document.getElementById('dashDeviceBindBtn');
-    var errEl = document.getElementById('dashDeviceErr');
-    if (!listEl || !bindBtn) return;
-    var csrf = (document.querySelector('input[name=csrf_token]') || {}).value || '';
-    function b64u(buf) {
-        var bytes = new Uint8Array(buf), bin = '';
-        for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-        return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    }
-    // v2.11.4：base64url → ArrayBuffer（PHP 返回的 challenge/user.id 是字符串，create() 要求 ArrayBuffer）
-    function b64ToBuf(s) {
-        var bin = atob(String(s).replace(/-/g, '+').replace(/_/g, '/')), bytes = new Uint8Array(bin.length);
-        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        return bytes.buffer;
-    }
-    function prepCreate(opts) {
-        if (opts && opts.challenge) opts.challenge = b64ToBuf(opts.challenge);
-        if (opts && opts.user && opts.user.id) opts.user.id = b64ToBuf(opts.user.id);
-        return opts;
-    }
-    function supported() {
-        return typeof window.PublicKeyCredential !== 'undefined'
-            && typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function';
-    }
-    function showErr(t) { errEl.textContent = t; errEl.style.display = t ? 'block' : 'none'; }
-    function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-    function load() {
-        fetch('../api.php?action=webauthn_devices', { method: 'POST', headers: { 'X-CSRF-Token': csrf } })
-            .then(function(r) { return r.json(); }).then(function(d) {
-                if (!d.success) return;
-                if (!d.devices || d.devices.length === 0) {
-                    listEl.innerHTML = '<div class="dash-device-empty">未绑定设备</div>';
-                    return;
-                }
-                listEl.innerHTML = d.devices.map(function(dev) {
-                    var last = dev.last_used ? new Date(dev.last_used * 1000).toLocaleString() : '从未使用';
-                    return '<div class="dash-device-item">'
-                        + '<div class="dash-device-info"><span class="dash-device-name">' + esc(dev.device_name) + '</span>'
-                        + '<span class="dash-device-meta">最近使用 ' + last + '</span></div>'
-                        + '<div class="dash-device-ops"><button class="dash-device-edit" data-id="' + dev.id + '" data-name="' + esc(dev.device_name) + '">重命名</button>'
-                        + '<button class="dash-device-del" data-id="' + dev.id + '">解绑</button></div></div>';
-                }).join('');
-                listEl.querySelectorAll('.dash-device-del').forEach(function(btn) {
-                    btn.addEventListener('click', function() {
-                        if (!confirm('确定解绑该设备？')) return;
-                        fetch('../api.php?action=webauthn_device_remove', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ device_id: btn.dataset.id }) })
-                            .then(function(r) { return r.json(); }).then(function(dd) {
-                                if (dd.success) { load(); showErr(''); } else showErr(dd.error || '解绑失败');
-                            }).catch(function() { showErr('网络错误'); });
-                    });
-                });
-                listEl.querySelectorAll('.dash-device-edit').forEach(function(btn) {
-                    btn.addEventListener('click', function() {
-                        var name = prompt('请输入新的设备名称（≤30 字）：', btn.dataset.name || '');
-                        if (name === null) return;
-                        name = name.trim();
-                        if (!name) { showErr('名称不能为空'); return; }
-                        fetch('../api.php?action=webauthn_device_rename', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ device_id: btn.dataset.id, device_name: name }) })
-                            .then(function(r) { return r.json(); }).then(function(dd) {
-                                if (dd.success) { load(); showErr(''); } else showErr(dd.error || '重命名失败');
-                            }).catch(function() { showErr('网络错误'); });
-                    });
-                });
-            }).catch(function() {});
-    }
-    if (supported()) {
-        PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(function(ok) {
-            if (!ok) { listEl.innerHTML = '<div class="dash-device-empty">当前浏览器/设备不支持 PIN/指纹（需 Windows Hello 或手机指纹）</div>'; bindBtn.style.display = 'none'; }
-            else load();
-        }).catch(function() {});
-    } else {
-        listEl.innerHTML = '<div class="dash-device-empty">当前浏览器/设备不支持 PIN/指纹（需 Windows Hello 或手机指纹）</div>';
-        bindBtn.style.display = 'none';
-    }
-    bindBtn.addEventListener('click', function() {
-        showErr('');
-        fetch('../api.php?action=webauthn_register_begin', { method: 'POST', headers: { 'X-CSRF-Token': csrf } })
-            .then(function(r) { return r.json(); }).then(function(d0) {
-                if (!d0.success) { showErr(d0.error || '无法开始绑定'); return; }
-                var devName = '平台认证器（PIN/指纹）';
-                if (navigator.userAgent) {
-                    if (/Windows NT/.test(navigator.userAgent)) devName = 'Windows 电脑';
-                    else if (/Android/i.test(navigator.userAgent)) devName = 'Android 手机';
-                    else if (/iPhone|iPad/i.test(navigator.userAgent)) devName = 'iPhone / iPad';
-                    else if (/Macintosh/i.test(navigator.userAgent)) devName = 'macOS';
-                }
-                return navigator.credentials.create({ publicKey: prepCreate(d0.options) }).then(function(cred) {
-                    return fetch('../api.php?action=webauthn_register_complete', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ id: cred.id, clientDataJSON: b64u(cred.response.clientDataJSON), attestationObject: b64u(cred.response.attestationObject), device_name: devName }) });
-                }).then(function(r) { return r.json(); }).then(function(d1) {
-                    if (d1.success) { load(); showErr(''); } else showErr(d1.error || '绑定失败');
-                });
-            }).catch(function(e) {
-                if (e && e.name === 'NotAllowedError') showErr('已取消绑定');
-                else {
-                    var m = (e && e.message) || '';
-                    // v2.11.6~2.11.8：凭据管理器无响应/凭证丢失给出明确指引（Android 专项）
-                    if (/credential manager|unknown error|security error|passkey|not allowed/i.test(m) || !m) {
-                        if (/Android/i.test(navigator.userAgent)) showErr('绑定失败：Android 通行证创建失败（系统提示凭证丢失/无响应），请确认 ① 已设置锁屏密码/指纹；② 手机已登录 Google 账号；③ 系统「密码与账户→自动填充服务」选了 Google 或系统密码管理器；④ 更新 Google Play 服务；推荐使用 Chrome 重试');
-                        else showErr('绑定失败：系统凭据管理器无响应，请确认已启用 PIN/指纹（电脑：设置→账户→登录选项→Windows Hello；手机：系统设置→指纹/锁屏密码）后重试');
-                    }
-                    else showErr('绑定失败（' + m + '）');
-                }
-            });
+// v3.0.6：名下写作者参数弹窗（仅展示服务端已过滤的本站长名下写作者，无越权/遍历面）
+function stEsc(s) {
+    var el = document.createElement('span');
+    el.textContent = (s === null || s === undefined) ? '' : String(s);
+    return el.innerHTML;
+}
+function stOpenDetail(btn) {
+    var d = {};
+    try { d = JSON.parse(btn.getAttribute('data-detail') || '{}'); } catch (e) { return; }
+    var rows = [
+        ['昵称', d.nickname], ['UID（QQ）', d.qq], ['邮箱', d.email],
+        ['归属站长', d.station], ['状态', d.disabled ? '已禁用' : '正常'],
+        ['创建时间', d.created], ['签名', d.signature || '—'],
+        ['最后登录', d.last_login]
+    ];
+    var stats = [['登录次数', d.login_count], ['评论数', d.comments], ['文章数', d.articles]];
+    var h = '<div class="user-detail-grid">';
+    rows.forEach(function(r) {
+        h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + stEsc(r[1]) + '</span></div>';
     });
-})();
+    h += '</div><div class="user-detail-sec">关联统计</div><div class="user-detail-grid">';
+    stats.forEach(function(r) {
+        h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + stEsc(r[1]) + '</span></div>';
+    });
+    h += '</div>';
+    document.getElementById('stDetailTitle').textContent = '写作者参数 - ' + (d.nickname || d.qq || '');
+    document.getElementById('stDetailBody').innerHTML = h;
+    document.getElementById('stDetailModal').style.display = 'flex';
+}
 </script>
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])): ?>
 <?php

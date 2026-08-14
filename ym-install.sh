@@ -889,32 +889,47 @@ configure_mail() {
     [ -z "$SMTP_FROM" ] && read -p "  发件人 (可空=账号): " SMTP_FROM
     SMTP_PORT=${SMTP_PORT:-465}
     SMTP_ENC=${SMTP_ENC:-ssl}
-    # base64 传递避免引号/特殊字符问题（授权码可能含特殊字符）
+    # v3.0.9：授权码改为环境变量注入（密钥不落 Web 可达盘）——
+    # ① php-fpm pool env[YM_SMTP_PASS]（root 只读，Web/DB 均不可见）
+    # ② root 密钥文件 /opt/you-markdown/secrets/smtp_pass（0600，供 CLI 发信如 audit-report 注入）
+    SECRETS_DIR="/opt/you-markdown/secrets"
+    mkdir -p "$SECRETS_DIR"
+    printf '%s' "$SMTP_PASS" > "$SECRETS_DIR/smtp_pass"
+    chmod 600 "$SECRETS_DIR/smtp_pass"
+    POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/www.conf"
+    if [ -f "$POOL_CONF" ]; then
+        sed -i '/env\[YM_SMTP_PASS\]/d' "$POOL_CONF" 2>/dev/null || true
+        ESC_PASS=$(printf '%s' "$SMTP_PASS" | sed 's/[\\"]/\\&/g')
+        printf '\nenv[YM_SMTP_PASS] = "%s"\n' "$ESC_PASS" >> "$POOL_CONF"
+        systemctl reload "php${PHP_VER}-fpm" 2>/dev/null || true
+        info "授权码已注入 php-fpm 环境变量（$POOL_CONF，Web 端不可见）"
+    else
+        warn "未找到 php-fpm pool 配置（$POOL_CONF），授权码仅存 root 密钥文件"
+    fi
+    # 非敏感配置仍写 config 表；smtp_pass 不再落库（环境注入优先）
     SMTP_HOST_B64=$(printf '%s' "$SMTP_HOST" | base64 -w0 2>/dev/null || printf '%s' "$SMTP_HOST" | base64)
     SMTP_USER_B64=$(printf '%s' "$SMTP_USER" | base64 -w0 2>/dev/null || printf '%s' "$SMTP_USER" | base64)
-    SMTP_PASS_B64=$(printf '%s' "$SMTP_PASS" | base64 -w0 2>/dev/null || printf '%s' "$SMTP_PASS" | base64)
     SMTP_FROM_B64=$(printf '%s' "$SMTP_FROM" | base64 -w0 2>/dev/null || printf '%s' "$SMTP_FROM" | base64)
     SMTP_HOST_B64="$SMTP_HOST_B64" SMTP_PORT_B64="$SMTP_PORT" SMTP_ENC_B64="$SMTP_ENC" \
-    SMTP_USER_B64="$SMTP_USER_B64" SMTP_PASS_B64="$SMTP_PASS_B64" SMTP_FROM_B64="$SMTP_FROM_B64" \
+    SMTP_USER_B64="$SMTP_USER_B64" SMTP_FROM_B64="$SMTP_FROM_B64" \
     php -r "
         require '$WEB_ROOT/utils.php';
         \$cfg = loadSiteConfig();
         \$cfg['smtp_host'] = base64_decode(getenv('SMTP_HOST_B64'));
         \$cfg['smtp_port'] = (int)getenv('SMTP_PORT_B64');
         \$cfg['smtp_user'] = base64_decode(getenv('SMTP_USER_B64'));
-        \$cfg['smtp_pass'] = base64_decode(getenv('SMTP_PASS_B64'));
+        \$cfg['smtp_pass'] = '';
         \$cfg['smtp_from'] = base64_decode(getenv('SMTP_FROM_B64'));
         \$cfg['smtp_enc'] = in_array(getenv('SMTP_ENC_B64'), ['ssl','tls','plain'], true) ? getenv('SMTP_ENC_B64') : 'ssl';
         saveSiteConfig(\$cfg);
         echo 'OK';
     " 2>/dev/null || true
     info "SMTP 配置完成（后台「邮件设置」可修改/测试）"
-    # 初次配置即测试：发一封测试邮件到管理员邮箱
+    # 初次配置即测试：发一封测试邮件到管理员邮箱（CLI 注入 YM_SMTP_PASS 走 root 密钥文件）
     if [ -n "$ADMIN_EMAIL" ]; then
         echo ""
         log "发送测试邮件到 $ADMIN_EMAIL ..."
-        TEST_RESULT=$(SMTP_HOST_B64="$SMTP_HOST_B64" SMTP_PORT_B64="$SMTP_PORT" SMTP_ENC_B64="$SMTP_ENC" \
-        SMTP_USER_B64="$SMTP_USER_B64" SMTP_PASS_B64="$SMTP_PASS_B64" SMTP_FROM_B64="$SMTP_FROM_B64" \
+        TEST_RESULT=$(YM_SMTP_PASS="$(cat "$SECRETS_DIR/smtp_pass" 2>/dev/null)" \
         ADMIN_EMAIL_B64=$(printf '%s' "$ADMIN_EMAIL" | base64 -w0 2>/dev/null || printf '%s' "$ADMIN_EMAIL" | base64) \
         php -r "
             require '$WEB_ROOT/utils.php';
@@ -924,7 +939,7 @@ configure_mail() {
         " 2>/dev/null)
         case "$TEST_RESULT" in
             OK*) info "✅ 测试邮件发送成功（请查收 $ADMIN_EMAIL）" ;;
-            *) warn "⚠️ 测试邮件发送失败：${TEST_RESULT#FAIL: }（可在后台「邮件设置」修正后重试）" ;;
+            *) warn "⚠️ 测试邮件发送失败：${TEST_RESULT#FAIL: }（可在服务器重配 YM_SMTP_PASS 后重试）" ;;
         esac
     else
         warn "未设置管理员邮箱，跳过测试邮件（请在后台「系统配置」设置 admin_email）"

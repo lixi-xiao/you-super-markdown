@@ -4,9 +4,13 @@ ENTRIES_FILE="$WEB_ROOT/data/.entries.json"
 USERS_FILE="$WEB_ROOT/data/.users.json"
 
 # 自动获取站点域名（v2.10.2 修复：禁止硬编码域名——优先 app-config.json 的 site_url，否则从 Nginx server_name 解析）
+# v2.11.2：剥离 scheme 与路径（site_url 可能带 https://，避免拼接出 https://https:// 双前缀）
 get_domain() {
     local d
     d=$(php -r "\$c=json_decode(@file_get_contents('$WEB_ROOT/app-config.json'),true); echo trim((string)(\$c['site_url']??''));" 2>/dev/null)
+    d=${d#http://}
+    d=${d#https://}
+    d=${d%%/*}
     if [ -z "$d" ]; then
         d=$(grep -rhoP 'server_name\s+\K[^;]+' /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | grep -v '^_' | head -1 | awk '{print $1}')
     fi

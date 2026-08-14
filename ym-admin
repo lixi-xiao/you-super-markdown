@@ -96,6 +96,18 @@ case "${1:-}" in
         "
         ;;
 
+    audit-report)
+        # 每日审计报告（v2.8.0 同次更新）：log-verify 结果经 sendAlert 走 SMTP 直连发送给 admin_email，
+        # 无 SMTP 配置时兜底 ym-alert(mail)，失败落盘 alert.log——不再依赖 cron | mail（无 MTA 静默失败）
+        php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$r = verifyAuditChain();
+            \$result = \$r['valid'] ? '审计日志哈希链校验通过 ('.\$r['count'].' 条)' : '校验失败！断裂于第 '.\$r['broken_at'].' 条';
+            echo \$result . PHP_EOL;
+            sendAlert('每日审计报告', \$result);
+        "
+        ;;
+
     challenge)
         CODE=$(openssl rand -hex 3)
         EXPIRES=$(date -d "+300 seconds" +%s 2>/dev/null || echo $(($(date +%s) + 300)))
@@ -457,6 +469,7 @@ case "${1:-}" in
         echo "  backup                    备份数据"
         echo "  status                    查看服务状态"
         echo "  log-verify                校验审计日志哈希链"
+        echo "  audit-report              每日审计报告（校验结果经 SMTP 发送给管理员）"
         echo "  challenge                 生成挑战码"
         echo "  apply-update              执行系统更新"
         echo "  rollback                  回滚到备份版本"

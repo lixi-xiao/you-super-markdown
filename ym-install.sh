@@ -368,13 +368,54 @@ chmod 660 "$WEB_ROOT/data/ym.db" 2>/dev/null || true
 log "配置 Nginx..."
 
 NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
+# 第一阶段：先写 80-only 配置（含 ACME 放行 + 其余 301 跳 https），供 certbot webroot 挑战；
+# 证书就绪后（本函数下方）再追加 443 server —— 避免 443 引用尚不存在的证书导致 nginx -t 失败、挑战无人响应
 cat > "$NGINX_CONF" << EOF
 server {
     listen 80;
     server_name $DOMAIN;
-    return 301 https://\$server_name\$request_uri;
-}
+    root $WEB_ROOT;
+    index index.php index.html;
 
+    # ACME 验证放行（certbot webroot 挑战/续期走 80）
+    location ^~ /.well-known/ {
+        allow all;
+    }
+
+    location / {
+        return 301 https://\$server_name\$request_uri;
+    }
+}
+EOF
+
+# 启用站点
+ln -sf "$NGINX_CONF" "/etc/nginx/sites-enabled/$DOMAIN" 2>/dev/null || \
+    ln -sf "$NGINX_CONF" "/etc/nginx/conf.d/$DOMAIN.conf" 2>/dev/null
+
+# Nginx 语法检查 + 启动（首次部署必须 enable --now；仅 reload 对未运行服务无效，会导致 certbot 挑战无响应）
+if nginx -t 2>/dev/null; then
+    systemctl enable --now nginx > /dev/null 2>&1 || true
+    systemctl reload nginx > /dev/null 2>&1 || true
+    log "Nginx 已启动（HTTP 模式，等待 SSL 证书）"
+else
+    warn "Nginx 配置有误，请手动检查"
+fi
+
+# ================================================================
+# 6. SSL 证书（公网首次部署前提：域名 DNS 已解析到本机公网 IP，云安全组放行 80/tcp）
+# ================================================================
+CERT_OK=false
+log "申请 SSL 证书..."
+if [ -n "$ADMIN_EMAIL" ]; then
+    certbot certonly --webroot -w "$WEB_ROOT" -d "$DOMAIN" --email "$ADMIN_EMAIL" --agree-tos --non-interactive > /dev/null 2>&1 && CERT_OK=true || true
+else
+    certbot certonly --webroot -w "$WEB_ROOT" -d "$DOMAIN" --agree-tos --non-interactive --register-unsafely-without-email > /dev/null 2>&1 && CERT_OK=true || true
+fi
+
+# 证书就绪后追加 443 server（完整安全配置）并 reload
+if [ "$CERT_OK" = true ] || [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+    CERT_OK=true
+    cat >> "$NGINX_CONF" << EOF
 server {
     listen 443 ssl http2;
     server_name $DOMAIN;
@@ -462,29 +503,14 @@ server {
     }
 }
 EOF
-
-# 启用站点
-ln -sf "$NGINX_CONF" "/etc/nginx/sites-enabled/$DOMAIN" 2>/dev/null || \
-    ln -sf "$NGINX_CONF" "/etc/nginx/conf.d/$DOMAIN.conf" 2>/dev/null
-
-# Nginx 语法检查
-if nginx -t 2>/dev/null; then
-    systemctl reload nginx
-    log "Nginx 配置完成"
+    if nginx -t 2>/dev/null; then
+        systemctl reload nginx > /dev/null 2>&1 || true
+        log "Nginx HTTPS 配置完成"
+    else
+        warn "Nginx HTTPS 配置有误，请手动检查"
+    fi
 else
-    warn "Nginx 配置有误，请手动检查"
-fi
-
-# ================================================================
-# 6. SSL 证书
-# ================================================================
-log "申请 SSL 证书..."
-if [ -n "$ADMIN_EMAIL" ]; then
-    certbot certonly --webroot -w "$WEB_ROOT" -d "$DOMAIN" --email "$ADMIN_EMAIL" --agree-tos --non-interactive 2>/dev/null || \
-        warn "SSL 证书申请失败，请手动执行: certbot --nginx -d $DOMAIN"
-else
-    certbot certonly --webroot -w "$WEB_ROOT" -d "$DOMAIN" --agree-tos --non-interactive --register-unsafely-without-email 2>/dev/null || \
-        warn "SSL 证书申请失败，请手动执行: certbot --nginx -d $DOMAIN"
+    warn "SSL 证书申请失败：请确认域名 DNS 已解析到本机公网 IP、安全组放行 80/443；稍后执行 certbot --nginx -d $DOMAIN 补证书后重启 nginx"
 fi
 
 # ================================================================

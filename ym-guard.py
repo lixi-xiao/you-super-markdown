@@ -194,22 +194,40 @@ def render_mail_html(site: str, alert_type: str, detail: str, server: str = 'loc
 
 
 def smtp_send(to: str, subject: str, body: str, smtp: dict, html: str = None) -> bool:
-    """smtplib 直连发送（v2.8.0，无 MTA 依赖），成功返回 True；html 非空时发 multipart/alternative（HTML+纯文本）"""
+    """smtplib 直连发送（v2.10.2-fix-mailqp2 起手写 8bit 报文，成功返回 True）。
+    v2.8.0 原用 MIMEText(...,'utf-8')，其默认 quoted-printable 编码在 163 等客户端不解码（显示源码）；
+    现改为与 PHP 端一致：8bit + HTML 标签间折行（每行 <998 字符，RFC 5322），报文按 UTF-8 bytes 发送。"""
     try:
         import smtplib
-        from email.mime.text import MIMEText
-        from email.header import Header
-        if html:
-            from email.mime.multipart import MIMEMultipart
-            msg = MIMEMultipart('alternative')
-            msg.attach(MIMEText(body, 'plain', 'utf-8'))
-            msg.attach(MIMEText(html, 'html', 'utf-8'))
-        else:
-            msg = MIMEText(body, 'plain', 'utf-8')
-        msg['Subject'] = Header(subject, 'utf-8')
+        import socket
+        import uuid
+        import base64
         frm = smtp['from'] or smtp['user']
-        msg['From'] = frm
-        msg['To'] = to
+        ehlo = socket.gethostname() or 'localhost'
+        enc_subject = '=?UTF-8?B?' + base64.b64encode(subject.encode('utf-8')).decode('ascii') + '?='
+        now = time.strftime('%a, %d %b %Y %H:%M:%S %z')
+        msg_id = '<' + uuid.uuid4().hex + '@' + ehlo + '>'
+        if html:
+            boundary = '----=_Part_' + uuid.uuid4().hex
+            folded = html.replace('><', '>\n<')
+            lines = [
+                f'From: {frm}', f'To: {to}', f'Subject: {enc_subject}', f'Date: {now}',
+                f'Message-ID: {msg_id}', 'X-Mailer: You Super Markdown', 'MIME-Version: 1.0',
+                f'Content-Type: multipart/alternative; boundary="{boundary}"', '',
+                f'--{boundary}', 'Content-Type: text/plain; charset=UTF-8',
+                'Content-Transfer-Encoding: 8bit', '', body, '',
+                f'--{boundary}', 'Content-Type: text/html; charset=UTF-8',
+                'Content-Transfer-Encoding: 8bit', '', folded, '',
+                f'--{boundary}--', '',
+            ]
+        else:
+            lines = [
+                f'From: {frm}', f'To: {to}', f'Subject: {enc_subject}', f'Date: {now}',
+                f'Message-ID: {msg_id}', 'X-Mailer: You Super Markdown', 'MIME-Version: 1.0',
+                'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: 8bit', '',
+                body, '',
+            ]
+        raw = '\r\n'.join(lines).encode('utf-8')
         if smtp['enc'] == 'ssl':
             server = smtplib.SMTP_SSL(smtp['host'], smtp['port'] or 465, timeout=15)
         else:
@@ -219,7 +237,7 @@ def smtp_send(to: str, subject: str, body: str, smtp: dict, html: str = None) ->
                 server.starttls()
                 server.ehlo()
         server.login(smtp['user'], smtp['pass'])
-        server.sendmail(frm, [to], msg.as_string())
+        server.sendmail(frm, [to], raw)
         server.quit()
         return True
     except Exception as e:

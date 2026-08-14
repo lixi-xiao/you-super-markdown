@@ -378,6 +378,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 break;
             }
         }
+    } elseif ($_POST['action'] === 'set_user_role') {
+        // v2.11.4：修改用户权限（站长/写作者/普通用户；不可操作超管，不可升级为超管）
+        $uid = $_POST['user_id'] ?? '';
+        $newRole = $_POST['role'] ?? '';
+        if (!in_array($newRole, [ROLE_STATION_ADMIN, ROLE_AUTHOR, ROLE_USER], true)) {
+            $msg = 'role_invalid';
+        } else {
+            foreach ($users as &$uu) {
+                if ($uu['id'] === $uid && ($uu['role'] ?? '') !== ROLE_SUPER_ADMIN) {
+                    $oldRole = $uu['role'] ?? ROLE_USER;
+                    $uu['role'] = $newRole;
+                    // 从站长角色降级/离开站长体系时清空归属关系；进入写作者时不强行分配站长
+                    if (($uu['station_id'] ?? '') !== '' && $oldRole === ROLE_STATION_ADMIN && $newRole !== ROLE_STATION_ADMIN) {
+                        $uu['station_id'] = '';
+                    }
+                    auditLog('user_role_change', $uu['qq'] ?? $uid, "修改权限: {$uu['nickname']} {$oldRole} → {$newRole}");
+                    $msg = 'role_changed';
+                    break;
+                }
+            }
+            unset($uu);
+            if ($msg !== 'role_changed') $msg = 'role_invalid';
+            saveUsers($users);
+        }
+    } elseif ($_POST['action'] === 'set_user_disabled') {
+        // v2.11.4：禁用/启用账号（禁用后无法登录/评论/进后台，已登录会话立即失效）
+        $uid = $_POST['user_id'] ?? '';
+        $disabled = (int)($_POST['disabled'] ?? 0);
+        foreach ($users as &$uu) {
+            if ($uu['id'] === $uid && ($uu['role'] ?? '') !== ROLE_SUPER_ADMIN) {
+                $uu['disabled'] = $disabled ? 1 : 0;
+                auditLog('user_disable', $uu['qq'] ?? $uid, ($disabled ? '禁用账号: ' : '启用账号: ') . ($uu['nickname'] ?? ''));
+                $msg = $disabled ? 'user_disabled' : 'user_enabled';
+                break;
+            }
+        }
+        unset($uu);
+        saveUsers($users);
     }
     if ($msg) {
         header("Location: dashboard.php?tab=users&msg={$msg}");
@@ -644,6 +682,10 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php if ($msg === 'saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>配置已保存</div><?php endif; ?>
     <?php if ($msg === 'user_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>用户已创建</div><?php endif; ?>
     <?php if ($msg === 'user_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>用户已删除</div><?php endif; ?>
+    <?php if ($msg === 'user_disabled'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>账号已禁用，该用户已无法登录/评论</div><?php endif; ?>
+    <?php if ($msg === 'user_enabled'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>账号已启用</div><?php endif; ?>
+    <?php if ($msg === 'role_changed'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>用户权限已修改</div><?php endif; ?>
+    <?php if ($msg === 'role_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>权限修改无效（无法操作超管）</div><?php endif; ?>
     <?php if ($msg === 'qq_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
     <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>密码至少 8 位，且必须包含大写字母、小写字母与数字</div><?php endif; ?>
     <?php if ($msg === 'challenge_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>挑战码无效或已过期，请重新生成</div><?php endif; ?>
@@ -807,22 +849,60 @@ $banMsg = $_GET['bmsg'] ?? '';
         </div>
         <div class="table-wrap">
         <table>
-            <tr><th>昵称</th><th>QQ</th><th>角色</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th>昵称</th><th>UID（QQ）</th><th>角色</th><th>创建时间</th><th>状态</th><th>操作</th></tr>
             <?php foreach ($users as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
-                <td style="color:var(--text-muted)"><?= htmlspecialchars($u['qq'] ?? '') ?></td>
+                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
                 <td><span class="role-badge role-<?= $u['role'] ?? 'user' ?>"><?= htmlspecialchars($u['role'] ?? 'user') ?></span></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
                 <td>
+                    <?php if (!empty($u['disabled'])): ?>
+                    <span class="role-badge" style="background:rgba(229,72,77,.12);color:var(--danger,#e5484d)">已禁用</span>
+                    <?php else: ?>
+                    <span class="role-badge" style="background:rgba(52,199,89,.12);color:#34c759">正常</span>
+                    <?php endif; ?>
+                </td>
+                <td>
                     <?php if (($u['role'] ?? '') !== ROLE_SUPER_ADMIN): ?>
-                    <form method="post" style="display:inline" class="need-challenge" data-confirm="确定删除 <?= htmlspecialchars($u['nickname'] ?? '') ?>？">
-                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
-                        <input type="hidden" name="action" value="delete_user">
-                        <input type="hidden" name="user_id" value="<?= htmlspecialchars($u['id']) ?>">
-                        <input type="hidden" name="challenge_code">
-                        <button type="submit" class="btn-link danger">删除</button>
-                    </form>
+                    <!-- v2.11.4：二级操作菜单（修改权限 / 禁用启用 / 删除，均需挑战码） -->
+                    <div class="user-op-menu">
+                        <button type="button" class="btn user-op-btn" data-op-toggle title="管理用户">⋯</button>
+                        <div class="user-op-dropdown" style="display:none">
+                            <form method="post" class="need-challenge">
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+                                <input type="hidden" name="action" value="set_user_role">
+                                <input type="hidden" name="user_id" value="<?= htmlspecialchars($u['id']) ?>">
+                                <input type="hidden" name="challenge_code">
+                                <div class="user-op-row">
+                                    <span class="user-op-label">权限</span>
+                                    <select class="form-select" name="role" style="flex:1">
+                                        <option value="<?= ROLE_STATION_ADMIN ?>" <?= ($u['role'] ?? '') === ROLE_STATION_ADMIN ? 'selected' : '' ?>>站长</option>
+                                        <option value="<?= ROLE_AUTHOR ?>" <?= ($u['role'] ?? '') === ROLE_AUTHOR ? 'selected' : '' ?>>写作者</option>
+                                        <option value="<?= ROLE_USER ?>" <?= ($u['role'] ?? '') === ROLE_USER ? 'selected' : '' ?>>普通用户</option>
+                                    </select>
+                                    <button type="submit" class="btn btn-sm">保存</button>
+                                </div>
+                            </form>
+                            <form method="post" class="need-challenge" data-confirm="<?= !empty($u['disabled']) ? '确认启用 ' . htmlspecialchars($u['nickname'] ?? '') . ' ？' : '确认禁用 ' . htmlspecialchars($u['nickname'] ?? '') . ' ？禁用后该用户无法登录/评论，已登录会话立即失效' ?>">
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+                                <input type="hidden" name="action" value="set_user_disabled">
+                                <input type="hidden" name="user_id" value="<?= htmlspecialchars($u['id']) ?>">
+                                <input type="hidden" name="disabled" value="<?= !empty($u['disabled']) ? '0' : '1' ?>">
+                                <input type="hidden" name="challenge_code">
+                                <button type="submit" class="user-op-item"><?= !empty($u['disabled']) ? '启用账号' : '禁用账号' ?></button>
+                            </form>
+                            <form method="post" class="need-challenge" data-confirm="确定删除 <?= htmlspecialchars($u['nickname'] ?? '') ?>？">
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+                                <input type="hidden" name="action" value="delete_user">
+                                <input type="hidden" name="user_id" value="<?= htmlspecialchars($u['id']) ?>">
+                                <input type="hidden" name="challenge_code">
+                                <button type="submit" class="user-op-item danger">删除用户</button>
+                            </form>
+                        </div>
+                    </div>
+                    <?php else: ?>
+                    <span style="color:var(--text-muted);font-size:0.82em">—</span>
                     <?php endif; ?>
                 </td>
             </tr>
@@ -2472,6 +2552,24 @@ function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebarOverlay').classList.toggle('active');
 }
+// v2.11.4：用户操作二级菜单（⋯ 展开 / 点击外部关闭）
+(function() {
+    document.querySelectorAll('.user-op-menu').forEach(function(menu) {
+        var btn = menu.querySelector('[data-op-toggle]');
+        var dd = menu.querySelector('.user-op-dropdown');
+        if (!btn || !dd) return;
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var open = dd.style.display === 'block';
+            document.querySelectorAll('.user-op-dropdown').forEach(function(d) { d.style.display = 'none'; });
+            dd.style.display = open ? 'none' : 'block';
+        });
+        dd.addEventListener('click', function(e) { e.stopPropagation(); });
+    });
+    document.addEventListener('click', function() {
+        document.querySelectorAll('.user-op-dropdown').forEach(function(d) { d.style.display = 'none'; });
+    });
+})();
 </script>
 </body>
 </html>

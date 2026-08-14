@@ -186,6 +186,11 @@ if (is_dir($articlesDir)) {
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
             发表文章
         </a>
+        <!-- v2.11.4：快捷返回主界面 -->
+        <a href="/" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            返回主页
+        </a>
         <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             退出登录
@@ -420,6 +425,17 @@ function logoutSubmit(e) {
         for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
         return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     }
+    // v2.11.4：base64url → ArrayBuffer（PHP 返回的 challenge/user.id 是字符串，create() 要求 ArrayBuffer）
+    function b64ToBuf(s) {
+        var bin = atob(String(s).replace(/-/g, '+').replace(/_/g, '/')), bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return bytes.buffer;
+    }
+    function prepCreate(opts) {
+        if (opts && opts.challenge) opts.challenge = b64ToBuf(opts.challenge);
+        if (opts && opts.user && opts.user.id) opts.user.id = b64ToBuf(opts.user.id);
+        return opts;
+    }
     function supported() {
         return typeof window.PublicKeyCredential !== 'undefined'
             && typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function';
@@ -486,7 +502,7 @@ function logoutSubmit(e) {
                     else if (/iPhone|iPad/i.test(navigator.userAgent)) devName = 'iPhone / iPad';
                     else if (/Macintosh/i.test(navigator.userAgent)) devName = 'macOS';
                 }
-                return navigator.credentials.create({ publicKey: d0.options }).then(function(cred) {
+                return navigator.credentials.create({ publicKey: prepCreate(d0.options) }).then(function(cred) {
                     return fetch('../api.php?action=webauthn_register_complete', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ id: cred.id, clientDataJSON: b64u(cred.response.clientDataJSON), attestationObject: b64u(cred.response.attestationObject), device_name: devName }) });
                 }).then(function(r) { return r.json(); }).then(function(d1) {
                     if (d1.success) { load(); showErr(''); } else showErr(d1.error || '绑定失败');

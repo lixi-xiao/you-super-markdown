@@ -1000,7 +1000,11 @@
     [cmtAuthModal, cmtProfileModal, cmtAdminModal].forEach(m => {
         if (m) m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); });
     });
-    if (cmtCapsuleBtn) cmtCapsuleBtn.addEventListener('click', () => { cmtAuthMode = 'login'; cmtUpdateAuthUI(); cmtOpenModal(cmtAuthModal); });
+    if (cmtCapsuleBtn) cmtCapsuleBtn.addEventListener('click', () => {
+        cmtAuthMode = 'login'; cmtUpdateAuthUI();
+        if (cmtAuthSlide) { cmtAuthSlide.classList.remove('slide-out'); cmtAuthSlide.classList.remove('slide-in'); }
+        cmtOpenModal(cmtAuthModal);
+    });
     // v2.11.3：打开编辑资料弹窗（主页用户下拉「编辑资料」与评论区用户栏共用）
     function cmtOpenProfileModal() {
         if (!cmtUser) return;
@@ -1046,14 +1050,23 @@
         cmtUser = null;
         cmtUpdateUI();
     });
+    // v2.11.4：切换防抖——动画期间忽略重复点击（此前快速双击会排队两个 setTimeout，
+    // 状态被来回切两次，表现为「要点两下才切过去」）
+    let cmtSwitchBusy = false;
     if (cmtSwitchBtn) cmtSwitchBtn.addEventListener('click', () => {
+        if (cmtSwitchBusy) return;
+        cmtSwitchBusy = true;
+        cmtAuthSlide.classList.remove('slide-in');
         cmtAuthSlide.classList.add('slide-out');
         setTimeout(() => {
             cmtAuthMode = cmtAuthMode === 'login' ? 'register' : 'login';
             cmtUpdateAuthUI();
             cmtAuthSlide.classList.remove('slide-out');
             cmtAuthSlide.classList.add('slide-in');
-            setTimeout(() => cmtAuthSlide.classList.remove('slide-in'), 250);
+            setTimeout(() => {
+                cmtAuthSlide.classList.remove('slide-in');
+                cmtSwitchBusy = false;
+            }, 300);
         }, 200);
     });
     function cmtUpdateAuthUI() {
@@ -1073,6 +1086,27 @@
         let bin = '';
         for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
         return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    // v2.11.4：base64url 解码（字符串 → ArrayBuffer）。PHP 返回的 challenge/user.id/凭据 id 为
+    // base64url 字符串，而 navigator.credentials.create/get() 要求 ArrayBuffer，此前直接透传报
+    // "The provided value is not of type '(ArrayBuffer or ArrayBufferView)'"
+    function webauthnB64ToBuf(s) {
+        const bin = atob(String(s).replace(/-/g, '+').replace(/_/g, '/'));
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return bytes.buffer;
+    }
+    function webauthnPrepCreateOptions(opts) {
+        if (opts && opts.challenge) opts.challenge = webauthnB64ToBuf(opts.challenge);
+        if (opts && opts.user && opts.user.id) opts.user.id = webauthnB64ToBuf(opts.user.id);
+        return opts;
+    }
+    function webauthnPrepGetOptions(opts) {
+        if (opts && opts.challenge) opts.challenge = webauthnB64ToBuf(opts.challenge);
+        if (opts && Array.isArray(opts.allowCredentials)) {
+            opts.allowCredentials.forEach(c => { if (c && c.id) c.id = webauthnB64ToBuf(c.id); });
+        }
+        return opts;
     }
     function deviceLoginSupported() {
         return typeof window.PublicKeyCredential !== 'undefined'
@@ -1105,7 +1139,7 @@
             if (!d0.success) { cmtDeviceLoginErr.textContent = d0.error || '设备登录不可用'; return; }
             const opts = d0.options;
             if (!opts.allowCredentials || opts.allowCredentials.length === 0) { cmtDeviceLoginErr.textContent = '该账号未绑定设备，请先用密码登录，再在「编辑资料」中绑定'; return; }
-            const cred = await navigator.credentials.get({ publicKey: opts });
+            const cred = await navigator.credentials.get({ publicKey: webauthnPrepGetOptions(opts) });
             const assertion = {
                 id: cred.id,
                 clientDataJSON: webauthnB64url(cred.response.clientDataJSON),
@@ -1281,7 +1315,7 @@
                 else if (/Macintosh/i.test(navigator.userAgent)) devName = 'macOS';
                 else if (/Linux/i.test(navigator.userAgent)) devName = 'Linux 设备';
             }
-            const cred = await navigator.credentials.create({ publicKey: d0.options });
+            const cred = await navigator.credentials.create({ publicKey: webauthnPrepCreateOptions(d0.options) });
             const att = {
                 id: cred.id,
                 clientDataJSON: webauthnB64url(cred.response.clientDataJSON),
@@ -2331,6 +2365,9 @@
                 cmtRegForm.style.display = 'none';
                 if (cmtSwitchText) cmtSwitchText.textContent = '还没有账号？';
                 if (cmtSwitchBtn) cmtSwitchBtn.textContent = '立即注册';
+                // v2.11.4：清理残留的切换动画状态（防止打开弹窗时表单仍处于 slide-out/in 中间态）
+                cmtAuthSlide.classList.remove('slide-out');
+                cmtAuthSlide.classList.remove('slide-in');
                 cmtAuthModal.classList.add('show');
             }
         }

@@ -333,11 +333,24 @@ def recover_audit():
     """从镜像 SQLite 恢复审计表与链尾（仅恢复 audit 表，不覆盖业务数据）"""
     if not os.path.exists(AUDIT_MIRROR_DB):
         return
+    mdir = os.path.dirname(AUDIT_MIRROR_DB)
+    # v2.8.0 修复：镜像目录 chattr +i 且 ym.db 为 WAL 模式——sqlite 打开需在目录内创建 -wal/-shm 侧车文件，
+    # immutable 目录禁止创建 → SQLITE_CANTOPEN（实测「从镜像恢复审计失败: unable to open database file」）。
+    # 与 mirror_db() 同模式：先解锁 → 操作 → 重锁（见踩坑 #23）
+    _chattr(mdir, '-i')
     try:
         mcon = sqlite3.connect(AUDIT_MIRROR_DB)
         mcon.row_factory = sqlite3.Row
         rows = mcon.execute("SELECT * FROM audit ORDER BY rowid").fetchall()
         mcon.close()
+        # 清理打开时产生的 WAL/SHM 侧车文件（防残留影响下次打开）
+        for suffix in ('-wal', '-shm'):
+            p = AUDIT_MIRROR_DB + suffix
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
 
         con = sqlite3.connect(DB_FILE)
         con.execute('DELETE FROM audit')
@@ -353,6 +366,8 @@ def recover_audit():
         log(f"从镜像恢复审计失败: {e}")
         # v2.8.0：恢复失败是最严重场景，必须邮件告警兜底（此前仅 log，告警静默缺失）
         send_alert("日志恢复失败", f"审计日志从镜像恢复失败，请立即人工介入: {e}")
+    finally:
+        _chattr(mdir, '+i')
     if os.path.exists(AUDIT_MIRROR_CHAIN):
         shutil.copy2(AUDIT_MIRROR_CHAIN, AUDIT_CHAIN)
 
@@ -673,6 +688,10 @@ def signal_handler(signum, frame):
     global running
     log(f"收到信号 {signum}，正在退出...")
     running = False
+    # v2.8.0 修复：主线程阻塞在 inotify epoll read()，仅置 running=False 无法中断；
+    # PEP 475 会让被中断的系统调用自动重试 → 进程不退 → systemd watchdog 30s 超时 SIGABRT 强杀。
+    # 在 handler 中抛 SystemExit（PEP 475：handler 抛异常则不重试），异常沿主线程传播使进程立即退出（见踩坑 #24）
+    raise SystemExit(0)
 
 
 def periodic_audit_thread():

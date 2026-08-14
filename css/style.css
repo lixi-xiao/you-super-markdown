@@ -1696,3 +1696,28 @@ kbd {
         width: 220px;
     }
 }
+
+/* ============================================================
+   移动端适配完善（v2.8.0 同次：评论输入 / 触控目标 / 下拉）
+   前台主页 index.php；与现有响应式同一设计语言
+   ============================================================ */
+@media (max-width: 640px) {
+    /* 评论输入控件：16px 防 iOS 聚焦缩放 + 44px 触控 */
+    .cmt-input-box textarea,
+    .cmt-input-box input,
+    .cmt-input-box .cmt-msg-input {
+        font-size: 16px;
+        padding: 12px 14px;
+    }
+    .cmt-capsule-btn { min-height: 44px; padding: 10px 18px; }
+    .cmt-user-inner { min-height: 44px; }
+
+    /* 顶栏图标触控目标 */
+    .top-bar .icon-btn { width: 40px; height: 40px; }
+
+    /* 下拉面板窄屏内边距 */
+    .dropdown-panel { max-height: 70vh; }
+
+    /* 正文行高与字号微调（手机可读性） */
+    .markdown-body { font-size: 15.5px; line-height: 1.75; }
+}

@@ -110,6 +110,15 @@ http_response_code(404);
             stroke-linecap: round;
             stroke-linejoin: round;
         }
+        @media (max-width: 480px) {
+            .error-container { padding: 24px 20px; }
+            .error-code { font-size: 88px; }
+            .error-icon { margin-top: -44px; width: 64px; height: 64px; }
+            .error-icon svg { width: 30px; height: 30px; }
+            h1 { font-size: 20px; }
+            p { font-size: 14px; margin-bottom: 26px; }
+            .back-btn { width: 100%; justify-content: center; padding: 13px 24px; }
+        }
     </style>
 </head>
 <body>

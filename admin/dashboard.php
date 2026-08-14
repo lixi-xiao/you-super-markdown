@@ -103,7 +103,8 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'test_smtp') {
     $mailBody = "这是一封来自 {$site} 的邮件配置测试。\n"
         . "如果你收到此邮件，说明 SMTP 配置正确，告警邮件可以正常发送。\n"
         . "时间：" . date('Y-m-d H:i:s') . "\n";
-    [$mailOk, $mailErr] = sendSmtpMail($mailTo, "[{$site} 邮件配置测试]", $mailBody);
+    $mailHtml = renderMailHtml($site, '邮件配置测试', $mailBody);
+    [$mailOk, $mailErr] = sendSmtpMail($mailTo, "[{$site} 邮件配置测试]", $mailBody, $mailHtml);
     auditLog('smtp_test', $mailTo, '发送测试邮件', $mailOk ? 'success' : 'failed');
     echo json_encode(['success' => $mailOk, 'error' => $mailOk ? '' : $mailErr], JSON_UNESCAPED_UNICODE);
     exit;

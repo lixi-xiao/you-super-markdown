@@ -155,6 +155,7 @@ case "${1:-}" in
 
     notify)
         # v3.1.0：发送通知邮件到管理员邮箱（测试/更新/运维消息均可用）
+        # v3.1.1：复用 renderMailHtml 统一邮件模板（HTML 布局 + 纯文本双版本 multipart），修复纯文本无布局
         # 用法: ym-admin notify "<消息>"；CLI 发信注入 YM_SMTP_PASS（root 密钥文件）
         MSG="${2:-}"
         if [ -z "$MSG" ]; then echo "用法: ym-admin notify <消息>"; exit 1; fi
@@ -166,9 +167,11 @@ case "${1:-}" in
                 \$cfg = loadSiteConfig();
                 \$to = \$cfg['admin_email'] ?? '';
                 if (\$to === '') { echo 'NO_ADMIN_EMAIL'; exit(0); }
+                \$site = \$cfg['site_title'] ?? 'You Super Markdown';
                 \$msg = base64_decode(getenv('MSG_B64'));
                 \$subject = '[You Super Markdown] ' . mb_substr(\$msg, 0, 60);
-                [\$ok, \$err] = sendSmtpMail(\$to, \$subject, \$msg, '');
+                \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')]);
+                [\$ok, \$err] = sendSmtpMail(\$to, \$subject, \$msg, \$html);
                 echo \$ok ? 'MAIL_OK' : ('MAIL_FAIL: ' . \$err);
             "
         else

@@ -488,13 +488,28 @@ chmod 664 /opt/you-markdown/backup.conf
 cp "$SCRIPT_DIR/ym-guard.py" /opt/you-markdown/ym-guard.py
 chmod 700 /opt/you-markdown/ym-guard.py
 
-# 创建邮件告警脚本
+# 创建邮件告警脚本（v2.8.0：mail 失败时落盘 alert.log，可追溯"邮件没发出去"）
+touch /opt/you-markdown/alert.log 2>/dev/null || true
+chown root:www-data /opt/you-markdown/alert.log 2>/dev/null || true
+chmod 664 /opt/you-markdown/alert.log 2>/dev/null || true
 cat > /usr/local/bin/ym-alert << 'EOF'
 #!/bin/bash
 TO="$1"
 SUBJECT="$2"
 BODY="$3"
-echo "$BODY" | mail -s "$SUBJECT" "$TO" 2>/dev/null || true
+if command -v mail >/dev/null 2>&1; then
+    echo "$BODY" | mail -s "$SUBJECT" "$TO" 2>/tmp/ym-alert.err
+    RC=$?
+    if [ $RC -ne 0 ]; then
+        ERR=$(head -1 /tmp/ym-alert.err 2>/dev/null)
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [FAIL] mail 命令失败(rc=$RC): $ERR" >> /opt/you-markdown/alert.log 2>/dev/null || true
+    fi
+    rm -f /tmp/ym-alert.err
+    exit $RC
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [FAIL] mail 命令不存在，无法发送告警" >> /opt/you-markdown/alert.log 2>/dev/null || true
+    exit 1
+fi
 EOF
 chmod +x /usr/local/bin/ym-alert
 
@@ -725,6 +740,83 @@ PY
 
 install_hfish
 set -e  # 恢复 set -e
+
+# 9.3 邮件告警配置（可选，v2.8.0：SMTP 直连，配置写入 config 表；后台「邮件设置」可随时修改/测试）
+configure_mail() {
+    if [ "$AUTO_YES" = true ] && [ -z "${YM_SMTP_HOST:-}" ]; then
+        info "已跳过邮件配置（后台「邮件设置」可随时配置，或环境变量 YM_SMTP_*）"
+        return 0
+    fi
+    echo ""
+    log "============================================"
+    log "  邮件告警配置（可选，建议配置以接收安全告警）"
+    log "============================================"
+    echo ""
+    read -p "  是否配置 SMTP 邮件? (y/N, 默认跳过): " mail_confirm
+    mail_confirm=${mail_confirm:-N}
+    if [ "$mail_confirm" != "y" ] && [ "$mail_confirm" != "Y" ]; then
+        info "已跳过邮件配置（后台「邮件设置」可随时配置）"
+        return 0
+    fi
+    SMTP_HOST="${YM_SMTP_HOST:-}"
+    SMTP_PORT="${YM_SMTP_PORT:-465}"
+    SMTP_ENC="${YM_SMTP_ENC:-ssl}"
+    SMTP_USER="${YM_SMTP_USER:-}"
+    SMTP_PASS="${YM_SMTP_PASS:-}"
+    SMTP_FROM="${YM_SMTP_FROM:-}"
+    [ -z "$SMTP_HOST" ] && read -p "  SMTP 服务器 (如 smtp.163.com): " SMTP_HOST
+    [ -z "$SMTP_PORT" ] && read -p "  端口 (默认 465): " SMTP_PORT
+    [ -z "$SMTP_ENC" ] && read -p "  加密方式 (ssl/tls/plain, 默认 ssl): " SMTP_ENC
+    [ -z "$SMTP_USER" ] && read -p "  发信账号 (如 xxx@163.com): " SMTP_USER
+    if [ -z "$SMTP_PASS" ]; then
+        read -s -p "  授权码 (不回显): " SMTP_PASS
+        echo ""
+    fi
+    [ -z "$SMTP_FROM" ] && read -p "  发件人 (可空=账号): " SMTP_FROM
+    SMTP_PORT=${SMTP_PORT:-465}
+    SMTP_ENC=${SMTP_ENC:-ssl}
+    # base64 传递避免引号/特殊字符问题（授权码可能含特殊字符）
+    SMTP_HOST_B64=$(printf '%s' "$SMTP_HOST" | base64 -w0 2>/dev/null || printf '%s' "$SMTP_HOST" | base64)
+    SMTP_USER_B64=$(printf '%s' "$SMTP_USER" | base64 -w0 2>/dev/null || printf '%s' "$SMTP_USER" | base64)
+    SMTP_PASS_B64=$(printf '%s' "$SMTP_PASS" | base64 -w0 2>/dev/null || printf '%s' "$SMTP_PASS" | base64)
+    SMTP_FROM_B64=$(printf '%s' "$SMTP_FROM" | base64 -w0 2>/dev/null || printf '%s' "$SMTP_FROM" | base64)
+    SMTP_HOST_B64="$SMTP_HOST_B64" SMTP_PORT_B64="$SMTP_PORT" SMTP_ENC_B64="$SMTP_ENC" \
+    SMTP_USER_B64="$SMTP_USER_B64" SMTP_PASS_B64="$SMTP_PASS_B64" SMTP_FROM_B64="$SMTP_FROM_B64" \
+    php -r "
+        require '$WEB_ROOT/utils.php';
+        \$cfg = loadSiteConfig();
+        \$cfg['smtp_host'] = base64_decode(getenv('SMTP_HOST_B64'));
+        \$cfg['smtp_port'] = (int)getenv('SMTP_PORT_B64');
+        \$cfg['smtp_user'] = base64_decode(getenv('SMTP_USER_B64'));
+        \$cfg['smtp_pass'] = base64_decode(getenv('SMTP_PASS_B64'));
+        \$cfg['smtp_from'] = base64_decode(getenv('SMTP_FROM_B64'));
+        \$cfg['smtp_enc'] = in_array(getenv('SMTP_ENC_B64'), ['ssl','tls','plain'], true) ? getenv('SMTP_ENC_B64') : 'ssl';
+        saveSiteConfig(\$cfg);
+        echo 'OK';
+    " 2>/dev/null || true
+    info "SMTP 配置完成（后台「邮件设置」可修改/测试）"
+    # 初次配置即测试：发一封测试邮件到管理员邮箱
+    if [ -n "$ADMIN_EMAIL" ]; then
+        echo ""
+        log "发送测试邮件到 $ADMIN_EMAIL ..."
+        TEST_RESULT=$(SMTP_HOST_B64="$SMTP_HOST_B64" SMTP_PORT_B64="$SMTP_PORT" SMTP_ENC_B64="$SMTP_ENC" \
+        SMTP_USER_B64="$SMTP_USER_B64" SMTP_PASS_B64="$SMTP_PASS_B64" SMTP_FROM_B64="$SMTP_FROM_B64" \
+        ADMIN_EMAIL_B64=$(printf '%s' "$ADMIN_EMAIL" | base64 -w0 2>/dev/null || printf '%s' "$ADMIN_EMAIL" | base64) \
+        php -r "
+            require '$WEB_ROOT/utils.php';
+            \$to = base64_decode(getenv('ADMIN_EMAIL_B64'));
+            [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown 安装成功] 邮件配置测试', '邮件配置测试：如果你收到此邮件，说明 SMTP 配置正确，安全告警可以正常发送。');
+            echo \$ok ? 'OK' : ('FAIL: ' . \$err);
+        " 2>/dev/null)
+        case "$TEST_RESULT" in
+            OK*) info "✅ 测试邮件发送成功（请查收 $ADMIN_EMAIL）" ;;
+            *) warn "⚠️ 测试邮件发送失败：${TEST_RESULT#FAIL: }（可在后台「邮件设置」修正后重试）" ;;
+        esac
+    else
+        warn "未设置管理员邮箱，跳过测试邮件（请在后台「系统配置」设置 admin_email）"
+    fi
+}
+configure_mail
 
 # ================================================================
 # 9. 安装 CLI 管理工具

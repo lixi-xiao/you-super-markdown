@@ -141,17 +141,37 @@ function db_init_schema($pdo) {
     $pdo->exec('CREATE TABLE IF NOT EXISTS pinned (
         article TEXT PRIMARY KEY
     )');
-    $pdo->exec('CREATE TABLE IF NOT EXISTS login_fails (ip TEXT, t INTEGER)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS login_fails (ip TEXT, t INTEGER, acc TEXT)');
+    // v2.11.0：老库 login_fails 无 acc 列（登录失败按账号维度计数），幂等补齐
+    try { $pdo->exec('ALTER TABLE login_fails ADD COLUMN acc TEXT'); } catch (Exception $e) { /* 列已存在 */ }
     $pdo->exec('CREATE TABLE IF NOT EXISTS reg_rates (ip TEXT, t INTEGER)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS comment_rates (ip TEXT, t INTEGER)');
+    // v2.11.0：登录锁定表（60 秒内同 IP 或同账号失败 ≥3 次 → 锁 15 分钟，IP+账号双级）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS login_locks (
+        key TEXT PRIMARY KEY,
+        locked_until INTEGER
+    )');
+    // v2.11.0：WebAuthn 设备凭据表（电脑 Windows Hello PIN / 手机指纹等平台认证器快速登录）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS webauthn_credentials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        credential_id TEXT UNIQUE,
+        public_key TEXT,
+        counter INTEGER DEFAULT 0,
+        device_name TEXT,
+        created INTEGER,
+        last_used INTEGER
+    )');
     // v2.5.4 性能优化：频率计数表索引
     // (ip, t) 复合索引加速 db_rate_count() 的按 IP 窗口计数；t 单列索引加速 30 天过期清理
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_login_fails_ip_t ON login_fails(ip, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_login_fails_t ON login_fails(t)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_login_fails_acc ON login_fails(acc)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_reg_rates_ip_t ON reg_rates(ip, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_reg_rates_t ON reg_rates(t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_comment_rates_ip_t ON comment_rates(ip, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_comment_rates_t ON comment_rates(t)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(user_id)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS logs (ip TEXT, action TEXT, time TEXT)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS unauthorized (
         ip TEXT, action TEXT, user TEXT, user_id TEXT, ua TEXT, time TEXT

@@ -148,22 +148,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
-// ===== v2.9.0：滑块人机验证 =====
-if ($action === 'captcha_new') {
-    $c = captcha_new();
-    jsonOut(['success' => true, 'captcha_id' => $c['id'], 'captcha_pos' => $c['pos']]);
-}
+// ===== v2.11.0：滑块人机验证已彻底移除（原 captcha_new 分支删除） =====
 
 // ===== v2.9.0：注册邮箱验证码发送（60s 冷却，按邮箱；注册为匿名，不走超管豁免） =====
 if ($action === 'send_register_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $siteCfg = loadSiteConfig();
-    if (!empty($siteCfg['email_verify_enabled']) && !empty($siteCfg['captcha_enabled'])) {
-        // 启用滑块时，发码前先过滑块（防脚本批量轰炸邮箱）
-        $input = json_decode(file_get_contents('php://input'), true);
-        if (!captcha_check($input['captcha_id'] ?? '', $input['captcha_pos'] ?? '')) {
-            jsonOut(['success' => false, 'error' => '滑块验证未通过，请重试'], 400);
-        }
-    }
+    // v2.11.0：滑块验证已移除，发码轰炸由下方 IP 级限速兜底
     $input = json_decode(file_get_contents('php://input'), true);
     $email = trim($input['email'] ?? '');
     // v2.9.0：IP 级发码限速（60 秒最多 5 次，防换邮箱轰炸）
@@ -195,16 +185,13 @@ if ($action === 'avatar') {
     }
     exit;
 }
-// ===== v2.9.0：站长创建写作者——发送验证码到写作者邮箱（需站长登录 + CSRF + 滑块） =====
+// ===== v2.9.0：站长创建写作者——发送验证码到写作者邮箱（需站长登录 + CSRF；v2.11.0 起滑块已移除） =====
 if ($action === 'send_author_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!checkRole(ROLE_STATION_ADMIN)) jsonOut(['success' => false, 'error' => '无权限'], 403);
     if (!verifyCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
     $input = json_decode(file_get_contents('php://input'), true);
     $email = trim($input['email'] ?? '');
     $cfg = loadSiteConfig();
-    if (!empty($cfg['captcha_enabled']) && !captcha_check($input['captcha_id'] ?? '', $input['captcha_pos'] ?? '')) {
-        jsonOut(['success' => false, 'error' => '滑块验证未通过，请重试'], 400);
-    }
     if (!email_valid($email)) jsonOut(['success' => false, 'error' => '邮箱格式不正确'], 400);
     $ipNow = getClientIP();
     $recent = db_one('SELECT COUNT(*) AS c FROM email_codes WHERE ip = ? AND created > ?', [$ipNow, time() - 60])['c'] ?? 0;
@@ -289,18 +276,13 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $nick = trim($input['nickname'] ?? '');
     $pw = $input['password'] ?? '';
     $email = trim($input['email'] ?? '');
-    $captchaId = $input['captcha_id'] ?? '';
-    $captchaPos = $input['captcha_pos'] ?? '';
     $code = $input['code'] ?? '';
     if (empty($qq) || empty($pw)) jsonOut(['success' => false, 'error' => 'QQ号和密码不能为空'], 400);
     $vp = validatePassword($pw);
     if ($vp !== true) jsonOut(['success' => false, 'error' => $vp], 400);
     if (empty($nick)) $nick = '用户' . substr($qq, -4);
     $nick = mb_substr($nick, 0, 20, 'UTF-8');
-    // v2.9.0 人机滑块验证（一次性）
-    if (!empty($siteCfg['captcha_enabled']) && !captcha_check($captchaId, $captchaPos)) {
-        jsonOut(['success' => false, 'error' => '滑块验证未通过，请重试'], 400);
-    }
+    // v2.11.0：滑块人机验证已彻底移除
     // v2.9.0 邮箱验证码（开关启用时：邮箱格式 + 唯一 + 验证码一次性校验）
     if (!empty($siteCfg['email_verify_enabled'])) {
         if (!email_valid($email)) jsonOut(['success' => false, 'error' => '邮箱格式不正确'], 400);
@@ -339,9 +321,14 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $qq = trim($input['qq'] ?? '');
     $pw = $input['password'] ?? '';
     if (empty($qq) || empty($pw)) jsonOut(['success' => false, 'error' => 'QQ号和密码不能为空'], 400);
+    // v2.11.0：登录锁定检查（IP+账号双级；60 秒内失败 ≥3 次 → 锁 15 分钟）
+    $lockLeft = loginLocked('ip:' . $clientIP);
+    if ($lockLeft <= 0) $lockLeft = loginLocked('qq:' . $qq);
+    if ($lockLeft > 0) {
+        jsonOut(['success' => false, 'error' => '登录失败次数过多，请 ' . $lockLeft . ' 秒后重试', 'locked_seconds' => $lockLeft], 429);
+    }
     $users = loadUsers();
     $isAdminFirst = false;
-    $loginFailed = false;
     foreach ($users as $u) {
         if (($u['qq'] ?? '') === $qq && password_verify($pw, $u['password'])) {
             session_regenerate_id(true);
@@ -356,21 +343,76 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 'pw_hash' => $u['password']
             ];
             if (in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN])) $isAdminFirst = true;
+            // v2.11.0：登录成功清除失败计数（IP 级 + 该账号级）
+            loginFailClear($clientIP, $qq);
             $safeUser = $_SESSION['cmt_user'];
             unset($safeUser['pw_hash']);
             jsonOut(['success' => true, 'user' => $safeUser, 'isAdminFirstLogin' => $isAdminFirst]);
         }
     }
-    db_rate_add('login_fails', $clientIP);
-    $ipFails = db_rate_count('login_fails', $clientIP, 3600); // 1 小时窗口
+    // v2.11.0：失败计数（IP+账号双级，60 秒窗口 ≥3 → 锁 15 分钟）
+    loginFailAdd($clientIP, $qq);
+    $ipFails = loginFailCount($clientIP, $qq, 60);
     $loginCfg = loadSiteConfig();
-    $maxLoginFails = max(3, intval($loginCfg['max_login_fails'] ?? 10));
-    if ($ipFails >= $maxLoginFails) {
-        logAbnormal($clientIP, '频繁错误登录（' . $ipFails . '次/小时）');
+    if ($ipFails >= 3) {
+        lockLogin('ip:' . $clientIP, 900);
+        lockLogin('qq:' . $qq, 900);
+        logAbnormal($clientIP, '频繁错误登录（60秒内' . $ipFails . '次，已锁定15分钟）');
         if ($loginCfg['auto_ban'] ?? false) addBan($clientIP, ['login'], '自动封禁：频繁错误登录');
-        db_rate_clear_ip('login_fails', $clientIP);
+        loginFailClear($clientIP, $qq);
+        jsonOut(['success' => false, 'error' => '登录失败次数过多，请 900 秒后重试', 'locked_seconds' => 900], 429);
     }
     jsonOut(['success' => false, 'error' => 'QQ号或密码错误'], 401);
+}
+
+// ===== v2.11.0：WebAuthn 设备认证（可选快速登录：电脑 PIN / 手机指纹） =====
+if ($action === 'webauthn_register_begin' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $u = validateHomeUser();
+    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    jsonOut(['success' => true, 'options' => webauthn_register_begin($u)]);
+}
+if ($action === 'webauthn_register_complete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $u = validateHomeUser();
+    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $input = json_decode(file_get_contents('php://input'), true);
+    $deviceName = trim($input['device_name'] ?? '') ?: '平台认证器（PIN/指纹）';
+    $r = webauthn_register_complete($input, $u['id'], $deviceName);
+    if (!$r['ok']) jsonOut(['success' => false, 'error' => $r['err']], 400);
+    jsonOut(['success' => true]);
+}
+if ($action === 'webauthn_login_begin' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $qq = trim($input['qq'] ?? '');
+    if ($qq === '') jsonOut(['success' => false, 'error' => 'QQ号不能为空'], 400);
+    // 隐私：不泄露账号是否存在——无绑定凭据时返回空 allowCredentials（前端提示「该账号未绑定设备」）
+    jsonOut(['success' => true, 'options' => webauthn_login_begin($qq)]);
+}
+if ($action === 'webauthn_login_complete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $qq = trim($input['qq'] ?? '');
+    if ($qq === '') jsonOut(['success' => false, 'error' => 'QQ号不能为空'], 400);
+    $r = webauthn_login_complete($input, $qq);
+    if (!$r['ok']) jsonOut(['success' => false, 'error' => $r['err']], 400);
+    jsonOut(['success' => true, 'user' => $r['user']]);
+}
+if ($action === 'webauthn_devices' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $u = validateHomeUser();
+    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    jsonOut(['success' => true, 'devices' => webauthn_list_devices($u['id'])]);
+}
+if ($action === 'webauthn_device_remove' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $u = validateHomeUser();
+    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $input = json_decode(file_get_contents('php://input'), true);
+    $deviceId = (int)($input['device_id'] ?? 0);
+    if ($deviceId <= 0) jsonOut(['success' => false, 'error' => '参数错误'], 400);
+    webauthn_remove_device($u['id'], $deviceId);
+    auditLog('webauthn_unbind', $u['id'], '解绑设备 #' . $deviceId);
+    jsonOut(['success' => true]);
 }
 if ($action === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // v2.10.2：超管也可在主页退出——与超管后台 logout 一致：吊销 JWT（jti 黑名单）+ 销毁会话 + 清 cookie

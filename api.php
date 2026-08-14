@@ -261,6 +261,17 @@ if ($action === 'check') {
         unset($safeUser['pw_hash']);
         jsonOut(['success' => true, 'loggedIn' => true, 'user' => $safeUser]);
     } else {
+        // v2.7.1：超管且已开启「超管主页评论」时，前端按登录态渲染以启用评论框（主页仍无管理入口，见 user-status）
+        $sess = validateSession();
+        $checkCfg = loadSiteConfig();
+        if ($sess && ($sess['role'] ?? '') === ROLE_SUPER_ADMIN && !empty($checkCfg['super_admin_comment'])) {
+            jsonOut([
+                'success' => true,
+                'loggedIn' => true,
+                'isSuperAdmin' => true,
+                'user' => ['id' => $sess['id'], 'nickname' => $sess['nickname'] ?? '超管', 'role' => 'super_admin', 'avatar' => '', 'signature' => ''],
+            ]);
+        }
         jsonOut(['success' => true, 'loggedIn' => false]);
     }
 }
@@ -384,6 +395,10 @@ if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         jsonOut(['success' => false, 'error' => '超管身份不参与前台评论'], 403);
     }
     $u = validateHomeUser();
+    // v2.7.1：开启「超管主页评论」后，超管以超管身份评论（不走访客分支）
+    if (!$u && ($_SESSION['cmt_user']['role'] ?? '') === ROLE_SUPER_ADMIN && !empty($siteCfg['super_admin_comment'])) {
+        $u = validateSession();
+    }
     if (!$u && empty($siteCfg['guest_comments_enabled'])) jsonOut(['success' => false, 'error' => '请先登录'], 401);
     if (!$u && !empty($siteCfg['guest_comments_enabled'])) {
         $u = ['id' => 'guest', 'nickname' => '访客', 'avatar' => '', 'qq' => '', 'role' => 'guest'];
@@ -436,6 +451,10 @@ if ($action === 'reply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (($_SESSION['cmt_user']['role'] ?? '') === ROLE_SUPER_ADMIN && empty($replyCfg['super_admin_comment'])) {
         jsonOut(['success' => false, 'error' => '超管身份不参与前台回复'], 403);
     }
+    // v2.7.1：开启「超管主页评论」后，超管以超管身份回复（不走访客分支）
+    if (!$u && ($_SESSION['cmt_user']['role'] ?? '') === ROLE_SUPER_ADMIN && !empty($replyCfg['super_admin_comment'])) {
+        $u = validateSession();
+    }
     if (!$u && empty($replyCfg['guest_comments_enabled'])) jsonOut(['success' => false, 'error' => '请先登录'], 401);
     if (!$u && !empty($replyCfg['guest_comments_enabled'])) {
         $u = ['id' => 'guest', 'nickname' => '访客', 'avatar' => '', 'qq' => '', 'role' => 'guest'];
@@ -486,6 +505,10 @@ if ($action === 'reply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 if ($action === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $u = validateHomeUser();
+    // v2.7.1：开启「超管主页评论」后，超管以超管身份删除评论（超管本身具备管理员删除权限）
+    if (!$u && ($_SESSION['cmt_user']['role'] ?? '') === ROLE_SUPER_ADMIN && !empty(loadSiteConfig()['super_admin_comment'])) {
+        $u = validateSession();
+    }
     if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
     $input = json_decode(file_get_contents('php://input'), true);
     $article = trim($input['article'] ?? '');

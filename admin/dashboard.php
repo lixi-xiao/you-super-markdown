@@ -41,6 +41,25 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'save_channel' && isset($_POST['
     exit;
 }
 
+// POST 处理：保存自动备份配置（敏感操作：CSRF + 挑战码 + 审计）
+if (isset($_POST['save_backup_config'])) {
+    if (!checkCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: dashboard.php?tab=data&msg=csrf_error');
+        exit;
+    }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=data&msg=challenge_failed');
+        exit;
+    }
+    $bkInterval = (int)($_POST['interval_min'] ?? 0);
+    $bkArtKeep = (int)($_POST['article_keep'] ?? 0);
+    $bkManKeep = (int)($_POST['manual_keep'] ?? 0);
+    $bkOk = saveBackupConfig($bkInterval, $bkArtKeep, $bkManKeep);
+    auditLog('backup_config_update', 'backup.conf', "数据库备份间隔={$bkInterval}分钟/文章保留{$bkArtKeep}份/手动保留{$bkManKeep}份", $bkOk ? 'success' : 'failed');
+    header('Location: dashboard.php?tab=data&msg=' . ($bkOk ? 'saved' : 'save_failed'));
+    exit;
+}
+
 // AJAX 处理：检查更新
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'check_update') {
     header('Content-Type: application/json; charset=utf-8');
@@ -504,6 +523,10 @@ $banMsg = $_GET['bmsg'] ?? '';
         <a href="dashboard.php?tab=guard" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'guard' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
             守护进程
+        </a>
+        <a href="dashboard.php?tab=data" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'data' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            数据管理
         </a>
         <a href="dashboard.php?tab=hfish" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'hfish' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
@@ -1913,6 +1936,95 @@ $banMsg = $_GET['bmsg'] ?? '';
             </tr>
             <tr><td style="color:var(--text-muted)">PID</td><td><code><?= $guardPid ?: 'N/A' ?></code></td></tr>
         </table>
+    </div>
+
+    <?php elseif ($tab === 'data'): ?>
+    <?php
+    $gState = getGuardState();
+    $bCfg = getBackupConfig();
+    $bList = getBackupList();
+    $dMsg = $_GET['msg'] ?? '';
+    ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            数据管理
+        </div>
+        <div class="page-subtitle">数据库 / 文章自动备份、整库恢复与保留策略</div>
+    </div>
+    <?php if ($dMsg === 'saved'): ?>
+        <div class="msg" style="margin:0 0 16px;background:rgba(46,204,113,0.15);color:#2ecc71"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>自动备份配置已保存，守护进程下个周期生效</div>
+    <?php elseif ($dMsg === 'save_failed'): ?>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">配置写入失败，请检查 /opt/you-markdown/backup.conf 权限</div>
+    <?php elseif ($dMsg === 'challenge_failed'): ?>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">挑战码无效或已过期，请重新生成</div>
+    <?php elseif ($dMsg === 'csrf_error'): ?>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">CSRF 校验失败，请刷新页面重试</div>
+    <?php endif; ?>
+
+    <div class="card">
+        <div class="card-title"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>自动备份状态</div>
+        <table>
+            <tr><td style="color:var(--text-muted)">数据库备份间隔</td><td><?= (int)($gState['backup_interval_min'] ?? $bCfg['interval_min']) ?> 分钟（5~1440 可配）</td></tr>
+            <tr><td style="color:var(--text-muted)">上次数据库备份</td><td><?= htmlspecialchars($gState['last_db_backup'] ?: '尚未生成') ?></td></tr>
+            <tr><td style="color:var(--text-muted)">下次数据库备份</td><td><?= htmlspecialchars($gState['next_db_backup'] ?: '—') ?></td></tr>
+            <tr><td style="color:var(--text-muted)">数据库备份大小</td><td><?= $gState['db_backup_size'] ? number_format((float)$gState['db_backup_size'] / 1024, 1) . ' KB' : '—' ?></td></tr>
+            <tr><td style="color:var(--text-muted)">文章每日备份</td><td>保留 <?= (int)($gState['article_backup_keep'] ?? $bCfg['article_keep']) ?> 份；上次：<?= htmlspecialchars($gState['last_articles_backup'] ?: '尚未生成') ?>（当前 <?= (int)($gState['articles_backup_count'] ?? 0) ?> 份）</td></tr>
+            <tr><td style="color:var(--text-muted)">手动备份保留</td><td><?= (int)($gState['manual_backup_keep'] ?? $bCfg['manual_keep']) ?> 份（超时自动清除）</td></tr>
+            <tr><td style="color:var(--text-muted)">最近自动恢复</td><td><?= htmlspecialchars($gState['last_restore'] ?: '无记录') ?></td></tr>
+            <tr><td style="color:var(--text-muted)">备份锁定</td><td>backups/db、backups/articles、logs 目录 chattr +i 锁定（root），PHP 权限不可篡改</td></tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>自动备份配置</div>
+        <form method="post" class="need-challenge" data-confirm="保存自动备份配置？">
+            <input type="hidden" name="save_backup_config" value="1">
+            <input type="hidden" name="csrf_token" value="<?= generateCsrfToken() ?>">
+            <table>
+                <tr>
+                    <td style="color:var(--text-muted)">数据库备份间隔（分钟）</td>
+                    <td><input class="form-input" style="width:160px" type="number" min="5" max="1440" name="interval_min" value="<?= (int)$bCfg['interval_min'] ?>" required></td>
+                </tr>
+                <tr>
+                    <td style="color:var(--text-muted)">文章每日备份保留份数</td>
+                    <td><input class="form-input" style="width:160px" type="number" min="1" max="90" name="article_keep" value="<?= (int)$bCfg['article_keep'] ?>" required></td>
+                </tr>
+                <tr>
+                    <td style="color:var(--text-muted)">手动备份保留份数</td>
+                    <td><input class="form-input" style="width:160px" type="number" min="1" max="30" name="manual_keep" value="<?= (int)$bCfg['manual_keep'] ?>" required></td>
+                </tr>
+            </table>
+            <div style="margin-top:12px">
+                <button class="btn btn-primary" type="submit">
+                    <svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                    保存配置
+                </button>
+                <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px">保存需 SSH 生成挑战码（sudo ym-admin challenge），300 秒有效</span>
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>备份列表</div>
+        <?php if (!$bList): ?>
+            <p style="color:var(--text-muted);font-size:0.85em">暂无备份记录（自动备份将在守护进程下个周期生成）</p>
+        <?php else: ?>
+        <table>
+            <thead><tr><th>类型</th><th>文件</th><th>时间</th><th>大小</th></tr></thead>
+            <tbody>
+            <?php foreach ($bList as $b): ?>
+                <tr>
+                    <td><span class="chain-badge chain-valid"><?= htmlspecialchars($b['version']) ?></span></td>
+                    <td><code><?= htmlspecialchars($b['file']) ?></code></td>
+                    <td><?= date('Y-m-d H:i:s', $b['timestamp']) ?></td>
+                    <td><?= number_format($b['size'] / 1024, 1) ?> KB</td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php endif; ?>
+        <p style="color:var(--text-muted);font-size:0.82em;margin-top:8px">数据库备份固定 1 份滚动；文章备份按保留份数自动清除；手动/更新备份超时自动清除。手动整站备份：SSH 执行 <code>sudo ym-admin backup</code>。</p>
     </div>
 
     <?php elseif ($tab === 'hfish'): ?>

@@ -489,6 +489,10 @@ function sendAlert($type, $detail) {
 define('UPDATE_REQUEST_FILE', '/tmp/ym-update-request.json');
 define('UPDATE_LOCK_FILE', '/tmp/ym-update.lock');
 define('BACKUP_DIR', '/opt/you-markdown/backups');
+define('BACKUP_CONF', '/opt/you-markdown/backup.conf');           // 自动备份配置（root:www-data 664）
+define('BACKUP_DB_DIR', BACKUP_DIR . '/db');                        // 数据库 30 分钟备份（固定 1 份）
+define('BACKUP_ARTICLES_DIR', BACKUP_DIR . '/articles');            // 文章每日备份（保留 N 份）
+define('GUARD_STATE_FILE', '/opt/you-markdown/guard-state.json');   // 守护进程状态（含备份状态）
 
 // 服务器挑战码校验（300 秒、单次）：匹配 code + 未过期 + 未使用，通过则原子消费
 function verifyChallenge($code) {
@@ -719,40 +723,92 @@ function paginateList(array $rows, array $fields, string $q = '', int $page = 1,
 }
 
 function getBackupList() {
-    if (!is_dir(BACKUP_DIR)) return [];
-    $files = array_merge(
-        glob(BACKUP_DIR . '/pre-update-*.tar.gz') ?: [],
-        glob(BACKUP_DIR . '/ym-backup-*.tar.gz') ?: []
-    );
     $backups = [];
-    foreach ($files as $f) {
-        $basename = basename($f);
-        // 更新备份格式: pre-update-{version}-{timestamp}.tar.gz
-        if (preg_match('/^pre-update-v?([\d.]+)-(\d+)\.tar\.gz$/', $basename, $m)) {
+    if (is_dir(BACKUP_DIR)) {
+        foreach (glob(BACKUP_DIR . '/pre-update-*.tar.gz') ?: [] as $f) {
+            $basename = basename($f);
+            // 更新备份格式: pre-update-{version}-{timestamp}.tar.gz
+            if (preg_match('/^pre-update-v?([\d.]+)-(\d+)\.tar\.gz$/', $basename, $m)) {
+                $backups[] = [
+                    'file' => $basename, 'path' => $f, 'version' => $m[1],
+                    'timestamp' => (int)$m[2], 'size' => filesize($f), 'type' => 'update',
+                ];
+            }
+        }
+        foreach (glob(BACKUP_DIR . '/ym-backup-*.tar.gz') ?: [] as $f) {
+            $basename = basename($f);
+            // 手动备份格式: ym-backup-{yyyyMMdd}-{HHmmss}.tar.gz
+            if (preg_match('/^ym-backup-(\d{8})-(\d{6})\.tar\.gz$/', $basename, $m2)) {
+                $backups[] = [
+                    'file' => $basename, 'path' => $f, 'version' => '手动备份',
+                    'timestamp' => (int)strtotime($m2[1] . ' ' . $m2[2]), 'size' => filesize($f), 'type' => 'manual',
+                ];
+            }
+        }
+        // 数据库 30 分钟自动备份（固定 1 份滚动）
+        foreach (glob(BACKUP_DB_DIR . '/ym-db-latest.tar.gz') ?: [] as $f) {
             $backups[] = [
-                'file' => $basename,
-                'path' => $f,
-                'version' => $m[1],
-                'timestamp' => (int)$m[2],
-                'size' => filesize($f),
-                'type' => 'update',
+                'file' => basename($f), 'path' => $f, 'version' => '数据库自动备份',
+                'timestamp' => (int)filemtime($f), 'size' => filesize($f), 'type' => 'db',
             ];
         }
-        // 手动备份格式: ym-backup-{yyyyMMdd}-{HHmmss}.tar.gz
-        elseif (preg_match('/^ym-backup-(\d{8})-(\d{6})\.tar\.gz$/', $basename, $m2)) {
-            $backups[] = [
-                'file' => $basename,
-                'path' => $f,
-                'version' => '手动备份',
-                'timestamp' => (int)strtotime($m2[1] . ' ' . $m2[2]),
-                'size' => filesize($f),
-                'type' => 'manual',
-            ];
+        // 文章每日自动备份
+        foreach (glob(BACKUP_ARTICLES_DIR . '/ym-articles-*.tar.gz') ?: [] as $f) {
+            if (preg_match('/^ym-articles-(\d{8})\.tar\.gz$/', basename($f), $m3)) {
+                $backups[] = [
+                    'file' => basename($f), 'path' => $f, 'version' => '文章每日备份',
+                    'timestamp' => (int)strtotime($m3[1]), 'size' => filesize($f), 'type' => 'articles',
+                ];
+            }
         }
     }
     // 按时间降序
     usort($backups, function($a, $b) { return $b['timestamp'] - $a['timestamp']; });
     return $backups;
+}
+
+// ============================================================
+// 自动备份配置（backup.conf，与守护进程 ym-guard.py 同源）
+// ============================================================
+function getBackupConfig() {
+    $cfg = ['interval_min' => 30, 'article_keep' => 7, 'manual_keep' => 5];
+    if (is_file(BACKUP_CONF)) {
+        foreach (file(BACKUP_CONF, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '' || $line[0] === '#' || strpos($line, '=') === false) continue;
+            [$k, $v] = explode('=', $line, 2);
+            $k = trim($k); $v = trim($v);
+            if ($k === 'DB_BACKUP_INTERVAL_MIN') $cfg['interval_min'] = (int)$v;
+            elseif ($k === 'ARTICLE_BACKUP_KEEP') $cfg['article_keep'] = (int)$v;
+            elseif ($k === 'MANUAL_BACKUP_KEEP') $cfg['manual_keep'] = (int)$v;
+        }
+    }
+    // 白名单约束（与守护进程一致）
+    $cfg['interval_min'] = ($cfg['interval_min'] >= 5 && $cfg['interval_min'] <= 1440) ? $cfg['interval_min'] : 30;
+    $cfg['article_keep'] = ($cfg['article_keep'] >= 1 && $cfg['article_keep'] <= 90) ? $cfg['article_keep'] : 7;
+    $cfg['manual_keep'] = ($cfg['manual_keep'] >= 1 && $cfg['manual_keep'] <= 30) ? $cfg['manual_keep'] : 5;
+    return $cfg;
+}
+
+function saveBackupConfig($intervalMin, $articleKeep, $manualKeep) {
+    $intervalMin = (int)$intervalMin;
+    $articleKeep = (int)$articleKeep;
+    $manualKeep = (int)$manualKeep;
+    $intervalMin = ($intervalMin >= 5 && $intervalMin <= 1440) ? $intervalMin : 30;
+    $articleKeep = ($articleKeep >= 1 && $articleKeep <= 90) ? $articleKeep : 7;
+    $manualKeep = ($manualKeep >= 1 && $manualKeep <= 30) ? $manualKeep : 5;
+    $content = "# 自动备份配置（守护进程 ym-guard.py 读取；超管后台/SSH 可改）\n"
+        . "DB_BACKUP_INTERVAL_MIN={$intervalMin}\n"
+        . "ARTICLE_BACKUP_KEEP={$articleKeep}\n"
+        . "MANUAL_BACKUP_KEEP={$manualKeep}\n";
+    return file_put_contents(BACKUP_CONF, $content, LOCK_EX) !== false;
+}
+
+function getGuardState() {
+    if (!is_file(GUARD_STATE_FILE)) return [];
+    $s = @file_get_contents(GUARD_STATE_FILE);
+    $d = json_decode((string)$s, true);
+    return is_array($d) ? $d : [];
 }
 
 function checkForUpdates($channel = 'stable') {

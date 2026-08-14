@@ -770,20 +770,23 @@ function sendSmtpMail($to, $subject, $body, $htmlBody = '') {
     if (substr($r, 0, 3) !== '354') { fclose($fp); return [false, 'DATA 被拒: ' . trim($r)]; }
     $encSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
     $textBody = str_replace("\r\n", "\n", $body);
-    // v2.10.2：邮件正文编码兼容性修复——HTML 用 base64、纯文本用 quoted-printable，
-    // 替代 8bit + 单行超长（163 等客户端对 8bit 长行会直接显示原始 MIME 源码）
+    // v2.10.2：正文编码兼容——HTML 与纯文本统一 quoted-printable（可读型编码 + 76 折行）。
+    // 实测：8bit 单行超长（v2.10.1）与 base64 HTML（v2.10.2）在 163 网页版均显示原始 MIME 源码，
+    // 而 8bit 短行（v2.8/2.9.0）与 QP 可正常渲染——163 对"可读型"编码渲染良好。
     $qpText = mailQpEncode($textBody);
     if ($htmlBody !== '') {
-        // multipart/alternative：HTML 版（base64）+ 纯文本版（quoted-printable，老客户端可见纯文本）
+        // multipart/alternative：HTML 版（quoted-printable）+ 纯文本版（quoted-printable，老客户端可见纯文本）
         $boundary = '----=_Part_' . bin2hex(random_bytes(8));
-        $b64Html = chunk_split(base64_encode($htmlBody), 76, "\r\n");
+        $qpHtml = mailQpEncode($htmlBody);
         $msg = "From: {$from}\r\nTo: {$to}\r\nSubject: {$encSubject}\r\nDate: " . date('r')
+            . "\r\nMessage-ID: <" . bin2hex(random_bytes(8)) . "@{$ehlo}>\r\nX-Mailer: You Super Markdown"
             . "\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"{$boundary}\"\r\n\r\n"
             . "--{$boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" . $qpText . "\r\n"
-            . "--{$boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . $b64Html . "\r\n"
+            . "--{$boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" . $qpHtml . "\r\n"
             . "--{$boundary}--\r\n";
     } else {
         $msg = "From: {$from}\r\nTo: {$to}\r\nSubject: {$encSubject}\r\nDate: " . date('r')
+            . "\r\nMessage-ID: <" . bin2hex(random_bytes(8)) . "@{$ehlo}>\r\nX-Mailer: You Super Markdown"
             . "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n"
             . $qpText;
     }

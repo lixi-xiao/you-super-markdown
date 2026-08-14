@@ -696,28 +696,11 @@ function renderMailCode($site, $purposeLabel, $code, $ttlMin, $extra = []) {
     return $out;
 }
 
-// quoted-printable 编码（v2.10.2）：非 ASCII/特殊字符转 =XX，软折行 76 字符，CRLF 行尾；
-// 用于邮件纯文本 part（替代 8bit，规避 163 等客户端显示原始源码的问题）
-function mailQpEncode($str) {
-    $hex = '0123456789ABCDEF';
-    $str = preg_replace('/\r\n/', "\n", (string)$str);
-    $lines = explode("\n", $str);
-    $out = [];
-    foreach ($lines as $line) {
-        $enc = '';
-        $l = strlen($line);
-        for ($i = 0; $i < $l; $i++) {
-            $o = ord($line[$i]);
-            // 可打印 ASCII（除 '=' 与行尾空格）原样保留
-            if ($o === 32 || ($o >= 33 && $o <= 60) || ($o >= 62 && $o <= 126)) {
-                $enc .= $line[$i];
-            } else {
-                $enc .= '=' . $hex[($o >> 4) & 15] . $hex[$o & 15];
-            }
-        }
-        $out[] = wordwrap($enc, 76, "=\r\n", true);
-    }
-    return implode("\r\n", $out);
+// HTML 折行（v2.10.2-fix-mailqp2）：在标签边界插入换行，确保 8bit 每行 < 998 字符（RFC 5322 行长度限制）。
+// 实测：163 网页版对 base64、quoted-printable 均不解码（显示原始 MIME 源码），对超长单行 8bit 也不解析；
+// 仅短行 8bit（v2.9.0 及以下）可正常渲染——故回归 8bit 并在标签间折行。标签间换行不影响 HTML 渲染。
+function mailFoldHtml($html) {
+    return str_replace('><', ">\n<", (string)$html);
 }
 
 // 轻量 SMTP 客户端（AUTH LOGIN + MAIL/RCPT/DATA），返回 [success, error]
@@ -770,25 +753,25 @@ function sendSmtpMail($to, $subject, $body, $htmlBody = '') {
     if (substr($r, 0, 3) !== '354') { fclose($fp); return [false, 'DATA 被拒: ' . trim($r)]; }
     $encSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
     $textBody = str_replace("\r\n", "\n", $body);
-    // v2.10.2：正文编码兼容——HTML 与纯文本统一 quoted-printable（可读型编码 + 76 折行）。
-    // 实测：8bit 单行超长（v2.10.1）与 base64 HTML（v2.10.2）在 163 网页版均显示原始 MIME 源码，
-    // 而 8bit 短行（v2.8/2.9.0）与 QP 可正常渲染——163 对"可读型"编码渲染良好。
-    $qpText = mailQpEncode($textBody);
-    if ($htmlBody !== '') {
-        // multipart/alternative：HTML 版（quoted-printable）+ 纯文本版（quoted-printable，老客户端可见纯文本）
+    $html = ($htmlBody !== '') ? mailFoldHtml($htmlBody) : '';
+    // v2.10.2-fix-mailqp2：正文统一 8bit（回归 v2.9.0 兼容方式）+ HTML 标签间折行（每行 <998 字符）。
+    // 实测：163 网页版对 base64、quoted-printable 均显示原始 MIME 源码，对超长单行 8bit 也不解析；
+    // 仅短行 8bit 可正常渲染（v2.9.0 12:42 邮件）。报文内部统一 \n，发送前一次性转 \r\n，
+    // 避免正文中已含换行被二次替换成 \r\r\n 破坏 multipart 边界（v2.10.2-fix-mailqp 根因）。
+    if ($html !== '') {
+        // multipart/alternative：HTML 版（8bit 短行）+ 纯文本版（8bit，老客户端可见纯文本）
         $boundary = '----=_Part_' . bin2hex(random_bytes(8));
-        $qpHtml = mailQpEncode($htmlBody);
-        $msg = "From: {$from}\r\nTo: {$to}\r\nSubject: {$encSubject}\r\nDate: " . date('r')
-            . "\r\nMessage-ID: <" . bin2hex(random_bytes(8)) . "@{$ehlo}>\r\nX-Mailer: You Super Markdown"
-            . "\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"{$boundary}\"\r\n\r\n"
-            . "--{$boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" . $qpText . "\r\n"
-            . "--{$boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" . $qpHtml . "\r\n"
-            . "--{$boundary}--\r\n";
+        $msg = "From: {$from}\nTo: {$to}\nSubject: {$encSubject}\nDate: " . date('r')
+            . "\nMessage-ID: <" . bin2hex(random_bytes(8)) . "@{$ehlo}>\nX-Mailer: You Super Markdown"
+            . "\nMIME-Version: 1.0\nContent-Type: multipart/alternative; boundary=\"{$boundary}\"\n\n"
+            . "--{$boundary}\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n\n" . $textBody . "\n"
+            . "--{$boundary}\nContent-Type: text/html; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n\n" . $html . "\n"
+            . "--{$boundary}--\n";
     } else {
-        $msg = "From: {$from}\r\nTo: {$to}\r\nSubject: {$encSubject}\r\nDate: " . date('r')
-            . "\r\nMessage-ID: <" . bin2hex(random_bytes(8)) . "@{$ehlo}>\r\nX-Mailer: You Super Markdown"
-            . "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n"
-            . $qpText;
+        $msg = "From: {$from}\nTo: {$to}\nSubject: {$encSubject}\nDate: " . date('r')
+            . "\nMessage-ID: <" . bin2hex(random_bytes(8)) . "@{$ehlo}>\nX-Mailer: You Super Markdown"
+            . "\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n\n"
+            . $textBody;
     }
     fwrite($fp, str_replace("\n", "\r\n", $msg) . "\r\n.\r\n");
     $r = fgets($fp, 512);

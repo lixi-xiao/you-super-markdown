@@ -141,13 +141,55 @@ def load_smtp_config() -> dict:
     return cfg
 
 
-def smtp_send(to: str, subject: str, body: str, smtp: dict) -> bool:
-    """smtplib 直连发送（v2.8.0，无 MTA 依赖），成功返回 True"""
+def render_mail_html(site: str, alert_type: str, detail: str, server: str = 'localhost', ts: str = '') -> str:
+    """HTML 邮件模板（v2.8.0 同次：与 PHP renderMailHtml 同一视觉；内联样式；所有动态值转义防注入）"""
+    import html as _html
+    import re as _re
+    e = lambda v: _html.escape(str(v), quote=True)
+    site_e, type_e = e(site), e(alert_type)
+    detail_e = '<br>'.join(e(line) for line in str(detail).split('\n'))
+    ts = ts or time.strftime('%Y-%m-%d %H:%M:%S')
+    server_e = e(server)
+    badge = '#1f3a5f'
+    if _re.search(r'失败|断裂|异常|告警|篡改|无法', alert_type):
+        badge = '#c0392b'
+    elif _re.search(r'已恢复|通过|成功', alert_type):
+        badge = '#1e8449'
+    return ('<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+            '<body style="margin:0;padding:0;background:#f4f6f8;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:24px 12px;"><tr><td align="center">'
+            '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e9f0;">'
+            '<tr><td style="background:#1f3a5f;padding:20px 28px;">'
+            '<div style="color:#ffffff;font-size:18px;font-weight:600;">' + site_e + '</div>'
+            '<div style="color:#9db4d6;font-size:12px;margin-top:4px;">安全告警通知 · 系统自动发送</div>'
+            '</td></tr>'
+            '<tr><td style="padding:28px;">'
+            '<div style="display:inline-block;background:' + badge + ';color:#ffffff;font-size:12px;font-weight:600;padding:5px 14px;border-radius:999px;">' + type_e + '</div>'
+            '<div style="margin-top:18px;color:#2d3748;font-size:14px;line-height:1.8;">' + detail_e + '</div>'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;border-top:1px solid #edf0f5;padding-top:14px;font-size:12px;color:#718096;">'
+            '<tr><td style="padding:3px 0;width:96px;color:#a0aec0;">服务器</td><td>' + server_e + '</td></tr>'
+            '<tr><td style="padding:3px 0;width:96px;color:#a0aec0;">时间</td><td>' + e(ts) + '</td></tr>'
+            '</table>'
+            '</td></tr>'
+            '<tr><td style="background:#fafbfc;padding:14px 28px;border-top:1px solid #edf0f5;color:#a0aec0;font-size:11px;text-align:center;">You Super Markdown · 此邮件为系统自动发送，请勿直接回复</td></tr>'
+            '</table>'
+            '</td></tr></table>'
+            '</body></html>')
+
+
+def smtp_send(to: str, subject: str, body: str, smtp: dict, html: str = None) -> bool:
+    """smtplib 直连发送（v2.8.0，无 MTA 依赖），成功返回 True；html 非空时发 multipart/alternative（HTML+纯文本）"""
     try:
         import smtplib
         from email.mime.text import MIMEText
         from email.header import Header
-        msg = MIMEText(body, 'plain', 'utf-8')
+        if html:
+            from email.mime.multipart import MIMEMultipart
+            msg = MIMEMultipart('alternative')
+            msg.attach(MIMEText(body, 'plain', 'utf-8'))
+            msg.attach(MIMEText(html, 'html', 'utf-8'))
+        else:
+            msg = MIMEText(body, 'plain', 'utf-8')
         msg['Subject'] = Header(subject, 'utf-8')
         frm = smtp['from'] or smtp['user']
         msg['From'] = frm
@@ -185,10 +227,12 @@ def send_alert(alert_type: str, detail: str):
         return
     host = os.uname().nodename if hasattr(os, 'uname') else 'localhost'
     subject = f"[{load_app_name()} 告警] {alert_type}"
-    body = f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')}\n服务器：{host}\n事件类型：{alert_type}\n详情：{detail}\n"
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+    body = f"时间：{now}\n服务器：{host}\n事件类型：{alert_type}\n详情：{detail}\n"
+    html = render_mail_html(load_app_name(), alert_type, detail, server=host, ts=now)
     smtp = load_smtp_config()
     if smtp['host'] and smtp['user'] and smtp['pass']:
-        if smtp_send(email, subject, body, smtp):
+        if smtp_send(email, subject, body, smtp, html=html):
             return
         log_alert_fail(f"SMTP 发送失败({alert_type})")
         return

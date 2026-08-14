@@ -519,8 +519,42 @@ function saveSmtpConfig($host, $port, $user, $pass, $from, $enc) {
     return saveSiteConfig($cfg);
 }
 
+// HTML 邮件模板（v2.8.0 同次：品牌卡片式 + 事件徽标 + 元信息；内联样式兼容主流邮件客户端；所有动态值转义防注入）
+function renderMailHtml($site, $type, $detail, $extra = []) {
+    $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+    $siteE = $e($site);
+    $typeE = $e($type);
+    $detailE = nl2br($e($detail));
+    $server = $e($extra['server'] ?? 'localhost');
+    $time = $e($extra['time'] ?? date('Y-m-d H:i:s'));
+    // 事件徽标配色：失败/断裂/异常 → 红；恢复/通过 → 绿；其余 → 品牌深蓝
+    $badgeBg = '#1f3a5f';
+    if (preg_match('/失败|断裂|异常|告警|篡改|无法/', $type)) $badgeBg = '#c0392b';
+    elseif (preg_match('/已恢复|通过|成功/', $type)) $badgeBg = '#1e8449';
+    return '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+        . '<body style="margin:0;padding:0;background:#f4f6f8;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:24px 12px;"><tr><td align="center">'
+        . '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e9f0;">'
+        . '<tr><td style="background:#1f3a5f;padding:20px 28px;">'
+        . '<div style="color:#ffffff;font-size:18px;font-weight:600;">' . $siteE . '</div>'
+        . '<div style="color:#9db4d6;font-size:12px;margin-top:4px;">安全告警通知 · 系统自动发送</div>'
+        . '</td></tr>'
+        . '<tr><td style="padding:28px;">'
+        . '<div style="display:inline-block;background:' . $badgeBg . ';color:#ffffff;font-size:12px;font-weight:600;padding:5px 14px;border-radius:999px;">' . $typeE . '</div>'
+        . '<div style="margin-top:18px;color:#2d3748;font-size:14px;line-height:1.8;">' . $detailE . '</div>'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;border-top:1px solid #edf0f5;padding-top:14px;font-size:12px;color:#718096;">'
+        . '<tr><td style="padding:3px 0;width:96px;color:#a0aec0;">服务器</td><td>' . $server . '</td></tr>'
+        . '<tr><td style="padding:3px 0;width:96px;color:#a0aec0;">时间</td><td>' . $time . '</td></tr>'
+        . '</table>'
+        . '</td></tr>'
+        . '<tr><td style="background:#fafbfc;padding:14px 28px;border-top:1px solid #edf0f5;color:#a0aec0;font-size:11px;text-align:center;">You Super Markdown · 此邮件为系统自动发送，请勿直接回复</td></tr>'
+        . '</table>'
+        . '</td></tr></table>'
+        . '</body></html>';
+}
+
 // 轻量 SMTP 客户端（AUTH LOGIN + MAIL/RCPT/DATA），返回 [success, error]
-function sendSmtpMail($to, $subject, $body) {
+function sendSmtpMail($to, $subject, $body, $htmlBody = '') {
     $s = getSmtpConfig();
     if ($s['host'] === '' || $s['user'] === '' || $s['pass'] === '') {
         return [false, 'SMTP 未配置'];
@@ -568,9 +602,20 @@ function sendSmtpMail($to, $subject, $body) {
     $r = $cmd('DATA');
     if (substr($r, 0, 3) !== '354') { fclose($fp); return [false, 'DATA 被拒: ' . trim($r)]; }
     $encSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
-    $msg = "From: {$from}\r\nTo: {$to}\r\nSubject: {$encSubject}\r\nDate: " . date('r')
-        . "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
-        . str_replace("\r\n", "\n", $body);
+    $textBody = str_replace("\r\n", "\n", $body);
+    if ($htmlBody !== '') {
+        // multipart/alternative：HTML 版 + 纯文本版（老客户端可见纯文本）
+        $boundary = '----=_Part_' . bin2hex(random_bytes(8));
+        $msg = "From: {$from}\r\nTo: {$to}\r\nSubject: {$encSubject}\r\nDate: " . date('r')
+            . "\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"{$boundary}\"\r\n\r\n"
+            . "--{$boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" . $textBody . "\r\n"
+            . "--{$boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" . $htmlBody . "\r\n"
+            . "--{$boundary}--\r\n";
+    } else {
+        $msg = "From: {$from}\r\nTo: {$to}\r\nSubject: {$encSubject}\r\nDate: " . date('r')
+            . "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
+            . $textBody;
+    }
     fwrite($fp, str_replace("\n", "\r\n", $msg) . "\r\n.\r\n");
     $r = fgets($fp, 512);
     fwrite($fp, "QUIT\r\n");
@@ -586,14 +631,16 @@ function sendAlert($type, $detail) {
     $site = $config['site_title'] ?? 'You Super Markdown';
     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
     $subject = "[{$site} 告警] {$type}";
-    $body = "时间：" . date('Y-m-d H:i:s') . "\n"
+    $now = date('Y-m-d H:i:s');
+    $body = "时间：{$now}\n"
           . "服务器：{$host}\n"
           . "事件类型：{$type}\n"
           . "详情：{$detail}\n";
+    $html = renderMailHtml($site, $type, $detail, ['server' => $host, 'time' => $now]);
     // v2.8.0：优先 SMTP 直连（无 MTA 依赖）；未配置退回 mail 命令；失败落盘 alert.log 可追溯
     $smtp = getSmtpConfig();
     if ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '') {
-        [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body);
+        [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body, $html);
         if ($ok) return;
         logAlertFail("SMTP 发送失败({$type}): {$err}");
         return;

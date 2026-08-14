@@ -624,5 +624,18 @@ if ($action === 'update') {
     }
 })();
 </script>
+<?php if (isset($_GET['logged_out']) && $_GET['logged_out'] === '1'): ?>
+<script>
+// v2.10.0-fix：超管登出完成提示（复用 toast 组件样式）
+document.addEventListener('DOMContentLoaded', function() {
+    var t = document.getElementById('toast');
+    if (t) {
+        t.textContent = '已退出登录';
+        t.classList.add('show');
+        setTimeout(function() { t.classList.remove('show'); }, 2500);
+    }
+});
+</script>
+<?php endif; ?>
 </body>
 </html>

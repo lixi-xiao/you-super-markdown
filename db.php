@@ -64,6 +64,13 @@ function db_init_schema($pdo) {
         operator_role TEXT
     )');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_email_codes_email ON email_codes(email)');
+    // v2.10.0-fix：JWT jti 吊销黑名单（登出即吊销，防 session 残留导致超管会话复活）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS jwt_blacklist (
+        jti TEXT PRIMARY KEY,
+        expires INTEGER,
+        created INTEGER
+    )');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_jwt_blacklist_expires ON jwt_blacklist(expires)');
     // v2.9.0：站长创建写作者双重确认中间态表
     $pdo->exec('CREATE TABLE IF NOT EXISTS pending_author_creates (
         id TEXT PRIMARY KEY,

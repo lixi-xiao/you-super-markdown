@@ -17,6 +17,27 @@ if (!validateJWT($jwt)) {
     exit;
 }
 
+// v2.10.0-fix：登出处理前置（HTML 输出前，避免 header 失效导致退不出去）。
+// 消费型 CSRF token 被页面内其他表单消耗后，同源请求走 Referer/Origin 兜底强制销毁；
+// 同时吊销 JWT jti（入黑名单）+ 清除 PHPSESSID cookie，杜绝 session 残留导致超管会话复活。
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])) {
+    $tokenOk = verifyCsrfToken($_POST['csrf_token'] ?? '');
+    $ref = $_SERVER['HTTP_REFERER'] ?? $_SERVER['HTTP_ORIGIN'] ?? '';
+    $sameOrigin = ($ref !== '' && parse_url($ref, PHP_URL_HOST) === ($_SERVER['HTTP_HOST'] ?? ''));
+    if ($tokenOk || $sameOrigin) {
+        auditLog('logout', getCurrentUserId(), '超管登出' . ($tokenOk ? '' : '（CSRF token 已失效，同源兜底销毁）'));
+        revokeCurrentJWT();
+        session_unset();
+        session_destroy();
+        if (ini_get('session.use_cookies')) {
+            $cp = session_get_cookie_params();
+            setcookie(session_name(), '', time() - 42000, $cp['path'], $cp['domain'], $cp['secure'], $cp['httponly']);
+        }
+    }
+    header('Location: /?logged_out=1');
+    exit;
+}
+
 $users = loadUsers();
 $config = loadSiteConfig();
 $siteTitle = $config['site_title'] ?? 'You Super Markdown';
@@ -2458,16 +2479,5 @@ function toggleSidebar() {
     document.getElementById('sidebarOverlay').classList.toggle('active');
 }
 </script>
-<?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])): ?>
-<?php
-if (verifyCsrfToken($_POST['csrf_token'] ?? '')) {
-    auditLog('logout', getCurrentUserId(), '超管登出');
-    session_unset();
-    session_destroy();
-}
-header('Location: /');
-exit;
-?>
-<?php endif; ?>
 </body>
 </html>

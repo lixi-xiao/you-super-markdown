@@ -387,12 +387,8 @@ case "${1:-}" in
             echo "  数据迁移完成"
         fi
 
-        # 5. 锁定母本
-        echo "[5/6] 锁定母本目录..."
-        chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
-
-        # 6. 重启守护
-        echo "[6/6] 重启守护进程并记录日志..."
+        # 4.6 更新版本号到 web 并同步母本（v3.1.2：必须在 [5/6] 锁定母本前执行——
+        # 否则 chattr +i 只读会导致 @copy 失败，母本 app-config.json 停留在旧版本，web↔母本 MD5 不一致）
         php -r "
             \$cfgFile = '$WEB_ROOT/app-config.json';
             if (file_exists(\$cfgFile)) {
@@ -402,6 +398,13 @@ case "${1:-}" in
                 @copy(\$cfgFile, '/opt/you-markdown/install-base/app-config.json');
             }
         " 2>/dev/null
+
+        # 5. 锁定母本
+        echo "[5/6] 锁定母本目录..."
+        chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
+
+        # 6. 重启守护
+        echo "[6/6] 重启守护进程并记录日志..."
         php -r "
             require_once '$WEB_ROOT/utils.php';
             auditLog('system_update', '', '系统更新: v${FROM_VER} → v${TO_VER}');

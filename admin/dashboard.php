@@ -83,6 +83,28 @@ if (isset($_POST['save_smtp_config'])) {
     exit;
 }
 
+// POST 处理：保存注册验证配置（v2.9.0，敏感操作：CSRF + 挑战码 + 审计）
+if (isset($_POST['save_verify_config'])) {
+    if (!checkCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: dashboard.php?tab=verify&msg=csrf_error');
+        exit;
+    }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=verify&msg=challenge_failed');
+        exit;
+    }
+    $config['email_verify_enabled'] = !empty($_POST['email_verify_enabled']);
+    $config['captcha_enabled'] = !empty($_POST['captcha_enabled']);
+    $config['author_dual_verify_enabled'] = !empty($_POST['author_dual_verify_enabled']);
+    $config['verify_code_ttl'] = max(60, (int)($_POST['verify_code_ttl'] ?? 300));
+    $config['confirm_link_ttl'] = max(300, (int)($_POST['confirm_link_ttl'] ?? 86400));
+    $config['resend_cooldown'] = max(10, (int)($_POST['resend_cooldown'] ?? 60));
+    saveSiteConfig($config);
+    auditLog('verify_config_update', 'config', '注册验证与双重确认配置更新');
+    header('Location: dashboard.php?tab=verify&msg=saved');
+    exit;
+}
+
 // AJAX 处理：发送测试邮件（敏感操作：CSRF + 挑战码）
 if (isset($_POST['ajax']) && $_POST['ajax'] === 'test_smtp') {
     header('Content-Type: application/json; charset=utf-8');
@@ -585,6 +607,10 @@ $banMsg = $_GET['bmsg'] ?? '';
         <a href="dashboard.php?tab=mail" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'mail' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
             邮件设置
+        </a>
+        <a href="dashboard.php?tab=verify" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'verify' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/><circle cx="12" cy="13" r="1"/></svg>
+            注册验证
         </a>
         <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -2276,6 +2302,130 @@ $banMsg = $_GET['bmsg'] ?? '';
             });
     }
     </script>
+    <?php elseif ($tab === 'verify'): ?>
+    <?php
+    $verifyMsg = $_GET['msg'] ?? '';
+    $codeRows = db_all('SELECT * FROM email_codes ORDER BY created DESC');
+    $codePage = max(1, (int)($_GET['vp'] ?? 1));
+    $codesPaged = paginateList($codeRows, ['email', 'purpose', 'code', 'ip'], trim($_GET['vq'] ?? ''), $codePage, 15);
+    $pendRows = db_all('SELECT * FROM pending_author_creates ORDER BY created DESC');
+    $pendPage = max(1, (int)($_GET['pp'] ?? 1));
+    $pendsPaged = paginateList($pendRows, ['email', 'nickname', 'qq', 'status'], trim($_GET['pq'] ?? ''), $pendPage, 15);
+    $purposeLabel = fn($p) => ['register' => '注册', 'author_verify' => '写作者验证', 'author_confirm' => '超管确认'][$p] ?? $p;
+    $statusLabel = fn($s) => ['verify_pending' => '等写作者验证', 'pending' => '待超管确认', 'confirmed' => '已确认', 'rejected' => '已拒绝', 'expired' => '已过期'][$s] ?? $s;
+    ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            注册验证
+        </div>
+        <div class="page-subtitle">注册邮箱验证码 + 滑块人机验证 + 写作者双重确认（v2.9.0，正式版默认启用 / 测试版默认禁用）</div>
+    </div>
+    <?php if ($verifyMsg === 'saved'): ?><div class="msg" style="margin:0 0 16px;background:rgba(46,204,113,0.15);color:#2ecc71"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>配置已保存</div><?php endif; ?>
+    <?php if ($verifyMsg === 'csrf_error'): ?><div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">请求已过期，请重试</div><?php endif; ?>
+    <?php if ($verifyMsg === 'challenge_failed'): ?><div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">挑战码无效或已过期</div><?php endif; ?>
+    <div class="card">
+        <div class="card-title">功能开关与参数</div>
+        <form method="post" class="need-challenge" data-confirm="确认保存注册验证配置？">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="save_verify_config" value="1">
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">注册邮箱验证码（总开关）</label>
+                    <div class="form-check">
+                        <input type="checkbox" name="email_verify_enabled" id="ev_email" value="1" <?= !empty($config['email_verify_enabled']) ? 'checked' : '' ?>>
+                        <label for="ev_email">启用注册邮箱验证码（一个邮箱只能注册一个账户）</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">滑块人机验证</label>
+                    <div class="form-check">
+                        <input type="checkbox" name="captcha_enabled" id="ev_captcha" value="1" <?= !empty($config['captcha_enabled']) ? 'checked' : '' ?>>
+                        <label for="ev_captcha">注册与站长创建写作者时启用滑块验证</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">写作者双重确认</label>
+                    <div class="form-check">
+                        <input type="checkbox" name="author_dual_verify_enabled" id="ev_dual" value="1" <?= !empty($config['author_dual_verify_enabled']) ? 'checked' : '' ?>>
+                        <label for="ev_dual">站长创建写作者需邮箱验证 + 超管邮件确认</label>
+                    </div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">验证码有效期（秒）</label>
+                    <input class="form-input" type="number" name="verify_code_ttl" min="60" value="<?= (int)($config['verify_code_ttl'] ?? 300) ?>">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">超管确认链接有效期（秒）</label>
+                    <input class="form-input" type="number" name="confirm_link_ttl" min="300" value="<?= (int)($config['confirm_link_ttl'] ?? 86400) ?>">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">验证码重发冷却（秒，超管后台操作不受限）</label>
+                    <input class="form-input" type="number" name="resend_cooldown" min="10" value="<?= (int)($config['resend_cooldown'] ?? 60) ?>">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group" style="flex:0">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-primary">保存配置</button>
+                </div>
+            </div>
+            <div class="form-hint" style="margin-top:8px;font-size:12px;color:var(--text-muted)">保存为敏感操作：需 SSH 执行 <code>sudo ym-admin challenge</code> 获取 6 位确认码</div>
+        </form>
+    </div>
+    <div class="card">
+        <div class="card-title">验证码发送记录（共 <?= count($codeRows) ?> 条）</div>
+        <form method="get" class="search-bar" style="margin-bottom:12px;display:flex;gap:8px">
+            <input type="hidden" name="tab" value="verify">
+            <input class="form-input" type="text" name="vq" value="<?= htmlspecialchars($_GET['vq'] ?? '') ?>" placeholder="搜索邮箱 / 用途 / 验证码 / IP" style="max-width:320px">
+            <button class="btn btn-secondary" type="submit">搜索</button>
+        </form>
+        <div class="table-wrap">
+        <table>
+            <tr><th>时间</th><th>邮箱</th><th>用途</th><th>验证码</th><th>IP</th><th>操作者</th><th>状态</th></tr>
+            <?php foreach ($codesPaged['rows'] as $c): ?>
+            <tr>
+                <td><?= date('Y-m-d H:i:s', (int)$c['created']) ?></td>
+                <td><?= htmlspecialchars($c['email']) ?></td>
+                <td><?= $purposeLabel($c['purpose']) ?></td>
+                <td><code><?= htmlspecialchars($c['code']) ?></code></td>
+                <td><?= htmlspecialchars($c['ip']) ?></td>
+                <td><?= $c['operator_role'] ? htmlspecialchars($c['operator_role']) : '—' ?></td>
+                <td><?= !empty($c['used']) ? '已使用' : ((int)$c['expires'] < time() ? '已过期' : '未使用') ?></td>
+            </tr>
+            <?php endforeach; ?>
+            <?php if (empty($codesPaged['rows'])): ?><tr><td colspan="7" style="text-align:center;color:var(--text-muted)">暂无记录</td></tr><?php endif; ?>
+        </table>
+        </div>
+        <?= renderPager($codesPaged, 'vp', ['tab' => 'verify', 'vq' => $_GET['vq'] ?? ''], 'vpp') ?>
+    </div>
+    <div class="card">
+        <div class="card-title">写作者创建确认记录（共 <?= count($pendRows) ?> 条）</div>
+        <form method="get" class="search-bar" style="margin-bottom:12px;display:flex;gap:8px">
+            <input type="hidden" name="tab" value="verify">
+            <input class="form-input" type="text" name="pq" value="<?= htmlspecialchars($_GET['pq'] ?? '') ?>" placeholder="搜索邮箱 / 昵称 / QQ / 状态" style="max-width:320px">
+            <button class="btn btn-secondary" type="submit">搜索</button>
+        </form>
+        <div class="table-wrap">
+        <table>
+            <tr><th>发起时间</th><th>邮箱</th><th>昵称</th><th>QQ</th><th>状态</th><th>确认时间</th></tr>
+            <?php foreach ($pendsPaged['rows'] as $pd): ?>
+            <tr>
+                <td><?= date('Y-m-d H:i:s', (int)$pd['created']) ?></td>
+                <td><?= htmlspecialchars($pd['email']) ?></td>
+                <td><?= htmlspecialchars($pd['nickname']) ?></td>
+                <td><?= htmlspecialchars($pd['qq']) ?></td>
+                <td><?= $statusLabel($pd['status']) ?></td>
+                <td><?= $pd['confirmed_at'] ? htmlspecialchars($pd['confirmed_at']) : '—' ?></td>
+            </tr>
+            <?php endforeach; ?>
+            <?php if (empty($pendsPaged['rows'])): ?><tr><td colspan="6" style="text-align:center;color:var(--text-muted)">暂无记录</td></tr><?php endif; ?>
+        </table>
+        </div>
+        <?= renderPager($pendsPaged, 'pp', ['tab' => 'verify', 'pq' => $_GET['pq'] ?? ''], 'ppp') ?>
+    </div>
     <?php endif; ?>
 </div>
 

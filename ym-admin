@@ -18,6 +18,24 @@ get_domain() {
     echo "$d"
 }
 
+# v3.1.0：更新完成收尾（必须定义为顶部函数——apply-update 会覆盖 /usr/local/bin/ym-admin 自身，
+# bash 惰性解析时仅对已读入内存的函数体免疫「新旧文件混合」语法错误，case 内联代码会在覆盖后解析失败）
+post_update_finish() {
+    local TO_VER="$1" CHANNEL="$2" FROM_VER="$3"
+    # 请求文件 root 可删，避免以 php 回写时 /tmp 属主权限拒绝
+    rm -f /tmp/ym-update-request.json
+    # 清理旧备份（保留最近2次）
+    echo "  清理旧备份..."
+    ls -t "/opt/you-markdown/backups"/pre-update-*.tar.gz 2>/dev/null | tail -n +3 | xargs rm -f 2>/dev/null || true
+    echo ""
+    echo "============================================"
+    echo "  更新完成！"
+    echo "  版本: v$FROM_VER → v$TO_VER"
+    echo "============================================"
+    # v3.1.0：更新完成自动发送通知邮件到管理员（失败不阻断）
+    /usr/local/bin/ym-admin notify "系统已更新至 v$TO_VER（$CHANNEL 更新通道）—— 更新完成，web↔母本 MD5 一致、守护进程正常运行。" 2>/dev/null || true
+}
+
 case "${1:-}" in
     login)
         ENTRY_TOKEN=$(openssl rand -base64 12 | tr -d '=+/' | cut -c1-12)
@@ -114,13 +132,48 @@ case "${1:-}" in
     audit-report)
         # 每日审计报告（v2.8.0 同次更新）：log-verify 结果经 sendAlert 走 SMTP 直连发送给 admin_email，
         # 无 SMTP 配置时兜底 ym-alert(mail)，失败落盘 alert.log——不再依赖 cron | mail（无 MTA 静默失败）
-        php -r "
-            require_once '$WEB_ROOT/utils.php';
-            \$r = verifyAuditChain();
-            \$result = \$r['valid'] ? '审计日志哈希链校验通过 ('.\$r['count'].' 条)' : '校验失败！断裂于第 '.\$r['broken_at'].' 条';
-            echo \$result . PHP_EOL;
-            sendAlert('每日审计报告', \$result);
-        "
+        # v3.0.9：SMTP 授权码经环境变量注入（CLI 读 root 密钥文件 /opt/you-markdown/secrets/smtp_pass）
+        SMTP_PASS_FILE="/opt/you-markdown/secrets/smtp_pass"
+        if [ -f "$SMTP_PASS_FILE" ]; then
+            YM_SMTP_PASS="$(cat "$SMTP_PASS_FILE")" php -r "
+                require_once '$WEB_ROOT/utils.php';
+                \$r = verifyAuditChain();
+                \$result = \$r['valid'] ? '审计日志哈希链校验通过 ('.\$r['count'].' 条)' : '校验失败！断裂于第 '.\$r['broken_at'].' 条';
+                echo \$result . PHP_EOL;
+                sendAlert('每日审计报告', \$result);
+            "
+        else
+            php -r "
+                require_once '$WEB_ROOT/utils.php';
+                \$r = verifyAuditChain();
+                \$result = \$r['valid'] ? '审计日志哈希链校验通过 ('.\$r['count'].' 条)' : '校验失败！断裂于第 '.\$r['broken_at'].' 条';
+                echo \$result . PHP_EOL;
+                sendAlert('每日审计报告', \$result);
+            "
+        fi
+        ;;
+
+    notify)
+        # v3.1.0：发送通知邮件到管理员邮箱（测试/更新/运维消息均可用）
+        # 用法: ym-admin notify "<消息>"；CLI 发信注入 YM_SMTP_PASS（root 密钥文件）
+        MSG="${2:-}"
+        if [ -z "$MSG" ]; then echo "用法: ym-admin notify <消息>"; exit 1; fi
+        SMTP_PASS_FILE="/opt/you-markdown/secrets/smtp_pass"
+        if [ -f "$SMTP_PASS_FILE" ]; then
+            YM_SMTP_PASS="$(cat "$SMTP_PASS_FILE")" MSG_B64=$(printf '%s' "$MSG" | base64 -w0 2>/dev/null || printf '%s' "$MSG" | base64) \
+            php -r "
+                require_once '$WEB_ROOT/utils.php';
+                \$cfg = loadSiteConfig();
+                \$to = \$cfg['admin_email'] ?? '';
+                if (\$to === '') { echo 'NO_ADMIN_EMAIL'; exit(0); }
+                \$msg = base64_decode(getenv('MSG_B64'));
+                \$subject = '[You Super Markdown] ' . mb_substr(\$msg, 0, 60);
+                [\$ok, \$err] = sendSmtpMail(\$to, \$subject, \$msg, '');
+                echo \$ok ? 'MAIL_OK' : ('MAIL_FAIL: ' . \$err);
+            "
+        else
+            echo "NO_SMTP_SECRET"
+        fi
         ;;
 
     challenge)
@@ -188,7 +241,7 @@ case "${1:-}" in
             \$r['status'] = 'in_progress';
             \$r['started_at'] = time();
             file_put_contents('$REQUEST_FILE', json_encode(\$r, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
-        "
+        " 2>/dev/null
 
         # 1. 备份
         echo "[1/6] 创建备份..."
@@ -299,8 +352,9 @@ case "${1:-}" in
                 mark_failed "全量更新源无效（缺少核心文件）"
                 exit 1
             fi
-            rsync -a --delete --exclude='data/' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
-            rsync -a --delete --exclude='data/' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
+            # v3.0.0：全量更新排除 app-config.json（服务器配置唯一真源，--delete 不得删除/覆盖）
+            rsync -a --delete --exclude='data/' --exclude='app-config.json' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
+            rsync -a --delete --exclude='data/' --exclude='app-config.json' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
         fi
         rm -rf "$TMP_DIR" 2>/dev/null || true
         echo "  文件更新完成"
@@ -351,22 +405,10 @@ case "${1:-}" in
         " 2>/dev/null
         systemctl start ym-guard 2>/dev/null || true
         rm -f /tmp/ym-update.lock
-        php -r "
-            \$r = json_decode(file_get_contents('$REQUEST_FILE'), true);
-            \$r['status'] = 'completed';
-            \$r['completed_at'] = time();
-            file_put_contents('$REQUEST_FILE', json_encode(\$r, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
-        "
-
-        # 清理旧备份（保留最近2次）
-        echo "  清理旧备份..."
-        ls -t "$BACKUP_DIR"/pre-update-*.tar.gz 2>/dev/null | tail -n +3 | xargs rm -f 2>/dev/null || true
-
-        echo ""
-        echo "============================================"
-        echo "  更新完成！"
-        echo "  版本: v$FROM_VER → v$TO_VER"
-        echo "============================================"
+        # v3.1.0：收尾逻辑抽到顶部函数（自更新后 case 内联代码会混合解析失败）
+        post_update_finish "$TO_VER" "$CHANNEL" "$FROM_VER"
+        # 自更新已覆盖本脚本文件：立即退出，避免 bash 继续解析磁盘上的新内容导致混合语法错误
+        exit 0
         ;;
 
     rollback)
@@ -486,7 +528,8 @@ case "${1:-}" in
         echo "  log-verify                校验审计日志哈希链"
         echo "  audit-report              每日审计报告（校验结果经 SMTP 发送给管理员）"
         echo "  challenge                 生成挑战码"
-        echo "  apply-update              执行系统更新"
+        echo "  notify <消息>              发送通知邮件到管理员（测试/更新/运维消息）"
+        echo "  apply-update              执行系统更新（完成后自动发通知邮件）"
         echo "  rollback                  回滚到备份版本"
         echo "  hfish-panel               建立 SSH 隧道访问 Hfish 管理面板"
         echo "  hfish-status              查看 Hfish 蜜罐状态"

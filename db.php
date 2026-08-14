@@ -168,17 +168,6 @@ function db_init_schema($pdo) {
         key TEXT PRIMARY KEY,
         locked_until INTEGER
     )');
-    // v2.11.0：WebAuthn 设备凭据表（电脑 Windows Hello PIN / 手机指纹等平台认证器快速登录）
-    $pdo->exec('CREATE TABLE IF NOT EXISTS webauthn_credentials (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT,
-        credential_id TEXT UNIQUE,
-        public_key TEXT,
-        counter INTEGER DEFAULT 0,
-        device_name TEXT,
-        created INTEGER,
-        last_used INTEGER
-    )');
     // v2.5.4 性能优化：频率计数表索引
     // (ip, t) 复合索引加速 db_rate_count() 的按 IP 窗口计数；t 单列索引加速 30 天过期清理
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_login_fails_ip_t ON login_fails(ip, t)');
@@ -188,7 +177,6 @@ function db_init_schema($pdo) {
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_reg_rates_t ON reg_rates(t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_comment_rates_ip_t ON comment_rates(ip, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_comment_rates_t ON comment_rates(t)');
-    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(user_id)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS logs (ip TEXT, action TEXT, time TEXT)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS unauthorized (
         ip TEXT, action TEXT, user TEXT, user_id TEXT, ua TEXT, time TEXT

@@ -2,6 +2,9 @@
 session_start();
 require_once __DIR__ . '/../utils.php';
 
+// v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
+security_check();
+
 // 获取 URL 中的 entry_token（如 /admin/entry/a3Bf9xQ2mZ1k）
 $requestUri = $_SERVER['REQUEST_URI'] ?? '';
 $path = parse_url($requestUri, PHP_URL_PATH);
@@ -84,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>管理员验证 - You Markdown</title>
-<link rel="stylesheet" href="/css/admin.css">
+<link rel="stylesheet" href="/css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
 </head>
 <body class="entry-page">
     <div class="entry-card">

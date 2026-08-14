@@ -41,31 +41,126 @@ function validatePassword($pw) {
     if (!preg_match('/[0-9]/', $pw)) return '密码必须包含数字';
     return true;
 }
+function isPrivateIp($ip) {
+    $ip = strtolower(trim((string)$ip));
+    if ($ip === '') return true;
+    // IPv4
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+        $long = ip2long($ip);
+        if ($long === false) return true; // 未识别地址 → 默认拒绝
+        $ranges = [
+            [ip2long('0.0.0.0'), ip2long('0.255.255.255')],
+            [ip2long('10.0.0.0'), ip2long('10.255.255.255')],
+            [ip2long('100.64.0.0'), ip2long('100.127.255.255')],   // CGNAT
+            [ip2long('127.0.0.0'), ip2long('127.255.255.255')],
+            [ip2long('169.254.0.0'), ip2long('169.254.255.255')],
+            [ip2long('172.16.0.0'), ip2long('172.31.255.255')],
+            [ip2long('192.0.0.0'), ip2long('192.0.0.255')],        // 保留（含 192.0.0.0/24）
+            [ip2long('192.168.0.0'), ip2long('192.168.255.255')],
+            [ip2long('198.18.0.0'), ip2long('198.19.255.255')],    // 基准测试
+            [ip2long('198.51.100.0'), ip2long('198.51.100.255')],  // TEST-NET
+            [ip2long('203.0.113.0'), ip2long('203.0.113.255')],    // TEST-NET
+            [ip2long('224.0.0.0'), ip2long('239.255.255.255')],    // 组播
+            [ip2long('240.0.0.0'), ip2long('255.255.255.255')],    // 保留
+        ];
+        foreach ($ranges as $r) {
+            if ($long >= $r[0] && $long <= $r[1]) return true;
+        }
+        return false;
+    }
+    // IPv6
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        $bin = @inet_pton($ip);
+        if ($bin === false || strlen($bin) !== 16) return true; // 未识别 → 默认拒绝
+        $b0 = ord($bin[0]);
+        $b1 = ord($bin[1]);
+        if ($ip === '::1' || $ip === '::') return true;         // loopback / unspecified
+        if (($b0 & 0xfe) === 0xfc) return true;                 // fc00::/7 ULA
+        if ($b0 === 0xfe && ($b1 & 0xc0) === 0x80) return true; // fe80::/10 link-local
+        if ($b0 === 0xff) return true;                          // ff00::/8 multicast
+        if (substr($bin, 0, 12) === "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff") { // ::ffff:0:0/96
+            return isPrivateIp(inet_ntop(substr($bin, 12)));
+        }
+        if (substr($bin, 0, 4) === "\x20\x01\x0d\xb8") return true; // 2001:db8::/32 文档
+        if ($b0 === 0x01 && $b1 === 0x00 && substr($bin, 2, 6) === "\x00\x00\x00\x00\x00\x00") return true; // 100::/64 discard-only
+        return false;
+    }
+    return true; // 非 IP → 默认拒绝
+}
+// 解析域名全部 A/AAAA 记录；任一内网即视为私有（防多 A 记录绕过）
+function resolveAllHostIps($host) {
+    $ips = [];
+    $a = @gethostbynamel($host);
+    if (is_array($a)) foreach ($a as $ip) $ips[] = $ip;
+    $aaaa = @dns_get_record($host, DNS_AAAA);
+    if (is_array($aaaa)) {
+        foreach ($aaaa as $rec) {
+            if (!empty($rec['ipv6'])) $ips[] = $rec['ipv6'];
+        }
+    }
+    return array_values(array_unique($ips));
+}
 function isPrivateHost($host) {
     $host = strtolower(trim(trim((string)$host), '[]'));
-    if ($host === '') return true;
+    if ($host === '') return true; // 空 → 默认拒绝
     if ($host === 'localhost' || $host === '0') return true;
+    // IP 字面量：直接校验（IPv4/IPv6 均覆盖）
     if (filter_var($host, FILTER_VALIDATE_IP)) {
-        $ip = $host;
-    } else {
-        $ip = @gethostbyname($host);
-        if ($ip === $host) return false; // 解析失败，不拦截
+        return isPrivateIp($host);
     }
-    if ($ip === '::1' || $ip === '::') return true;
-    $long = ip2long($ip);
-    if ($long === false) return false;
-    $ranges = [
-        [ip2long('0.0.0.0'), ip2long('0.255.255.255')],
-        [ip2long('10.0.0.0'), ip2long('10.255.255.255')],
-        [ip2long('127.0.0.0'), ip2long('127.255.255.255')],
-        [ip2long('169.254.0.0'), ip2long('169.254.255.255')],
-        [ip2long('172.16.0.0'), ip2long('172.31.255.255')],
-        [ip2long('192.168.0.0'), ip2long('192.168.255.255')],
-    ];
-    foreach ($ranges as $r) {
-        if ($long >= $r[0] && $long <= $r[1]) return true;
+    // 域名：解析全部 A/AAAA 记录，任一内网即拒绝
+    $ips = resolveAllHostIps($host);
+    if (empty($ips)) return true; // 解析失败/无记录 → 默认拒绝
+    foreach ($ips as $ip) {
+        if (isPrivateIp($ip)) return true;
     }
     return false;
+}
+// 解析出第一个公网 IP 用于直连（与 isPrivateHost 同源判定），无则返回 null（默认拒绝）
+function resolvePublicIp($host) {
+    $host = strtolower(trim(trim((string)$host), '[]'));
+    if (filter_var($host, FILTER_VALIDATE_IP)) {
+        return isPrivateIp($host) ? null : $host;
+    }
+    foreach (resolveAllHostIps($host) as $ip) {
+        if (!isPrivateIp($ip)) return $ip;
+    }
+    return null;
+}
+// SSRF 安全抓取：一次解析 + 固定解析后的 IP 直连（Host/SNI 保留原域名），消除 DNS rebinding TOCTOU
+function fetchHttpContent($url) {
+    $parts = parse_url($url);
+    $scheme = strtolower($parts['scheme'] ?? '');
+    $host = strtolower(trim($parts['host'] ?? ''));
+    if (!in_array($scheme, ['http', 'https'], true) || $host === '') return false;
+    if (isPrivateHost($host)) return false; // 域名/IP 任一内网即拒
+    $ip = resolvePublicIp($host);
+    if ($ip === null) return false; // 未识别/无公网解析 → 默认拒绝
+    if (strpos($ip, ':') !== false) $ip = '[' . $ip . ']'; // IPv6 括弧
+    $port = $parts['port'] ?? ($scheme === 'https' ? 443 : 80);
+    $path = ($parts['path'] ?? '/') . (isset($parts['query']) ? '?' . $parts['query'] : '');
+    $targetUrl = $scheme . '://' . $ip . ':' . $port . $path;
+    $header = "Host: " . $host . "\r\n"
+        . "User-Agent: " . appConfig('app_name', 'You Super Markdown') . "/" . APP_VERSION . "\r\n"
+        . "Connection: close\r\n";
+    $opts = [
+        'http' => [
+            'method' => 'GET',
+            'header' => $header,
+            'timeout' => 10,
+            'ignore_errors' => false,
+        ],
+    ];
+    if ($scheme === 'https') {
+        $opts['ssl'] = [
+            'peer_name' => $host,        // TLS SNI 与证书校验仍用原域名
+            'SNI_enabled' => true,
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+            'capture_peer_cert' => false,
+        ];
+    }
+    return @file_get_contents($targetUrl, false, stream_context_create($opts));
 }
 function loadUsers() {
     return db_all('SELECT * FROM users ORDER BY rowid');
@@ -233,6 +328,36 @@ function getClientIP() {
         return $_SERVER['HTTP_X_REAL_IP'];
     }
     return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+}
+// ============================================================
+// v3.0.8 统一安全入口（checkScanner：扫描器 UA 黑名单检测）
+// 命中 sqlmap/nikto/nmap/acunetix/masscan/zgrab/curl 等工具特征：
+// 返回 403 + 记录越权日志 + 按现有封禁机制封禁来源 IP
+// ============================================================
+function checkScanner() {
+    $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
+    if ($ua === '') return false;
+    $l = strtolower($ua);
+    $tools = [
+        'sqlmap', 'nikto', 'nmap', 'acunetix', 'masscan', 'zgrab', 'gobuster',
+        'dirb', 'dirbuster', 'wpscan', 'nessus', 'openvas', 'hydra', 'metasploit',
+        'curl', 'wget', 'python-requests', 'scrapy',
+    ];
+    foreach ($tools as $t) {
+        if (strpos($l, $t) !== false) return $t;
+    }
+    return false;
+}
+function security_check() {
+    $tool = checkScanner();
+    if ($tool === false) return;
+    $ip = getClientIP();
+    logUnauthorized('扫描器UA检测: ' . $tool);
+    addBan($ip, ['login', 'register', 'comment'], '扫描器UA: ' . $tool);
+    logAbnormal($ip, '扫描器UA封禁: ' . $tool);
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=utf-8');
+    exit('Forbidden');
 }
 function loadLogsList() {
     return db_all('SELECT ip, action, time FROM logs ORDER BY time ASC');
@@ -571,13 +696,58 @@ function logAlertFail($detail) {
     @file_put_contents(ALERT_LOG, date('Y-m-d H:i:s') . " [FAIL] {$detail}\n", FILE_APPEND | LOCK_EX);
 }
 
+// ============================================================
+// v3.0.8 SMTP 密码可逆加密存储（应用密钥分层：独立 data/.app_secret，AES-256-GCM）
+// 建议使用独立专用发信账号的客户端授权码，不复用个人邮箱密码
+// ============================================================
+function getAppSecret() {
+    $f = __DIR__ . '/data/.app_secret';
+    if (!file_exists($f)) {
+        @file_put_contents($f, bin2hex(random_bytes(32)), LOCK_EX);
+        @chmod($f, 0600);
+    }
+    return file_get_contents($f);
+}
+function encryptSecret($plain) {
+    if ($plain === '') return '';
+    $key = hash('sha256', getAppSecret(), true);
+    $iv = random_bytes(12);
+    $tag = '';
+    $cipher = openssl_encrypt($plain, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    if ($cipher === false) return '';
+    return 'gcm:' . base64_encode($iv . $tag . $cipher);
+}
+function decryptSecret($stored) {
+    if ($stored === '') return '';
+    if (strpos($stored, 'gcm:') !== 0) return $stored; // 兼容历史明文（保存时自动迁移为密文）
+    $raw = base64_decode(substr($stored, 4));
+    if ($raw === false || strlen($raw) < 12 + 16) return '';
+    $iv = substr($raw, 0, 12);
+    $tag = substr($raw, 12, 16);
+    $cipher = substr($raw, 28);
+    $key = hash('sha256', getAppSecret(), true);
+    $plain = openssl_decrypt($cipher, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    return $plain === false ? '' : $plain;
+}
+// SMTP 密码来源：环境变量注入（YM_SMTP_PASS，php-fpm pool env，root 只读、Web 不可见）优先；
+// 未注入时回退 config 表密文（AES-GCM 同机加密兜底，兼容旧部署）
+function smtpPassSource() {
+    $env = getenv('YM_SMTP_PASS');
+    if ($env !== false && $env !== '') return 'env';
+    $cfg = loadSiteConfig();
+    $stored = (string)($cfg['smtp_pass'] ?? '');
+    if ($stored !== '') return 'config';
+    return 'none';
+}
 function getSmtpConfig() {
     $c = loadSiteConfig();
+    $env = getenv('YM_SMTP_PASS');
+    $pass = ($env !== false && $env !== '') ? $env : decryptSecret((string)($c['smtp_pass'] ?? ''));
     return [
         'host' => trim($c['smtp_host'] ?? ''),
         'port' => (int)($c['smtp_port'] ?? 465),
         'user' => trim($c['smtp_user'] ?? ''),
-        'pass' => (string)($c['smtp_pass'] ?? ''),
+        'pass' => $pass,
         'from' => trim($c['smtp_from'] ?? ''),
         'enc' => in_array($c['smtp_enc'] ?? '', ['ssl', 'tls', 'plain'], true) ? $c['smtp_enc'] : 'ssl',
     ];
@@ -588,7 +758,19 @@ function saveSmtpConfig($host, $port, $user, $pass, $from, $enc) {
     $cfg['smtp_host'] = trim($host);
     $cfg['smtp_port'] = max(1, (int)$port);
     $cfg['smtp_user'] = trim($user);
-    $cfg['smtp_pass'] = (string)$pass;
+    // v3.0.9：密码优先走环境变量注入（YM_SMTP_PASS），后台不再直接设置；
+    // 仅当环境未注入时才允许写入 config 表密文兜底（供旧部署平滑过渡）
+    $env = getenv('YM_SMTP_PASS');
+    if ($env === false || $env === '') {
+        $pass = (string)$pass;
+        if ($pass === '') {
+            $cfg['smtp_pass'] = $cfg['smtp_pass'] ?? '';
+        } elseif (strpos($pass, 'gcm:') === 0) {
+            $cfg['smtp_pass'] = $pass;
+        } else {
+            $cfg['smtp_pass'] = encryptSecret($pass);
+        }
+    }
     $cfg['smtp_from'] = trim($from);
     $cfg['smtp_enc'] = in_array($enc, ['ssl', 'tls', 'plain'], true) ? $enc : 'ssl';
     return saveSiteConfig($cfg);
@@ -1500,14 +1682,8 @@ function checkForUpdates($channel = 'stable') {
     $url = $channel === 'beta'
         ? rtrim($apiBase, '/') . "/releases?per_page=10"
         : rtrim($apiBase, '/') . "/releases/latest";
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'GET',
-            'header' => "User-Agent: " . appConfig('app_name', 'You Super Markdown') . "/" . APP_VERSION . "\r\n",
-            'timeout' => 10,
-        ],
-    ]);
-    $result = @file_get_contents($url, false, $context);
+    // SSRF 安全抓取：一次解析 + pin IP 直连（消除 DNS rebinding TOCTOU；内网/未识别默认拒绝）
+    $result = fetchHttpContent($url);
     if ($result) {
         $release = json_decode($result, true);
         if ($channel === 'beta' && is_array($release)) {
@@ -1538,324 +1714,3 @@ function checkForUpdates($channel = 'stable') {
     ];
 }
 
-// ============================================================
-// v2.11.0：WebAuthn 设备认证（可选快速登录）
-// 电脑 Windows Hello PIN / 手机指纹等平台认证器；仅支持 ES256(P-256)；
-// 服务端只存公钥与计数器，不存任何生物特征（隐私友好）。
-// ============================================================
-
-function webauthn_base64url_encode($data) {
-    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
-}
-function webauthn_base64url_decode($data) {
-    $b64 = strtr((string)$data, '-_', '+/');
-    $b64 = str_pad($b64, (int)(4 * ceil(strlen($b64) / 4)), '=', STR_PAD_RIGHT);
-    return base64_decode($b64, true);
-}
-
-/** RP 信息：域名（从 site_url 提取主机名）；缺省回退 HTTP_HOST */
-function webauthn_rp_id() {
-    $host = parse_url(appConfig('site_url', ''), PHP_URL_HOST);
-    if (!$host) $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    return $host;
-}
-function webauthn_origin() {
-    $siteUrl = appConfig('site_url', '');
-    $scheme = parse_url($siteUrl, PHP_URL_SCHEME);
-    $host = parse_url($siteUrl, PHP_URL_HOST);
-    if (!$scheme || !$host) {
-        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    }
-    $port = parse_url($siteUrl, PHP_URL_PORT);
-    return $scheme . '://' . $host . ($port ? ':' . $port : '');
-}
-
-/** 生成 32 字节 challenge 存 session（300 秒一次性） */
-function webauthn_new_challenge($purpose) {
-    $challenge = webauthn_base64url_encode(random_bytes(32));
-    $_SESSION['webauthn'][$purpose] = ['challenge' => $challenge, 'expires' => time() + 300];
-    return $challenge;
-}
-function webauthn_consume_challenge($purpose) {
-    $c = $_SESSION['webauthn'][$purpose] ?? null;
-    unset($_SESSION['webauthn'][$purpose]);
-    if (!$c) return null;
-    if (($c['expires'] ?? 0) < time()) return null;
-    return $c['challenge'];
-}
-
-/** 校验 clientDataJSON：type / challenge / origin */
-function webauthn_verify_client_data($clientDataJson, $expectedType, $expectedChallenge) {
-    $d = json_decode($clientDataJson, true);
-    if (!is_array($d)) return false;
-    if (($d['type'] ?? '') !== $expectedType) return false;
-    if (!hash_equals($expectedChallenge, $d['challenge'] ?? '')) return false;
-    if (($d['origin'] ?? '') !== webauthn_origin()) return false;
-    return true;
-}
-
-/**
- * 最小 CBOR 解码（仅支持 WebAuthn COSE 所需子集）
- * 返回 [value, 新 offset]；value：int|string|array
- */
-function webauthn_cbor_decode($buf, &$off) {
-    if ($off >= strlen($buf)) throw new Exception('CBOR 越界');
-    $ib = ord($buf[$off]);
-    $major = ($ib >> 5) & 0x07;
-    $ai = $ib & 0x1f;
-    $off++;
-    $val = $ai;
-    if ($ai === 24) { $val = ord($buf[$off]); $off++; }
-    elseif ($ai === 25) { $val = unpack('n', substr($buf, $off, 2))[1]; $off += 2; }
-    elseif ($ai === 26) { $val = unpack('N', substr($buf, $off, 4))[1]; $off += 4; }
-    elseif ($ai === 27) { $val = unpack('J', substr($buf, $off, 8))[1]; $off += 8; }
-    elseif ($ai === 31) throw new Exception('不支持的 indefinite 编码');
-    switch ($major) {
-        case 0: return $val;                              // uint
-        case 1: return -1 - $val;                         // nint
-        case 2: $s = substr($buf, $off, $val); $off += $val; return $s;   // bytes
-        case 3: $s = substr($buf, $off, $val); $off += $val; return $s;   // text
-        case 5: {                                         // map
-            $m = [];
-            for ($i = 0; $i < $val; $i++) {
-                $k = webauthn_cbor_decode($buf, $off);
-                $v = webauthn_cbor_decode($buf, $off);
-                $m[$k] = $v;
-            }
-            return $m;
-        }
-        case 6: return webauthn_cbor_decode($buf, $off); // tag（跳过内层）
-        case 7: if ($ai === 20) return false; if ($ai === 21) return true; if ($ai === 22) return null; return $val;
-    }
-    throw new Exception('CBOR major 不支持: ' . $major);
-}
-
-/**
- * COSE 公钥 → PEM（仅 ES256 / P-256）
- * @return array{pem:string, alg:int}
- */
-function webauthn_cose_to_pem($coseBytes) {
-    $off = 0;
-    $c = webauthn_cbor_decode($coseBytes, $off);
-    if (!is_array($c)) throw new Exception('COSE 格式错误');
-    $kty = $c[1] ?? null;
-    if ($kty === 2) { // EC2
-        if (($c[-1] ?? null) !== 1) throw new Exception('仅支持 P-256 曲线');
-        $x = $c[-2] ?? ''; $y = $c[-3] ?? '';
-        if (strlen($x) !== 32 || strlen($y) !== 32) throw new Exception('P-256 坐标长度错误');
-        $der = "\x30\x59"
-            . "\x30\x13"
-            . "\x06\x07\x2a\x86\x48\xce\x3d\x02\x01"         // id-ecPublicKey
-            . "\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07"     // prime256v1
-            . "\x03\x42\x00\x04"
-            . $x . $y;
-        return [
-            'pem' => "-----BEGIN PUBLIC KEY-----\n" . chunk_split(base64_encode($der), 64, "\n") . "-----END PUBLIC KEY-----\n",
-            'alg' => (int)($c[3] ?? -7),
-        ];
-    }
-    throw new Exception('仅支持 ES256（EC P-256）');
-}
-
-/**
- * 解析 authenticatorData
- * @param string $authData
- * @param bool $withCred 注册(create)时 true（含凭据数据）
- */
-function webauthn_parse_auth_data($authData, $withCred) {
-    $off = 0;
-    $rpIdHash = substr($authData, 0, 32); $off += 32;
-    $flags = ord($authData[$off]); $off += 1;
-    $counter = unpack('N', substr($authData, $off, 4))[1]; $off += 4;
-    $out = ['rpIdHash' => $rpIdHash, 'flags' => $flags, 'counter' => $counter, 'credentialId' => '', 'cose' => ''];
-    if ($withCred) {
-        $credIdLen = unpack('n', substr($authData, $off, 2))[1]; $off += 2;
-        $out['credentialId'] = substr($authData, $off, $credIdLen); $off += $credIdLen;
-        $out['cose'] = substr($authData, $off);
-    }
-    return $out;
-}
-
-/** ECDSA raw r||s → DER 签名（openssl_verify 需要） */
-function webauthn_raw_to_der($sig) {
-    if (strlen($sig) !== 64) return $sig;
-    $r = ltrim(substr($sig, 0, 32), "\x00");
-    $s = ltrim(substr($sig, 32, 32), "\x00");
-    if (strlen($r) === 0) $r = "\x00";
-    if (strlen($s) === 0) $s = "\x00";
-    if (ord($r[0]) & 0x80) $r = "\x00" . $r;
-    if (ord($s[0]) & 0x80) $s = "\x00" . $s;
-    return "\x30" . chr(2 + strlen($r) + 2 + strlen($s))
-        . "\x02" . chr(strlen($r)) . $r
-        . "\x02" . chr(strlen($s)) . $s;
-}
-
-/** 注册开始：返回前端 PublicKeyCredentialCreationOptions */
-function webauthn_register_begin($user) {
-    $challenge = webauthn_new_challenge('register');
-    return [
-        'challenge' => $challenge,
-        'rp' => ['id' => webauthn_rp_id(), 'name' => appConfig('app_name', 'You Super Markdown')],
-        'user' => [
-            'id' => webauthn_base64url_encode(hash('sha256', $user['id'], true)),
-            'name' => (string)$user['qq'],
-            'displayName' => $user['nickname'] ?? $user['qq'],
-        ],
-        'pubKeyCredParams' => [['type' => 'public-key', 'alg' => -7]],
-        // v2.11.8：按 Android 平台认证器（Google/MIUI 密码管理器）最佳实践配置——
-        // ① 恢复 authenticatorAttachment=platform（明确走系统指纹/通行证路径，改善 GPM 集成）；
-        // ② residentKey=preferred（允许无用户名通行证，GPM 友好）；③ timeout 120s（Android 创建流程较慢）
-        'authenticatorSelection' => [
-            'authenticatorAttachment' => 'platform',
-            'residentKey' => 'preferred',
-            'userVerification' => 'preferred',
-        ],
-        'timeout' => 120000,
-        'attestation' => 'none',
-        'extensions' => ['credProps' => true],
-    ];
-}
-
-/** 注册完成：校验并保存凭据 */
-function webauthn_register_complete($input, $userId, $deviceName) {
-    $challenge = webauthn_consume_challenge('register');
-    if (!$challenge) return ['ok' => false, 'err' => '验证会话已过期，请重试'];
-    $clientData = webauthn_base64url_decode($input['clientDataJSON'] ?? '');
-    $attObj = webauthn_base64url_decode($input['attestationObject'] ?? '');
-    if ($clientData === false || $attObj === false) return ['ok' => false, 'err' => '数据格式错误'];
-    if (!webauthn_verify_client_data($clientData, 'webauthn.create', $challenge)) {
-        return ['ok' => false, 'err' => '校验失败（challenge/来源不匹配）'];
-    }
-    $off = 0;
-    try {
-        $att = webauthn_cbor_decode($attObj, $off);
-    } catch (Exception $e) {
-        return ['ok' => false, 'err' => 'attestation 解析失败'];
-    }
-    if (!is_array($att) || !isset($att['authData'])) return ['ok' => false, 'err' => 'attestation 缺少 authData'];
-    $ad = webauthn_parse_auth_data($att['authData'], true);
-    if (!hash_equals(hash('sha256', webauthn_rp_id(), true), $ad['rpIdHash'])) {
-        return ['ok' => false, 'err' => 'RP 标识不匹配'];
-    }
-    if (($ad['flags'] & 0x01) === 0) return ['ok' => false, 'err' => '用户在场位未设置'];
-    if (empty($ad['credentialId']) || empty($ad['cose'])) return ['ok' => false, 'err' => '凭据数据缺失'];
-    $credIdB64 = webauthn_base64url_encode($ad['credentialId']);
-    if (db_one('SELECT id FROM webauthn_credentials WHERE credential_id = ?', [$credIdB64])) {
-        return ['ok' => false, 'err' => '该设备已绑定'];
-    }
-    try {
-        $pem = webauthn_cose_to_pem($ad['cose']);
-    } catch (Exception $e) {
-        return ['ok' => false, 'err' => $e->getMessage()];
-    }
-    db_exec(
-        'INSERT INTO webauthn_credentials (user_id, credential_id, public_key, counter, device_name, created, last_used) VALUES (?,?,?,?,?,?,?)',
-        [$userId, $credIdB64, $pem['pem'], $ad['counter'], $deviceName, time(), time()]
-    );
-    auditLog('webauthn_bind', $userId, "绑定设备: {$deviceName}");
-    return ['ok' => true];
-}
-
-/** 登录开始：返回 PublicKeyCredentialRequestOptions（含该账号已绑定凭据） */
-function webauthn_login_begin($qq) {
-    $challenge = webauthn_new_challenge('login');
-    $creds = db_all(
-        'SELECT credential_id FROM webauthn_credentials WHERE user_id = (SELECT id FROM users WHERE qq = ?)',
-        [$qq]
-    );
-    $allow = [];
-    foreach ($creds as $c) {
-        $allow[] = ['type' => 'public-key', 'id' => $c['credential_id']];
-    }
-    return [
-        'challenge' => $challenge,
-        'rpId' => webauthn_rp_id(),
-        'allowCredentials' => $allow,
-        // v2.11.6：同注册端，放宽为 preferred 提高兼容性
-        'userVerification' => 'preferred',
-        'timeout' => 60000,
-    ];
-}
-
-/** 登录完成：验证断言 → 建立会话（与密码登录一致） */
-function webauthn_login_complete($input, $qq) {
-    $challenge = webauthn_consume_challenge('login');
-    if (!$challenge) return ['ok' => false, 'err' => '验证会话已过期，请重试'];
-    $clientData = webauthn_base64url_decode($input['clientDataJSON'] ?? '');
-    $authData = webauthn_base64url_decode($input['authenticatorData'] ?? '');
-    $signature = webauthn_base64url_decode($input['signature'] ?? '');
-    $credIdB64 = $input['id'] ?? '';
-    if ($clientData === false || $authData === false || $signature === false || $credIdB64 === '') {
-        return ['ok' => false, 'err' => '数据格式错误'];
-    }
-    if (!webauthn_verify_client_data($clientData, 'webauthn.get', $challenge)) {
-        return ['ok' => false, 'err' => '校验失败（challenge/来源不匹配）'];
-    }
-    $cred = db_one('SELECT * FROM webauthn_credentials WHERE credential_id = ?', [$credIdB64]);
-    if (!$cred) return ['ok' => false, 'err' => '设备未绑定'];
-    $owner = db_one('SELECT id, qq FROM users WHERE id = ?', [$cred['user_id']]);
-    if (!$owner || $owner['qq'] !== $qq) return ['ok' => false, 'err' => '设备与账号不匹配'];
-    // v2.11.4：被禁用账号拒绝设备登录
-    $ownerFull = null;
-    foreach (loadUsers() as $ou) {
-        if ($ou['id'] === $cred['user_id']) { $ownerFull = $ou; break; }
-    }
-    if (!$ownerFull || !empty($ownerFull['disabled'])) return ['ok' => false, 'err' => '该账号已被禁用，请联系管理员'];
-    $ad = webauthn_parse_auth_data($authData, false);
-    if (!hash_equals(hash('sha256', webauthn_rp_id(), true), $ad['rpIdHash'])) {
-        return ['ok' => false, 'err' => 'RP 标识不匹配'];
-    }
-    if (($ad['flags'] & 0x01) === 0) return ['ok' => false, 'err' => '用户在场位未设置'];
-    if (($ad['flags'] & 0x04) === 0) return ['ok' => false, 'err' => '未完成用户验证（PIN/指纹）'];
-    if ((int)$cred['counter'] > 0 && $ad['counter'] <= (int)$cred['counter']) {
-        return ['ok' => false, 'err' => '计数器异常（凭据可能被克隆）'];
-    }
-    $signed = $authData . hash('sha256', $clientData, true);
-    $ok = openssl_verify($signed, webauthn_raw_to_der($signature), $cred['public_key'], OPENSSL_ALGO_SHA256);
-    if ($ok !== 1) return ['ok' => false, 'err' => '签名验证失败'];
-    db_exec('UPDATE webauthn_credentials SET counter = ?, last_used = ? WHERE credential_id = ?', [$ad['counter'], time(), $credIdB64]);
-    $u = null;
-    foreach (loadUsers() as $uu) {
-        if ($uu['id'] === $cred['user_id']) { $u = $uu; break; }
-    }
-    if (!$u) return ['ok' => false, 'err' => '账号不存在'];
-    session_regenerate_id(true);
-    // v2.11.5：设备登录同样记录最后登录时间与次数
-    db_exec('UPDATE users SET last_login = ?, login_count = login_count + 1 WHERE id = ?', [date('Y-m-d H:i:s'), $u['id']]);
-    $_SESSION['cmt_user'] = [
-        'id' => $u['id'], 'qq' => $u['qq'],
-        'nickname' => $u['nickname'] ?? '',
-        'avatar' => $u['avatar'] ?? (preg_match('/^\d+$/', $u['qq']) ? 'https://q1.qlogo.cn/g?b=qq&nk=' . $u['qq'] . '&s=100' : ''),
-        'signature' => $u['signature'] ?? '',
-        'role' => $u['role'] ?? 'user',
-        'email' => $u['email'] ?? '',
-        'pw_hash' => $u['password']
-    ];
-    auditLog('webauthn_login', $u['id'], '设备快速登录（PIN/指纹）');
-    return ['ok' => true, 'user' => sanitizeUserForClient($_SESSION['cmt_user'])];
-}
-
-/** 列出账号已绑定设备（不暴露 credential_id 原文） */
-function webauthn_list_devices($userId) {
-    $rows = db_all('SELECT id, device_name, created, last_used FROM webauthn_credentials WHERE user_id = ? ORDER BY id', [$userId]);
-    return array_map(function($r) {
-        return [
-            'id' => (int)$r['id'],
-            'device_name' => $r['device_name'] ?? '未知设备',
-            'created' => (int)$r['created'],
-            'last_used' => (int)$r['last_used'],
-        ];
-    }, $rows);
-}
-function webauthn_remove_device($userId, $deviceId) {
-    db_exec('DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ?', [(int)$deviceId, $userId]);
-}
-/** v2.11.1：重命名已绑定设备（≤30 字符） */
-function webauthn_rename_device($userId, $deviceId, $name) {
-    $name = trim((string)$name);
-    if ($name === '' || mb_strlen($name) > 30) return false;
-    db_exec('UPDATE webauthn_credentials SET device_name = ? WHERE id = ? AND user_id = ?', [$name, (int)$deviceId, $userId]);
-    auditLog('webauthn_rename', $userId, '重命名设备 #' . (int)$deviceId . ' → ' . $name);
-    return true;
-}

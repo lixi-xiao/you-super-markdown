@@ -939,11 +939,6 @@
     const cmtSwitchText = document.getElementById('cmtSwitchText');
     const cmtSwitchBtn = document.getElementById('cmtSwitchBtn');
     const cmtProfileModal = document.getElementById('cmtProfileModal');
-    // v2.11.0：设备快速登录（WebAuthn）控件
-    const cmtDevicesWrap = document.getElementById('cmtDevicesWrap');
-    const cmtDeviceList = document.getElementById('cmtDeviceList');
-    const cmtDeviceBindBtn = document.getElementById('cmtDeviceBindBtn');
-    const cmtDeviceErr = document.getElementById('cmtDeviceErr');
     const cmtEditNick = document.getElementById('cmtEditNick');
     const cmtEditSign = document.getElementById('cmtEditSign');
     const cmtProfileErr = document.getElementById('cmtProfileErr');
@@ -1007,41 +1002,45 @@
     });
     // v2.11.3：打开编辑资料弹窗（主页用户下拉「编辑资料」与评论区用户栏共用）
     function cmtOpenProfileModal() {
-        if (!cmtUser) return;
-        cmtEditNick.value = cmtUser.nickname || '';
-        cmtEditSign.value = cmtUser.signature || '';
-        // v2.10.0：打开编辑资料弹窗时填充头像预览 + 邮箱区
-        const avBox = document.getElementById('cmtProfileAvatar');
-        if (avBox) {
-            const avUrl = cmtUser.avatar || '';
-            avBox.innerHTML = avUrl ? '<img src="' + cmtEscape(avUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '';
-        }
-        const emailWrap = document.getElementById('cmtProfileEmailWrap');
-        if (emailWrap) emailWrap.style.display = emailChangeOn ? 'block' : 'none';
-        const editEmail = document.getElementById('cmtEditEmail');
-        if (editEmail) {
-            editEmail.value = '';
-            editEmail.placeholder = cmtUser.email ? ('当前绑定：' + cmtUser.email + '，输入新邮箱更换') : '输入邮箱进行绑定';
-        }
-        const emailCode = document.getElementById('cmtEditEmailCode');
-        if (emailCode) emailCode.value = '';
-        const emailErr = document.getElementById('cmtEmailErr');
-        if (emailErr) emailErr.textContent = '';
-        const sendBtn = document.getElementById('cmtEmailSendCode');
-        if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '获取验证码'; }
-        // v2.11.3：设备快速登录管理区**总是显示**（不再按平台认证器支持性隐藏）；
-        // 不支持时显示提示 + 隐藏绑定按钮，用户可明确知道入口存在
-        if (cmtDevicesWrap) {
-            cmtDevicesWrap.style.display = 'block';
-            if (deviceLoginSupported()) {
-                if (cmtDeviceBindBtn) cmtDeviceBindBtn.style.display = '';
-                cmtLoadDevices();
-            } else {
-                if (cmtDeviceList) cmtDeviceList.innerHTML = '<div class="cmt-device-empty">当前浏览器/设备不支持 PIN/指纹验证（需 Windows Hello 或手机指纹）</div>';
-                if (cmtDeviceBindBtn) cmtDeviceBindBtn.style.display = 'none';
+        // v3.0.1：主页停留时 cmtUser 可能为 null（cmtCheckAuth 仅在文章加载时执行），而顶部下拉
+        // 「编辑资料」按 user-status 显示已登录——点击时若状态缺失则实时恢复，避免静默无反应
+        const doOpen = () => {
+            cmtEditNick.value = cmtUser.nickname || '';
+            cmtEditSign.value = cmtUser.signature || '';
+            // v2.10.0：打开编辑资料弹窗时填充头像预览 + 邮箱区
+            const avBox = document.getElementById('cmtProfileAvatar');
+            if (avBox) {
+                const avUrl = cmtUser.avatar || '';
+                avBox.innerHTML = avUrl ? '<img src="' + cmtEscape(avUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '';
             }
-        }
-        cmtOpenModal(cmtProfileModal);
+            const emailWrap = document.getElementById('cmtProfileEmailWrap');
+            if (emailWrap) emailWrap.style.display = emailChangeOn ? 'block' : 'none';
+            const editEmail = document.getElementById('cmtEditEmail');
+            if (editEmail) {
+                editEmail.value = '';
+                editEmail.placeholder = cmtUser.email ? ('当前绑定：' + cmtUser.email + '，输入新邮箱更换') : '输入邮箱进行绑定';
+            }
+            const emailCode = document.getElementById('cmtEditEmailCode');
+            if (emailCode) emailCode.value = '';
+            const emailErr = document.getElementById('cmtEmailErr');
+            if (emailErr) emailErr.textContent = '';
+            const sendBtn = document.getElementById('cmtEmailSendCode');
+            if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '获取验证码'; }
+            cmtOpenModal(cmtProfileModal);
+        };
+        if (cmtUser) { doOpen(); return; }
+        fetch('api.php?action=check').then(r => r.json()).then(d => {
+            if (d.success && d.loggedIn) {
+                cmtUser = d.user;
+                if (d.isAdminFirstLogin) cmtAdminFirstLogin = true;
+                cmtUpdateUI();
+                doOpen();
+            } else {
+                cmtUser = null;
+                cmtUpdateUI();
+                if (cmtAuthModal) { cmtAuthMode = 'login'; cmtUpdateAuthUI(); cmtOpenModal(cmtAuthModal); }
+            }
+        }).catch(() => {});
     }
     if (cmtUserInner) cmtUserInner.addEventListener('click', () => { cmtOpenProfileModal(); });
     if (cmtLogoutBtn) cmtLogoutBtn.addEventListener('click', e => {
@@ -1079,94 +1078,6 @@
         if (cmtLoginErr) cmtLoginErr.textContent = '';
         if (cmtRegErr) cmtRegErr.textContent = '';
     }
-    // ---- v2.11.0：登录逻辑优化——回车提交、密码可见性、失败锁定倒计时、设备快速登录 ----
-    // WebAuthn base64url 编码（ArrayBuffer → 字符串）
-    function webauthnB64url(buf) {
-        const bytes = new Uint8Array(buf);
-        let bin = '';
-        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-        return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    }
-    // v2.11.4：base64url 解码（字符串 → ArrayBuffer）。PHP 返回的 challenge/user.id/凭据 id 为
-    // base64url 字符串，而 navigator.credentials.create/get() 要求 ArrayBuffer，此前直接透传报
-    // "The provided value is not of type '(ArrayBuffer or ArrayBufferView)'"
-    function webauthnB64ToBuf(s) {
-        const bin = atob(String(s).replace(/-/g, '+').replace(/_/g, '/'));
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        return bytes.buffer;
-    }
-    function webauthnPrepCreateOptions(opts) {
-        if (opts && opts.challenge) opts.challenge = webauthnB64ToBuf(opts.challenge);
-        if (opts && opts.user && opts.user.id) opts.user.id = webauthnB64ToBuf(opts.user.id);
-        return opts;
-    }
-    function webauthnPrepGetOptions(opts) {
-        if (opts && opts.challenge) opts.challenge = webauthnB64ToBuf(opts.challenge);
-        if (opts && Array.isArray(opts.allowCredentials)) {
-            opts.allowCredentials.forEach(c => { if (c && c.id) c.id = webauthnB64ToBuf(c.id); });
-        }
-        return opts;
-    }
-    // v2.11.6~2.11.8：WebAuthn 错误可读化——凭据管理器无响应/凭证丢失（系统层前置条件未满足）给出明确指引
-    function webauthnErrMsg(e) {
-        const m = (e && e.message) || '';
-        if (e && e.name === 'NotAllowedError') return '已取消操作';
-        if (e && e.name === 'NotSupportedError') return '当前浏览器/系统不支持 PIN/指纹，或系统未启用生物识别';
-        if (/credential manager|unknown error|security error|passkey|not allowed/i.test(m) || !m) {
-            if (/Android/i.test(navigator.userAgent)) {
-                return 'Android 通行证创建失败（系统提示凭证丢失/无响应）：请确认 ① 已设置锁屏密码/指纹；② 手机已登录 Google 账号；③ 系统「密码与账户→自动填充服务」选了 Google 或系统密码管理器；④ 更新 Google Play 服务；推荐使用 Chrome 浏览器重试';
-            }
-            return '系统凭据管理器无响应——请确认已启用 PIN/指纹：电脑端「设置→账户→登录选项→Windows Hello（PIN）」；手机端「系统设置→指纹/锁屏密码」，然后重试';
-        }
-        return m || '未知错误';
-    }
-    function deviceLoginSupported() {
-        return typeof window.PublicKeyCredential !== 'undefined'
-            && typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function';
-    }
-    const cmtLoginPwToggle = document.getElementById('cmtLoginPwToggle');
-    const cmtDeviceLoginRow = document.getElementById('cmtDeviceLoginRow');
-    const cmtDeviceLoginBtn = document.getElementById('cmtDeviceLoginBtn');
-    const cmtDeviceLoginErr = document.getElementById('cmtDeviceLoginErr');
-    if (cmtLoginQQ) cmtLoginQQ.addEventListener('keydown', (e) => { if (e.key === 'Enter' && cmtLoginBtn) cmtLoginBtn.click(); });
-    if (cmtLoginPw) cmtLoginPw.addEventListener('keydown', (e) => { if (e.key === 'Enter' && cmtLoginBtn) cmtLoginBtn.click(); });
-    if (cmtLoginPwToggle && cmtLoginPw) cmtLoginPwToggle.addEventListener('click', () => {
-        const isPw = cmtLoginPw.type === 'password';
-        cmtLoginPw.type = isPw ? 'text' : 'password';
-        cmtLoginPwToggle.textContent = isPw ? '🙈' : '👁';
-    });
-    // 登录弹窗显示设备快速登录入口（仅当平台认证器支持 PIN/指纹时）
-    if (cmtDeviceLoginRow && deviceLoginSupported()) {
-        PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(ok => {
-            if (ok) cmtDeviceLoginRow.style.display = 'block';
-        }).catch(() => {});
-    }
-    if (cmtDeviceLoginBtn) cmtDeviceLoginBtn.addEventListener('click', async () => {
-        const qq = cmtLoginQQ.value.trim();
-        cmtDeviceLoginErr.textContent = '';
-        if (!qq) { cmtDeviceLoginErr.textContent = '请先输入QQ号'; return; }
-        try {
-            const r0 = await fetch('api.php?action=webauthn_login_begin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq }) });
-            const d0 = await r0.json();
-            if (!d0.success) { cmtDeviceLoginErr.textContent = d0.error || '设备登录不可用'; return; }
-            const opts = d0.options;
-            if (!opts.allowCredentials || opts.allowCredentials.length === 0) { cmtDeviceLoginErr.textContent = '该账号未绑定设备，请先用密码登录，再在「编辑资料」中绑定'; return; }
-            const cred = await navigator.credentials.get({ publicKey: webauthnPrepGetOptions(opts) });
-            const assertion = {
-                id: cred.id,
-                clientDataJSON: webauthnB64url(cred.response.clientDataJSON),
-                authenticatorData: webauthnB64url(cred.response.authenticatorData),
-                signature: webauthnB64url(cred.response.signature)
-            };
-            const r1 = await fetch('api.php?action=webauthn_login_complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ qq: qq }, assertion)) });
-            const d1 = await r1.json();
-            if (d1.success) { cmtUser = d1.user; cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); }
-            else cmtDeviceLoginErr.textContent = d1.error || '设备验证失败';
-        } catch (e) {
-            cmtDeviceLoginErr.textContent = '设备验证失败：' + webauthnErrMsg(e);
-        }
-    });
     if (cmtLoginBtn) cmtLoginBtn.addEventListener('click', async () => {
         const qq = cmtLoginQQ.value.trim(), pw = cmtLoginPw.value;
         cmtLoginErr.textContent = '';
@@ -1265,82 +1176,6 @@
                 else { cmtRegErr.textContent = d.error || '注册失败'; }
             }).catch(() => { cmtRegErr.textContent = '网络错误'; })
             .finally(() => { cmtRegBtn.disabled = false; cmtRegBtn.textContent = '注册'; });
-    });
-    // ---- v2.11.0：设备快速登录管理（列表 / 绑定 / 解绑） ----
-    function cmtLoadDevices() {
-        if (!cmtDeviceList) return;
-        fetch('api.php?action=webauthn_devices', { method: 'POST' })
-            .then(r => r.json()).then(d => {
-                if (!d.success) return;
-                if (!d.devices || d.devices.length === 0) {
-                    cmtDeviceList.innerHTML = '<div class="cmt-device-empty">未绑定设备</div>';
-                    return;
-                }
-                cmtDeviceList.innerHTML = d.devices.map(dev => {
-                    const last = dev.last_used ? new Date(dev.last_used * 1000).toLocaleString() : '从未使用';
-                    return '<div class="cmt-device-item">'
-                        + '<div class="cmt-device-info"><span class="cmt-device-name">' + escapeHTML(dev.device_name) + '</span>'
-                        + '<span class="cmt-device-meta">最近使用 ' + last + '</span></div>'
-                        + '<div class="cmt-device-ops"><button class="cmt-device-edit" data-id="' + dev.id + '" data-name="' + escapeHTML(dev.device_name) + '">重命名</button>'
-                        + '<button class="cmt-device-del" data-id="' + dev.id + '">解绑</button></div></div>';
-                }).join('');
-                cmtDeviceList.querySelectorAll('.cmt-device-del').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        if (!window.confirm('确定解绑该设备？')) return;
-                        fetch('api.php?action=webauthn_device_remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device_id: btn.dataset.id }) })
-                            .then(r => r.json()).then(dd => {
-                                if (dd.success) { cmtLoadDevices(); if (cmtDeviceErr) cmtDeviceErr.textContent = ''; }
-                                else if (cmtDeviceErr) cmtDeviceErr.textContent = dd.error || '解绑失败';
-                            }).catch(() => { if (cmtDeviceErr) cmtDeviceErr.textContent = '网络错误'; });
-                    });
-                });
-                // v2.11.1：设备重命名（≤30 字）
-                cmtDeviceList.querySelectorAll('.cmt-device-edit').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        const oldName = btn.dataset.name || '';
-                        const name = window.prompt('请输入新的设备名称（≤30 字）：', oldName);
-                        if (name === null) return;
-                        const trimmed = name.trim();
-                        if (!trimmed) { if (cmtDeviceErr) cmtDeviceErr.textContent = '名称不能为空'; return; }
-                        fetch('api.php?action=webauthn_device_rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device_id: btn.dataset.id, device_name: trimmed }) })
-                            .then(r => r.json()).then(dd => {
-                                if (dd.success) { cmtLoadDevices(); if (cmtDeviceErr) cmtDeviceErr.textContent = ''; showToast('设备已重命名'); }
-                                else if (cmtDeviceErr) cmtDeviceErr.textContent = dd.error || '重命名失败';
-                            }).catch(() => { if (cmtDeviceErr) cmtDeviceErr.textContent = '网络错误'; });
-                    });
-                });
-            }).catch(() => {});
-    }
-    if (cmtDeviceBindBtn) cmtDeviceBindBtn.addEventListener('click', async () => {
-        if (cmtDeviceErr) cmtDeviceErr.textContent = '';
-        try {
-            const r0 = await fetch('api.php?action=webauthn_register_begin', { method: 'POST' });
-            const d0 = await r0.json();
-            if (!d0.success) { if (cmtDeviceErr) cmtDeviceErr.textContent = d0.error || '无法开始绑定'; return; }
-            // 设备名：按 UA 简化（不采集/上传精确设备标识，隐私友好）
-            let devName = '平台认证器（PIN/指纹）';
-            if (navigator.userAgent) {
-                const m = navigator.userAgent.match(/Windows NT (\d+\.\d+)/);
-                if (m) devName = 'Windows 电脑';
-                else if (/Android/i.test(navigator.userAgent)) devName = 'Android 手机';
-                else if (/iPhone|iPad/i.test(navigator.userAgent)) devName = 'iPhone / iPad';
-                else if (/Macintosh/i.test(navigator.userAgent)) devName = 'macOS';
-                else if (/Linux/i.test(navigator.userAgent)) devName = 'Linux 设备';
-            }
-            const cred = await navigator.credentials.create({ publicKey: webauthnPrepCreateOptions(d0.options) });
-            const att = {
-                id: cred.id,
-                clientDataJSON: webauthnB64url(cred.response.clientDataJSON),
-                attestationObject: webauthnB64url(cred.response.attestationObject),
-                device_name: devName
-            };
-            const r1 = await fetch('api.php?action=webauthn_register_complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(att) });
-            const d1 = await r1.json();
-            if (d1.success) { cmtLoadDevices(); if (cmtDeviceErr) cmtDeviceErr.textContent = ''; showToast('设备已绑定'); }
-            else if (cmtDeviceErr) cmtDeviceErr.textContent = d1.error || '绑定失败';
-        } catch (e) {
-            if (cmtDeviceErr) cmtDeviceErr.textContent = '绑定失败：' + webauthnErrMsg(e);
-        }
     });
     if (cmtProfileSave) cmtProfileSave.addEventListener('click', () => {
         const nick = cmtEditNick.value.trim(), sign = cmtEditSign.value.trim();
@@ -2487,7 +2322,7 @@
                 showToast('已退出登录');
             });
         }
-        // v2.11.3：用户下拉「编辑资料」→ 打开个人资料弹窗（含设备快速登录管理）
+        // v2.11.3：用户下拉「编辑资料」→ 打开个人资料弹窗
         if (dropdownProfile) {
             dropdownProfile.addEventListener('click', function(e) {
                 e.stopPropagation();

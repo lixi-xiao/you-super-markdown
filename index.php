@@ -2,6 +2,9 @@
 session_start();
 require_once __DIR__ . '/utils.php';
 
+// v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
+security_check();
+
 // 守护进程 MD5 校验钩子：每次请求检查 index.php 自身完整性
 $guardStateFile = '/opt/you-markdown/guard-state.json';
 $indexMd5 = md5_file(__FILE__);
@@ -523,14 +526,6 @@ if ($action === 'update') {
                 </div>
                 <div class="cmt-modal-err" id="cmtLoginErr"></div>
                 <button class="cmt-modal-submit" id="cmtLoginBtn">登录</button>
-                <!-- v2.11.0：设备快速登录（电脑 Windows Hello PIN / 手机指纹） -->
-                <div class="cmt-device-login" id="cmtDeviceLoginRow" style="display:none">
-                    <button type="button" class="cmt-device-btn" id="cmtDeviceLoginBtn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-                        使用设备快速登录（PIN / 指纹）
-                    </button>
-                    <div class="cmt-modal-err" id="cmtDeviceLoginErr"></div>
-                </div>
             </div>
             <div class="cmt-modal-form cmt-reg-form" id="cmtRegForm" style="display:none">
                 <!-- v2.10.2：注册表单统一设计——账号信息 / 身份验证分组分层 -->
@@ -581,13 +576,6 @@ if ($action === 'update') {
                     <input class="cmt-modal-input" type="text" placeholder="邮箱验证码（6位）" maxlength="6" id="cmtEditEmailCode">
                     <div class="cmt-modal-err" id="cmtEmailErr"></div>
                     <button class="cmt-modal-submit cmt-email-confirm" id="cmtEmailSave">确认绑定</button>
-                </div>
-                <!-- v2.11.0：设备快速登录管理（绑定/解绑，电脑 PIN / 手机指纹） -->
-                <div class="cmt-profile-devices" id="cmtDevicesWrap">
-                    <div class="cmt-profile-sec-title">设备快速登录</div>
-                    <div class="cmt-device-list" id="cmtDeviceList"></div>
-                    <button type="button" class="cmt-device-add" id="cmtDeviceBindBtn">＋ 绑定当前设备（PIN / 指纹）</button>
-                    <div class="cmt-modal-err" id="cmtDeviceErr"></div>
                 </div>
             </div>
         </div>

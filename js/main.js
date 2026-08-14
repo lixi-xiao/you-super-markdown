@@ -1108,6 +1108,16 @@
         }
         return opts;
     }
+    // v2.11.6：WebAuthn 错误可读化——凭据管理器无响应（Windows Hello 未配置等）给出明确指引
+    function webauthnErrMsg(e) {
+        const m = (e && e.message) || '';
+        if (e && e.name === 'NotAllowedError') return '已取消操作';
+        if (e && e.name === 'NotSupportedError') return '当前浏览器/系统不支持 PIN/指纹，或系统未启用生物识别';
+        if (/credential manager|unknown error|security error/i.test(m)) {
+            return '系统凭据管理器无响应——请确认已启用 PIN/指纹：电脑端「设置→账户→登录选项→Windows Hello（PIN）」；手机端「系统设置→指纹/锁屏密码」，然后重试';
+        }
+        return m || '未知错误';
+    }
     function deviceLoginSupported() {
         return typeof window.PublicKeyCredential !== 'undefined'
             && typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function';
@@ -1151,8 +1161,7 @@
             if (d1.success) { cmtUser = d1.user; cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); }
             else cmtDeviceLoginErr.textContent = d1.error || '设备验证失败';
         } catch (e) {
-            if (e && e.name === 'NotAllowedError') cmtDeviceLoginErr.textContent = '已取消验证';
-            else cmtDeviceLoginErr.textContent = '设备验证失败（' + ((e && e.message) || '未知错误') + '）';
+            cmtDeviceLoginErr.textContent = '设备验证失败：' + webauthnErrMsg(e);
         }
     });
     if (cmtLoginBtn) cmtLoginBtn.addEventListener('click', async () => {
@@ -1327,8 +1336,7 @@
             if (d1.success) { cmtLoadDevices(); if (cmtDeviceErr) cmtDeviceErr.textContent = ''; showToast('设备已绑定'); }
             else if (cmtDeviceErr) cmtDeviceErr.textContent = d1.error || '绑定失败';
         } catch (e) {
-            if (e && e.name === 'NotAllowedError') { if (cmtDeviceErr) cmtDeviceErr.textContent = '已取消绑定'; }
-            else if (cmtDeviceErr) cmtDeviceErr.textContent = '绑定失败（' + ((e && e.message) || '未知错误') + '）';
+            if (cmtDeviceErr) cmtDeviceErr.textContent = '绑定失败：' + webauthnErrMsg(e);
         }
     });
     if (cmtProfileSave) cmtProfileSave.addEventListener('click', () => {

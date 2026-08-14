@@ -979,7 +979,12 @@ function logoutSubmit(e) {
                 });
             }).catch(function(e) {
                 if (e && e.name === 'NotAllowedError') showErr('已取消绑定');
-                else showErr('绑定失败（' + ((e && e.message) || '未知错误') + '）');
+                else {
+                    var m = (e && e.message) || '';
+                    // v2.11.6：凭据管理器无响应（Windows Hello 未配置等）给出明确指引
+                    if (/credential manager|unknown error|security error/i.test(m)) showErr('绑定失败：系统凭据管理器无响应，请确认已启用 PIN/指纹（电脑：设置→账户→登录选项→Windows Hello；手机：系统设置→指纹/锁屏密码）后重试');
+                    else showErr('绑定失败（' + m + '）');
+                }
             });
     });
 })();

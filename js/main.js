@@ -105,7 +105,15 @@
     let currentFileIndex = -1;
     let currentFileName = '';
     function escapeHTML(str) { const div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
-    const CSRF_TOKEN = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+    let CSRF_TOKEN = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+    // v2.11.1：动态获取 CSRF token（修复「会话失败」根因——登录/注册等匿名 POST 前调用，
+    // 同一请求链内 cookie 与 token 必然同 session；浏览器未携带 PHPSESSID/session 过期也能自愈）
+    function ensureFreshCsrf() {
+        return fetch('api.php?action=csrf').then(r => r.json()).then(d => {
+            if (d.success && d.csrf_token) CSRF_TOKEN = d.csrf_token;
+            return d.success ? d.csrf_token : CSRF_TOKEN;
+        }).catch(() => CSRF_TOKEN);
+    }
     (function() {
         const origFetch = window.fetch.bind(window);
         window.fetch = function(url, options) {
@@ -1000,7 +1008,7 @@
             // v2.10.0：打开编辑资料弹窗时填充头像预览 + 邮箱区
             const avBox = document.getElementById('cmtProfileAvatar');
             if (avBox) {
-                const avUrl = cmtUser.avatar || (cmtUser.qq ? 'api.php?action=avatar&qq=' + encodeURIComponent(cmtUser.qq) : '');
+                const avUrl = cmtUser.avatar || '';
                 avBox.innerHTML = avUrl ? '<img src="' + cmtEscape(avUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '';
             }
             const emailWrap = document.getElementById('cmtProfileEmailWrap');
@@ -1107,10 +1115,12 @@
             else cmtDeviceLoginErr.textContent = '设备验证失败（' + ((e && e.message) || '未知错误') + '）';
         }
     });
-    if (cmtLoginBtn) cmtLoginBtn.addEventListener('click', () => {
+    if (cmtLoginBtn) cmtLoginBtn.addEventListener('click', async () => {
         const qq = cmtLoginQQ.value.trim(), pw = cmtLoginPw.value;
         cmtLoginErr.textContent = '';
         if (!qq || !pw) { cmtLoginErr.textContent = '请填写QQ号和密码'; return; }
+        // v2.11.1：提交前动态刷新 token（与当前 session 绑定，杜绝「会话失败」）
+        await ensureFreshCsrf();
         cmtLoginBtn.disabled = true; cmtLoginBtn.textContent = '登录中...';
         fetch('api.php?action=login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, password: pw }) })
             .then(r => r.json()).then(d => {
@@ -1183,7 +1193,7 @@
         }).catch(() => { cmtRegErr.textContent = '网络错误'; cmtRegSendCode.disabled = false; });
     });
 
-    if (cmtRegBtn) cmtRegBtn.addEventListener('click', () => {
+    if (cmtRegBtn) cmtRegBtn.addEventListener('click', async () => {
         const qq = cmtRegQQ.value.trim(), nick = cmtRegNick.value.trim(), pw = cmtRegPw.value;
         const email = regVerifyOn ? cmtRegEmail.value.trim() : '';
         const code = regVerifyOn ? cmtRegCode.value.trim() : '';
@@ -1194,6 +1204,8 @@
             if (!email) { cmtRegErr.textContent = '请填写邮箱'; return; }
             if (!code) { cmtRegErr.textContent = '请填写邮箱验证码'; return; }
         }
+        // v2.11.1：提交前动态刷新 token（与当前 session 绑定）
+        await ensureFreshCsrf();
         cmtRegBtn.disabled = true; cmtRegBtn.textContent = '注册中...';
         fetch('api.php?action=register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw, email, code }) })
             .then(r => r.json()).then(d => {
@@ -1217,7 +1229,8 @@
                     return '<div class="cmt-device-item">'
                         + '<div class="cmt-device-info"><span class="cmt-device-name">' + escapeHTML(dev.device_name) + '</span>'
                         + '<span class="cmt-device-meta">最近使用 ' + last + '</span></div>'
-                        + '<button class="cmt-device-del" data-id="' + dev.id + '">解绑</button></div>';
+                        + '<div class="cmt-device-ops"><button class="cmt-device-edit" data-id="' + dev.id + '" data-name="' + escapeHTML(dev.device_name) + '">重命名</button>'
+                        + '<button class="cmt-device-del" data-id="' + dev.id + '">解绑</button></div></div>';
                 }).join('');
                 cmtDeviceList.querySelectorAll('.cmt-device-del').forEach(btn => {
                     btn.addEventListener('click', () => {
@@ -1226,6 +1239,21 @@
                             .then(r => r.json()).then(dd => {
                                 if (dd.success) { cmtLoadDevices(); if (cmtDeviceErr) cmtDeviceErr.textContent = ''; }
                                 else if (cmtDeviceErr) cmtDeviceErr.textContent = dd.error || '解绑失败';
+                            }).catch(() => { if (cmtDeviceErr) cmtDeviceErr.textContent = '网络错误'; });
+                    });
+                });
+                // v2.11.1：设备重命名（≤30 字）
+                cmtDeviceList.querySelectorAll('.cmt-device-edit').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const oldName = btn.dataset.name || '';
+                        const name = window.prompt('请输入新的设备名称（≤30 字）：', oldName);
+                        if (name === null) return;
+                        const trimmed = name.trim();
+                        if (!trimmed) { if (cmtDeviceErr) cmtDeviceErr.textContent = '名称不能为空'; return; }
+                        fetch('api.php?action=webauthn_device_rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device_id: btn.dataset.id, device_name: trimmed }) })
+                            .then(r => r.json()).then(dd => {
+                                if (dd.success) { cmtLoadDevices(); if (cmtDeviceErr) cmtDeviceErr.textContent = ''; showToast('设备已重命名'); }
+                                else if (cmtDeviceErr) cmtDeviceErr.textContent = dd.error || '重命名失败';
                             }).catch(() => { if (cmtDeviceErr) cmtDeviceErr.textContent = '网络错误'; });
                     });
                 });
@@ -1367,7 +1395,7 @@
         if (pw !== pw2) { cmtAdminErr.textContent = '两次密码不一致'; return; }
         fetch('api.php?action=admin_setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw }) })
             .then(r => r.json()).then(d => {
-                if (d.success) { if (cmtUser) { cmtUser.nickname = nick; cmtUser.qq = qq; } cmtCloseModal(cmtAdminModal); cmtUpdateUI(); }
+                if (d.success) { if (cmtUser) { cmtUser.nickname = nick; cmtUser.avatar = d.user.avatar || cmtUser.avatar; } cmtCloseModal(cmtAdminModal); cmtUpdateUI(); }
                 else { cmtAdminErr.textContent = d.error || '保存失败'; }
             }).catch(() => { cmtAdminErr.textContent = '网络错误'; });
     });
@@ -1381,7 +1409,7 @@
             const name = cmtUser.nickname || '用户';
             const avatarUrl = cmtUser.avatar || '';
             if (cmtUserAvatar) {
-                const avatarSrc = cmtUser.qq ? 'api.php?action=avatar&qq=' + encodeURIComponent(cmtUser.qq) : (cmtUser.avatar || '');
+                const avatarSrc = cmtUser.avatar || '';
                 if (avatarSrc) {
                     cmtUserAvatar.innerHTML = '<img src="' + cmtEscape(avatarSrc) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display=\'none\'">';
                 } else {
@@ -2309,8 +2337,9 @@
                 if (dropdownRole) dropdownRole.textContent = roleLabel;
                 if (dropdownAvatar) {
                     var initial = nickname.charAt(0).toUpperCase();
-                    if (userData.qq) {
-                        dropdownAvatar.innerHTML = '<img src="api.php?action=avatar&qq=' + encodeURIComponent(userData.qq) + '" alt="" onerror="this.style.display=\'none\';this.parentNode.textContent=\'' + escHtml(initial) + '\'">';
+                    // v2.11.1：API 返回的 qq 已打码，头像一律用 avatar 字段（不再用 qq 拼 URL）
+                    if (userData.avatar) {
+                        dropdownAvatar.innerHTML = '<img src="' + escHtml(userData.avatar) + '" alt="" onerror="this.style.display=\'none\';this.parentNode.textContent=\'' + escHtml(initial) + '\'">';
                     } else {
                         dropdownAvatar.textContent = initial;
                     }

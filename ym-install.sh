@@ -136,6 +136,28 @@ esac
 # 安装 Python 依赖
 pip3 install inotify 2>/dev/null || warn "inotify 安装失败，将使用轮询模式"
 
+# 配置 PHP 时区与系统一致（v2.8.0：PHP 默认 UTC 会导致邮件/日志时间戳慢 8 小时）
+configure_php_timezone() {
+    local tz
+    tz=$(cat /etc/timezone 2>/dev/null || timedatectl 2>/dev/null | awk -F': ' '/Time zone/{print $2}' | awk '{print $1}' || true)
+    tz=${tz:-Asia/Shanghai}
+    for ini in /etc/php/*/cli/php.ini /etc/php/*/fpm/php.ini; do
+        [ -f "$ini" ] || continue
+        if grep -q '^date.timezone' "$ini"; then
+            sed -i "s|^date.timezone.*|date.timezone = $tz|" "$ini"
+        elif grep -q '^;date.timezone' "$ini"; then
+            sed -i "s|^;date.timezone.*|date.timezone = $tz|" "$ini"
+        else
+            echo "date.timezone = $tz" >> "$ini"
+        fi
+    done
+    local fpm_svc="php-fpm"
+    if [ -n "${PHP_VER:-}" ]; then fpm_svc="php${PHP_VER}-fpm"; fi
+    systemctl restart "$fpm_svc" > /dev/null 2>&1 || systemctl restart php-fpm > /dev/null 2>&1 || true
+    log "PHP 时区已配置: $tz（CLI/FPM，邮件与日志时间戳）"
+}
+configure_php_timezone
+
 # ================================================================
 # 1. 参数收集
 # ================================================================

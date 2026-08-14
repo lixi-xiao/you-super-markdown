@@ -119,11 +119,20 @@ log "安装系统依赖..."
 case $OS in
     ubuntu|debian)
         apt-get update -qq
-        # 检测已安装的 PHP 版本
-        PHP_VER=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null || echo "8.4")
+        # 检测已安装的 PHP 版本；未安装则按可用版本探测（Ubuntu 24.04=noble 默认 8.3，
+        # 禁止回退写死 8.4——php8.4-fpm 在该发行版不存在会导致依赖安装失败，见踩坑 #30）
+        PHP_VER=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null || true)
+        if [ -z "$PHP_VER" ]; then
+            for _v in 8.4 8.3 8.2 8.1; do
+                if apt-cache policy "php${_v}-fpm" 2>/dev/null | grep -q "Candidate: [0-9]"; then
+                    PHP_VER="$_v"; break
+                fi
+            done
+        fi
+        [ -z "$PHP_VER" ] && PHP_VER="8.3"
         log "检测到 PHP 版本: $PHP_VER"
         apt-get install -y -qq nginx "php${PHP_VER}-fpm" "php${PHP_VER}-cli" "php${PHP_VER}-zip" "php${PHP_VER}-mbstring" "php${PHP_VER}-curl" "php${PHP_VER}-sqlite3" certbot python3 python3-pip ufw > /dev/null 2>&1 || \
-        apt-get install -y -qq nginx libnginx-mod-http-php php-fpm php-cli php-zip php-mbstring php-curl php-sqlite3 certbot python3 python3-pip ufw > /dev/null 2>&1
+        apt-get install -y -qq nginx php-fpm php-cli php-zip php-mbstring php-curl php-sqlite3 certbot python3 python3-pip ufw > /dev/null 2>&1
         ;;
     centos|rhel|fedora)
         yum install -y -q nginx php php-fpm php-zip php-mbstring php-curl php-pdo php-sqlite3 certbot python3 python3-pip > /dev/null 2>&1

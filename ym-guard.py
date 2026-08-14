@@ -357,6 +357,14 @@ def mirror_db():
     try:
         con = sqlite3.connect(DB_FILE)
         con.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        # v2.8.1（踩坑 #25）：背书前校正主库链尾文件=主库表尾 hash，避免错位链尾被传播到镜像
+        try:
+            last = con.execute("SELECT hash FROM audit ORDER BY rowid DESC LIMIT 1").fetchone()
+            if last and last['hash']:
+                with open(AUDIT_CHAIN, 'w') as f:
+                    f.write(last['hash'])
+        except Exception as e:
+            log(f"审计背书链尾校正失败: {e}")
         con.close()
         os.makedirs(os.path.dirname(AUDIT_MIRROR_DB), exist_ok=True)
         _chattr(os.path.dirname(AUDIT_MIRROR_DB), '-i')
@@ -402,8 +410,21 @@ def recover_audit():
             'INSERT INTO audit (id,ts,user_id,user_name,role,ip,action,target,detail,result,hash,prev_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
             [(r['id'], r['ts'], r['user_id'], r['user_name'], r['role'], r['ip'], r['action'], r['target'], r['detail'], r['result'], r['hash'], r['prev_hash']) for r in rows]
         )
+        # v2.8.1 修复（踩坑 #25）：恢复后链尾文件必须以恢复后表尾 hash 为准，
+        # 不可 copy 镜像 audit_chain——镜像 ym.db 与 audit_chain 由不同时机独立更新可能错位，
+        # 残留旧链尾会导致下一条记录断链。校验表内容后写表尾 hash 到主库+镜像链尾文件。
+        last_row = con.execute("SELECT hash FROM audit ORDER BY rowid DESC LIMIT 1").fetchone()
+        tail_hash = last_row['hash'] if last_row else ''
         con.commit()
         con.close()
+        try:
+            with open(AUDIT_CHAIN, 'w') as f:
+                f.write(tail_hash)
+            if os.path.exists(AUDIT_MIRROR_CHAIN):
+                with open(AUDIT_MIRROR_CHAIN, 'w') as f:
+                    f.write(tail_hash)
+        except Exception as e:
+            log(f"审计恢复链尾刷新失败: {e}")
         log("审计日志已从镜像恢复")
         send_alert("日志已恢复", "审计日志已从镜像 SQLite 副本恢复，请检查")
     except Exception as e:
@@ -412,8 +433,6 @@ def recover_audit():
         send_alert("日志恢复失败", f"审计日志从镜像恢复失败，请立即人工介入: {e}")
     finally:
         _chattr(mdir, '+i')
-    if os.path.exists(AUDIT_MIRROR_CHAIN):
-        shutil.copy2(AUDIT_MIRROR_CHAIN, AUDIT_CHAIN)
 
 
 # === 自动备份 / 恢复 / 清理（2026-08-14 新增） ===

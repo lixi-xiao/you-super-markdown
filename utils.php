@@ -1703,10 +1703,11 @@ function webauthn_register_begin($user) {
             'displayName' => $user['nickname'] ?? $user['qq'],
         ],
         'pubKeyCredParams' => [['type' => 'public-key', 'alg' => -7]],
-        // v2.11.6：userVerification 由 required 放宽为 preferred——
-        // Windows Hello 未配置 PIN 时 required 会触发浏览器 "An unknown error occurred while
-        // talking to the credential manager"；preferred 下平台认证器仍会执行用户验证，兼容性更好
-        'authenticatorSelection' => ['authenticatorAttachment' => 'platform', 'userVerification' => 'preferred'],
+        // v2.11.7：不再强制 authenticatorAttachment=platform——
+        // Android（尤其 MIUI/Chrome）强制 platform 会走 Google/系统密码管理器，要求「自动填充服务」
+        // 就绪，未就绪时 passkey 创建被打断（跳设置页仍失败，服务器收不到 register_complete）；
+        // 去掉后系统优先平台指纹路径，兼容性更好
+        'authenticatorSelection' => ['userVerification' => 'preferred'],
         'timeout' => 60000,
         'attestation' => 'none',
     ];

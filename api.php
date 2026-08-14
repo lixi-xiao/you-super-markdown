@@ -215,6 +215,61 @@ if ($action === 'send_author_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     jsonOut(['success' => true, 'ttl' => is_array($err) ? ($err['ttl'] ?? 300) : 300]);
 }
 
+// ===== v2.10.0：更换绑定邮箱——发送验证码（登录 + CSRF；受 email_verify_enabled 开关控制，关闭即禁用） =====
+if ($action === 'send_email_change_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $u = validateHomeUser();
+    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $siteCfg = loadSiteConfig();
+    if (empty($siteCfg['email_verify_enabled'])) jsonOut(['success' => false, 'error' => '邮箱验证已关闭'], 403);
+    $input = json_decode(file_get_contents('php://input'), true);
+    $email = trim($input['email'] ?? '');
+    if (!email_valid($email)) jsonOut(['success' => false, 'error' => '邮箱格式不正确'], 400);
+    if (email_exists($email)) jsonOut(['success' => false, 'error' => '该邮箱已被其他账号使用'], 409);
+    $ipNow = getClientIP();
+    $recent = db_one('SELECT COUNT(*) AS c FROM email_codes WHERE ip = ? AND created > ?', [$ipNow, time() - 60])['c'] ?? 0;
+    if ($recent >= 5) jsonOut(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429);
+    [$ok, $err] = email_code_send($email, 'email_change', '更换绑定邮箱', $u['role'] ?? '');
+    if (!$ok) jsonOut(['success' => false, 'error' => $err], 400);
+    jsonOut(['success' => true, 'ttl' => is_array($err) ? ($err['ttl'] ?? 300) : 300]);
+}
+
+// ===== v2.10.0：更换绑定邮箱——验证码原子确认（登录 + CSRF） =====
+if ($action === 'update_email' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $u = validateHomeUser();
+    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $siteCfg = loadSiteConfig();
+    if (empty($siteCfg['email_verify_enabled'])) jsonOut(['success' => false, 'error' => '邮箱验证已关闭'], 403);
+    $input = json_decode(file_get_contents('php://input'), true);
+    $email = trim($input['email'] ?? '');
+    $code = trim($input['code'] ?? '');
+    if (!email_valid($email)) jsonOut(['success' => false, 'error' => '邮箱格式不正确'], 400);
+    if (email_exists($email)) jsonOut(['success' => false, 'error' => '该邮箱已被其他账号使用'], 409);
+    [$ok, $verr] = email_code_verify($email, $code, 'email_change');
+    if (!$ok) jsonOut(['success' => false, 'error' => $verr], 400);
+    $users = loadUsers();
+    foreach ($users as &$usr) {
+        if ($usr['id'] === $u['id']) { $usr['email'] = $email; break; }
+    }
+    unset($usr);
+    saveUsers($users);
+    $_SESSION['cmt_user']['email'] = $email;
+    auditLog('email_change', $u['id'], '更换绑定邮箱为 ' . $email);
+    jsonOut(['success' => true, 'email' => $email]);
+}
+
+// ===== v2.10.0：头像上传（登录 + CSRF；multipart/form-data，字段名 avatar） =====
+if ($action === 'avatar_upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $u = validateHomeUser();
+    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    [$ok, $res] = avatar_upload($u['id'], $_FILES['avatar'] ?? null);
+    if (!$ok) jsonOut(['success' => false, 'error' => $res], 400);
+    auditLog('avatar_update', $u['id'], '更新头像');
+    jsonOut(['success' => true, 'avatar' => $res]);
+}
+
 if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $siteCfg = loadSiteConfig();
     if (empty($siteCfg['registration_enabled'])) {
@@ -270,6 +325,7 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $_SESSION['cmt_user'] = [
         'id' => $new['id'], 'qq' => $qq, 'nickname' => $nick,
         'avatar' => $avatarUrl, 'signature' => '', 'role' => 'user',
+        'email' => $email,   // v2.10.0：注册即写邮箱，供个人设置展示/更换
         'pw_hash' => $new['password']
     ];
     $safeUser = $_SESSION['cmt_user'];
@@ -296,6 +352,7 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 'avatar' => $avatar,
                 'signature' => $u['signature'] ?? '',
                 'role' => $u['role'] ?? 'user',
+                'email' => $u['email'] ?? '',   // v2.10.0：登录写入邮箱，供个人设置展示/更换
                 'pw_hash' => $u['password']
             ];
             if (in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN])) $isAdminFirst = true;

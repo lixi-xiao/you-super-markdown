@@ -926,6 +926,9 @@
     const cmtRegCaptchaBox = document.getElementById('cmtRegCaptchaBox');
     const regVerifyOn = (document.body.getAttribute('data-reg-verify') === '1');
     const regCaptchaOn = (document.body.getAttribute('data-reg-captcha') === '1');
+    // v2.10.0：邮箱验证开关（控制前台个人设置里的邮箱绑定/更换入口）与 CSRF token
+    const emailChangeOn = (document.body.getAttribute('data-email-change') === '1');
+    const csrfToken = document.body.getAttribute('data-csrf') || '';
     const cmtSwitchText = document.getElementById('cmtSwitchText');
     const cmtSwitchBtn = document.getElementById('cmtSwitchBtn');
     const cmtProfileModal = document.getElementById('cmtProfileModal');
@@ -975,7 +978,8 @@
     }
     function cmtAvatarHtml(url, name, qq) {
         const initial = cmtEscape((name||'?').charAt(0));
-        const src = qq ? 'api.php?action=avatar&qq=' + encodeURIComponent(qq) : (url || '');
+        // v2.10.0：优先使用自定义头像（data/avatars/...），未上传时回退 QQ 头像
+        const src = url ? url : (qq ? 'api.php?action=avatar&qq=' + encodeURIComponent(qq) : '');
         if (src) return '<img src="' + cmtEscape(src) + '" alt="" class="cmt-avatar-img" onerror="this.style.display=\'none\';this.parentNode.querySelector(\'.cmt-avatar-text\').style.display=\'flex\'"/><span class="cmt-avatar-text" style="display:none">' + initial + '</span>';
         return '<span class="cmt-avatar-text">' + initial + '</span>';
     }
@@ -989,6 +993,25 @@
         if (cmtUser) {
             cmtEditNick.value = cmtUser.nickname || '';
             cmtEditSign.value = cmtUser.signature || '';
+            // v2.10.0：打开编辑资料弹窗时填充头像预览 + 邮箱区
+            const avBox = document.getElementById('cmtProfileAvatar');
+            if (avBox) {
+                const avUrl = cmtUser.avatar || (cmtUser.qq ? 'api.php?action=avatar&qq=' + encodeURIComponent(cmtUser.qq) : '');
+                avBox.innerHTML = avUrl ? '<img src="' + cmtEscape(avUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '';
+            }
+            const emailWrap = document.getElementById('cmtProfileEmailWrap');
+            if (emailWrap) emailWrap.style.display = emailChangeOn ? 'block' : 'none';
+            const editEmail = document.getElementById('cmtEditEmail');
+            if (editEmail) {
+                editEmail.value = '';
+                editEmail.placeholder = cmtUser.email ? ('当前绑定：' + cmtUser.email + '，输入新邮箱更换') : '输入邮箱进行绑定';
+            }
+            const emailCode = document.getElementById('cmtEditEmailCode');
+            if (emailCode) emailCode.value = '';
+            const emailErr = document.getElementById('cmtEmailErr');
+            if (emailErr) emailErr.textContent = '';
+            const sendBtn = document.getElementById('cmtEmailSendCode');
+            if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '获取验证码'; }
             cmtOpenModal(cmtProfileModal);
         }
     });
@@ -1099,6 +1122,8 @@
     let cmtRegCaptcha = null;
     function cmtRegShowVerify() {
         if (cmtRegVerifyBox) cmtRegVerifyBox.style.display = 'flex';
+        // v2.10.0：captcha 开关关闭时隐藏滑块容器（邮箱验证码输入保留）
+        if (cmtRegCaptchaBox) cmtRegCaptchaBox.style.display = regCaptchaOn ? '' : 'none';
         if (regCaptchaOn && cmtRegCaptchaBox) {
             if (!cmtRegCaptcha) cmtRegCaptcha = initYMCaptcha(cmtRegCaptchaBox);
             cmtRegCaptcha.refresh();
@@ -1108,11 +1133,13 @@
     if (cmtSwitchBtn) {
         const sw = cmtSwitchBtn;
         sw.addEventListener('click', () => {
+            // v2.10.0 修复：原切换逻辑带 200ms 滑出动画后才切表单，50ms 检查过早导致验证区块永不显示；
+            // 对齐为 250ms（动画 200ms 完成后），同时按开关决定显示/隐藏
             setTimeout(() => {
                 if (cmtRegForm && cmtRegForm.style.display !== 'none') {
                     if (regVerifyOn) cmtRegShowVerify(); else if (cmtRegVerifyBox) cmtRegVerifyBox.style.display = 'none';
                 } else if (cmtRegVerifyBox) cmtRegVerifyBox.style.display = 'none';
-            }, 50);
+            }, 250);
         });
     }
 
@@ -1175,6 +1202,91 @@
                 if (d.success) { cmtUser.nickname = nick; cmtUser.signature = sign; cmtCloseModal(cmtProfileModal); cmtUpdateUI(); }
                 else { cmtProfileErr.textContent = d.error || '保存失败'; }
             }).catch(() => { cmtProfileErr.textContent = '网络错误'; });
+    });
+    // ===== v2.10.0：头像上传（选择文件后立即上传；登录用户，含 CSRF） =====
+    const cmtAvatarFile = document.getElementById('cmtAvatarFile');
+    const cmtEmailSendCode = document.getElementById('cmtEmailSendCode');
+    const cmtEmailSave = document.getElementById('cmtEmailSave');
+    if (cmtAvatarFile) cmtAvatarFile.addEventListener('change', () => {
+        const f = cmtAvatarFile.files && cmtAvatarFile.files[0];
+        if (!f) return;
+        if (!/\.(jpg|jpeg|png|webp)$/i.test(f.name)) { cmtProfileErr.textContent = '仅支持 JPG / PNG / WEBP 格式'; cmtAvatarFile.value = ''; return; }
+        if (f.size > 2 * 1024 * 1024) { cmtProfileErr.textContent = '图片不能超过 2MB'; cmtAvatarFile.value = ''; return; }
+        cmtProfileErr.textContent = '头像上传中...';
+        const fd = new FormData();
+        fd.append('avatar', f);
+        fetch('api.php?action=avatar_upload', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken },
+            body: fd
+        }).then(r => r.json()).then(d => {
+            if (d.success) {
+                cmtUser.avatar = d.avatar;
+                const avBox = document.getElementById('cmtProfileAvatar');
+                if (avBox) avBox.innerHTML = '<img src="' + cmtEscape(d.avatar) + '" alt="" onerror="this.style.display=\'none\'">';
+                cmtProfileErr.textContent = '';
+                showToast('头像已更新');
+                cmtUpdateUI();
+            } else {
+                cmtProfileErr.textContent = d.error || '上传失败';
+            }
+            cmtAvatarFile.value = '';
+        }).catch(() => { cmtProfileErr.textContent = '网络错误'; cmtAvatarFile.value = ''; });
+    });
+    // 邮箱更换：发送验证码（60s 倒计时，复用后端冷却）
+    if (cmtEmailSendCode) cmtEmailSendCode.addEventListener('click', () => {
+        const email = cmtEditEmail.value.trim();
+        const re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+        const emailErr = document.getElementById('cmtEmailErr');
+        if (!re.test(email)) { if (emailErr) emailErr.textContent = '请输入正确的邮箱'; return; }
+        if (emailErr) emailErr.textContent = '';
+        cmtEmailSendCode.disabled = true;
+        fetch('api.php?action=send_email_change_code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({ email })
+        }).then(r => r.json()).then(d => {
+            if (d.success) {
+                if (emailErr) emailErr.textContent = '';
+                let left = 60;
+                cmtEmailSendCode.textContent = left + 's 后重发';
+                const t = setInterval(() => {
+                    left--;
+                    if (left <= 0) { clearInterval(t); cmtEmailSendCode.textContent = '获取验证码'; cmtEmailSendCode.disabled = false; }
+                    else cmtEmailSendCode.textContent = left + 's 后重发';
+                }, 1000);
+            } else {
+                if (emailErr) emailErr.textContent = d.error || '发送失败';
+                cmtEmailSendCode.disabled = false;
+            }
+        }).catch(() => { if (emailErr) emailErr.textContent = '网络错误'; cmtEmailSendCode.disabled = false; });
+    });
+    // 邮箱更换：验证码确认
+    if (cmtEmailSave) cmtEmailSave.addEventListener('click', () => {
+        const email = cmtEditEmail.value.trim();
+        const code = cmtEditEmailCode.value.trim();
+        const emailErr = document.getElementById('cmtEmailErr');
+        if (!email) { if (emailErr) emailErr.textContent = '请先填写新邮箱'; return; }
+        if (!code) { if (emailErr) emailErr.textContent = '请填写邮箱验证码'; return; }
+        if (emailErr) emailErr.textContent = '';
+        cmtEmailSave.disabled = true;
+        fetch('api.php?action=update_email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({ email, code })
+        }).then(r => r.json()).then(d => {
+            if (d.success) {
+                cmtUser.email = d.email;
+                cmtEditEmail.placeholder = '当前绑定：' + d.email + '，输入新邮箱更换';
+                cmtEditEmail.value = '';
+                cmtEditEmailCode.value = '';
+                if (emailErr) emailErr.textContent = '';
+                showToast('邮箱绑定成功');
+            } else {
+                if (emailErr) emailErr.textContent = d.error || '绑定失败';
+            }
+            cmtEmailSave.disabled = false;
+        }).catch(() => { if (emailErr) emailErr.textContent = '网络错误'; cmtEmailSave.disabled = false; });
     });
     if (cmtAdminSave) cmtAdminSave.addEventListener('click', () => {
         const qq = cmtAdminQQ.value.trim(), nick = cmtAdminNick.value.trim(), pw = cmtAdminPw.value, pw2 = cmtAdminPw2.value;
@@ -1266,9 +1378,12 @@
             nestedHtml = '<div class="cmt-reply-nested">' + r.replies.map(nr => cmtRenderReply(nr, level + 1, r.nickname || '')).join('') + '</div>';
         }
         const replyToHtml = (level >= 2 && parentNick) ? '<span class="cmt-reply-arrow">▶︎</span><span class="cmt-reply-to">' + cmtEscape(parentNick) + '</span>' : '';
+        // v2.10.0：评论头像/昵称可点击打开个人详情页（无 user_id 的匿名/游客评论不生成链接）
+        const rLink = r.user_id ? '<a class="cmt-user-link" href="user.php?id=' + encodeURIComponent(r.user_id) + '">' : '';
+        const rLinkEnd = r.user_id ? '</a>' : '';
         return '<div class="cmt-reply-item" data-id="' + r.id + '" data-del="' + rDel + '">' +
-            '<div class="cmt-reply-top"><div class="cmt-reply-avatar">' + cmtAvatarHtml(r.avatar, r.nickname, r.qq) + '</div>' +
-            '<div class="cmt-reply-info"><div class="cmt-reply-name-row"><span class="cmt-reply-name">' + cmtEscape(r.nickname||'') + '</span>' + replyToHtml + '<span class="cmt-reply-time">' + cmtFormatTime(r.created_at) + '</span></div>' +
+            '<div class="cmt-reply-top"><div class="cmt-reply-avatar">' + rLink + cmtAvatarHtml(r.avatar, r.nickname, r.qq) + rLinkEnd + '</div>' +
+            '<div class="cmt-reply-info"><div class="cmt-reply-name-row">' + rLink + '<span class="cmt-reply-name">' + cmtEscape(r.nickname||'') + '</span>' + rLinkEnd + replyToHtml + '<span class="cmt-reply-time">' + cmtFormatTime(r.created_at) + '</span></div>' +
             '</div></div>' +
             '<div class="cmt-reply-text">' + cmtEscape(r.content) + '</div>' +
             '<div class="cmt-reply-actions">' +
@@ -1294,9 +1409,12 @@
             const totalReplies = (function countReplies(arr) { return arr.reduce((n, r) => n + 1 + countReplies(r.replies || []), 0); })(c.replies || []);
             const expandBtn = totalReplies ? '<button class="cmt-reply-expand"><span>' + totalReplies + '条回复</span><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></button>' : '';
             const noSignCls = !c.signature ? ' cmt-no-sign' : '';
+            // v2.10.0：评论头像/昵称可点击打开个人详情页（无 user_id 的匿名/游客评论不生成链接）
+            const uLink = c.user_id ? '<a class="cmt-user-link" href="user.php?id=' + encodeURIComponent(c.user_id) + '">' : '';
+            const uLinkEnd = c.user_id ? '</a>' : '';
             return '<div class="cmt-item" data-id="' + c.id + '" data-del="' + canDel + '">' +
-                '<div class="cmt-top' + noSignCls + '"><div class="cmt-avatar">' + cmtAvatarHtml(c.avatar, c.nickname, c.qq) + '</div>' +
-                '<div class="cmt-info"><div class="cmt-name-row"><span class="cmt-name">' + cmtEscape(c.nickname||'') + '</span><span class="cmt-time">' + cmtFormatTime(c.created_at) + '</span></div>' +
+                '<div class="cmt-top' + noSignCls + '"><div class="cmt-avatar">' + uLink + cmtAvatarHtml(c.avatar, c.nickname, c.qq) + uLinkEnd + '</div>' +
+                '<div class="cmt-info"><div class="cmt-name-row">' + uLink + '<span class="cmt-name">' + cmtEscape(c.nickname||'') + '</span>' + uLinkEnd + '<span class="cmt-time">' + cmtFormatTime(c.created_at) + '</span></div>' +
                 sign + '</div></div>' +
                 '<div class="cmt-text">' + cmtEscape(c.content) + '</div>' +
                 '<div class="cmt-actions">' +

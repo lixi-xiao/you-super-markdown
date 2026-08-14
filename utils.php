@@ -576,7 +576,21 @@ function saveSmtpConfig($host, $port, $user, $pass, $from, $enc) {
     return saveSiteConfig($cfg);
 }
 
-// HTML 邮件基础模板（v2.8.0 品牌卡片式 → v2.9.0 精致化：渐变品牌头 + 徽标 + 元信息 + 页脚；内联样式兼容主流邮件客户端）
+// 邮件类型 → 配色方案（v2.10.1：顶部栏按功能分色——告警红 / 恢复绿 / 验证蓝 / 默认深蓝）
+function mailPalette($type) {
+    if (preg_match('/失败|断裂|异常|告警|篡改|无法|错误|超时/', (string)$type)) {
+        return ['g1' => '#7f1d1d', 'g2' => '#b91c1c', 'badge' => '#c0392b', 'sub' => '安全告警 · 请及时处理'];
+    }
+    if (preg_match('/已恢复|通过|成功/', (string)$type)) {
+        return ['g1' => '#14532d', 'g2' => '#1e8449', 'badge' => '#1e8449', 'sub' => '系统状态 · 已恢复正常'];
+    }
+    if (preg_match('/验证|确认|绑定|注册/', (string)$type)) {
+        return ['g1' => '#1e3a8a', 'g2' => '#2563eb', 'badge' => '#2563eb', 'sub' => '身份验证 · 请勿泄露'];
+    }
+    return ['g1' => '#1f3a5f', 'g2' => '#2a4a75', 'badge' => '#1f3a5f', 'sub' => '安全通知 · 系统自动发送'];
+}
+
+// HTML 邮件基础模板（v2.10.1 统一设计：顶部栏按功能分色 + 卡片放大 660px + 内容分层 + 大圆角；内联样式兼容主流邮件客户端）
 // $htmlDetail 为非空时直接作为正文区 HTML（调用方负责转义动态值），否则将 $detail 按纯文本转义后渲染（默认安全）
 function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null) {
     $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
@@ -589,36 +603,40 @@ function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null) 
     } else {
         $detailHtml = nl2br($e($detail));
     }
-    // 事件徽标配色：失败/断裂/异常 → 红；恢复/通过 → 绿；其余 → 品牌深蓝
-    $badgeBg = '#1f3a5f';
-    if (preg_match('/失败|断裂|异常|告警|篡改|无法/', $type)) $badgeBg = '#c0392b';
-    elseif (preg_match('/已恢复|通过|成功/', $type)) $badgeBg = '#1e8449';
+    $p = mailPalette($type);
+    $iconLetter = mb_substr($siteE, 0, 1, 'UTF-8');
     return '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
-        . '<body style="margin:0;padding:0;background:#f0f3f7;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
-        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f3f7;padding:28px 12px;"><tr><td align="center">'
-        . '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e3e8f0;box-shadow:0 8px 24px rgba(31,58,95,0.08);">'
-        . '<tr><td style="background:linear-gradient(135deg,#1f3a5f 0%,#2a4a75 100%);padding:26px 32px;">'
+        . '<body style="margin:0;padding:0;background:#eef1f6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;padding:32px 12px;"><tr><td align="center">'
+        . '<table role="presentation" width="660" cellpadding="0" cellspacing="0" style="max-width:660px;width:100%;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #dde3ec;box-shadow:0 16px 44px rgba(15,42,82,0.12);">'
+        // 顶部栏：按功能分色渐变
+        . '<tr><td style="background:linear-gradient(135deg,' . $p['g1'] . ' 0%,' . $p['g2'] . ' 100%);padding:30px 38px;">'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
-        . '<td style="vertical-align:middle;"><div style="color:#ffffff;font-size:19px;font-weight:700;letter-spacing:0.5px;">' . $siteE . '</div>'
-        . '<div style="color:#a8bcd9;font-size:12px;margin-top:5px;">安全通知 · 系统自动发送</div></td>'
-        . '<td align="right" style="vertical-align:middle;"><div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,0.14);color:#fff;font-size:17px;font-weight:700;text-align:center;line-height:38px;">' . mb_substr($siteE, 0, 1, 'UTF-8') . '</div></td>'
+        . '<td style="vertical-align:middle;"><div style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:0.5px;">' . $siteE . '</div>'
+        . '<div style="color:rgba(255,255,255,0.72);font-size:12px;margin-top:6px;">' . $p['sub'] . '</div></td>'
+        . '<td align="right" style="vertical-align:middle;"><div style="width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,0.16);color:#fff;font-size:19px;font-weight:700;text-align:center;line-height:44px;">' . $iconLetter . '</div></td>'
         . '</tr></table>'
         . '</td></tr>'
-        . '<tr><td style="padding:32px 34px;">'
-        . '<div style="display:inline-block;background:' . $badgeBg . ';color:#ffffff;font-size:12px;font-weight:600;padding:6px 16px;border-radius:999px;letter-spacing:0.5px;">' . $typeE . '</div>'
-        . '<div style="margin-top:20px;color:#2d3748;font-size:14px;line-height:1.9;">' . $detailHtml . '</div>'
-        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:26px;border-top:1px solid #edf0f5;padding-top:16px;font-size:12px;color:#718096;">'
-        . '<tr><td style="padding:4px 0;width:88px;color:#a0aec0;">服务器</td><td>' . $server . '</td></tr>'
-        . '<tr><td style="padding:4px 0;width:88px;color:#a0aec0;">时间</td><td>' . $time . '</td></tr>'
+        // 主内容区（分层一：类型徽标 + 正文）
+        . '<tr><td style="padding:38px 40px 26px;">'
+        . '<div style="display:inline-block;background:' . $p['badge'] . ';color:#ffffff;font-size:12px;font-weight:600;padding:7px 18px;border-radius:999px;letter-spacing:0.5px;">' . $typeE . '</div>'
+        . '<div style="margin-top:22px;color:#2d3748;font-size:14.5px;line-height:2.0;">' . $detailHtml . '</div>'
+        . '</td></tr>'
+        // 分层二：元信息面板（浅色内嵌卡）
+        . '<tr><td style="padding:0 40px 34px;">'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f9fc;border-radius:14px;border:1px solid #eaeef4;padding:14px 20px;font-size:12.5px;color:#5b6b80;">'
+        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">服务器</td><td>' . $server . '</td></tr>'
+        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">时间</td><td>' . $time . '</td></tr>'
         . '</table>'
         . '</td></tr>'
-        . '<tr><td style="background:#fafbfd;padding:16px 32px;border-top:1px solid #edf0f5;color:#a0aec0;font-size:11px;text-align:center;line-height:1.8;">You Super Markdown · 此邮件为系统自动发送，请勿直接回复<br>如非本人操作请忽略，谨防泄露验证信息</td></tr>'
+        // 页脚
+        . '<tr><td style="background:#f7f9fc;padding:18px 40px;border-top:1px solid #eaeef4;color:#93a2b4;font-size:11px;text-align:center;line-height:1.9;">You Super Markdown · 此邮件为系统自动发送，请勿直接回复<br>如非本人操作请忽略，谨防泄露验证信息</td></tr>'
         . '</table>'
         . '</td></tr></table>'
         . '</body></html>';
 }
 
-// 验证码邮件专用模板（v2.9.0：大号等宽验证码 3-3 分组 + 品牌徽标 + 有效期 + 安全提示）
+// 验证码邮件专用模板（v2.10.1 统一设计：蓝色顶栏 + 验证码卡放大 + 分层 + 大圆角）
 function renderMailCode($site, $purposeLabel, $code, $ttlMin, $extra = []) {
     $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
     $siteE = $e($site);
@@ -628,45 +646,50 @@ function renderMailCode($site, $purposeLabel, $code, $ttlMin, $extra = []) {
     $server = $e($extra['server'] ?? 'localhost');
     $time = $e($extra['time'] ?? date('Y-m-d H:i:s'));
     $ttlMin = max(1, (int)$ttlMin);
+    $p = mailPalette('验证'); // 验证码统一蓝色系
+    $iconLetter = mb_substr($siteE, 0, 1, 'UTF-8');
     $out = '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
-        . '<body style="margin:0;padding:0;background:#f0f3f7;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
-        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f3f7;padding:28px 12px;"><tr><td align="center">'
-        . '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e3e8f0;box-shadow:0 8px 24px rgba(31,58,95,0.08);">'
-        . '<tr><td style="background:linear-gradient(135deg,#1f3a5f 0%,#2a4a75 100%);padding:26px 32px;">'
+        . '<body style="margin:0;padding:0;background:#eef1f6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;padding:32px 12px;"><tr><td align="center">'
+        . '<table role="presentation" width="660" cellpadding="0" cellspacing="0" style="max-width:660px;width:100%;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #dde3ec;box-shadow:0 16px 44px rgba(15,42,82,0.12);">'
+        . '<tr><td style="background:linear-gradient(135deg,' . $p['g1'] . ' 0%,' . $p['g2'] . ' 100%);padding:30px 38px;">'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
-        . '<td style="vertical-align:middle;"><div style="color:#ffffff;font-size:19px;font-weight:700;letter-spacing:0.5px;">' . $siteE . '</div>'
-        . '<div style="color:#a8bcd9;font-size:12px;margin-top:5px;">邮箱验证 · 请勿泄露</div></td>'
-        . '<td align="right" style="vertical-align:middle;"><div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,0.14);color:#fff;font-size:17px;font-weight:700;text-align:center;line-height:38px;">' . mb_substr($siteE, 0, 1, 'UTF-8') . '</div></td>'
+        . '<td style="vertical-align:middle;"><div style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:0.5px;">' . $siteE . '</div>'
+        . '<div style="color:rgba(255,255,255,0.72);font-size:12px;margin-top:6px;">' . $p['sub'] . '</div></td>'
+        . '<td align="right" style="vertical-align:middle;"><div style="width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,0.16);color:#fff;font-size:19px;font-weight:700;text-align:center;line-height:44px;">' . $iconLetter . '</div></td>'
         . '</tr></table>'
         . '</td></tr>'
-        . '<tr><td style="padding:34px 34px 30px;">'
+        . '<tr><td style="padding:40px 44px 26px;">'
         . '<div style="text-align:center;">'
-        . '<div style="display:inline-block;background:#eef3fb;color:#1f3a5f;font-size:12px;font-weight:600;padding:6px 16px;border-radius:999px;">' . $purposeE . '</div>'
+        . '<div style="display:inline-block;background:#eef3fb;color:#1e3a8a;font-size:12px;font-weight:600;padding:7px 18px;border-radius:999px;">' . $purposeE . '</div>'
         . '</div>'
-        . '<div style="text-align:center;margin-top:24px;">'
-        . '<div style="display:inline-block;background:#f0f4ff;border:2px dashed #b9cbe6;border-radius:14px;padding:22px 36px;">'
-        . '<div style="color:#8a97ad;font-size:12px;margin-bottom:10px;letter-spacing:1px;">您的验证码</div>'
-        . '<div style="font-family:Consolas,Menlo,monospace;font-size:38px;font-weight:700;letter-spacing:4px;color:#1f3a5f;">' . $codeFmt . '</div>'
+        // 验证码卡片（放大：圆角 18px、内距加大）
+        . '<div style="text-align:center;margin-top:26px;">'
+        . '<div style="display:inline-block;background:#f0f4ff;border:2px dashed #b9cbe6;border-radius:18px;padding:26px 46px;">'
+        . '<div style="color:#8a97ad;font-size:12px;margin-bottom:12px;letter-spacing:1px;">您的验证码</div>'
+        . '<div style="font-family:Consolas,Menlo,monospace;font-size:40px;font-weight:700;letter-spacing:5px;color:#1e3a8a;">' . $codeFmt . '</div>'
         . '</div>'
         . '</div>'
-        . '<div style="text-align:center;margin-top:20px;">'
-        . '<span style="display:inline-block;background:#fff3e0;color:#b26a00;font-size:12px;font-weight:600;padding:5px 14px;border-radius:999px;">有效期 ' . $ttlMin . ' 分钟 · 一次性使用</span>'
+        . '<div style="text-align:center;margin-top:22px;">'
+        . '<span style="display:inline-block;background:#fff3e0;color:#b26a00;font-size:12px;font-weight:600;padding:6px 16px;border-radius:999px;">有效期 ' . $ttlMin . ' 分钟 · 一次性使用</span>'
         . '</div>';
     $link = (string)($extra['link'] ?? '');
     if ($link !== '') {
-        $out .= '<div style="text-align:center;margin-top:22px;">'
-            . '<a href="' . $e($link) . '" style="display:inline-block;background:linear-gradient(135deg,#1f3a5f 0%,#2a4a75 100%);color:#ffffff;font-size:14px;font-weight:600;padding:13px 34px;border-radius:999px;text-decoration:none;">前往完成验证</a>'
+        $out .= '<div style="text-align:center;margin-top:24px;">'
+            . '<a href="' . $e($link) . '" style="display:inline-block;background:linear-gradient(135deg,' . $p['g1'] . ' 0%,' . $p['g2'] . ' 100%);color:#ffffff;font-size:14px;font-weight:600;padding:14px 38px;border-radius:999px;text-decoration:none;">前往完成验证</a>'
             . '</div>';
     }
-    $out .= '<div style="margin-top:24px;padding:14px 18px;background:#fafbfd;border-radius:10px;color:#718096;font-size:12px;line-height:1.8;">'
+    // 分层：安全提示面板
+    $out .= '<div style="margin-top:26px;padding:16px 20px;background:#f7f9fc;border:1px solid #eaeef4;border-radius:14px;color:#5b6b80;font-size:12.5px;line-height:1.9;">'
         . '如果这不是您本人的操作，请忽略本邮件，您的账号不会受到任何影响。<br>请勿将验证码转发给任何人，工作人员不会向您索要验证码。'
         . '</div>'
-        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;border-top:1px solid #edf0f5;padding-top:14px;font-size:12px;color:#718096;">'
-        . '<tr><td style="padding:3px 0;width:88px;color:#a0aec0;">服务器</td><td>' . $server . '</td></tr>'
-        . '<tr><td style="padding:3px 0;width:88px;color:#a0aec0;">时间</td><td>' . $time . '</td></tr>'
+        // 分层：元信息面板
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;background:#f7f9fc;border-radius:14px;border:1px solid #eaeef4;padding:14px 20px;font-size:12.5px;color:#5b6b80;">'
+        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">服务器</td><td>' . $server . '</td></tr>'
+        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">时间</td><td>' . $time . '</td></tr>'
         . '</table>'
         . '</td></tr>'
-        . '<tr><td style="background:#fafbfd;padding:16px 32px;border-top:1px solid #edf0f5;color:#a0aec0;font-size:11px;text-align:center;line-height:1.8;">You Super Markdown · 此邮件为系统自动发送，请勿直接回复</td></tr>'
+        . '<tr><td style="background:#f7f9fc;padding:18px 40px;border-top:1px solid #eaeef4;color:#93a2b4;font-size:11px;text-align:center;line-height:1.9;">You Super Markdown · 此邮件为系统自动发送，请勿直接回复</td></tr>'
         . '</table>'
         . '</td></tr></table>'
         . '</body></html>';

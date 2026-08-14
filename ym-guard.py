@@ -360,9 +360,9 @@ def mirror_db():
         # v2.8.1（踩坑 #25）：背书前校正主库链尾文件=主库表尾 hash，避免错位链尾被传播到镜像
         try:
             last = con.execute("SELECT hash FROM audit ORDER BY rowid DESC LIMIT 1").fetchone()
-            if last and last['hash']:
+            if last:
                 with open(AUDIT_CHAIN, 'w') as f:
-                    f.write(last['hash'])
+                    f.write(last[0])
         except Exception as e:
             log(f"审计背书链尾校正失败: {e}")
         con.close()
@@ -414,7 +414,7 @@ def recover_audit():
         # 不可 copy 镜像 audit_chain——镜像 ym.db 与 audit_chain 由不同时机独立更新可能错位，
         # 残留旧链尾会导致下一条记录断链。校验表内容后写表尾 hash 到主库+镜像链尾文件。
         last_row = con.execute("SELECT hash FROM audit ORDER BY rowid DESC LIMIT 1").fetchone()
-        tail_hash = last_row['hash'] if last_row else ''
+        tail_hash = last_row[0] if last_row else ''
         con.commit()
         con.close()
         try:

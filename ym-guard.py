@@ -123,7 +123,9 @@ def load_version() -> str:
 
 
 def load_smtp_config() -> dict:
-    """读取 SMTP 配置（config 表，与 PHP getSmtpConfig 同源）"""
+    """读取 SMTP 配置（config 表，与 PHP getSmtpConfig 同源）
+    v3.1.3：密码优先取 root 密钥文件 /opt/you-markdown/secrets/smtp_pass（v3.0.9「密钥不落盘」模型，
+    config 表已不再存密码）——否则守护进程 SMTP 认证拿不到密码，告警会回落 mail 命令而发送失败"""
     cfg = {'host': '', 'port': 465, 'user': '', 'pass': '', 'from': '', 'enc': 'ssl'}
     try:
         con = sqlite3.connect(DB_FILE)
@@ -139,6 +141,14 @@ def load_smtp_config() -> dict:
                 cfg['enc'] = val if val in ('ssl', 'tls', 'plain') else 'ssl'
             else:
                 cfg[k.replace('smtp_', '')] = val or ''
+    except Exception:
+        pass
+    # v3.1.3：密码优先读 root 密钥文件（root:root 0600，Web 进程不可读）
+    try:
+        with open('/opt/you-markdown/secrets/smtp_pass', 'r', encoding='utf-8') as f:
+            _p = f.read().strip()
+        if _p:
+            cfg['pass'] = _p
     except Exception:
         pass
     return cfg

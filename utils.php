@@ -488,10 +488,90 @@ function recoverAuditFromMirror() {
     return true;
 }
 
+// ============================================================
+// v2.8.0 邮件通道（SMTP 直连，无 MTA 依赖；失败落盘 alert.log 可追溯）
+// ============================================================
+function logAlertFail($detail) {
+    // 告警发送失败落盘（root 目录，可追溯"邮件没发出去"）
+    @file_put_contents(ALERT_LOG, date('Y-m-d H:i:s') . " [FAIL] {$detail}\n", FILE_APPEND | LOCK_EX);
+}
+
+function getSmtpConfig() {
+    $c = loadSiteConfig();
+    return [
+        'host' => trim($c['smtp_host'] ?? ''),
+        'port' => (int)($c['smtp_port'] ?? 465),
+        'user' => trim($c['smtp_user'] ?? ''),
+        'pass' => (string)($c['smtp_pass'] ?? ''),
+        'from' => trim($c['smtp_from'] ?? ''),
+        'enc' => in_array($c['smtp_enc'] ?? '', ['ssl', 'tls', 'plain'], true) ? $c['smtp_enc'] : 'ssl',
+    ];
+}
+
+function saveSmtpConfig($host, $port, $user, $pass, $from, $enc) {
+    $cfg = loadSiteConfig();
+    $cfg['smtp_host'] = trim($host);
+    $cfg['smtp_port'] = max(1, (int)$port);
+    $cfg['smtp_user'] = trim($user);
+    $cfg['smtp_pass'] = (string)$pass;
+    $cfg['smtp_from'] = trim($from);
+    $cfg['smtp_enc'] = in_array($enc, ['ssl', 'tls', 'plain'], true) ? $enc : 'ssl';
+    return saveSiteConfig($cfg);
+}
+
+// 轻量 SMTP 客户端（AUTH LOGIN + MAIL/RCPT/DATA），返回 [success, error]
+function sendSmtpMail($to, $subject, $body) {
+    $s = getSmtpConfig();
+    if ($s['host'] === '' || $s['user'] === '' || $s['pass'] === '') {
+        return [false, 'SMTP 未配置'];
+    }
+    $port = $s['port'] ?: 465;
+    $prefix = $s['enc'] === 'ssl' ? 'ssl://' : 'tcp://';
+    $errno = 0; $errstr = '';
+    $fp = @stream_socket_client("{$prefix}{$s['host']}:{$port}", $errno, $errstr, 15);
+    if (!$fp) return [false, "连接失败: {$errstr}"];
+    $resp = fgets($fp, 512);
+    if (substr($resp, 0, 3) !== '220') { fclose($fp); return [false, 'SMTP 握手失败: ' . trim($resp)]; }
+    $ehlo = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $cmd = function ($c) use ($fp) { fwrite($fp, $c . "\r\n"); return fgets($fp, 512); };
+    if ($s['enc'] === 'tls') {
+        $r = $cmd('EHLO ' . $ehlo);
+        if (stripos($r, 'STARTTLS') === false) { fclose($fp); return [false, '服务器不支持 STARTTLS']; }
+        $r = $cmd('STARTTLS');
+        if (substr($r, 0, 3) !== '220') { fclose($fp); return [false, 'STARTTLS 失败: ' . trim($r)]; }
+        stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+        $cmd('EHLO ' . $ehlo);
+    } else {
+        $cmd('EHLO ' . $ehlo);
+    }
+    $r = $cmd('AUTH LOGIN');
+    if (substr($r, 0, 3) !== '334') { fclose($fp); return [false, 'AUTH 被拒: ' . trim($r)]; }
+    $cmd(base64_encode($s['user']));
+    $r = $cmd(base64_encode($s['pass']));
+    if (substr($r, 0, 3) !== '235') { fclose($fp); return [false, 'SMTP 认证失败（检查账号/授权码）: ' . trim($r)]; }
+    $from = $s['from'] !== '' ? $s['from'] : $s['user'];
+    $r = $cmd('MAIL FROM:<' . $from . '>');
+    if (substr($r, 0, 3) !== '250') { fclose($fp); return [false, 'MAIL FROM 失败: ' . trim($r)]; }
+    $r = $cmd('RCPT TO:<' . $to . '>');
+    if (substr($r, 0, 3) !== '250') { fclose($fp); return [false, 'RCPT TO 失败: ' . trim($r)]; }
+    $r = $cmd('DATA');
+    if (substr($r, 0, 3) !== '354') { fclose($fp); return [false, 'DATA 被拒: ' . trim($r)]; }
+    $encSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    $msg = "From: {$from}\r\nTo: {$to}\r\nSubject: {$encSubject}\r\nDate: " . date('r')
+        . "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
+        . str_replace("\r\n", "\n", $body);
+    fwrite($fp, str_replace("\n", "\r\n", $msg) . "\r\n.\r\n");
+    $r = fgets($fp, 512);
+    fwrite($fp, "QUIT\r\n");
+    fclose($fp);
+    if (substr($r, 0, 3) !== '250') return [false, 'SMTP 发送失败: ' . trim($r)];
+    return [true, ''];
+}
+
 function sendAlert($type, $detail) {
     $config = loadSiteConfig();
     $adminEmail = $config['admin_email'] ?? '';
-    if (!$adminEmail || !file_exists(EMAIL_ALERT)) return;
+    if (!$adminEmail) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
     $subject = "[{$site} 告警] {$type}";
@@ -499,8 +579,18 @@ function sendAlert($type, $detail) {
           . "服务器：{$host}\n"
           . "事件类型：{$type}\n"
           . "详情：{$detail}\n";
+    // v2.8.0：优先 SMTP 直连（无 MTA 依赖）；未配置退回 mail 命令；失败落盘 alert.log 可追溯
+    $smtp = getSmtpConfig();
+    if ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '') {
+        [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body);
+        if ($ok) return;
+        logAlertFail("SMTP 发送失败({$type}): {$err}");
+        return;
+    }
+    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ym-alert 不存在({$type})"); return; }
     $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($adminEmail) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
     exec($cmd . ' > /dev/null 2>&1 &');
+    // mail 命令为异步后台，其内部失败由 ym-alert 落盘 alert.log（见 v2.8.0 ym-alert 改造）
 }
 
 // ============================================================
@@ -513,6 +603,7 @@ define('BACKUP_CONF', '/opt/you-markdown/backup.conf');           // 自动备�
 define('BACKUP_DB_DIR', BACKUP_DIR . '/db');                        // 数据库 30 分钟备份（固定 1 份）
 define('BACKUP_ARTICLES_DIR', BACKUP_DIR . '/articles');            // 文章每日备份（保留 N 份）
 define('GUARD_STATE_FILE', '/opt/you-markdown/guard-state.json');   // 守护进程状态（含备份状态）
+define('ALERT_LOG', '/opt/you-markdown/alert.log');                  // 告警发送失败日志（可追溯）
 
 // 服务器挑战码校验（300 秒、单次）：匹配 code + 未过期 + 未使用，通过则原子消费
 function verifyChallenge($code) {

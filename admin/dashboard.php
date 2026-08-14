@@ -60,6 +60,55 @@ if (isset($_POST['save_backup_config'])) {
     exit;
 }
 
+// POST 处理：保存 SMTP 邮件配置（敏感操作：CSRF + 挑战码 + 审计）
+if (isset($_POST['save_smtp_config'])) {
+    if (!checkCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: dashboard.php?tab=mail&msg=csrf_error');
+        exit;
+    }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=mail&msg=challenge_failed');
+        exit;
+    }
+    $smtpOk = saveSmtpConfig(
+        $_POST['smtp_host'] ?? '',
+        (int)($_POST['smtp_port'] ?? 465),
+        $_POST['smtp_user'] ?? '',
+        $_POST['smtp_pass'] ?? '',
+        $_POST['smtp_from'] ?? '',
+        $_POST['smtp_enc'] ?? 'ssl'
+    );
+    auditLog('smtp_config_update', 'config(smtp)', 'SMTP 邮件配置更新', $smtpOk ? 'success' : 'failed');
+    header('Location: dashboard.php?tab=mail&msg=' . ($smtpOk ? 'saved' : 'save_failed'));
+    exit;
+}
+
+// AJAX 处理：发送测试邮件（敏感操作：CSRF + 挑战码）
+if (isset($_POST['ajax']) && $_POST['ajax'] === 'test_smtp') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (!checkCsrfToken($_POST['csrf_token'] ?? '')) {
+        echo json_encode(['success' => false, 'error' => 'csrf_error'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        echo json_encode(['success' => false, 'error' => '挑战码无效或已过期'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $mailTo = $config['admin_email'] ?? '';
+    if ($mailTo === '') {
+        echo json_encode(['success' => false, 'error' => '请先在系统配置中设置管理员邮箱（admin_email）'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $site = $config['site_title'] ?? 'You Super Markdown';
+    $mailBody = "这是一封来自 {$site} 的邮件配置测试。\n"
+        . "如果你收到此邮件，说明 SMTP 配置正确，告警邮件可以正常发送。\n"
+        . "时间：" . date('Y-m-d H:i:s') . "\n";
+    [$mailOk, $mailErr] = sendSmtpMail($mailTo, "[{$site} 邮件配置测试]", $mailBody);
+    auditLog('smtp_test', $mailTo, '发送测试邮件', $mailOk ? 'success' : 'failed');
+    echo json_encode(['success' => $mailOk, 'error' => $mailOk ? '' : $mailErr], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // AJAX 处理：检查更新
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'check_update') {
     header('Content-Type: application/json; charset=utf-8');
@@ -531,6 +580,10 @@ $banMsg = $_GET['bmsg'] ?? '';
         <a href="dashboard.php?tab=hfish" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'hfish' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
             蜜罐安全
+        </a>
+        <a href="dashboard.php?tab=mail" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'mail' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            邮件设置
         </a>
         <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -2105,6 +2158,121 @@ $banMsg = $_GET['bmsg'] ?? '';
                 else { msg.textContent = '同步失败：' + (d.output || d.error || '未知错误'); }
             })
             .catch(function() { btn.disabled = false; msg.textContent = '请求失败'; });
+    }
+    </script>
+    <?php elseif ($tab === 'mail'): ?>
+    <?php
+    $smtpCfg = getSmtpConfig();
+    $smtpAdminEmail = $config['admin_email'] ?? '';
+    $smtpMsg = $_GET['msg'] ?? '';
+    $alertLogTail = [];
+    if (is_file(ALERT_LOG)) {
+        $lines = array_slice(array_filter(explode("\n", (string)@file_get_contents(ALERT_LOG))), -6);
+        $alertLogTail = array_reverse($lines);
+    }
+    ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            邮件设置
+        </div>
+        <div class="page-subtitle">SMTP 告警邮件配置（直连发送，无 MTA 依赖）</div>
+    </div>
+    <?php if ($smtpMsg === 'saved'): ?>
+        <div class="msg" style="margin:0 0 16px;background:rgba(46,204,113,0.15);color:#2ecc71"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>SMTP 配置已保存</div>
+    <?php elseif ($smtpMsg === 'save_failed'): ?>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">配置保存失败，请检查 config 表权限</div>
+    <?php elseif ($smtpMsg === 'challenge_failed'): ?>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">挑战码无效或已过期，请重新生成</div>
+    <?php elseif ($smtpMsg === 'csrf_error'): ?>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">CSRF 校验失败，请刷新页面重试</div>
+    <?php endif; ?>
+
+    <div class="card">
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>SMTP 配置</div>
+        <table>
+            <tr><td style="color:var(--text-muted)">管理员邮箱（收件人）</td><td><?= htmlspecialchars($smtpAdminEmail ?: '(未设置，请到「系统配置」填写 admin_email)') ?></td></tr>
+            <tr><td style="color:var(--text-muted)">当前 SMTP 服务器</td><td><?= $smtpCfg['host'] ? htmlspecialchars($smtpCfg['host']) . ':' . (int)$smtpCfg['port'] . '（' . htmlspecialchars($smtpCfg['enc']) . '）' : '未配置' ?></td></tr>
+            <tr><td style="color:var(--text-muted)">当前发信账号</td><td><?= htmlspecialchars($smtpCfg['user'] ?: '未配置') ?></td></tr>
+        </table>
+        <form method="post" class="need-challenge" data-confirm="保存 SMTP 配置？授权码将写入数据库 config 表">
+            <input type="hidden" name="save_smtp_config" value="1">
+            <input type="hidden" name="csrf_token" value="<?= generateCsrfToken() ?>">
+            <table style="margin-top:8px">
+                <tr><td style="color:var(--text-muted)">SMTP 服务器</td>
+                    <td><input class="form-input" style="width:220px" type="text" name="smtp_host" value="<?= htmlspecialchars($smtpCfg['host']) ?>" placeholder="如 smtp.163.com" required></td></tr>
+                <tr><td style="color:var(--text-muted)">端口</td>
+                    <td><input class="form-input" style="width:120px" type="number" min="1" max="65535" name="smtp_port" value="<?= (int)$smtpCfg['port'] ?>" required></td></tr>
+                <tr><td style="color:var(--text-muted)">加密方式</td>
+                    <td><select class="form-input" style="width:160px" name="smtp_enc">
+                        <option value="ssl" <?= $smtpCfg['enc'] === 'ssl' ? 'selected' : '' ?>>SSL (465)</option>
+                        <option value="tls" <?= $smtpCfg['enc'] === 'tls' ? 'selected' : '' ?>>STARTTLS (587)</option>
+                        <option value="plain" <?= $smtpCfg['enc'] === 'plain' ? 'selected' : '' ?>>无加密</option>
+                    </select></td></tr>
+                <tr><td style="color:var(--text-muted)">发信账号</td>
+                    <td><input class="form-input" style="width:220px" type="text" name="smtp_user" value="<?= htmlspecialchars($smtpCfg['user']) ?>" placeholder="如 xxx@163.com" required></td></tr>
+                <tr><td style="color:var(--text-muted)">授权码</td>
+                    <td><input class="form-input" style="width:220px" type="password" name="smtp_pass" value="<?= htmlspecialchars($smtpCfg['pass']) ?>" placeholder="邮箱网页端生成的客户端授权码" autocomplete="off"></td></tr>
+                <tr><td style="color:var(--text-muted)">发件人（可空=账号）</td>
+                    <td><input class="form-input" style="width:220px" type="text" name="smtp_from" value="<?= htmlspecialchars($smtpCfg['from']) ?>" placeholder="留空则用发信账号"></td></tr>
+            </table>
+            <div style="margin-top:12px">
+                <button class="btn btn-primary" type="submit">
+                    <svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                    保存配置
+                </button>
+                <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px">保存需 SSH 生成挑战码（sudo ym-admin challenge），300 秒有效</span>
+            </div>
+        </form>
+        <div style="margin-top:14px">
+            <button class="btn btn-secondary" onclick="testSmtpMail()">发送测试邮件</button>
+            <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px">向管理员邮箱发送一封测试邮件，验证配置是否正确（需挑战码）</span>
+        </div>
+        <div id="smtpTestResult" style="display:none;margin-top:10px;padding:10px 14px;border-radius:8px;font-size:0.9em"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>最近告警发送记录（alert.log）</div>
+        <?php if (!$alertLogTail): ?>
+            <p style="color:var(--text-muted);font-size:0.85em">暂无失败记录（发送成功不会出现在此）</p>
+        <?php else: ?>
+        <div style="font-family:monospace;font-size:0.82em;line-height:1.7;white-space:pre-wrap;word-break:break-all">
+            <?php foreach ($alertLogTail as $line): ?><?= htmlspecialchars($line) ?><?= PHP_EOL ?><?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+        <p style="color:var(--text-muted);font-size:0.82em;margin-top:8px">说明：邮件发送成功无记录；失败会在此列出（SMTP 认证失败/连接失败/mail 命令不可用等），便于追溯「告警没发出去」。</p>
+    </div>
+
+    <script>
+    function testSmtpMail() {
+        var code = prompt('请在 SSH 中执行 sudo ym-admin challenge 获取 6 位确认码后输入：');
+        if (!code) return;
+        var fd = new FormData();
+        fd.append('ajax', 'test_smtp');
+        fd.append('csrf_token', '<?= generateCsrfToken() ?>');
+        fd.append('challenge_code', code.trim().toUpperCase());
+        var el = document.getElementById('smtpTestResult');
+        el.style.display = 'block';
+        el.textContent = '发送中...';
+        el.style.color = 'var(--text-secondary)';
+        fetch('<?= $_SERVER['SCRIPT_NAME'] ?>', { method: 'POST', body: fd })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.success) {
+                    el.style.background = 'rgba(46,204,113,0.15)';
+                    el.style.color = '#2ecc71';
+                    el.textContent = '✅ 测试邮件发送成功，请查收 <?= htmlspecialchars($smtpAdminEmail ?: "") ?>';
+                } else {
+                    el.style.background = 'rgba(255,80,80,0.15)';
+                    el.style.color = '#ff6060';
+                    el.textContent = '❌ ' + (d.error || '发送失败');
+                }
+            })
+            .catch(function() {
+                el.style.background = 'rgba(255,80,80,0.15)';
+                el.style.color = '#ff6060';
+                el.textContent = '❌ 请求失败，请重试';
+            });
     }
     </script>
     <?php endif; ?>

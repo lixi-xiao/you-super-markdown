@@ -32,6 +32,7 @@ AUDIT_MIRROR_DB = '/opt/you-markdown/logs/ym.db'
 AUDIT_MIRROR_CHAIN = '/opt/you-markdown/logs/audit_chain'
 GUARD_STATE = '/opt/you-markdown/guard-state.json'
 EMAIL_ALERT_BIN = '/usr/local/bin/ym-alert'
+ALERT_LOG = '/opt/you-markdown/alert.log'  # 告警发送失败日志（v2.8.0 可追溯）
 WATCHDOG_USEC = int(os.environ.get('WATCHDOG_USEC', 0)) / 1_000_000  # systemd watchdog 间隔（秒）
 
 # === 自动备份配置（backup.conf，root:www-data 664；守护进程读取）===
@@ -118,21 +119,86 @@ def load_version() -> str:
         return '0.0.0'
 
 
+def load_smtp_config() -> dict:
+    """读取 SMTP 配置（config 表，与 PHP getSmtpConfig 同源）"""
+    cfg = {'host': '', 'port': 465, 'user': '', 'pass': '', 'from': '', 'enc': 'ssl'}
+    try:
+        con = sqlite3.connect(DB_FILE)
+        cur = con.cursor()
+        cur.execute("SELECT key, value FROM config WHERE key IN ('smtp_host','smtp_port','smtp_user','smtp_pass','smtp_from','smtp_enc')")
+        rows = cur.fetchall()
+        con.close()
+        for k, v in rows:
+            val = json.loads(v) if v else ''
+            if k == 'smtp_port':
+                cfg['port'] = int(val) if str(val).isdigit() else 465
+            elif k == 'smtp_enc':
+                cfg['enc'] = val if val in ('ssl', 'tls', 'plain') else 'ssl'
+            else:
+                cfg[k.replace('smtp_', '')] = val or ''
+    except Exception:
+        pass
+    return cfg
+
+
+def smtp_send(to: str, subject: str, body: str, smtp: dict) -> bool:
+    """smtplib 直连发送（v2.8.0，无 MTA 依赖），成功返回 True"""
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.header import Header
+        msg = MIMEText(body, 'plain', 'utf-8')
+        msg['Subject'] = Header(subject, 'utf-8')
+        frm = smtp['from'] or smtp['user']
+        msg['From'] = frm
+        msg['To'] = to
+        if smtp['enc'] == 'ssl':
+            server = smtplib.SMTP_SSL(smtp['host'], smtp['port'] or 465, timeout=15)
+        else:
+            server = smtplib.SMTP(smtp['host'], smtp['port'] or 587, timeout=15)
+            server.ehlo()
+            if smtp['enc'] == 'tls':
+                server.starttls()
+                server.ehlo()
+        server.login(smtp['user'], smtp['pass'])
+        server.sendmail(frm, [to], msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        log(f"SMTP 发送失败: {e}")
+        return False
+
+
+def log_alert_fail(detail: str):
+    """告警发送失败落盘（/opt/you-markdown/alert.log，可追溯）"""
+    try:
+        with open(ALERT_LOG, 'a', encoding='utf-8') as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [FAIL] {detail}\n")
+    except Exception:
+        pass
+
+
 def send_alert(alert_type: str, detail: str):
-    """发送邮件告警"""
+    """发送邮件告警：优先 SMTP 直连（v2.8.0，无 MTA 依赖）；未配置退回 ym-alert(mail)；失败落盘 alert.log"""
     email = load_admin_email()
-    if not email or not os.path.exists(EMAIL_ALERT_BIN):
+    if not email:
         return
     host = os.uname().nodename if hasattr(os, 'uname') else 'localhost'
     subject = f"[{load_app_name()} 告警] {alert_type}"
     body = f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')}\n服务器：{host}\n事件类型：{alert_type}\n详情：{detail}\n"
+    smtp = load_smtp_config()
+    if smtp['host'] and smtp['user'] and smtp['pass']:
+        if smtp_send(email, subject, body, smtp):
+            return
+        log_alert_fail(f"SMTP 发送失败({alert_type})")
+        return
+    if not os.path.exists(EMAIL_ALERT_BIN):
+        log_alert_fail(f"ym-alert 不存在({alert_type})")
+        return
     try:
-        subprocess.run(
-            [EMAIL_ALERT_BIN, email, subject, body],
-            capture_output=True, timeout=10
-        )
-    except Exception:
-        pass
+        subprocess.run([EMAIL_ALERT_BIN, email, subject, body], capture_output=True, timeout=15)
+    except Exception as e:
+        log_alert_fail(f"ym-alert 调用失败({alert_type}): {e}")
 
 
 def is_update_in_progress() -> bool:
@@ -285,6 +351,8 @@ def recover_audit():
         send_alert("日志已恢复", "审计日志已从镜像 SQLite 副本恢复，请检查")
     except Exception as e:
         log(f"从镜像恢复审计失败: {e}")
+        # v2.8.0：恢复失败是最严重场景，必须邮件告警兜底（此前仅 log，告警静默缺失）
+        send_alert("日志恢复失败", f"审计日志从镜像恢复失败，请立即人工介入: {e}")
     if os.path.exists(AUDIT_MIRROR_CHAIN):
         shutil.copy2(AUDIT_MIRROR_CHAIN, AUDIT_CHAIN)
 
@@ -446,6 +514,8 @@ def restore_db_from_file(src) -> bool:
         return True
     except Exception as e:
         log(f"数据库恢复失败: {e}")
+        # v2.8.0：恢复失败需告警兜底（db_health_check 全失败时另有"数据库损坏"告警）
+        send_alert("数据库恢复失败", f"主库 ym.db 从备份恢复失败，请立即人工介入: {e}")
         return False
 
 
@@ -515,6 +585,8 @@ def articles_health_check():
         return True
     except Exception as e:
         log(f"文章恢复失败: {e}")
+        # v2.8.0：文章目录恢复失败告警兜底
+        send_alert("文章恢复失败", f"文章目录从每日备份恢复失败，请立即人工介入: {e}")
         return False
 
 

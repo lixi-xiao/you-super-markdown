@@ -51,6 +51,12 @@ function db_init_schema($pdo) {
     } catch (Exception $e) {
         // 列已存在（幂等），忽略
     }
+    // v2.11.4：users 表新增 disabled 字段（超管禁用账号开关，1=已禁用；禁用后无法登录/评论/进后台）
+    try {
+        $pdo->exec('ALTER TABLE users ADD COLUMN disabled INTEGER DEFAULT 0');
+    } catch (Exception $e) {
+        // 列已存在（幂等），忽略
+    }
     // v2.9.0：邮箱验证码表（注册 / 写作者验证 / 超管确认链路）
     $pdo->exec('CREATE TABLE IF NOT EXISTS email_codes (
         id TEXT PRIMARY KEY,

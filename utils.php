@@ -78,13 +78,13 @@ function saveUsers($users) {
     $pdo->beginTransaction();
     try {
         $pdo->exec('DELETE FROM users');
-        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, qq, nickname, password, avatar, signature, role, station_id, created, created_by, email) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, qq, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
         foreach ($users as $u) {
             $st->execute([
                 $u['id'] ?? '', $u['qq'] ?? '', $u['nickname'] ?? '', $u['password'] ?? '',
                 $u['avatar'] ?? '', $u['signature'] ?? '', $u['role'] ?? 'user',
                 $u['station_id'] ?? '', $u['created'] ?? '', $u['created_by'] ?? '',
-                $u['email'] ?? '',
+                $u['email'] ?? '', (int)($u['disabled'] ?? 0),
             ]);
         }
         $pdo->commit();
@@ -406,7 +406,11 @@ function validateBackendUser() {
     $uid = $_SESSION['cmt_user']['id'] ?? '';
     if ($uid === '') return false;
     foreach (loadUsers() as $u) {
-        if ($u['id'] === $uid) return true;
+        if ($u['id'] === $uid) {
+            // v2.11.4：被禁用账号后台立即失效（踢出会话）
+            if (!empty($u['disabled'])) return false;
+            return true;
+        }
     }
     return false;
 }
@@ -1769,6 +1773,12 @@ function webauthn_login_complete($input, $qq) {
     if (!$cred) return ['ok' => false, 'err' => '设备未绑定'];
     $owner = db_one('SELECT id, qq FROM users WHERE id = ?', [$cred['user_id']]);
     if (!$owner || $owner['qq'] !== $qq) return ['ok' => false, 'err' => '设备与账号不匹配'];
+    // v2.11.4：被禁用账号拒绝设备登录
+    $ownerFull = null;
+    foreach (loadUsers() as $ou) {
+        if ($ou['id'] === $cred['user_id']) { $ownerFull = $ou; break; }
+    }
+    if (!$ownerFull || !empty($ownerFull['disabled'])) return ['ok' => false, 'err' => '该账号已被禁用，请联系管理员'];
     $ad = webauthn_parse_auth_data($authData, false);
     if (!hash_equals(hash('sha256', webauthn_rp_id(), true), $ad['rpIdHash'])) {
         return ['ok' => false, 'err' => 'RP 标识不匹配'];

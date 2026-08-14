@@ -104,6 +104,10 @@ function validateHomeUser() {
     $u = validateSession();
     if (!$u) return null;
     if (($u['role'] ?? '') === ROLE_SUPER_ADMIN) return null;
+    // v2.11.4：被禁用账号主页按未登录处理（隐身 + 不能评论/绑定设备）
+    foreach (loadUsers() as $lu) {
+        if ($lu['id'] === ($u['id'] ?? '') && !empty($lu['disabled'])) return null;
+    }
     return $u;
 }
 function jsonOut($data, $code = 200) {
@@ -337,6 +341,8 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $isAdminFirst = false;
     foreach ($users as $u) {
         if (($u['qq'] ?? '') === $qq && password_verify($pw, $u['password'])) {
+            // v2.11.4：被禁用账号拒绝登录
+            if (!empty($u['disabled'])) jsonOut(['success' => false, 'error' => '该账号已被禁用，请联系管理员'], 403);
             session_regenerate_id(true);
             $avatar = $u['avatar'] ?? getAvatarUrl($qq);
             $_SESSION['cmt_user'] = [

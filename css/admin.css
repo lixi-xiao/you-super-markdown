@@ -629,6 +629,55 @@ td code {
     padding: 6px 14px;
     font-size: 12px;
 }
+/* v2.11.4：超管用户列表二级操作菜单（⋯ 下拉：权限 / 禁用启用 / 删除） */
+.user-op-menu { position: relative; display: inline-block; }
+.user-op-btn {
+    min-width: 34px;
+    padding: 4px 8px;
+    font-size: 16px;
+    line-height: 1;
+    color: var(--text-secondary);
+    border-color: var(--border);
+    background: transparent;
+}
+.user-op-btn:hover { color: var(--accent); border-color: var(--accent); }
+.user-op-dropdown {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 60;
+    min-width: 200px;
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 10px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.user-op-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.user-op-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.user-op-item {
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.user-op-item:hover { background: var(--hover-bg, rgba(0,0,0,0.05)); }
+.user-op-item.danger { color: var(--danger, #e5484d); }
+.user-op-item.danger:hover { background: rgba(229, 72, 77, 0.08); }
+.user-op-dropdown form.need-challenge { margin: 0; }
 /* ---------- 日志搜索工具栏 + 分页控件（v2.6.6；同次更新：统一后台设计语言 + 修复嵌套边框穿模） ---------- */
 .log-toolbar {
     display: flex;

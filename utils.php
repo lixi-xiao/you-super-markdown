@@ -354,7 +354,27 @@ function validateJWT($token) {
     if (!hash_equals($expected, $signature)) return false;
     $data = json_decode(base64_decode(strtr($payload, '-_', '+/')), true);
     if (!$data || ($data['exp'] ?? 0) < time()) return false;
+    // v2.7.2：吊销校验——签发用户已不在 users 表（被删除/吊销）时视为无效，会话立即失效
+    $uid = $data['sub'] ?? '';
+    if ($uid !== '') {
+        $found = false;
+        foreach (loadUsers() as $u) {
+            if ($u['id'] === $uid) { $found = true; break; }
+        }
+        if (!$found) return false;
+    }
     return $data;
+}
+
+// v2.7.2：后台鉴权校验当前登录用户在 users 表仍存在（账号被删/吊销后会话立即失效）
+// 站长/写作者后台无 JWT（仅超管 OTP 用 JWT），依赖 Session + checkRole，需此校验兜底
+function validateBackendUser() {
+    $uid = $_SESSION['cmt_user']['id'] ?? '';
+    if ($uid === '') return false;
+    foreach (loadUsers() as $u) {
+        if ($u['id'] === $uid) return true;
+    }
+    return false;
 }
 
 // ============================================================

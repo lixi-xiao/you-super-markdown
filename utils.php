@@ -533,7 +533,18 @@ function sendSmtpMail($to, $subject, $body) {
     $resp = fgets($fp, 512);
     if (substr($resp, 0, 3) !== '220') { fclose($fp); return [false, 'SMTP 握手失败: ' . trim($resp)]; }
     $ehlo = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    $cmd = function ($c) use ($fp) { fwrite($fp, $c . "\r\n"); return fgets($fp, 512); };
+    // 多行响应读取：3 位码 + '-' 为续行，读到非续行（3 位码 + 空格）为止（修复 EHLO 多行响应残留导致 AUTH 读取错位）
+    $readResp = function () use ($fp) {
+        $lines = '';
+        while (true) {
+            $line = fgets($fp, 512);
+            if ($line === false) break;
+            $lines .= $line;
+            if (strlen($line) < 4 || $line[3] !== '-') break;
+        }
+        return $lines;
+    };
+    $cmd = function ($c) use ($fp, $readResp) { fwrite($fp, $c . "\r\n"); return $readResp(); };
     if ($s['enc'] === 'tls') {
         $r = $cmd('EHLO ' . $ehlo);
         if (stripos($r, 'STARTTLS') === false) { fclose($fp); return [false, '服务器不支持 STARTTLS']; }

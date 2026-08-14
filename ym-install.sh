@@ -578,8 +578,8 @@ log "守护进程已启动"
 cat > /etc/cron.d/ym-guard << EOF
 # You Super Markdown 守护进程兜底检查（每5分钟）
 */5 * * * * root /usr/bin/systemctl is-active --quiet ym-guard || /usr/bin/systemctl start ym-guard
-# 每天凌晨3点校验审计日志（ym-admin log-verify 为只读哈希链校验）
-0 3 * * * root /usr/local/bin/ym-admin log-verify 2>/dev/null | mail -s "You Super Markdown 每日审计报告" $ADMIN_EMAIL
+# 每天凌晨3点发送每日审计报告（ym-admin audit-report：校验哈希链并经 SMTP 发送给管理员，无 MTA 依赖）
+0 3 * * * root /usr/local/bin/ym-admin audit-report > /dev/null 2>&1
 EOF
 
 # ================================================================
@@ -935,6 +935,17 @@ case "${1:-}" in
         "
         ;;
 
+    audit-report)
+        # 每日审计报告：校验结果经 sendAlert 走 SMTP 直连发送给管理员（无 MTA 依赖，失败落盘 alert.log）
+        php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$r = verifyAuditChain();
+            \$result = \$r['valid'] ? '审计日志哈希链校验通过 ('.\$r['count'].' 条)' : '校验失败！断裂于第 '.\$r['broken_at'].' 条';
+            echo \$result . PHP_EOL;
+            sendAlert('每日审计报告', \$result);
+        "
+        ;;
+
     challenge)
         CODE=$(openssl rand -hex 3)
         EXPIRES=$(( $(date +%s) + 60 ))
@@ -1006,6 +1017,7 @@ case "${1:-}" in
         echo "  backup                    备份数据"
         echo "  status                    查看服务状态"
         echo "  log-verify                校验审计日志哈希链"
+        echo "  audit-report              每日审计报告（校验结果经 SMTP 发送给管理员）"
         echo "  challenge                 生成挑战码"
         echo "  hfish-panel               建立 SSH 隧道访问 Hfish 管理面板"
         echo "  hfish-status              查看 Hfish 蜜罐状态"

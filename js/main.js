@@ -1001,39 +1001,45 @@
         if (m) m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); });
     });
     if (cmtCapsuleBtn) cmtCapsuleBtn.addEventListener('click', () => { cmtAuthMode = 'login'; cmtUpdateAuthUI(); cmtOpenModal(cmtAuthModal); });
-    if (cmtUserInner) cmtUserInner.addEventListener('click', () => {
-        if (cmtUser) {
-            cmtEditNick.value = cmtUser.nickname || '';
-            cmtEditSign.value = cmtUser.signature || '';
-            // v2.10.0：打开编辑资料弹窗时填充头像预览 + 邮箱区
-            const avBox = document.getElementById('cmtProfileAvatar');
-            if (avBox) {
-                const avUrl = cmtUser.avatar || '';
-                avBox.innerHTML = avUrl ? '<img src="' + cmtEscape(avUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '';
-            }
-            const emailWrap = document.getElementById('cmtProfileEmailWrap');
-            if (emailWrap) emailWrap.style.display = emailChangeOn ? 'block' : 'none';
-            const editEmail = document.getElementById('cmtEditEmail');
-            if (editEmail) {
-                editEmail.value = '';
-                editEmail.placeholder = cmtUser.email ? ('当前绑定：' + cmtUser.email + '，输入新邮箱更换') : '输入邮箱进行绑定';
-            }
-            const emailCode = document.getElementById('cmtEditEmailCode');
-            if (emailCode) emailCode.value = '';
-            const emailErr = document.getElementById('cmtEmailErr');
-            if (emailErr) emailErr.textContent = '';
-            const sendBtn = document.getElementById('cmtEmailSendCode');
-            if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '获取验证码'; }
-            // v2.11.0：打开编辑资料时刷新设备快速登录列表
-            if (cmtDevicesWrap && deviceLoginSupported()) {
-                cmtDevicesWrap.style.display = 'block';
-                cmtLoadDevices();
-            } else if (cmtDevicesWrap) {
-                cmtDevicesWrap.style.display = 'none';
-            }
-            cmtOpenModal(cmtProfileModal);
+    // v2.11.3：打开编辑资料弹窗（主页用户下拉「编辑资料」与评论区用户栏共用）
+    function cmtOpenProfileModal() {
+        if (!cmtUser) return;
+        cmtEditNick.value = cmtUser.nickname || '';
+        cmtEditSign.value = cmtUser.signature || '';
+        // v2.10.0：打开编辑资料弹窗时填充头像预览 + 邮箱区
+        const avBox = document.getElementById('cmtProfileAvatar');
+        if (avBox) {
+            const avUrl = cmtUser.avatar || '';
+            avBox.innerHTML = avUrl ? '<img src="' + cmtEscape(avUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '';
         }
-    });
+        const emailWrap = document.getElementById('cmtProfileEmailWrap');
+        if (emailWrap) emailWrap.style.display = emailChangeOn ? 'block' : 'none';
+        const editEmail = document.getElementById('cmtEditEmail');
+        if (editEmail) {
+            editEmail.value = '';
+            editEmail.placeholder = cmtUser.email ? ('当前绑定：' + cmtUser.email + '，输入新邮箱更换') : '输入邮箱进行绑定';
+        }
+        const emailCode = document.getElementById('cmtEditEmailCode');
+        if (emailCode) emailCode.value = '';
+        const emailErr = document.getElementById('cmtEmailErr');
+        if (emailErr) emailErr.textContent = '';
+        const sendBtn = document.getElementById('cmtEmailSendCode');
+        if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '获取验证码'; }
+        // v2.11.3：设备快速登录管理区**总是显示**（不再按平台认证器支持性隐藏）；
+        // 不支持时显示提示 + 隐藏绑定按钮，用户可明确知道入口存在
+        if (cmtDevicesWrap) {
+            cmtDevicesWrap.style.display = 'block';
+            if (deviceLoginSupported()) {
+                if (cmtDeviceBindBtn) cmtDeviceBindBtn.style.display = '';
+                cmtLoadDevices();
+            } else {
+                if (cmtDeviceList) cmtDeviceList.innerHTML = '<div class="cmt-device-empty">当前浏览器/设备不支持 PIN/指纹验证（需 Windows Hello 或手机指纹）</div>';
+                if (cmtDeviceBindBtn) cmtDeviceBindBtn.style.display = 'none';
+            }
+        }
+        cmtOpenModal(cmtProfileModal);
+    }
+    if (cmtUserInner) cmtUserInner.addEventListener('click', () => { cmtOpenProfileModal(); });
     if (cmtLogoutBtn) cmtLogoutBtn.addEventListener('click', e => {
         e.stopPropagation();
         fetch('api.php?action=logout', { method: 'POST' }).catch(() => {});
@@ -2302,6 +2308,7 @@
         var dropdownAdmin = document.getElementById('userDropdownAdmin');
         var dropdownDivider = document.getElementById('userDropdownDivider');
         var dropdownLogout = document.getElementById('userDropdownLogout');
+        var dropdownProfile = document.getElementById('userDropdownProfile');
         var cmtAuthModal = document.getElementById('cmtAuthModal');
         var cmtAuthTitle = document.getElementById('cmtAuthTitle');
         var cmtLoginForm = document.getElementById('cmtLoginForm');
@@ -2350,9 +2357,13 @@
                     if (dropdownDivider) dropdownDivider.style.display = 'block';
                     if (dropdownLogout) dropdownLogout.style.display = 'flex';
                     if (dropdownAdmin) dropdownAdmin.style.display = 'none';
+                    // v2.11.3：超管隐身，不提供「编辑资料」入口（超管走 OTP/SSH 安全通道）
+                    if (dropdownProfile) dropdownProfile.style.display = 'none';
                 } else {
                     if (dropdownDivider) dropdownDivider.style.display = 'block';
                     if (dropdownLogout) dropdownLogout.style.display = 'flex';
+                    // v2.11.3：普通用户/站长/写作者显示「编辑资料」入口
+                    if (dropdownProfile) dropdownProfile.style.display = 'flex';
                     if (dropdownAdmin) {
                         dropdownAdmin.style.display = userData.canAccessAdmin ? 'flex' : 'none';
                     }
@@ -2365,6 +2376,7 @@
                 if (dropdownDivider) dropdownDivider.style.display = 'none';
                 if (dropdownLogout) dropdownLogout.style.display = 'none';
                 if (dropdownAdmin) dropdownAdmin.style.display = 'none';
+                if (dropdownProfile) dropdownProfile.style.display = 'none';
             }
         }
         btnUser.addEventListener('click', function(e) {
@@ -2425,6 +2437,14 @@
                 if (typeof cmtUpdateUI === 'function') cmtUpdateUI();
                 updateDropdown(null);
                 showToast('已退出登录');
+            });
+        }
+        // v2.11.3：用户下拉「编辑资料」→ 打开个人资料弹窗（含设备快速登录管理）
+        if (dropdownProfile) {
+            dropdownProfile.addEventListener('click', function(e) {
+                e.stopPropagation();
+                dropdown.classList.remove('active');
+                if (typeof cmtOpenProfileModal === 'function') cmtOpenProfileModal();
             });
         }
         document.addEventListener('click', function() {

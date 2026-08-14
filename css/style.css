@@ -1904,3 +1904,32 @@ kbd {
     transition: all 0.15s;
 }
 .cmt-device-add:hover { opacity: 0.85; }
+/* v2.11.3：站长端 / 写作者端「设备快速登录」卡样式（复用评论区设备管理视觉） */
+.dash-device-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.dash-device-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--code-bg);
+}
+.dash-device-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dash-device-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.dash-device-meta { font-size: 11px; color: var(--text-muted); }
+.dash-device-ops { display: flex; gap: 6px; flex-shrink: 0; }
+.dash-device-edit, .dash-device-del {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    font-size: 12px;
+    cursor: pointer;
+}
+.dash-device-edit { color: var(--text-secondary); }
+.dash-device-edit:hover { background: var(--hover-bg); color: var(--text); }
+.dash-device-del { color: var(--danger, #e5484d); }
+.dash-device-del:hover { background: rgba(229,72,77,0.08); border-color: var(--danger, #e5484d); }
+.dash-device-empty { font-size: 12px; color: var(--text-muted); padding: 6px 2px; }

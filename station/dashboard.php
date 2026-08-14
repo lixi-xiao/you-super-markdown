@@ -911,7 +911,7 @@ function logoutSubmit(e) {
         dot.style.left = '0%';
         hint.textContent = '拖动滑块对准圆点完成验证';
         hint.classList.remove('ok');
-        fetch('api.php?action=captcha_new').then(function(r){ return r.json(); }).then(function(d) {
+        fetch('../api.php?action=captcha_new').then(function(r){ return r.json(); }).then(function(d) {
             if (d.success) { st.id = d.captcha_id; st.target = d.captcha_pos; dot.style.left = (st.target / 10) + '%'; }
         }).catch(function(){});
     }

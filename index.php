@@ -306,7 +306,7 @@ if ($action === 'update') {
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="css/style.css?v=<?= filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
-<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_siteConfig['bg_api_url'] ?? '') ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
+<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-reg-captcha="<?= !empty($_siteConfig['captcha_enabled']) ? '1' : '0' ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_siteConfig['bg_api_url'] ?? '') ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($_siteTitle) ?></a></div>
     <div class="header-right">
@@ -520,6 +520,21 @@ if ($action === 'update') {
                 <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtRegQQ">
                 <input class="cmt-modal-input" type="text" placeholder="昵称" maxlength="20" id="cmtRegNick">
                 <input class="cmt-modal-input" type="password" placeholder="密码（至少8位，含大小写与数字）" id="cmtRegPw">
+                <div class="cmt-reg-verify" id="cmtRegVerifyBox" style="display:none">
+                    <div class="cmt-reg-email-row">
+                        <input class="cmt-modal-input" type="email" placeholder="邮箱（用于验证）" id="cmtRegEmail">
+                        <button type="button" class="cmt-code-btn" id="cmtRegSendCode">获取验证码</button>
+                    </div>
+                    <input class="cmt-modal-input" type="text" placeholder="邮箱验证码（6位）" maxlength="6" id="cmtRegCode">
+                    <div class="captcha-box" id="cmtRegCaptchaBox">
+                        <div class="captcha-slider" id="cmtRegSlider">
+                            <div class="captcha-track" id="cmtRegTrack"></div>
+                            <div class="captcha-dot" id="cmtRegDot"></div>
+                            <div class="captcha-thumb" id="cmtRegThumb"><span>→</span></div>
+                        </div>
+                        <div class="captcha-hint" id="cmtRegCaptchaHint">拖动滑块对准圆点完成验证</div>
+                    </div>
+                </div>
                 <div class="cmt-modal-err" id="cmtRegErr"></div>
                 <button class="cmt-modal-submit" id="cmtRegBtn">注册</button>
             </div>

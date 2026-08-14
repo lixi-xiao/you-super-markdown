@@ -918,6 +918,14 @@
     const cmtRegPw = document.getElementById('cmtRegPw');
     const cmtRegErr = document.getElementById('cmtRegErr');
     const cmtRegBtn = document.getElementById('cmtRegBtn');
+    // v2.9.0 注册验证控件
+    const cmtRegVerifyBox = document.getElementById('cmtRegVerifyBox');
+    const cmtRegEmail = document.getElementById('cmtRegEmail');
+    const cmtRegSendCode = document.getElementById('cmtRegSendCode');
+    const cmtRegCode = document.getElementById('cmtRegCode');
+    const cmtRegCaptchaBox = document.getElementById('cmtRegCaptchaBox');
+    const regVerifyOn = (document.body.getAttribute('data-reg-verify') === '1');
+    const regCaptchaOn = (document.body.getAttribute('data-reg-captcha') === '1');
     const cmtSwitchText = document.getElementById('cmtSwitchText');
     const cmtSwitchBtn = document.getElementById('cmtSwitchBtn');
     const cmtProfileModal = document.getElementById('cmtProfileModal');
@@ -1022,13 +1030,136 @@
             }).catch(() => { cmtLoginErr.textContent = '网络错误'; })
             .finally(() => { cmtLoginBtn.disabled = false; cmtLoginBtn.textContent = '登录'; });
     });
+    // ---- v2.9.0 滑块人机验证组件（对准随机圆点，误差≤3%） ----
+    function initYMCaptcha(box) {
+        const slider = box.querySelector('.captcha-slider');
+        const thumb = box.querySelector('.captcha-thumb');
+        const dot = box.querySelector('.captcha-dot');
+        const hint = box.querySelector('.captcha-hint');
+        const state = { id: '', target: 0, passed: false };
+        const thumbW = 46;
+        let dragging = false, curPct = 0;
+
+        function refresh() {
+            state.id = ''; state.passed = false; curPct = 0;
+            thumb.classList.remove('passed', 'dragging');
+            thumb.style.left = '0px';
+            dot.style.left = '0%';
+            hint.textContent = '拖动滑块对准圆点完成验证';
+            hint.classList.remove('ok');
+            fetch('api.php?action=captcha_new')
+                .then(r => r.json())
+                .then(d => {
+                    if (d.success) {
+                        state.id = d.captcha_id;
+                        state.target = d.captcha_pos;
+                        dot.style.left = (state.target / 10) + '%';
+                    }
+                })
+                .catch(() => {});
+        }
+        function setPos(clientX) {
+            const rect = slider.getBoundingClientRect();
+            let pct = (clientX - rect.left) / rect.width * 100;
+            pct = Math.max(0, Math.min(100, pct));
+            curPct = pct;
+            thumb.style.left = (pct / 100 * (rect.width - thumbW)) + 'px';
+        }
+        function release() {
+            if (!dragging) return;
+            dragging = false;
+            thumb.classList.remove('dragging');
+            if (!state.id) { hint.textContent = '验证码加载失败，请重试'; return; }
+            if (Math.abs(Math.round(curPct * 10) - state.target) <= 30) {
+                state.passed = true;
+                thumb.classList.add('passed');
+                thumb.innerHTML = '<span>✓</span>';
+                hint.textContent = '验证通过';
+                hint.classList.add('ok');
+            } else {
+                refresh();
+            }
+        }
+        thumb.addEventListener('pointerdown', (e) => {
+            if (state.passed) return;
+            dragging = true;
+            thumb.classList.add('dragging');
+            thumb.setPointerCapture(e.pointerId);
+            setPos(e.clientX);
+        });
+        thumb.addEventListener('pointermove', (e) => { if (dragging) setPos(e.clientX); });
+        thumb.addEventListener('pointerup', release);
+        thumb.addEventListener('pointercancel', release);
+        return {
+            refresh,
+            result: () => state.passed ? { id: state.id, pos: Math.round(curPct * 10) } : null
+        };
+    }
+
+    let cmtRegCaptcha = null;
+    function cmtRegShowVerify() {
+        if (cmtRegVerifyBox) cmtRegVerifyBox.style.display = 'flex';
+        if (regCaptchaOn && cmtRegCaptchaBox) {
+            if (!cmtRegCaptcha) cmtRegCaptcha = initYMCaptcha(cmtRegCaptchaBox);
+            cmtRegCaptcha.refresh();
+        }
+    }
+    // 切到注册时按开关显示验证区块
+    if (cmtSwitchBtn) {
+        const sw = cmtSwitchBtn;
+        sw.addEventListener('click', () => {
+            setTimeout(() => {
+                if (cmtRegForm && cmtRegForm.style.display !== 'none') {
+                    if (regVerifyOn) cmtRegShowVerify(); else if (cmtRegVerifyBox) cmtRegVerifyBox.style.display = 'none';
+                } else if (cmtRegVerifyBox) cmtRegVerifyBox.style.display = 'none';
+            }, 50);
+        });
+    }
+
+    // 发码按钮：60s 倒计时（后端同样限制；超管后台操作不受限）
+    if (cmtRegSendCode) cmtRegSendCode.addEventListener('click', () => {
+        const email = cmtRegEmail.value.trim();
+        const re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+        if (!re.test(email)) { cmtRegErr.textContent = '请输入正确的邮箱'; return; }
+        const captcha = cmtRegCaptcha ? cmtRegCaptcha.result() : null;
+        if (regCaptchaOn && !captcha) { cmtRegErr.textContent = '请先完成滑块验证'; return; }
+        cmtRegErr.textContent = '';
+        cmtRegSendCode.disabled = true;
+        fetch('api.php?action=send_register_code', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, captcha_id: captcha ? captcha.id : '', captcha_pos: captcha ? captcha.pos : 0 })
+        }).then(r => r.json()).then(d => {
+            if (d.success) {
+                cmtRegErr.textContent = '';
+                let left = 60;
+                cmtRegSendCode.textContent = left + 's 后重发';
+                const t = setInterval(() => {
+                    left--;
+                    if (left <= 0) { clearInterval(t); cmtRegSendCode.textContent = '获取验证码'; cmtRegSendCode.disabled = false; }
+                    else cmtRegSendCode.textContent = left + 's 后重发';
+                }, 1000);
+            } else {
+                cmtRegErr.textContent = d.error || '发送失败';
+                cmtRegSendCode.disabled = false;
+            }
+        }).catch(() => { cmtRegErr.textContent = '网络错误'; cmtRegSendCode.disabled = false; });
+    });
+
     if (cmtRegBtn) cmtRegBtn.addEventListener('click', () => {
         const qq = cmtRegQQ.value.trim(), nick = cmtRegNick.value.trim(), pw = cmtRegPw.value;
+        const email = regVerifyOn ? cmtRegEmail.value.trim() : '';
+        const code = regVerifyOn ? cmtRegCode.value.trim() : '';
+        const captcha = cmtRegCaptcha ? cmtRegCaptcha.result() : null;
         cmtRegErr.textContent = '';
         if (!qq || !pw) { cmtRegErr.textContent = '请填写QQ号和密码'; return; }
         if (pw.length < 8 || !/[a-z]/.test(pw) || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw)) { cmtRegErr.textContent = '密码至少8位，且需包含大写字母、小写字母与数字'; return; }
+        if (regVerifyOn) {
+            if (!email) { cmtRegErr.textContent = '请填写邮箱'; return; }
+            if (!code) { cmtRegErr.textContent = '请填写邮箱验证码'; return; }
+            if (regCaptchaOn && !captcha) { cmtRegErr.textContent = '请先完成滑块验证'; return; }
+        }
         cmtRegBtn.disabled = true; cmtRegBtn.textContent = '注册中...';
-        fetch('api.php?action=register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw }) })
+        fetch('api.php?action=register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw, email, code, captcha_id: captcha ? captcha.id : '', captcha_pos: captcha ? captcha.pos : 0 }) })
             .then(r => r.json()).then(d => {
                 if (d.success) { cmtUser = d.user; cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); }
                 else { cmtRegErr.textContent = d.error || '注册失败'; }

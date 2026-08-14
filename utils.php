@@ -73,16 +73,18 @@ function loadUsers() {
 function saveUsers($users) {
     // 全量替换（保持原函数语义：写入完整用户列表）
     // v2.5.4：INSERT OR REPLACE 防止列表内重复 id 触发唯一约束冲突导致事务回滚
+    // v2.9.0：列清单加入 email（注册验证引入，漏列会导致全量替换时邮箱丢失）
     $pdo = db();
     $pdo->beginTransaction();
     try {
         $pdo->exec('DELETE FROM users');
-        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, qq, nickname, password, avatar, signature, role, station_id, created, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)');
+        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, qq, nickname, password, avatar, signature, role, station_id, created, created_by, email) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
         foreach ($users as $u) {
             $st->execute([
                 $u['id'] ?? '', $u['qq'] ?? '', $u['nickname'] ?? '', $u['password'] ?? '',
                 $u['avatar'] ?? '', $u['signature'] ?? '', $u['role'] ?? 'user',
                 $u['station_id'] ?? '', $u['created'] ?? '', $u['created_by'] ?? '',
+                $u['email'] ?? '',
             ]);
         }
         $pdo->commit();
@@ -108,6 +110,13 @@ function loadSiteConfig() {
         'station_path' => 'station',
         'author_path' => 'author',
         'hide_default_paths' => true,
+        // v2.9.0 注册验证与双重确认开关（正式版默认启用 / 测试版默认禁用，后台可随时切换）
+        'email_verify_enabled' => true,      // 注册邮箱验证码总开关
+        'captcha_enabled' => true,           // 人机滑块验证开关
+        'author_dual_verify_enabled' => true, // 站长创建写作者双重确认开关
+        'verify_code_ttl' => 300,            // 验证码有效期（秒）
+        'confirm_link_ttl' => 86400,         // 超管确认链接有效期（秒）
+        'resend_cooldown' => 60,             // 验证码重发冷却（秒），超管后台操作不受限
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;
@@ -672,6 +681,180 @@ function sendAlert($type, $detail) {
     $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($adminEmail) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
     exec($cmd . ' > /dev/null 2>&1 &');
     // mail 命令为异步后台，其内部失败由 ym-alert 落盘 alert.log（见 v2.8.0 ym-alert 改造）
+}
+
+// ============================================================
+// v2.9.0 注册验证：滑块人机验证 + 邮箱验证码 + 写作者双重确认
+// ============================================================
+
+/** 邮箱格式校验 */
+function email_valid($email) {
+    return is_string($email) && strlen($email) <= 254
+        && preg_match('/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/', $email);
+}
+
+/**
+ * 滑块验证：生成随机目标位置（60.0%~95.0%，千分位）存 session，返回 [id, pos]。
+ * 前端渲染滑块轨道 + 随机小圆点标记，用户拖动滑块对准标记；提交后后端校验误差 ≤3.0%。
+ */
+function captcha_new() {
+    $id = genId();
+    $_SESSION['captchas'][$id] = random_int(600, 950);
+    $_SESSION['captcha_exp'][$id] = time() + 300;
+    return ['id' => $id, 'pos' => $_SESSION['captchas'][$id]];
+}
+/** 校验滑块结果（一次性，5 分钟过期，误差 ≤30 千分位） */
+function captcha_check($id, $pos) {
+    if (!isset($_SESSION['captchas'][$id])) return false;
+    if (($_SESSION['captcha_exp'][$id] ?? 0) < time()) {
+        unset($_SESSION['captchas'][$id]);
+        return false;
+    }
+    $target = $_SESSION['captchas'][$id];
+    unset($_SESSION['captchas'][$id], $_SESSION['captcha_exp'][$id]);
+    return abs((int)$pos - (int)$target) <= 30;
+}
+
+/** 邮箱是否已被账户占用 */
+function email_exists($email) {
+    $r = db_one('SELECT COUNT(*) AS c FROM users WHERE email = ?', [$email]);
+    return ($r['c'] ?? 0) > 0;
+}
+
+/**
+ * 发送邮箱验证码。
+ * @param string $email     目标邮箱
+ * @param string $purpose   register | author_verify
+ * @param string $target    关联对象描述（如注册邮箱 / 待创建写作者昵称）
+ * @param string $operatorRole 操作者角色（super_admin 后台操作跳过 60s 冷却）
+ * @param string $link      可选的验证链接（author_verify 时附在邮件内，写作者自助输入验证码）
+ * @return array [bool, mixed] 成功返回 [true, code记录数组]，失败返回 [false, 原因]
+ */
+function email_code_send($email, $purpose, $target = '', $operatorRole = '', $link = '') {
+    if (!email_valid($email)) return [false, '邮箱格式不正确'];
+    $cfg = loadSiteConfig();
+    $cooldown = max(10, (int)($cfg['resend_cooldown'] ?? 60));
+    // 60s 冷却（按邮箱）；超管后台主动操作不受限
+    $isAdminOp = ($operatorRole === ROLE_SUPER_ADMIN);
+    if (!$isAdminOp) {
+        $last = db_one('SELECT MAX(created) AS m FROM email_codes WHERE email = ?', [$email]);
+        if ($last && $last['m'] && (time() - (int)$last['m']) < $cooldown) {
+            $wait = $cooldown - (time() - (int)$last['m']);
+            return [false, '发送过于频繁，请 ' . $wait . ' 秒后重试'];
+        }
+    }
+    $code = str_pad((string)random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+    $ttl = max(60, (int)($cfg['verify_code_ttl'] ?? 300));
+    $rowId = genId();
+    db_exec('INSERT INTO email_codes (id,email,code,purpose,expires,used,created,ip,operator_role) VALUES (?,?,?,?,?,0,?,?,?)', [
+        $rowId, $email, $code, $purpose, time() + $ttl, time(), getClientIP(), $operatorRole,
+    ]);
+    $site = $cfg['site_title'] ?? 'You Super Markdown';
+    $now = date('Y-m-d H:i:s');
+    $subject = "[{$site}] 邮箱验证码";
+    $body = "您的验证码为：{$code}\n\n"
+          . "有效期为 " . intdiv($ttl, 60) . " 分钟，仅限一次性使用。\n";
+    if ($link !== '') {
+        $body .= "请点击以下链接输入验证码完成验证：\n{$link}\n\n";
+    }
+    $body .= "若非本人操作，请忽略本邮件。\n时间：{$now}";
+    $htmlDetail = "验证码：<b>{$code}</b><br>有效期 " . intdiv($ttl, 60) . " 分钟，一次性使用";
+    if ($link !== '') {
+        $htmlDetail .= '<br><a href="' . $link . '" style="display:inline-block;margin-top:10px;padding:10px 20px;background:#1f3a5f;color:#fff;border-radius:8px;text-decoration:none;">点击输入验证码</a>';
+    }
+    $html = renderMailHtml($site, '邮箱验证码', $htmlDetail, ['server' => $_SERVER['HTTP_HOST'] ?? 'localhost', 'time' => $now]);
+    [$ok, $err] = sendSmtpMail($email, $subject, $body, $html);
+    if (!$ok) {
+        logAlertFail("验证码邮件发送失败({$purpose} → {$email}): {$err}");
+        return [false, '验证码邮件发送失败：' . $err];
+    }
+    return [true, ['id' => $rowId, 'ttl' => $ttl]];
+}
+
+/**
+ * 校验邮箱验证码（一次性，未过期即原子消费）。
+ * @return array [bool, mixed] 成功返回 [true, 验证码记录]，失败返回 [false, 原因]
+ */
+function email_code_verify($email, $code, $purpose) {
+    if (!email_valid($email) || !preg_match('/^\d{6}$/', (string)$code)) return [false, '验证码不正确'];
+    $row = db_one('SELECT * FROM email_codes WHERE email = ? AND code = ? AND purpose = ? AND used = 0 ORDER BY created DESC LIMIT 1', [$email, $code, $purpose]);
+    if (!$row) return [false, '验证码不正确'];
+    if ((int)$row['expires'] < time()) return [false, '验证码已过期'];
+    db_exec('UPDATE email_codes SET used = 1 WHERE id = ?', [$row['id']]);
+    return [true, $row];
+}
+
+/** 创建写作者双重确认中间态，返回 [pendingId, confirmToken]；$status: verify_pending(等写作者验证码) / pending(待超管确认) */
+function create_pending_author($email, $nickname, $qq, $passwordHash, $stationId, $verifyCodeId = '', $status = 'pending') {
+    $id = genId();
+    $token = ($status === 'pending') ? bin2hex(random_bytes(16)) : '';
+    db_exec('INSERT INTO pending_author_creates (id,email,nickname,qq,password_hash,station_id,verify_code_id,confirm_token,status,created,confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
+        $id, $email, $nickname, $qq, $passwordHash, $stationId, $verifyCodeId, $token, $status, time(), '',
+    ]);
+    return [$id, $token];
+}
+/** 按确认 token 查待确认记录（未过期） */
+function get_pending_author_by_token($token) {
+    if (!is_string($token) || strlen($token) !== 32) return null;
+    $row = db_one('SELECT * FROM pending_author_creates WHERE confirm_token = ?', [$token]);
+    if (!$row || $row['status'] !== 'pending') return null;
+    return $row;
+}
+/** 按 id 查待确认记录 */
+function get_pending_author_by_id($id) {
+    return db_one('SELECT * FROM pending_author_creates WHERE id = ?', [$id]);
+}
+/** 标记待确认记录状态 */
+function update_pending_author_status($id, $status) {
+    db_exec("UPDATE pending_author_creates SET status = ?, confirmed_at = ? WHERE id = ?", [$status, date('Y-m-d H:i:s'), $id]);
+}
+/** 创建写作者账号（超管确认后执行）；邮箱/QQ 冲突返回 false */
+function create_author_from_pending($row) {
+    $users = loadUsers();
+    foreach ($users as $u) {
+        if (($u['qq'] ?? '') === $row['qq']) return false;
+        if (!empty($u['email']) && ($u['email'] ?? '') === $row['email']) return false;
+    }
+    $users[] = [
+        'id' => genId(),
+        'qq' => $row['qq'],
+        'email' => $row['email'],
+        'nickname' => $row['nickname'],
+        'password' => $row['password_hash'],
+        'role' => ROLE_AUTHOR,
+        'station_id' => $row['station_id'],
+        'created' => date('Y-m-d H:i:s'),
+        'created_by' => 'dual_verify',
+    ];
+    saveUsers($users);
+    return true;
+}
+
+/** 给超管发送写作者创建确认邮件（一次性链接，confirm_link_ttl 秒有效） */
+function sendAdminConfirmMail($pendingId, $token, $nick, $qq, $email) {
+    $cfg = loadSiteConfig();
+    $adminEmail = $cfg['admin_email'] ?? '';
+    if (!$adminEmail) return false;
+    $ttl = max(300, (int)($cfg['confirm_link_ttl'] ?? 86400));
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $link = "{$scheme}://{$host}/verify-confirm.php?token={$token}";
+    $site = $cfg['site_title'] ?? 'You Super Markdown';
+    $now = date('Y-m-d H:i:s');
+    $subject = "[{$site}] 写作者创建确认";
+    $body = "站长申请创建写作者：\n昵称：{$nick}\nQQ：{$qq}\n邮箱：{$email}\n\n"
+          . "点击以下链接确认（" . intdiv($ttl, 3600) . " 小时内有效，一次性）：\n{$link}\n\n时间：{$now}";
+    $html = renderMailHtml($site, '写作者创建确认',
+        '申请创建写作者：<b>' . htmlspecialchars($nick) . '</b>（QQ: ' . htmlspecialchars($qq) . '）<br>'
+        . '确认链接（' . intdiv($ttl, 3600) . ' 小时内有效，一次性）：'
+        . '<br><a href="' . $link . '" style="display:inline-block;margin-top:10px;padding:10px 20px;background:#1f3a5f;color:#fff;border-radius:8px;text-decoration:none;">确认创建</a>',
+        ['server' => $host, 'time' => $now]);
+    [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body, $html);
+    if (!$ok) {
+        logAlertFail("写作者确认邮件发送失败: {$err}");
+        return false;
+    }
+    return true;
 }
 
 // ============================================================

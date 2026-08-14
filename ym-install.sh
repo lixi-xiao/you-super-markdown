@@ -196,12 +196,27 @@ if [ -z "$ADMIN_EMAIL" ]; then
     warn "未提供邮箱，告警/Let's Encrypt 功能将不可用（可后续在超管后台配置）"
 fi
 
+# v2.9.0：注册验证模式（正式版默认启用 / 测试版默认禁用，后台「注册验证」可随时切换）
+VERIFY_MODE="${VERIFY_MODE_ARG:-production}"
+if [ "$AUTO_YES" != true ] && [ -z "$VERIFY_MODE_ARG" ]; then
+    echo ""
+    read -p "  注册验证模式 (production=正式版默认启用验证 / test=测试版默认禁用, 默认 production): " VERIFY_MODE
+    [ -z "$VERIFY_MODE" ] && VERIFY_MODE="production"
+fi
+if [ "$VERIFY_MODE" != "test" ]; then VERIFY_MODE="production"; fi
+if [ "$VERIFY_MODE" = "production" ]; then
+    VERIFY_EMAIL_FLAG=true; VERIFY_CAPTCHA_FLAG=true; VERIFY_DUAL_FLAG=true
+else
+    VERIFY_EMAIL_FLAG=false; VERIFY_CAPTCHA_FLAG=false; VERIFY_DUAL_FLAG=false
+fi
+
 echo ""
 info "部署参数确认："
 echo "  域名:       $DOMAIN"
 echo "  Web 根目录: $WEB_ROOT"
 echo "  管理员邮箱: ${ADMIN_EMAIL:-未设置}"
 echo "  Hfish 蜜罐: $([ "$INSTALL_HFISH" = true ] && echo '安装' || echo '跳过（--skip-hfish）')"
+echo "  注册验证:   $([ "$VERIFY_MODE" = production ] && echo '正式版（默认启用邮箱验证码/滑块/双重确认）' || echo '测试版（默认禁用，可在超管后台开启）')"
 echo ""
 if [ "$AUTO_YES" != true ]; then
     read -p "确认继续? (y/n): " confirm
@@ -303,7 +318,13 @@ cat > "$WEB_ROOT/data/.config.json" << EOF
     "max_login_fails": 10,
     "station_path": "station",
     "author_path": "author",
-    "hide_default_paths": true
+    "hide_default_paths": true,
+    "email_verify_enabled": ${VERIFY_EMAIL_FLAG},
+    "captcha_enabled": ${VERIFY_CAPTCHA_FLAG},
+    "author_dual_verify_enabled": ${VERIFY_DUAL_FLAG},
+    "verify_code_ttl": 300,
+    "confirm_link_ttl": 86400,
+    "resend_cooldown": 60
 }
 EOF
 chown www-data:www-data "$WEB_ROOT/data/.config.json"

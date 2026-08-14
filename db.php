@@ -44,6 +44,40 @@ function db_init_schema($pdo) {
         created TEXT,
         created_by TEXT
     )');
+    // v2.9.0：users 表新增 email 字段（注册邮箱验证用；老用户无邮箱不受影响）。
+    // SQLite 的 ADD COLUMN 不支持 UNIQUE 约束，邮箱唯一性由应用层检查保证。
+    try {
+        $pdo->exec('ALTER TABLE users ADD COLUMN email TEXT');
+    } catch (Exception $e) {
+        // 列已存在（幂等），忽略
+    }
+    // v2.9.0：邮箱验证码表（注册 / 写作者验证 / 超管确认链路）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS email_codes (
+        id TEXT PRIMARY KEY,
+        email TEXT,
+        code TEXT,
+        purpose TEXT,
+        expires INTEGER,
+        used INTEGER DEFAULT 0,
+        created INTEGER,
+        ip TEXT,
+        operator_role TEXT
+    )');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_email_codes_email ON email_codes(email)');
+    // v2.9.0：站长创建写作者双重确认中间态表
+    $pdo->exec('CREATE TABLE IF NOT EXISTS pending_author_creates (
+        id TEXT PRIMARY KEY,
+        email TEXT,
+        nickname TEXT,
+        qq TEXT,
+        password_hash TEXT,
+        station_id TEXT,
+        verify_code_id TEXT,
+        confirm_token TEXT,
+        status TEXT,
+        created INTEGER,
+        confirmed_at TEXT
+    )');
     $pdo->exec('CREATE TABLE IF NOT EXISTS config (
         key TEXT PRIMARY KEY,
         value TEXT

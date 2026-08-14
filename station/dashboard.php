@@ -46,34 +46,85 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         $msg = 'csrf_error';
     } elseif (isset($_POST['action'])) {
-        if ($_POST['action'] === 'create_author') {
+        if ($_POST['action'] === 'send_author_code') {
+            // v2.9.0：发送验证码到写作者邮箱（滑块校验 + 邮箱格式/唯一检查，60s 冷却）
+            $email = trim($_POST['email'] ?? '');
+            $captchaId = $_POST['captcha_id'] ?? '';
+            $captchaPos = $_POST['captcha_pos'] ?? '';
+            if (!empty($config['captcha_enabled']) && !captcha_check($captchaId, $captchaPos)) {
+                $msg = 'captcha_fail';
+            } elseif (!email_valid($email)) {
+                $msg = 'email_invalid';
+            } elseif (email_exists($email)) {
+                $msg = 'email_duplicate';
+            } else {
+                [$ok, $err] = email_code_send($email, 'author_verify', '站长创建写作者', ROLE_STATION_ADMIN);
+                $msg = $ok ? 'code_sent' : 'send_fail';
+            }
+        } elseif ($_POST['action'] === 'create_author') {
             $newNick = trim($_POST['nickname'] ?? '');
             $newQQ = trim($_POST['qq'] ?? '');
             $newPwd = trim($_POST['password'] ?? '');
-            if ($newNick && $newQQ && $newPwd) {
+            $newEmail = trim($_POST['email'] ?? '');
+            $captchaId = $_POST['captcha_id'] ?? '';
+            $captchaPos = $_POST['captcha_pos'] ?? '';
+            if (!empty($config['captcha_enabled']) && !captcha_check($captchaId, $captchaPos)) {
+                $msg = 'captcha_fail';
+            } elseif ($newNick && $newQQ && $newPwd) {
                 $vp = validatePassword($newPwd);
                 if ($vp !== true) {
                     $msg = 'pw_weak';
                 } else {
-                    // QQ 唯一性检查（避免同 QQ 账号登录歧义）
-                    $qqExists = false;
-                    foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
-                    if ($qqExists) {
-                        $msg = 'qq_duplicate';
+                    // v2.9.0：邮箱校验（格式 + 唯一）——启用双重确认时必填
+                    if (!empty($config['author_dual_verify_enabled'])) {
+                        if (!email_valid($newEmail)) { $msg = 'email_invalid'; }
+                        elseif (email_exists($newEmail)) { $msg = 'email_duplicate'; }
+                        else {
+                            $qqExists = false;
+                            foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
+                            if ($qqExists) {
+                                $msg = 'qq_duplicate';
+                            } else {
+                                // 建 verify_pending 中间态（等写作者通过邮件链接自助验证码）
+                                [$pid, ] = create_pending_author(
+                                    $newEmail, $newNick, $newQQ,
+                                    password_hash($newPwd, PASSWORD_DEFAULT), $myId, '', 'verify_pending'
+                                );
+                                $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+                                $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                                $vlink = "{$scheme}://{$host}/verify-author.php?pid={$pid}&email=" . rawurlencode($newEmail);
+                                [$ok, $verr] = email_code_send($newEmail, 'author_verify', "写作者:{$newNick}", ROLE_STATION_ADMIN, $vlink);
+                                if (!$ok) {
+                                    update_pending_author_status($pid, 'expired');
+                                    $msg = 'send_fail';
+                                } else {
+                                    auditLog('author_create_init', $newQQ, "站长发起创建写作者: {$newNick}（等待写作者验证邮箱）");
+                                    $msg = 'code_sent_await_author';
+                                }
+                            }
+                        }
                     } else {
-                        $users[] = [
-                            'id' => bin2hex(random_bytes(8)),
-                            'qq' => $newQQ,
-                            'nickname' => $newNick,
-                            'password' => password_hash($newPwd, PASSWORD_DEFAULT),
-                            'role' => ROLE_AUTHOR,
-                            'station_id' => $myId,
-                            'created' => date('Y-m-d H:i:s'),
-                            'created_by' => $myId,
-                        ];
-                        saveUsers($users);
-                        auditLog('author_create', $newQQ, "站长创建写作者: {$newNick}");
-                        $msg = 'author_created';
+                        // 双重确认关闭：直接创建（原逻辑）
+                        $qqExists = false;
+                        foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
+                        if ($qqExists) {
+                            $msg = 'qq_duplicate';
+                        } else {
+                            $users[] = [
+                                'id' => bin2hex(random_bytes(8)),
+                                'qq' => $newQQ,
+                                'email' => $newEmail,
+                                'nickname' => $newNick,
+                                'password' => password_hash($newPwd, PASSWORD_DEFAULT),
+                                'role' => ROLE_AUTHOR,
+                                'station_id' => $myId,
+                                'created' => date('Y-m-d H:i:s'),
+                                'created_by' => $myId,
+                            ];
+                            saveUsers($users);
+                            auditLog('author_create', $newQQ, "站长创建写作者: {$newNick}");
+                            $msg = 'author_created';
+                        }
                     }
                 }
             }
@@ -235,6 +286,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 
 <div class="main">
     <?php if ($msg === 'author_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者已创建</div><?php endif; ?>
+    <?php if ($msg === 'code_sent_await_author'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>已提交！验证码已发送到写作者邮箱，请其打开邮件链接自助验证；验证通过后将通知超管确认</div><?php endif; ?>
+    <?php if ($msg === 'captcha_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>滑块验证未通过，请重试</div><?php endif; ?>
+    <?php if ($msg === 'email_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱格式不正确</div><?php endif; ?>
+    <?php if ($msg === 'email_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该邮箱已被使用</div><?php endif; ?>
+    <?php if ($msg === 'send_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>验证码发送失败（请确认 SMTP 邮件配置）</div><?php endif; ?>
     <?php if ($msg === 'author_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者已删除</div><?php endif; ?>
     <?php if ($msg === 'qq_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
     <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>请求已过期，请重试</div><?php endif; ?>
@@ -261,6 +317,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="action" value="create_author">
+            <input type="hidden" name="captcha_id" id="authorCaptchaId">
+            <input type="hidden" name="captcha_pos" id="authorCaptchaPos">
             <div class="form-row">
                 <div class="form-group">
                     <label class="form-label">昵称</label>
@@ -274,6 +332,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                     <label class="form-label">密码（至少 8 位，含大小写字母与数字）</label>
                     <input class="form-input" name="password" type="password" placeholder="******">
                 </div>
+            </div>
+            <?php if (!empty($config['author_dual_verify_enabled'])): ?>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">写作者邮箱（收验证码，由写作者通过邮件链接自助验证，超管确认后生效）</label>
+                    <input class="form-input" name="email" id="authorEmail" placeholder="写作者邮箱">
+                </div>
+            </div>
+            <?php if (!empty($config['captcha_enabled'])): ?>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">人机验证</label>
+                    <div class="captcha-box" id="authorCaptchaBox">
+                        <div class="captcha-slider">
+                            <div class="captcha-track"></div>
+                            <div class="captcha-dot"></div>
+                            <div class="captcha-thumb"><span>→</span></div>
+                        </div>
+                        <div class="captcha-hint">拖动滑块对准圆点完成验证</div>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
+            <?php endif; ?>
+            <div class="form-row">
                 <div class="form-group" style="flex:0">
                     <label class="form-label">&nbsp;</label>
                     <button type="submit" class="btn btn-primary">创建</button>
@@ -680,6 +763,82 @@ function logoutSubmit(e) {
     fetch(window.location.href.split('?')[0], { method: 'POST', body: fd }).then(function() { location.href = '/'; });
 }
 </script>
+<?php if (!empty($config['author_dual_verify_enabled'])): ?>
+<script>
+(function() {
+    // v2.9.0 站长创建写作者：滑块人机验证（提交时随表单附带滑块结果）
+    var box = document.getElementById('authorCaptchaBox');
+    if (!box) return;
+    var captchaEnabled = <?= !empty($config['captcha_enabled']) ? 'true' : 'false' ?>;
+    var slider = box.querySelector('.captcha-slider');
+    var thumb = box.querySelector('.captcha-thumb');
+    var dot = box.querySelector('.captcha-dot');
+    var hint = box.querySelector('.captcha-hint');
+    var st = { id: '', target: 0, passed: false }, dragging = false, curPct = 0, thumbW = 46;
+
+    function refresh() {
+        st.id = ''; st.passed = false; curPct = 0;
+        thumb.classList.remove('passed', 'dragging');
+        thumb.innerHTML = '<span>→</span>';
+        thumb.style.left = '0px';
+        dot.style.left = '0%';
+        hint.textContent = '拖动滑块对准圆点完成验证';
+        hint.classList.remove('ok');
+        fetch('api.php?action=captcha_new').then(function(r){ return r.json(); }).then(function(d) {
+            if (d.success) { st.id = d.captcha_id; st.target = d.captcha_pos; dot.style.left = (st.target / 10) + '%'; }
+        }).catch(function(){});
+    }
+    function setPos(clientX) {
+        var rect = slider.getBoundingClientRect();
+        var pct = (clientX - rect.left) / rect.width * 100;
+        pct = Math.max(0, Math.min(100, pct));
+        curPct = pct;
+        thumb.style.left = (pct / 100 * (rect.width - thumbW)) + 'px';
+    }
+    function release() {
+        if (!dragging) return;
+        dragging = false;
+        thumb.classList.remove('dragging');
+        if (!st.id) { hint.textContent = '验证码加载失败，请重试'; return; }
+        if (Math.abs(Math.round(curPct * 10) - st.target) <= 30) {
+            st.passed = true;
+            thumb.classList.add('passed');
+            thumb.innerHTML = '<span>✓</span>';
+            hint.textContent = '验证通过';
+            hint.classList.add('ok');
+        } else refresh();
+    }
+    thumb.addEventListener('pointerdown', function(e) {
+        if (st.passed) return;
+        dragging = true;
+        thumb.classList.add('dragging');
+        thumb.setPointerCapture(e.pointerId);
+        setPos(e.clientX);
+    });
+    thumb.addEventListener('pointermove', function(e) { if (dragging) setPos(e.clientX); });
+    thumb.addEventListener('pointerup', release);
+    thumb.addEventListener('pointercancel', release);
+    refresh();
+
+    var showErr = function(text) {
+        var div = document.createElement('div');
+        div.className = 'msg msg-error';
+        div.textContent = text;
+        var main = document.querySelector('.main');
+        if (main) main.insertBefore(div, main.firstChild);
+        setTimeout(function() { if (div.parentNode) div.parentNode.removeChild(div); }, 6000);
+    };
+    var form = document.querySelector('form');
+    if (form) form.addEventListener('submit', function(e) {
+        if (captchaEnabled) {
+            if (!st.passed) { e.preventDefault(); showErr('请先完成滑块验证'); return; }
+            document.getElementById('authorCaptchaId').value = st.id;
+            document.getElementById('authorCaptchaPos').value = Math.round(curPct * 10);
+        }
+    });
+})();
+</script>
+<?php endif; ?>
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])): ?>
 <?php
 if (verifyCsrfToken($_POST['csrf_token'] ?? '')) {

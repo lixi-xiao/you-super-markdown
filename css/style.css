@@ -1721,3 +1721,71 @@ kbd {
     /* 正文行高与字号微调（手机可读性） */
     .markdown-body { font-size: 15.5px; line-height: 1.75; }
 }
+
+/* ============================================================
+   v2.9.0 注册验证：邮箱验证码 + 滑块人机验证
+   与既有设计语言一致（CSS 变量 / 圆角 / 品牌色 / 44px 触控）
+   ============================================================ */
+.cmt-reg-verify { margin-top: 4px; }
+.cmt-reg-email-row { display: flex; gap: 8px; }
+.cmt-reg-email-row .cmt-modal-input { flex: 1; min-width: 0; }
+.cmt-code-btn {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    font-family: inherit;
+}
+.cmt-code-btn:hover:not(:disabled) { filter: brightness(0.97); }
+.cmt-code-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.captcha-box { margin-top: 10px; }
+.captcha-slider {
+    position: relative;
+    height: 44px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--code-bg);
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+}
+.captcha-track { position: absolute; inset: 0; }
+.captcha-dot {
+    position: absolute;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-light);
+    pointer-events: none;
+}
+.captcha-thumb {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 46px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    cursor: grab;
+    color: var(--text-secondary);
+    font-size: 16px;
+    touch-action: none;
+}
+.captcha-thumb.dragging { cursor: grabbing; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+.captcha-thumb.passed { background: hsl(var(--accent-hue), var(--accent-sat), 45%); color: #fff; border-right: none; cursor: default; }
+.captcha-hint { margin-top: 6px; font-size: 12px; color: var(--text-muted); text-align: center; }
+.captcha-hint.ok { color: hsl(var(--accent-hue), var(--accent-sat), 40%); }

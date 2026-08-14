@@ -147,6 +147,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
+
+// ===== v2.9.0：滑块人机验证 =====
+if ($action === 'captcha_new') {
+    $c = captcha_new();
+    jsonOut(['success' => true, 'captcha_id' => $c['id'], 'captcha_pos' => $c['pos']]);
+}
+
+// ===== v2.9.0：注册邮箱验证码发送（60s 冷却，按邮箱；注册为匿名，不走超管豁免） =====
+if ($action === 'send_register_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $siteCfg = loadSiteConfig();
+    if (!empty($siteCfg['email_verify_enabled']) && !empty($siteCfg['captcha_enabled'])) {
+        // 启用滑块时，发码前先过滑块（防脚本批量轰炸邮箱）
+        $input = json_decode(file_get_contents('php://input'), true);
+        if (!captcha_check($input['captcha_id'] ?? '', $input['captcha_pos'] ?? '')) {
+            jsonOut(['success' => false, 'error' => '滑块验证未通过，请重试'], 400);
+        }
+    }
+    $input = json_decode(file_get_contents('php://input'), true);
+    $email = trim($input['email'] ?? '');
+    // v2.9.0：IP 级发码限速（60 秒最多 5 次，防换邮箱轰炸）
+    $ipNow = getClientIP();
+    $recent = db_one('SELECT COUNT(*) AS c FROM email_codes WHERE ip = ? AND created > ?', [$ipNow, time() - 60])['c'] ?? 0;
+    if ($recent >= 5) jsonOut(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429);
+    if (email_exists($email)) jsonOut(['success' => false, 'error' => '该邮箱已被注册'], 409);
+    [$ok, $err] = email_code_send($email, 'register', $email);
+    if (!$ok) jsonOut(['success' => false, 'error' => $err], 400);
+    jsonOut(['success' => true, 'ttl' => is_array($err) ? ($err['ttl'] ?? 300) : 300]);
+}
+
 if ($action === 'avatar') {
     // v2.6.3：收紧——仅登录用户可用，防止未登录批量探测 QQ 号（配合评论脱敏，前台已无匿名头像需求）
     if (!validateSession()) jsonOut(['success' => false, 'error' => '请先登录'], 403);
@@ -166,6 +195,26 @@ if ($action === 'avatar') {
     }
     exit;
 }
+// ===== v2.9.0：站长创建写作者——发送验证码到写作者邮箱（需站长登录 + CSRF + 滑块） =====
+if ($action === 'send_author_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!checkRole(ROLE_STATION_ADMIN)) jsonOut(['success' => false, 'error' => '无权限'], 403);
+    if (!verifyCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $input = json_decode(file_get_contents('php://input'), true);
+    $email = trim($input['email'] ?? '');
+    $cfg = loadSiteConfig();
+    if (!empty($cfg['captcha_enabled']) && !captcha_check($input['captcha_id'] ?? '', $input['captcha_pos'] ?? '')) {
+        jsonOut(['success' => false, 'error' => '滑块验证未通过，请重试'], 400);
+    }
+    if (!email_valid($email)) jsonOut(['success' => false, 'error' => '邮箱格式不正确'], 400);
+    $ipNow = getClientIP();
+    $recent = db_one('SELECT COUNT(*) AS c FROM email_codes WHERE ip = ? AND created > ?', [$ipNow, time() - 60])['c'] ?? 0;
+    if ($recent >= 5) jsonOut(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429);
+    if (email_exists($email)) jsonOut(['success' => false, 'error' => '该邮箱已被使用'], 409);
+    [$ok, $err] = email_code_send($email, 'author_verify', '站长创建写作者', ROLE_STATION_ADMIN);
+    if (!$ok) jsonOut(['success' => false, 'error' => $err], 400);
+    jsonOut(['success' => true, 'ttl' => is_array($err) ? ($err['ttl'] ?? 300) : 300]);
+}
+
 if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $siteCfg = loadSiteConfig();
     if (empty($siteCfg['registration_enabled'])) {
@@ -184,16 +233,32 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $qq = trim($input['qq'] ?? '');
     $nick = trim($input['nickname'] ?? '');
     $pw = $input['password'] ?? '';
+    $email = trim($input['email'] ?? '');
+    $captchaId = $input['captcha_id'] ?? '';
+    $captchaPos = $input['captcha_pos'] ?? '';
+    $code = $input['code'] ?? '';
     if (empty($qq) || empty($pw)) jsonOut(['success' => false, 'error' => 'QQ号和密码不能为空'], 400);
     $vp = validatePassword($pw);
     if ($vp !== true) jsonOut(['success' => false, 'error' => $vp], 400);
     if (empty($nick)) $nick = '用户' . substr($qq, -4);
     $nick = mb_substr($nick, 0, 20, 'UTF-8');
+    // v2.9.0 人机滑块验证（一次性）
+    if (!empty($siteCfg['captcha_enabled']) && !captcha_check($captchaId, $captchaPos)) {
+        jsonOut(['success' => false, 'error' => '滑块验证未通过，请重试'], 400);
+    }
+    // v2.9.0 邮箱验证码（开关启用时：邮箱格式 + 唯一 + 验证码一次性校验）
+    if (!empty($siteCfg['email_verify_enabled'])) {
+        if (!email_valid($email)) jsonOut(['success' => false, 'error' => '邮箱格式不正确'], 400);
+        if (email_exists($email)) jsonOut(['success' => false, 'error' => '该邮箱已被注册'], 409);
+        [$ok, $verr] = email_code_verify($email, $code, 'register');
+        if (!$ok) jsonOut(['success' => false, 'error' => $verr], 400);
+    }
     $users = loadUsers();
     foreach ($users as $u) { if (($u['qq'] ?? '') === $qq) jsonOut(['success' => false, 'error' => '该QQ号已注册'], 409); }
     $avatarUrl = getAvatarUrl($qq);
     $new = [
         'id' => genId(), 'qq' => $qq, 'nickname' => $nick,
+        'email' => $email,
         'password' => password_hash($pw, PASSWORD_DEFAULT),
         'avatar' => $avatarUrl, 'signature' => '', 'role' => 'user',
         'created' => date('Y-m-d H:i:s')

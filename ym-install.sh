@@ -277,6 +277,17 @@ fi
 
 log "文件部署完成"
 
+# 写入站点域名到 app-config.json（供 ym-admin 生成管理入口 URL；v2.10.2 起禁止 ym-admin 硬编码域名）
+php -r "
+    \$p = '$WEB_ROOT/app-config.json';
+    if (file_exists(\$p)) {
+        \$c = json_decode(file_get_contents(\$p), true) ?: [];
+        \$c['site_url'] = '$DOMAIN';
+        file_put_contents(\$p, json_encode(\$c, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
+    }
+" 2>/dev/null
+log "站点域名已写入 app-config.json: $DOMAIN"
+
 # ================================================================
 # 3. 初始化管理员
 # ================================================================

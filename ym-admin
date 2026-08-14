@@ -3,6 +3,17 @@ WEB_ROOT="${YM_WEB_ROOT:-/var/www/you-markdown}"
 ENTRIES_FILE="$WEB_ROOT/data/.entries.json"
 USERS_FILE="$WEB_ROOT/data/.users.json"
 
+# 自动获取站点域名（v2.10.2 修复：禁止硬编码域名——优先 app-config.json 的 site_url，否则从 Nginx server_name 解析）
+get_domain() {
+    local d
+    d=$(php -r "\$c=json_decode(@file_get_contents('$WEB_ROOT/app-config.json'),true); echo trim((string)(\$c['site_url']??''));" 2>/dev/null)
+    if [ -z "$d" ]; then
+        d=$(grep -rhoP 'server_name\s+\K[^;]+' /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | grep -v '^_' | head -1 | awk '{print $1}')
+    fi
+    [ -z "$d" ] && d="localhost"
+    echo "$d"
+}
+
 case "${1:-}" in
     login)
         ENTRY_TOKEN=$(openssl rand -base64 12 | tr -d '=+/' | cut -c1-12)
@@ -17,7 +28,7 @@ case "${1:-}" in
         echo "  管理入口（仅显示一次，10分钟有效）"
         echo "============================================"
         echo ""
-        echo "  入口 URL: https://youmarkdown.example.com/admin/entry/$ENTRY_TOKEN"
+        echo "  入口 URL: https://$(get_domain)/admin/entry/$ENTRY_TOKEN"
         echo "  一次性密码: $OTP"
         echo ""
         echo "  ⚠️ 请立即保存！"

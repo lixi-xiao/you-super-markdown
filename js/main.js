@@ -1108,14 +1108,14 @@
         }
         return opts;
     }
-    // v2.11.6/2.11.7：WebAuthn 错误可读化——凭据管理器无响应（Windows Hello 未配置/Android 自动填充服务未就绪）给出明确指引
+    // v2.11.6~2.11.8：WebAuthn 错误可读化——凭据管理器无响应/凭证丢失（系统层前置条件未满足）给出明确指引
     function webauthnErrMsg(e) {
         const m = (e && e.message) || '';
         if (e && e.name === 'NotAllowedError') return '已取消操作';
         if (e && e.name === 'NotSupportedError') return '当前浏览器/系统不支持 PIN/指纹，或系统未启用生物识别';
         if (/credential manager|unknown error|security error|passkey|not allowed/i.test(m) || !m) {
             if (/Android/i.test(navigator.userAgent)) {
-                return 'Android 通行证创建被系统中断：请确认 ① 使用 Chrome/系统浏览器访问；② 浏览器「设置→自动填充服务」已选 Google 或系统密码管理器且已登录账号；③ 系统已设置锁屏密码/指纹，然后重试';
+                return 'Android 通行证创建失败（系统提示凭证丢失/无响应）：请确认 ① 已设置锁屏密码/指纹；② 手机已登录 Google 账号；③ 系统「密码与账户→自动填充服务」选了 Google 或系统密码管理器；④ 更新 Google Play 服务；推荐使用 Chrome 浏览器重试';
             }
             return '系统凭据管理器无响应——请确认已启用 PIN/指纹：电脑端「设置→账户→登录选项→Windows Hello（PIN）」；手机端「系统设置→指纹/锁屏密码」，然后重试';
         }

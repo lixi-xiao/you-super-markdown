@@ -981,9 +981,9 @@ function logoutSubmit(e) {
                 if (e && e.name === 'NotAllowedError') showErr('已取消绑定');
                 else {
                     var m = (e && e.message) || '';
-                    // v2.11.6/2.11.7：凭据管理器无响应给出明确指引（Android 专项提示自动填充服务）
+                    // v2.11.6~2.11.8：凭据管理器无响应/凭证丢失给出明确指引（Android 专项）
                     if (/credential manager|unknown error|security error|passkey|not allowed/i.test(m) || !m) {
-                        if (/Android/i.test(navigator.userAgent)) showErr('绑定失败：Android 通行证创建被系统中断，请确认 ① 使用 Chrome/系统浏览器访问；② 浏览器「设置→自动填充服务」已选 Google 或系统密码管理器且已登录账号；③ 系统已设置锁屏密码/指纹，然后重试');
+                        if (/Android/i.test(navigator.userAgent)) showErr('绑定失败：Android 通行证创建失败（系统提示凭证丢失/无响应），请确认 ① 已设置锁屏密码/指纹；② 手机已登录 Google 账号；③ 系统「密码与账户→自动填充服务」选了 Google 或系统密码管理器；④ 更新 Google Play 服务；推荐使用 Chrome 重试');
                         else showErr('绑定失败：系统凭据管理器无响应，请确认已启用 PIN/指纹（电脑：设置→账户→登录选项→Windows Hello；手机：系统设置→指纹/锁屏密码）后重试');
                     }
                     else showErr('绑定失败（' + m + '）');

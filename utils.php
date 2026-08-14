@@ -1703,13 +1703,17 @@ function webauthn_register_begin($user) {
             'displayName' => $user['nickname'] ?? $user['qq'],
         ],
         'pubKeyCredParams' => [['type' => 'public-key', 'alg' => -7]],
-        // v2.11.7：不再强制 authenticatorAttachment=platform——
-        // Android（尤其 MIUI/Chrome）强制 platform 会走 Google/系统密码管理器，要求「自动填充服务」
-        // 就绪，未就绪时 passkey 创建被打断（跳设置页仍失败，服务器收不到 register_complete）；
-        // 去掉后系统优先平台指纹路径，兼容性更好
-        'authenticatorSelection' => ['userVerification' => 'preferred'],
-        'timeout' => 60000,
+        // v2.11.8：按 Android 平台认证器（Google/MIUI 密码管理器）最佳实践配置——
+        // ① 恢复 authenticatorAttachment=platform（明确走系统指纹/通行证路径，改善 GPM 集成）；
+        // ② residentKey=preferred（允许无用户名通行证，GPM 友好）；③ timeout 120s（Android 创建流程较慢）
+        'authenticatorSelection' => [
+            'authenticatorAttachment' => 'platform',
+            'residentKey' => 'preferred',
+            'userVerification' => 'preferred',
+        ],
+        'timeout' => 120000,
         'attestation' => 'none',
+        'extensions' => ['credProps' => true],
     ];
 }
 

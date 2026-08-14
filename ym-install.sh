@@ -6,9 +6,10 @@
 # ================================================================
 set -e
 
-# 版本号：唯一事实来源为 app-config.json（代码禁止硬编码版本）
+# 版本号：唯一事实来源为 app-config.json（代码禁止硬编码版本；v2.10.2 起用 grep 读取，
+# 不依赖 php——全新服务器 php 未装时 php 命令不存在会导致 APP_VER 显示 v0.0.0）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_VER=$(php -r '$c = json_decode(@file_get_contents($argv[1]), true); echo $c["version"] ?? "0.0.0";' "$SCRIPT_DIR/app-config.json" 2>/dev/null || echo "0.0.0")
+APP_VER=$(grep -oP '"version"\s*:\s*"\K[0-9.]+' "$SCRIPT_DIR/app-config.json" 2>/dev/null | head -1)
 if [ -z "$APP_VER" ]; then APP_VER="0.0.0"; fi
 
 # 解析命令行参数（支持全自动/半自动，小白也可全部回车走默认）
@@ -118,7 +119,19 @@ log "检测到系统: $OS"
 log "安装系统依赖..."
 case $OS in
     ubuntu|debian)
-        apt-get update -qq
+        apt-get update -qq 2>&1 | tail -3 || true
+        # dpkg 锁等待（v2.10.2 公网部署实测：系统刚启动时 unattended-upgrades 可能占用 dpkg 锁，
+        # apt-get 立即失败 + set -e 静默退出——此处轮询等待锁释放）
+        if command -v fuser >/dev/null 2>&1; then
+            for _i in 1 2 3 4 5 6; do
+                if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; then
+                    warn "dpkg 锁被占用（可能为 unattended-upgrades），等待 10 秒后重试..."
+                    sleep 10
+                else
+                    break
+                fi
+            done
+        fi
         # 检测已安装的 PHP 版本；未安装则按可用版本探测（Ubuntu 24.04=noble 默认 8.3，
         # 禁止回退写死 8.4——php8.4-fpm 在该发行版不存在会导致依赖安装失败，见踩坑 #30）
         PHP_VER=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null || true)
@@ -131,8 +144,13 @@ case $OS in
         fi
         [ -z "$PHP_VER" ] && PHP_VER="8.3"
         log "检测到 PHP 版本: $PHP_VER"
-        apt-get install -y -qq nginx "php${PHP_VER}-fpm" "php${PHP_VER}-cli" "php${PHP_VER}-zip" "php${PHP_VER}-mbstring" "php${PHP_VER}-curl" "php${PHP_VER}-sqlite3" certbot python3 python3-pip ufw > /dev/null 2>&1 || \
-        apt-get install -y -qq nginx php-fpm php-cli php-zip php-mbstring php-curl php-sqlite3 certbot python3 python3-pip ufw > /dev/null 2>&1
+        # 依赖安装：失败时显示错误（v2.10.2 修复：原 > /dev/null 2>&1 + set -e 使失败静默终止，无法定位）
+        if ! apt-get install -y nginx "php${PHP_VER}-fpm" "php${PHP_VER}-cli" "php${PHP_VER}-zip" "php${PHP_VER}-mbstring" "php${PHP_VER}-curl" "php${PHP_VER}-sqlite3" certbot python3 python3-pip ufw 2>&1 | tail -15; then
+            warn "标准包名安装失败（php${PHP_VER} 可能不在当前源），尝试通用包名..."
+            if ! apt-get install -y nginx php-fpm php-cli php-zip php-mbstring php-curl php-sqlite3 certbot python3 python3-pip ufw 2>&1 | tail -15; then
+                warn "依赖安装失败！请检查 apt 源/网络后重新运行本脚本；上方输出为具体错误"
+            fi
+        fi
         ;;
     centos|rhel|fedora)
         yum install -y -q nginx php php-fpm php-zip php-mbstring php-curl php-pdo php-sqlite3 certbot python3 python3-pip > /dev/null 2>&1
@@ -669,6 +687,13 @@ install_hfish() {
     if [ "$INSTALL_HFISH" = false ]; then
         info "已跳过 Hfish 蜜罐安装（--skip-hfish）"
         return 0
+    fi
+
+    # 低内存提示（v2.10.2 公网部署实测：2GB 内存装 Hfish 后可用内存吃紧）
+    _mem_mb=$(free -m 2>/dev/null | awk '/Mem:/{print $2}')
+    if [ -n "$_mem_mb" ] && [ "$_mem_mb" -lt 2048 ]; then
+        warn "内存仅 ${_mem_mb}MB，Hfish（Go 服务 + 面板）可能使可用内存吃紧"
+        warn "若后续网站卡顿/进程被杀，可用 --skip-hfish 跳过重装（蜜罐为可选组件）"
     fi
 
     echo ""

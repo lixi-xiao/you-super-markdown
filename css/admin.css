@@ -678,6 +678,31 @@ td code {
 .user-op-item.danger { color: var(--danger, #e5484d); }
 .user-op-item.danger:hover { background: rgba(229, 72, 77, 0.08); }
 .user-op-dropdown form.need-challenge { margin: 0; }
+/* v2.11.5：用户详情弹窗（完整资料 + 关联统计） */
+.user-detail-box { width: 520px; max-height: 82vh; overflow-y: auto; }
+.user-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 18px;
+}
+.user-detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    background: var(--bg, #f6f7f9);
+    border-radius: 10px;
+}
+.user-detail-label { font-size: 11px; color: var(--text-muted); }
+.user-detail-value { font-size: 13px; font-weight: 500; color: var(--text); word-break: break-all; }
+.user-detail-sec {
+    margin: 14px 0 8px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
 /* ---------- 日志搜索工具栏 + 分页控件（v2.6.6；同次更新：统一后台设计语言 + 修复嵌套边框穿模） ---------- */
 .log-toolbar {
     display: flex;

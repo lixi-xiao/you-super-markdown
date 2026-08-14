@@ -357,6 +357,8 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if (in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN])) $isAdminFirst = true;
             // v2.11.0：登录成功清除失败计数（IP 级 + 该账号级）
             loginFailClear($clientIP, $qq);
+            // v2.11.5：记录最后登录时间与登录次数（超管用户详情统计）
+            db_exec('UPDATE users SET last_login = ?, login_count = login_count + 1 WHERE id = ?', [date('Y-m-d H:i:s'), $u['id']]);
             // v2.11.1：站长/写作者登录通知管理员（SMTP 通道）
             notifyLoginEvent($u, $clientIP);
             $safeUser = sanitizeUserForClient($_SESSION['cmt_user']);

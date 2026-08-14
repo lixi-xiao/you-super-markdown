@@ -57,6 +57,17 @@ function db_init_schema($pdo) {
     } catch (Exception $e) {
         // 列已存在（幂等），忽略
     }
+    // v2.11.5：users 表新增 last_login / login_count（超管用户详情统计：最后登录时间与登录次数）
+    try {
+        $pdo->exec('ALTER TABLE users ADD COLUMN last_login TEXT');
+    } catch (Exception $e) {
+        // 列已存在（幂等），忽略
+    }
+    try {
+        $pdo->exec('ALTER TABLE users ADD COLUMN login_count INTEGER DEFAULT 0');
+    } catch (Exception $e) {
+        // 列已存在（幂等），忽略
+    }
     // v2.9.0：邮箱验证码表（注册 / 写作者验证 / 超管确认链路）
     $pdo->exec('CREATE TABLE IF NOT EXISTS email_codes (
         id TEXT PRIMARY KEY,

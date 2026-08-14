@@ -144,7 +144,7 @@ def load_smtp_config() -> dict:
 
 
 def render_mail_html(site: str, alert_type: str, detail: str, server: str = 'localhost', ts: str = '') -> str:
-    """HTML 邮件模板（v2.8.0 同次：与 PHP renderMailHtml 同一视觉；内联样式；所有动态值转义防注入）"""
+    """HTML 邮件模板（v2.8.0 品牌卡片式 → v2.9.0 精致化：与 PHP renderMailHtml 同一视觉；内联样式；动态值转义防注入）"""
     import html as _html
     import re as _re
     e = lambda v: _html.escape(str(v), quote=True)
@@ -158,22 +158,25 @@ def render_mail_html(site: str, alert_type: str, detail: str, server: str = 'loc
     elif _re.search(r'已恢复|通过|成功', alert_type):
         badge = '#1e8449'
     return ('<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
-            '<body style="margin:0;padding:0;background:#f4f6f8;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
-            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:24px 12px;"><tr><td align="center">'
-            '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e9f0;">'
-            '<tr><td style="background:#1f3a5f;padding:20px 28px;">'
-            '<div style="color:#ffffff;font-size:18px;font-weight:600;">' + site_e + '</div>'
-            '<div style="color:#9db4d6;font-size:12px;margin-top:4px;">安全告警通知 · 系统自动发送</div>'
+            '<body style="margin:0;padding:0;background:#f0f3f7;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f3f7;padding:28px 12px;"><tr><td align="center">'
+            '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e3e8f0;box-shadow:0 8px 24px rgba(31,58,95,0.08);">'
+            '<tr><td style="background:linear-gradient(135deg,#1f3a5f 0%,#2a4a75 100%);padding:26px 32px;">'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
+            '<td style="vertical-align:middle;"><div style="color:#ffffff;font-size:19px;font-weight:700;letter-spacing:0.5px;">' + site_e + '</div>'
+            '<div style="color:#a8bcd9;font-size:12px;margin-top:5px;">安全通知 · 系统自动发送</div></td>'
+            '<td align="right" style="vertical-align:middle;"><div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,0.14);color:#fff;font-size:17px;font-weight:700;text-align:center;line-height:38px;">' + site_e[:1] + '</div></td>'
+            '</tr></table>'
             '</td></tr>'
-            '<tr><td style="padding:28px;">'
-            '<div style="display:inline-block;background:' + badge + ';color:#ffffff;font-size:12px;font-weight:600;padding:5px 14px;border-radius:999px;">' + type_e + '</div>'
-            '<div style="margin-top:18px;color:#2d3748;font-size:14px;line-height:1.8;">' + detail_e + '</div>'
-            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;border-top:1px solid #edf0f5;padding-top:14px;font-size:12px;color:#718096;">'
-            '<tr><td style="padding:3px 0;width:96px;color:#a0aec0;">服务器</td><td>' + server_e + '</td></tr>'
-            '<tr><td style="padding:3px 0;width:96px;color:#a0aec0;">时间</td><td>' + e(ts) + '</td></tr>'
+            '<tr><td style="padding:32px 34px;">'
+            '<div style="display:inline-block;background:' + badge + ';color:#ffffff;font-size:12px;font-weight:600;padding:6px 16px;border-radius:999px;letter-spacing:0.5px;">' + type_e + '</div>'
+            '<div style="margin-top:20px;color:#2d3748;font-size:14px;line-height:1.9;">' + detail_e + '</div>'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:26px;border-top:1px solid #edf0f5;padding-top:16px;font-size:12px;color:#718096;">'
+            '<tr><td style="padding:4px 0;width:88px;color:#a0aec0;">服务器</td><td>' + server_e + '</td></tr>'
+            '<tr><td style="padding:4px 0;width:88px;color:#a0aec0;">时间</td><td>' + e(ts) + '</td></tr>'
             '</table>'
             '</td></tr>'
-            '<tr><td style="background:#fafbfc;padding:14px 28px;border-top:1px solid #edf0f5;color:#a0aec0;font-size:11px;text-align:center;">You Super Markdown · 此邮件为系统自动发送，请勿直接回复</td></tr>'
+            '<tr><td style="background:#fafbfd;padding:16px 32px;border-top:1px solid #edf0f5;color:#a0aec0;font-size:11px;text-align:center;line-height:1.8;">You Super Markdown · 此邮件为系统自动发送，请勿直接回复<br>如非本人操作请忽略，谨防泄露验证信息</td></tr>'
             '</table>'
             '</td></tr></table>'
             '</body></html>')

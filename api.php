@@ -373,7 +373,15 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     jsonOut(['success' => false, 'error' => 'QQ号或密码错误'], 401);
 }
 if ($action === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    // v2.10.2：超管也可在主页退出——与超管后台 logout 一致：吊销 JWT（jti 黑名单）+ 销毁会话 + 清 cookie
+    revokeCurrentJWT();
     unset($_SESSION['cmt_user']);
+    session_unset();
+    session_destroy();
+    if (ini_get('session.use_cookies')) {
+        $cp = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $cp['path'], $cp['domain'], $cp['secure'], $cp['httponly']);
+    }
     jsonOut(['success' => true]);
 }
 if ($action === 'check') {
@@ -398,7 +406,8 @@ if ($action === 'check') {
     }
 }
 if ($action === 'user-status') {
-    // v2.6.5：超管在主页显示「超管」身份（右侧用户区），但不提供「快捷进入管理」与「退出登录」按钮
+    // v2.6.5：超管在主页显示「超管」身份（右侧用户区），不提供「快捷进入管理」（后台仅 OTP 入口）；
+    // v2.10.2：提供「退出登录」（与后台 logout 一致吊销 JWT）
     $sess = validateSession();
     if ($sess && ($sess['role'] ?? '') === ROLE_SUPER_ADMIN) {
         jsonOut([

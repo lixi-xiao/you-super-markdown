@@ -808,6 +808,40 @@ function sendAlert($type, $detail) {
     // mail 命令为异步后台，其内部失败由 ym-alert 落盘 alert.log（见 v2.8.0 ym-alert 改造）
 }
 
+/**
+ * v2.11.1：站长/写作者登录成功通知管理员（复用 SMTP 告警通道；普通用户登录不通知，防轰炸）
+ */
+function notifyLoginEvent($u, $clientIP) {
+    $config = loadSiteConfig();
+    $adminEmail = $config['admin_email'] ?? '';
+    if (!$adminEmail) return;
+    $roleName = [
+        ROLE_STATION_ADMIN => '站长',
+        ROLE_AUTHOR => '写作者',
+    ][$u['role'] ?? ''] ?? ($u['role'] ?? '');
+    if (!in_array($u['role'] ?? '', [ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) return;
+    $site = $config['site_title'] ?? 'You Super Markdown';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $subject = "[{$site} 通知] {$roleName}登录";
+    $now = date('Y-m-d H:i:s');
+    $body = "时间：{$now}\n"
+          . "服务器：{$host}\n"
+          . "账号：{$u['nickname']}（" . maskQQ($u['qq'] ?? '') . "）\n"
+          . "角色：{$roleName}\n"
+          . "IP：{$clientIP}";
+    $html = renderMailHtml($site, $subject, $body, ['server' => $host, 'time' => $now]);
+    $smtp = getSmtpConfig();
+    if ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '') {
+        [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body, $html);
+        if ($ok) return;
+        logAlertFail("SMTP 发送失败({$subject}): {$err}");
+        return;
+    }
+    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ym-alert 不存在({$subject})"); return; }
+    $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($adminEmail) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
+    exec($cmd . ' > /dev/null 2>&1 &');
+}
+
 // ============================================================
 // v2.9.0 注册验证：滑块人机验证 + 邮箱验证码 + 写作者双重确认
 // ============================================================
@@ -926,6 +960,17 @@ function maskQQ($qq) {
     if ($len <= 4) return str_repeat('*', $len);
     if ($len <= 7) return substr($qq, 0, 1) . str_repeat('*', $len - 2) . substr($qq, -1);
     return substr($qq, 0, 3) . str_repeat('*', $len - 7) . substr($qq, -4);
+}
+
+/**
+ * v2.11.1：对外返回的用户信息统一脱敏——去除 pw_hash，QQ 打码（防登录/注册/check
+ * 接口泄露完整 QQ 给前端；头像走 avatar 字段，前端不再依赖完整 qq 拼 URL）。
+ */
+function sanitizeUserForClient($u) {
+    if (!is_array($u)) return $u;
+    unset($u['pw_hash']);
+    if (isset($u['qq']) && $u['qq'] !== '') $u['qq'] = maskQQ($u['qq']);
+    return $u;
 }
 
 /** 邮箱是否已被账户占用 */
@@ -1753,9 +1798,7 @@ function webauthn_login_complete($input, $qq) {
         'pw_hash' => $u['password']
     ];
     auditLog('webauthn_login', $u['id'], '设备快速登录（PIN/指纹）');
-    $safe = $_SESSION['cmt_user'];
-    unset($safe['pw_hash']);
-    return ['ok' => true, 'user' => $safe];
+    return ['ok' => true, 'user' => sanitizeUserForClient($_SESSION['cmt_user'])];
 }
 
 /** 列出账号已绑定设备（不暴露 credential_id 原文） */
@@ -1772,4 +1815,12 @@ function webauthn_list_devices($userId) {
 }
 function webauthn_remove_device($userId, $deviceId) {
     db_exec('DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ?', [(int)$deviceId, $userId]);
+}
+/** v2.11.1：重命名已绑定设备（≤30 字符） */
+function webauthn_rename_device($userId, $deviceId, $name) {
+    $name = trim((string)$name);
+    if ($name === '' || mb_strlen($name) > 30) return false;
+    db_exec('UPDATE webauthn_credentials SET device_name = ? WHERE id = ? AND user_id = ?', [$name, (int)$deviceId, $userId]);
+    auditLog('webauthn_rename', $userId, '重命名设备 #' . (int)$deviceId . ' → ' . $name);
+    return true;
 }

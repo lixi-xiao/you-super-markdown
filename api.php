@@ -150,6 +150,13 @@ $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
 // ===== v2.11.0：滑块人机验证已彻底移除（原 captcha_new 分支删除） =====
 
+// ===== v2.11.1：动态 CSRF token 获取（修复「会话失败」根因） =====
+// 登录/注册等匿名前置操作在提交前先取本接口的 token（同一请求链内 cookie 与 token
+// 必然同 session），解决浏览器未携带 PHPSESSID / session 过期导致的 token 不匹配
+if ($action === 'csrf') {
+    jsonOut(['success' => true, 'csrf_token' => generateCsrfToken()]);
+}
+
 // ===== v2.9.0：注册邮箱验证码发送（60s 冷却，按邮箱；注册为匿名，不走超管豁免） =====
 if ($action === 'send_register_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $siteCfg = loadSiteConfig();
@@ -310,8 +317,7 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         'email' => $email,   // v2.10.0：注册即写邮箱，供个人设置展示/更换
         'pw_hash' => $new['password']
     ];
-    $safeUser = $_SESSION['cmt_user'];
-    unset($safeUser['pw_hash']);
+    $safeUser = sanitizeUserForClient($_SESSION['cmt_user']);
     jsonOut(['success' => true, 'user' => $safeUser]);
 }
 if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -345,8 +351,9 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if (in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN])) $isAdminFirst = true;
             // v2.11.0：登录成功清除失败计数（IP 级 + 该账号级）
             loginFailClear($clientIP, $qq);
-            $safeUser = $_SESSION['cmt_user'];
-            unset($safeUser['pw_hash']);
+            // v2.11.1：站长/写作者登录通知管理员（SMTP 通道）
+            notifyLoginEvent($u, $clientIP);
+            $safeUser = sanitizeUserForClient($_SESSION['cmt_user']);
             jsonOut(['success' => true, 'user' => $safeUser, 'isAdminFirstLogin' => $isAdminFirst]);
         }
     }
@@ -414,6 +421,17 @@ if ($action === 'webauthn_device_remove' && $_SERVER['REQUEST_METHOD'] === 'POST
     auditLog('webauthn_unbind', $u['id'], '解绑设备 #' . $deviceId);
     jsonOut(['success' => true]);
 }
+if ($action === 'webauthn_device_rename' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $u = validateHomeUser();
+    if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $input = json_decode(file_get_contents('php://input'), true);
+    $deviceId = (int)($input['device_id'] ?? 0);
+    $name = trim((string)($input['device_name'] ?? ''));
+    if ($deviceId <= 0 || $name === '' || mb_strlen($name) > 30) jsonOut(['success' => false, 'error' => '参数错误（名称 ≤30 字）'], 400);
+    if (!webauthn_rename_device($u['id'], $deviceId, $name)) jsonOut(['success' => false, 'error' => '重命名失败'], 400);
+    jsonOut(['success' => true, 'devices' => webauthn_list_devices($u['id'])]);
+}
 if ($action === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // v2.10.2：超管也可在主页退出——与超管后台 logout 一致：吊销 JWT（jti 黑名单）+ 销毁会话 + 清 cookie
     revokeCurrentJWT();
@@ -429,8 +447,7 @@ if ($action === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($action === 'check') {
     $u = validateHomeUser();
     if ($u) {
-        $safeUser = $u;
-        unset($safeUser['pw_hash']);
+        $safeUser = sanitizeUserForClient($u);
         jsonOut(['success' => true, 'loggedIn' => true, 'user' => $safeUser]);
     } else {
         // v2.7.1：超管且已开启「超管主页评论」时，前端按登录态渲染以启用评论框（主页仍无管理入口，见 user-status）
@@ -512,9 +529,7 @@ if ($action === 'update_profile' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     saveUsers($users);
     $_SESSION['cmt_user']['nickname'] = $nick;
     $_SESSION['cmt_user']['signature'] = $sign;
-    $safeUser = $_SESSION['cmt_user'];
-    unset($safeUser['pw_hash']);
-    jsonOut(['success' => true, 'user' => $safeUser]);
+    jsonOut(['success' => true, 'user' => sanitizeUserForClient($_SESSION['cmt_user'])]);
 }
 if ($action === 'admin_setup' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $u = validateSession();
@@ -546,9 +561,7 @@ if ($action === 'admin_setup' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $_SESSION['cmt_user']['qq'] = $qq;
     $_SESSION['cmt_user']['nickname'] = $nick;
     $_SESSION['cmt_user']['avatar'] = $avatarUrl;
-    $safeUser = $_SESSION['cmt_user'];
-    unset($safeUser['pw_hash']);
-    jsonOut(['success' => true, 'user' => $safeUser]);
+    jsonOut(['success' => true, 'user' => sanitizeUserForClient($_SESSION['cmt_user'])]);
 }
 if ($action === 'get') {
     $article = $_GET['article'] ?? '';

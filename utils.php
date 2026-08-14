@@ -363,6 +363,8 @@ function validateJWT($token) {
     if (!hash_equals($expected, $signature)) return false;
     $data = json_decode(base64_decode(strtr($payload, '-_', '+/')), true);
     if (!$data || ($data['exp'] ?? 0) < time()) return false;
+    // v2.10.0-fix：jti 黑名单吊销检查（登出后即使 JWT 未过期、session 残留也立即失效）
+    if (jwt_blacklist_has($data['jti'] ?? '')) return false;
     // v2.7.2：吊销校验——签发用户已不在 users 表（被删除/吊销）时视为无效，会话立即失效
     $uid = $data['sub'] ?? '';
     if ($uid !== '') {
@@ -373,6 +375,29 @@ function validateJWT($token) {
         if (!$found) return false;
     }
     return $data;
+}
+
+// v2.10.0-fix：JWT 吊销链——jti 黑名单（登出即吊销，JWT 三层吊销链的最后一层兜底）
+function jwt_blacklist_add($jti, $exp) {
+    if (!is_string($jti) || $jti === '') return;
+    // 顺带清理已过期条目，防止黑名单表无限增长
+    db_exec('DELETE FROM jwt_blacklist WHERE expires < ?', [time()]);
+    db_exec('INSERT OR REPLACE INTO jwt_blacklist (jti, expires, created) VALUES (?,?,?)', [$jti, (int)$exp, time()]);
+}
+function jwt_blacklist_has($jti) {
+    if (!is_string($jti) || $jti === '') return false;
+    $r = db_one('SELECT 1 AS x FROM jwt_blacklist WHERE jti = ?', [$jti]);
+    return !empty($r);
+}
+// 吊销当前会话 JWT（登出时调用）：解码 session 中 jwt 的 jti 并加入黑名单
+function revokeCurrentJWT() {
+    $jwt = $_SESSION['cmt_user']['jwt'] ?? '';
+    if ($jwt === '') return;
+    $parts = explode('.', $jwt);
+    if (count($parts) !== 3) return;
+    $data = json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true);
+    if (!$data) return;
+    jwt_blacklist_add($data['jti'] ?? '', (int)($data['exp'] ?? time()));
 }
 
 // v2.7.2：后台鉴权校验当前登录用户在 users 表仍存在（账号被删/吊销后会话立即失效）

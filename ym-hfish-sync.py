@@ -139,10 +139,20 @@ def apply_ban(ip, threshold):
         return False
 
 
+def find_hfish_db(cfg):
+    """探测 HFish 数据库路径：优先 app-config.json 的 hfish_db_path，其次常见安装位置。
+    官方 webinstall.sh 装在 /opt/hfish；早期手动安装可能在 /usr/share/hfish（v2.10.2 公网部署实测）"""
+    db_path = cfg.get('hfish_db_path') or ''
+    for p in [db_path, '/usr/share/hfish/database/hfish.db', '/opt/hfish/database/hfish.db']:
+        if p and os.path.exists(p):
+            return p
+    return db_path or '/usr/share/hfish/database/hfish.db'
+
+
 def main():
     cfg = load_config()
     threshold = int(cfg.get('hfish_ban_threshold', 3) or 3)
-    db_path = cfg.get('hfish_db_path') or '/usr/share/hfish/database/hfish.db'
+    db_path = find_hfish_db(cfg)
 
     attacks, err = read_hfish_attacks(db_path)
     snapshot = {

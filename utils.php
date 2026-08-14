@@ -1703,7 +1703,10 @@ function webauthn_register_begin($user) {
             'displayName' => $user['nickname'] ?? $user['qq'],
         ],
         'pubKeyCredParams' => [['type' => 'public-key', 'alg' => -7]],
-        'authenticatorSelection' => ['authenticatorAttachment' => 'platform', 'userVerification' => 'required'],
+        // v2.11.6：userVerification 由 required 放宽为 preferred——
+        // Windows Hello 未配置 PIN 时 required 会触发浏览器 "An unknown error occurred while
+        // talking to the credential manager"；preferred 下平台认证器仍会执行用户验证，兼容性更好
+        'authenticatorSelection' => ['authenticatorAttachment' => 'platform', 'userVerification' => 'preferred'],
         'timeout' => 60000,
         'attestation' => 'none',
     ];
@@ -1764,7 +1767,8 @@ function webauthn_login_begin($qq) {
         'challenge' => $challenge,
         'rpId' => webauthn_rp_id(),
         'allowCredentials' => $allow,
-        'userVerification' => 'required',
+        // v2.11.6：同注册端，放宽为 preferred 提高兼容性
+        'userVerification' => 'preferred',
         'timeout' => 60000,
     ];
 }

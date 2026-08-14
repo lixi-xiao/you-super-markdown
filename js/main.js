@@ -1049,7 +1049,16 @@
         fetch('api.php?action=login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, password: pw }) })
             .then(r => r.json()).then(d => {
                 if (d.success) { cmtUser = d.user; if (d.isAdminFirstLogin) cmtAdminFirstLogin = true; cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); }
-                else { cmtLoginErr.textContent = d.error || '登录失败'; }
+                else {
+                    // v2.10.2：CSRF 校验失败多为会话 cookie 未生效（浏览器 cookie 策略/瞬态），自动刷新页面一次重取 token+cookie
+                    if (d.error === 'CSRF 校验失败' && !window.__csrfRetried) {
+                        window.__csrfRetried = true;
+                        cmtLoginErr.textContent = '会话校验失败，正在刷新页面，请重新登录...';
+                        setTimeout(function() { location.reload(); }, 600);
+                        return;
+                    }
+                    cmtLoginErr.textContent = d.error || '登录失败';
+                }
             }).catch(() => { cmtLoginErr.textContent = '网络错误'; })
             .finally(() => { cmtLoginBtn.disabled = false; cmtLoginBtn.textContent = '登录'; });
     });
@@ -2247,8 +2256,9 @@
                 }
                 if (dropdownLogin) dropdownLogin.style.display = 'none';
                 if (userData.isSuperAdmin) {
-                    if (dropdownDivider) dropdownDivider.style.display = 'none';
-                    if (dropdownLogout) dropdownLogout.style.display = 'none';
+                    // v2.10.2：超管在主页可退出登录（原先无退出入口，需回后台）；无「快捷进入管理」按钮（超管后台仅 SSH/OTP 入口）
+                    if (dropdownDivider) dropdownDivider.style.display = 'block';
+                    if (dropdownLogout) dropdownLogout.style.display = 'flex';
                     if (dropdownAdmin) dropdownAdmin.style.display = 'none';
                 } else {
                     if (dropdownDivider) dropdownDivider.style.display = 'block';

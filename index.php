@@ -73,6 +73,7 @@ foreach (getAnnouncements(20) as $_an) {
     $_announcements[] = [
         'id' => $_an['id'], 'type' => $_an['type'], 'article' => $_an['article'],
         'title' => $_an['title'], 'summary' => $_an['summary'], 'date' => $_an['date'],
+        'body' => $_an['body'] ?? '',
         'cover' => '', 'tags' => $tg, 'words' => $wc,
     ];
 }

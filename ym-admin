@@ -562,7 +562,8 @@ case "${1:-}" in
                 \$content = file_get_contents(\$artPath);
                 // 2) 该版本已存在 → 跳过（幂等）
                 if (strpos(\$content, \"## v{\$toVer}\") !== false) { exit; }
-                \$section = \"## v{\$toVer}（\" . date('Y-m-d') . \"）\n\n{\$cl}\n\n\";
+                // v3.2.3：更新历史段落不写日期（温馨公告只写版本号，日期由用户自行体会）
+                \$section = \"## v{\$toVer}\n\n{\$cl}\n\n\";
                 \$pos = strpos(\$content, '## ');
                 if (\$pos === false) {
                     \$content .= \"\n{\$section}\";

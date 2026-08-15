@@ -95,6 +95,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['rich_zip']) && ($_FI
     $vidMap = []; // 原 basename => data/videos/新名
     $mdList = []; // ['name' => 原相对路径, 'content' => 内容]
     $cnt = ['md' => 0, 'img' => 0, 'vid' => 0];
+    // v4.1.6：富媒体包发布方式——立即发布（默认）/ 存草稿 / 定时发布；显式选择非「立即发布」时覆盖导入 md 的发布状态
+    $richStatus = $_POST['publish_status'] ?? 'published';
+    if (!in_array($richStatus, ['published', 'draft', 'scheduled'], true)) $richStatus = 'published';
+    $richAt = trim($_POST['publish_at'] ?? '');
+    if ($richStatus === 'scheduled' && $richAt === '') $richStatus = 'published'; // 定时未填时间 → 立即发布（与编辑器一致）
+    $richStatusMeta = [];
+    if ($richStatus !== 'published') {
+        $richStatusMeta['status'] = $richStatus;
+        if ($richStatus === 'scheduled') $richStatusMeta['publish_at'] = str_replace('T', ' ', $richAt);
+    }
     $zipSafe = true;
     $errKey = '';
     if ($zip->numFiles > 200) { $zipSafe = false; $errKey = 'too_many'; }
@@ -159,8 +169,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['rich_zip']) && ($_FI
                 return substr($m[0], 0, strrpos($m[0], '(') + 1) . $imgMap[$b] . ')';
             }, $content);
             if (!preg_match('/^<!--META/', $content)) {
-                $meta = json_encode(['category' => $_POST['category'] ?? '', 'tags' => $_POST['tags'] ?? '', 'excerpt' => $_POST['excerpt'] ?? '', 'author' => $_POST['author'] ?? '', 'author_id' => $myId, 'license' => $_POST['license'] ?? 'CC BY-NC-SA 4.0', 'licenseUrl' => ($licenseUrlMap[$_POST['license'] ?? 'CC BY-NC-SA 4.0'] ?? '')], JSON_UNESCAPED_UNICODE);
-                $content = "<!--META" . $meta . "-->\n" . $content;
+                $meta = ['category' => $_POST['category'] ?? '', 'tags' => $_POST['tags'] ?? '', 'excerpt' => $_POST['excerpt'] ?? '', 'author' => $_POST['author'] ?? '', 'author_id' => $myId, 'license' => $_POST['license'] ?? 'CC BY-NC-SA 4.0', 'licenseUrl' => ($licenseUrlMap[$_POST['license'] ?? 'CC BY-NC-SA 4.0'] ?? '')];
+                // v4.1.6：表单显式选择非「立即发布」时写入发布状态（默认立即发布，保持原行为）
+                if ($richStatusMeta) {
+                    $meta = array_merge($meta, $richStatusMeta);
+                    if ($richStatus === 'draft') unset($meta['publish_at']);
+                }
+                $content = "<!--META" . json_encode($meta, JSON_UNESCAPED_UNICODE) . "-->\n" . $content;
+            } elseif ($richStatusMeta && preg_match('/^<!--META(.*?)-->/s', $content, $m)) {
+                // v4.1.6：md 自带 META 时，表单显式选择非「立即发布」则覆盖其发布状态（重建 META 头）
+                $meta = json_decode(trim($m[1]), true);
+                if (!is_array($meta)) $meta = [];
+                $meta = array_merge($meta, $richStatusMeta);
+                if ($richStatus === 'draft') unset($meta['publish_at']);
+                $content = preg_replace('/^<!--META.*?-->/s', "<!--META" . json_encode($meta, JSON_UNESCAPED_UNICODE) . "-->", $content, 1);
             }
             if (file_put_contents($dataDir . '/' . $targetName, $content, LOCK_EX)) {
                 $cnt['md']++;
@@ -584,6 +606,22 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                     <label class="form-label">预览摘要（留空自动生成）</label>
                     <textarea class="form-input" id="richExcerpt" style="min-height:56px" placeholder="可选"></textarea>
                 </div>
+                <!-- v4.1.6：富媒体包发布方式——立即发布 / 存草稿 / 定时发布（默认立即发布，与编辑器一致） -->
+                <div class="form-group">
+                    <label class="form-label">发布方式</label>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+                        <select class="form-select" id="richPublishStatus" onchange="var r=document.getElementById('richPublishAtRow'); if(r) r.style.display=this.value==='scheduled'?'flex':'none'">
+                            <option value="published">立即发布</option>
+                            <option value="draft">存为草稿</option>
+                            <option value="scheduled">定时发布</option>
+                        </select>
+                        <span class="form-hint">导入的多篇文档统一按此方式发布；默认立即发布</span>
+                    </div>
+                </div>
+                <div class="form-group" id="richPublishAtRow" style="display:none">
+                    <label class="form-label">发布时间</label>
+                    <input type="datetime-local" class="form-input" id="richPublishAt">
+                </div>
                 <div class="form-group" id="richProgressWrap" style="display:none">
                     <div style="display:flex;justify-content:space-between;font-size:0.85em;color:var(--text-muted);margin-bottom:6px"><span id="richProgressText">上传中 0%</span><span id="richProgressSize"></span></div>
                     <div style="height:8px;background:#eef1f6;border-radius:999px;overflow:hidden"><div id="richProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2563eb,#06b6d4);border-radius:999px;transition:width .2s"></div></div>
@@ -889,6 +927,9 @@ document.querySelectorAll('.method-tab').forEach(function(b) {
         fd.append('category', (document.getElementById('richCategory') || {}).value || '');
         fd.append('tags', (document.getElementById('richTags') || {}).value || '');
         fd.append('excerpt', (document.getElementById('richExcerpt') || {}).value || '');
+        // v4.1.6：发布方式（立即/草稿/定时）+ 定时时间
+        fd.append('publish_status', (document.getElementById('richPublishStatus') || {}).value || 'published');
+        fd.append('publish_at', (document.getElementById('richPublishAt') || {}).value || '');
         btn.disabled = true;
         hint.textContent = '';
         pwrap.style.display = 'block';

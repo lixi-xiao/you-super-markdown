@@ -14,10 +14,14 @@
         }
         if (bgType === 'image' && bgImage) {
             body.classList.add('bg-active');
-            body.style.setProperty('--bg-url', 'url(' + bgImage + ')');
+            // v3.3.3：背景图相对路径补前导斜杠——CSS 变量里相对路径按 CSS 文件(css/)解析，
+            // 导致 /css/data/bg/.. 404；统一转成根相对路径 /data/bg/..
+            var bgUrl = (bgImage.indexOf('/') === 0 || /^https?:/i.test(bgImage)) ? bgImage : '/' + bgImage;
+            body.style.setProperty('--bg-url', 'url(' + bgUrl + ')');
         } else if (bgType === 'api' && bgApiUrl) {
             body.classList.add('bg-active');
-            body.style.setProperty('--bg-url', 'url(' + bgApiUrl + ')');
+            var apiUrl = (bgApiUrl.indexOf('/') === 0 || /^https?:/i.test(bgApiUrl)) ? bgApiUrl : '/' + bgApiUrl;
+            body.style.setProperty('--bg-url', 'url(' + apiUrl + ')');
         }
     })();
     const topBar = document.getElementById('topBar');

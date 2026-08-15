@@ -1904,14 +1904,19 @@ kbd {
     font-size: 0.78em; font-weight: 500; transition: all 0.2s;
 }
 .ann-card-tag:hover { border: 1px solid var(--accent); padding: 1px 9px; }
-.ann-card-media {
-    width: 220px; flex-shrink: 0; position: relative; overflow: hidden;
-    border-left: 1px solid var(--border);
-}
 .ann-card-cover {
     width: 100%; height: 100%; object-fit: cover; display: block;
     filter: grayscale(1) contrast(1.05) brightness(1.02);
+    /* v3.1.11：水墨渐隐——左侧不透明，向右渐隐至透明，融于卡片背景 */
+    -webkit-mask-image: linear-gradient(to right, #000 55%, transparent 100%);
+    mask-image: linear-gradient(to right, #000 55%, transparent 100%);
     transition: filter 0.4s ease, transform 0.4s ease;
+}
+.ann-card-media {
+    width: 220px; flex-shrink: 0; position: relative; overflow: hidden;
+    border-left: 1px solid var(--border);
+    /* v3.1.11：渐隐区衬底（淡墨色） */
+    background: linear-gradient(to right, transparent 45%, hsl(var(--accent-hue), 30%, 90%) 100%);
 }
 .ann-card[data-file]:hover .ann-card-cover { transform: scale(1.04); }
 .ann-card-cover-ink {

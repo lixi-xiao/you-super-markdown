@@ -86,7 +86,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_content') {
     $contentWithoutCode = preg_replace('/```[\s\S]*?```/', '', $content);
     if (preg_match('/^#\s+(.+)/m', $contentWithoutCode, $tm)) $title = $tm[1];
     else $title = preg_replace('/\.md$/i', '', $reqFile);
-    echo json_encode(['success' => true, 'title' => $title, 'content' => $content, 'meta' => $meta], JSON_UNESCAPED_UNICODE);
+    // v3.1.11：返回该文章当前是否为公告（编辑弹窗「作为公告」开关初始状态；仅站长可设）
+    $isAnn = $isStationAdmin && (bool)db_one('SELECT 1 FROM announcement WHERE article = ? LIMIT 1', [$reqFile]);
+    echo json_encode(['success' => true, 'title' => $title, 'content' => $content, 'meta' => $meta, 'is_announce' => $isAnn], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -215,6 +217,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
                     $editSuccess = '文档已创建';
                     auditLog('article_create', $fn, '创建文档: ' . $title);
                 } else { $editError = '保存失败'; }
+            }
+        }
+
+        // v3.1.11：文章发布界面「作为公告」开关（仅站长可设）——
+        // 开启 → 该文章在首页公告区展示；关闭 → 移除其公告。系统文章（更新历史）受保护不被误删。
+        if ($editSuccess && !$isZip && $isStationAdmin && !empty($fn)) {
+            $protectedAnn = ['更新历史.md'];
+            if (!in_array($fn, $protectedAnn, true)) {
+                $exAnn = db_one('SELECT id FROM announcement WHERE article = ? LIMIT 1', [$fn]);
+                if (!empty($_POST['as_announce'])) {
+                    if (!$exAnn) {
+                        addAnnouncement('manual', $fn, $myId, $title, $excerpt);
+                        auditLog('announce_from_article', $fn, '将文章设为公告: ' . $title);
+                    } else {
+                        updateAnnouncement($exAnn['id'], $fn, $title, $excerpt);
+                    }
+                } else {
+                    if ($exAnn) {
+                        deleteAnnouncement($exAnn['id']);
+                        auditLog('announce_remove', $fn, '取消文章公告: ' . $title);
+                    }
+                }
             }
         }
     }
@@ -508,6 +532,15 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                     <label class="form-label">预览摘要</label>
                     <textarea class="form-input" name="excerpt" id="editExcerpt" style="min-height:56px" placeholder="可选"></textarea>
                 </div>
+                <?php if ($isStationAdmin): ?>
+                <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface-2,var(--bg));border:1px solid var(--border);border-radius:10px">
+                    <input type="checkbox" name="as_announce" id="editAsAnnounce" value="1" style="width:17px;height:17px;accent-color:var(--accent)">
+                    <div>
+                        <label for="editAsAnnounce" style="font-weight:600;cursor:pointer">同时作为公告展示</label>
+                        <div class="form-hint" style="margin:0">开启后该文章在首页公告区展示，且不再出现在文章列表</div>
+                    </div>
+                </div>
+                <?php endif; ?>
                 <div class="modal-actions">
                     <button type="submit" class="btn btn-primary">保存修改</button>
                     <button type="button" class="btn btn-outline" onclick="closeModal('editModal')">取消</button>
@@ -578,6 +611,8 @@ function openEditModal(fn) {
     document.getElementById('editLicense').value = 'CC BY-NC-SA 4.0';
     document.getElementById('editCharCount').textContent = '';
     document.getElementById('imageUploadHint').textContent = '';
+    var annChk = document.getElementById('editAsAnnounce');
+    if (annChk) annChk.checked = false;
     document.getElementById('editModal').classList.add('active');
     fetch('sc.php?action=get_content&file=' + encodeURIComponent(fn))
         .then(function(r) { return r.json(); })
@@ -592,6 +627,7 @@ function openEditModal(fn) {
                 document.getElementById('editExcerpt').value = d.meta.excerpt || '';
                 if (d.meta.license) document.getElementById('editLicense').value = d.meta.license;
             }
+            if (annChk && d.is_announce) annChk.checked = true;
             var l = d.content.replace(/\s/g,'').length;
             document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
         });

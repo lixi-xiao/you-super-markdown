@@ -55,6 +55,7 @@ WATCH_FILES = [
     'index.php',
     'api.php',
     'utils.php',
+    'img.php',              # v3.3.12：缩略图服务（首页封面加速，防篡改注入）
     'db.php',
     'admin/entry.php',
     'admin/dashboard.php',

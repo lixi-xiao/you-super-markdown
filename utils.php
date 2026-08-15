@@ -1759,6 +1759,7 @@ function checkForUpdates($channel = 'stable') {
             'download_url' => '',
             'published_at' => '',
             'source' => 'local',
+            'packages' => [],
         ];
     }
     // beta 通道查询 releases 列表（含 pre-release），stable 查询 latest
@@ -1774,6 +1775,26 @@ function checkForUpdates($channel = 'stable') {
         }
         if ($release && isset($release['tag_name'])) {
             $latest = ltrim($release['tag_name'], 'v');
+            // v3.2.0：解析 Releases assets，自动识别全量包（*-full.tar.gz）与增量包（*-inc.tar.gz）
+            $packages = [];
+            if (!empty($release['assets']) && is_array($release['assets'])) {
+                foreach ($release['assets'] as $asset) {
+                    $aname = (string)($asset['name'] ?? '');
+                    if (!preg_match('/\.(tar\.gz|zip)$/i', $aname)) continue;
+                    $atype = '';
+                    if (preg_match('/-full\.(tar\.gz|zip)$/i', $aname)) $atype = 'full';
+                    elseif (preg_match('/-inc\.(tar\.gz|zip)$/i', $aname)) $atype = 'inc';
+                    elseif (preg_match('/-to-v[\d.]+-inc\./i', $aname)) $atype = 'inc';
+                    if ($atype === '') continue;
+                    $packages[] = [
+                        'type' => $atype,
+                        'name' => $aname,
+                        'url' => $asset['browser_download_url'] ?? '',
+                        'size' => (int)($asset['size'] ?? 0),
+                        'download_count' => (int)($asset['download_count'] ?? 0),
+                    ];
+                }
+            }
             return [
                 'available' => version_compare($latest, APP_VERSION) > 0,
                 'latest_version' => $latest,
@@ -1782,6 +1803,7 @@ function checkForUpdates($channel = 'stable') {
                 'download_url' => $release['zipball_url'] ?? '',
                 'published_at' => $release['published_at'] ?? '',
                 'source' => 'github',
+                'packages' => $packages,
             ];
         }
     }
@@ -1794,6 +1816,7 @@ function checkForUpdates($channel = 'stable') {
         'download_url' => '',
         'published_at' => '',
         'source' => 'local',
+        'packages' => [],
     ];
 }
 

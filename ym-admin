@@ -55,6 +55,76 @@ $CL_TEXT"
     /usr/local/bin/ym-admin notify "$NOTIFY_MSG" 2>/dev/null || true
 }
 
+# v3.2.0：更新包签名验证（RSA 非对称）——服务器内置公钥 /opt/you-markdown/update_signing_public.pem，
+# 正式更新包在包根内置 manifest.json（全文件 SHA256）+ manifest.json.sig（私钥签名）。
+# 返回 0 通过；非 0 失败（失败封闭）。未部署公钥 → 跳过验证（旧环境兼容）。
+verify_package_signature() {
+    local tmp_root="$1"
+    local pubkey="/opt/you-markdown/update_signing_public.pem"
+    local mf sig bad root
+    if [ ! -f "$pubkey" ]; then
+        echo "  [签名] 未部署公钥，跳过签名验证（旧环境兼容）"
+        return 0
+    fi
+    mf=$(find "$tmp_root" -maxdepth 3 -name manifest.json 2>/dev/null | head -1)
+    if [ -z "$mf" ] || [ ! -f "$mf" ]; then
+        echo "  [签名] 错误：已部署公钥但更新包缺少 manifest.json，拒绝更新（失败封闭）"
+        return 1
+    fi
+    sig="$mf.sig"
+    if [ ! -f "$sig" ]; then
+        echo "  [签名] 错误：已部署公钥但更新包缺少签名文件 manifest.json.sig，拒绝更新（失败封闭）"
+        return 1
+    fi
+    if ! openssl dgst -sha256 -verify "$pubkey" -signature "$sig" "$mf" >/dev/null 2>&1; then
+        echo "  [签名] 错误：manifest 签名验证失败，包可能被篡改，拒绝更新"
+        return 1
+    fi
+    echo "  [签名] manifest 签名验证通过"
+    # 逐文件 SHA256 与 manifest 比对（manifest.json / manifest.json.sig 自身不校验）
+    root=$(dirname "$mf")
+    bad=$(php -r "
+        \$mf = '$mf';
+        \$root = '$root';
+        \$m = json_decode(@file_get_contents(\$mf), true);
+        \$files = \$m['files'] ?? [];
+        foreach (\$files as \$rel => \$expect) {
+            \$p = rtrim(\$root, '/') . '/' . ltrim(\$rel, '/');
+            if (!is_file(\$p)) { echo \"missing:\$rel\n\"; continue; }
+            if (hash_file('sha256', \$p) !== \$expect) { echo \"mismatch:\$rel\n\"; }
+        }
+    " 2>/dev/null)
+    if [ -n "$bad" ]; then
+        echo "  [签名] 错误：文件哈希校验失败："
+        echo "$bad" | head -5
+        return 1
+    fi
+    echo "  [签名] 全部文件哈希校验通过"
+    return 0
+}
+
+# v3.2.0：更新失败自动回退——从最新备份恢复 WEB_ROOT 与母本（停守护→解锁→恢复→锁定→重启）
+auto_rollback() {
+    local BACKUP_DIR="/opt/you-markdown/backups"
+    local LATEST
+    LATEST=$(ls -t "$BACKUP_DIR"/pre-update-*.tar.gz 2>/dev/null | head -1)
+    if [ -z "$LATEST" ]; then
+        echo "  [回退] 错误：没有可用备份，无法自动回退，请人工介入"
+        return 1
+    fi
+    echo "  [回退] 检测到更新失败，自动回退到备份: $(basename "$LATEST")"
+    systemctl stop ym-guard 2>/dev/null || true
+    sleep 1
+    chattr -R -i /opt/you-markdown/install-base/ 2>/dev/null || true
+    tar -xzf "$LATEST" -C "$WEB_ROOT" 2>/dev/null
+    rsync -a --delete --exclude='data/' "$WEB_ROOT/" "/opt/you-markdown/install-base/" 2>/dev/null
+    chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
+    systemctl start ym-guard 2>/dev/null || true
+    rm -f /tmp/ym-update.lock
+    echo "  [回退] 自动回退完成，系统已恢复至更新前状态"
+    return 0
+}
+
 case "${1:-}" in
     login)
         ENTRY_TOKEN=$(openssl rand -base64 12 | tr -d '=+/' | cut -c1-12)
@@ -223,18 +293,21 @@ case "${1:-}" in
         fi
 
         # 失败处理统一出口：写 failed 状态 + 重锁母本 + 清理更新锁 + 重启守护
+        # v3.2.0：备份已生成且文件已应用时自动回退（恢复 WEB_ROOT + 母本），并记录到 failed 状态
         mark_failed() {
             local reason="$1"
-            php -r "
-                \$f = '$REQUEST_FILE';
-                if (file_exists(\$f)) {
-                    \$r = json_decode(file_get_contents(\$f), true);
-                    \$r['status'] = 'failed';
-                    \$r['error'] = '$reason';
-                    \$r['completed_at'] = time();
-                    file_put_contents(\$f, json_encode(\$r, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
-                }
-            " 2>/dev/null
+            if [ -n "${BACKUP_FILE:-}" ] && [ -f "$BACKUP_FILE" ] && [ -n "${FILES_APPLIED:-}" ]; then
+                auto_rollback && reason="$reason（已自动回退）"
+            fi
+            # v3.2.0：failed 状态写入改 rm + 重建（实测文件 inode 可能被安全防护瞬时锁定，
+            # 直接 truncate/open-for-write 报 Permission denied，rm 后重建新文件即可写）
+            local now_ts=$(date +%s)
+            local reason_esc
+            reason_esc=$(printf '%s' "$reason" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            rm -f "$REQUEST_FILE" 2>/dev/null || true
+            printf '{"status":"failed","from_version":"%s","to_version":"%s","channel":"%s","error":"%s","completed_at":%d}\n' \
+                "$FROM_VER" "$TO_VER" "$CHANNEL" "$reason_esc" "$now_ts" > "$REQUEST_FILE" 2>/dev/null || true
+            chmod 666 "$REQUEST_FILE" 2>/dev/null || true
             chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
             rm -f /tmp/ym-update.lock
             systemctl start ym-guard 2>/dev/null || true
@@ -244,10 +317,14 @@ case "${1:-}" in
         TO_VER=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['to_version'] ?? '';")
         CHANNEL=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['channel'] ?? 'stable';")
         PKG_PATH=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['package_path'] ?? '';")
+        PKG_URL=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['package_url'] ?? '';")
 
         # v3.1.15：判定更新方式——PKG_PATH 非空且文件存在 → 后台外部上传更新包；否则 → 服务器命令更新（仓库下载）
+        # v3.2.0：在线更新选中的仓库包（package_url）单独判定为「在线包更新（仓库下载）」
         if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
             UPDATE_METHOD="外部上传更新包"
+        elif [ -n "$PKG_URL" ]; then
+            UPDATE_METHOD="在线包更新（仓库下载）"
         else
             UPDATE_METHOD="服务器命令更新（仓库下载）"
         fi
@@ -294,14 +371,32 @@ case "${1:-}" in
         echo "[4/6] 应用更新文件..."
         STAGE_DIR=""
         TMP_DIR=""
+        PKG_FILE=""
         PKG_TYPE="full"
+        FILES_APPLIED=""
+        # v3.2.0：三种来源——后台上传包（PKG_PATH）/ 在线更新选中的仓库包（PKG_URL）/ 仓库 archive 全量（兼容）
         if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
             echo "  使用上传的更新包: $PKG_PATH"
+            PKG_FILE="$PKG_PATH"
+        elif [ -n "$PKG_URL" ]; then
+            echo "  下载在线更新包（全量/增量包）..."
+            PKG_FILE="/tmp/ym-update-download.tar.gz"
+            HTTP_CODE=$(curl -sL -o "$PKG_FILE" -w '%{http_code}' "$PKG_URL" 2>/dev/null)
+            if [ "$HTTP_CODE" != "200" ] || [ ! -s "$PKG_FILE" ]; then
+                echo "错误：下载失败 (HTTP ${HTTP_CODE:-无响应})"
+                rm -f "$PKG_FILE"
+                mark_failed "下载失败 (HTTP ${HTTP_CODE:-无响应})"
+                exit 1
+            fi
+        fi
+
+        # 本地包 / 在线包统一：解压 → 定位 STAGE_DIR → 识别全量/增量 → 签名验证
+        if [ -n "$PKG_FILE" ]; then
             TMP_DIR=$(mktemp -d)
-            tar -xzf "$PKG_PATH" -C "$TMP_DIR" 2>/dev/null
+            tar -xzf "$PKG_FILE" -C "$TMP_DIR" 2>/dev/null
             if [ $? -ne 0 ]; then
                 echo "  解压失败，尝试 unzip..."
-                unzip -o "$PKG_PATH" -d "$TMP_DIR" 2>/dev/null || {
+                unzip -o "$PKG_FILE" -d "$TMP_DIR" 2>/dev/null || {
                     echo "错误：无法解压更新包"
                     rm -rf "$TMP_DIR"
                     mark_failed "无法解压更新包"
@@ -328,6 +423,14 @@ case "${1:-}" in
                     fi
                 fi
             fi
+            # v3.2.0：非对称密钥签名验证（服务器部署公钥后强制，失败封闭；未部署公钥跳过兼容旧环境）
+            if [ -n "$STAGE_DIR" ]; then
+                if ! verify_package_signature "$TMP_DIR"; then
+                    rm -rf "$TMP_DIR"
+                    mark_failed "更新包签名验证失败，已拒绝（可能被篡改）"
+                    exit 1
+                fi
+            fi
         else
             REPO_URL=$(php -r "\$c = json_decode(@file_get_contents('$WEB_ROOT/app-config.json'), true); echo \$c['repo_url'] ?? '';" 2>/dev/null)
             if [ -z "$REPO_URL" ]; then
@@ -335,7 +438,7 @@ case "${1:-}" in
                 systemctl start ym-guard 2>/dev/null || true
                 exit 1
             fi
-            echo "  从仓库下载更新包..."
+            echo "  从仓库下载更新包（archive 全量）..."
             DOWNLOAD_URL="${REPO_URL%/}/archive/refs/tags/v${TO_VER}.tar.gz"
             PKG_FILE="/tmp/ym-update-download.tar.gz"
             HTTP_CODE=$(curl -sL -o "$PKG_FILE" -w '%{http_code}' "$DOWNLOAD_URL" 2>/dev/null)
@@ -373,8 +476,8 @@ case "${1:-}" in
                 exit 1
             fi
             echo "  增量更新：仅覆盖变更文件，不删除现有文件"
-            rsync -a --exclude='data/' --exclude='version.json' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
-            rsync -a --exclude='data/' --exclude='version.json' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
+            rsync -a --exclude='data/' --exclude='version.json' --exclude='manifest.json*' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
+            rsync -a --exclude='data/' --exclude='version.json' --exclude='manifest.json*' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
         else
             if [ ! -f "$STAGE_DIR/index.php" ] && [ ! -f "$STAGE_DIR/utils.php" ]; then
                 echo "错误：全量更新源无效（缺少 index.php/utils.php），已中止，未修改任何文件"
@@ -383,9 +486,12 @@ case "${1:-}" in
                 exit 1
             fi
             # v3.0.0：全量更新排除 app-config.json（服务器配置唯一真源，--delete 不得删除/覆盖）
-            rsync -a --delete --exclude='data/' --exclude='app-config.json' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
-            rsync -a --delete --exclude='data/' --exclude='app-config.json' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
+            # v3.2.0：同时排除签名元数据 manifest.json*
+            rsync -a --delete --exclude='data/' --exclude='app-config.json' --exclude='manifest.json*' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
+            rsync -a --delete --exclude='data/' --exclude='app-config.json' --exclude='manifest.json*' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
         fi
+        # v3.2.0：文件已实际应用，此后失败触发自动回退（此前失败仅标记，文件未被修改）
+        FILES_APPLIED="1"
         # 4.7a 提前读取更新包 changelog（v3.1.6：必须在清理 TMP_DIR 前读取，否则 version.json 已不存在；
         # base64 传参规避引号/特殊字符；无 changelog 字段 → 空，后续跳过）
         CHANGELOG_B64=$(php -r "

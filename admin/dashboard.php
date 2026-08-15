@@ -210,6 +210,12 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'trigger_update') {
         echo json_encode(['success' => false, 'error' => '更新包路径非法'], JSON_UNESCAPED_UNICODE);
         exit;
     }
+    // v3.2.0：在线更新选择的仓库包下载地址（仅允许 https，防 SSRF/任意协议注入）
+    $packageUrl = trim($_POST['package_url'] ?? '');
+    if ($packageUrl !== '' && strpos($packageUrl, 'https://') !== 0) {
+        echo json_encode(['success' => false, 'error' => '更新包下载地址非法'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     // 挑战码尝试限次（防暴力枚举：连续 5 次失败锁定 60 秒）
     $nowTs = time();
     if ($nowTs < (int)($_SESSION['challenge_lock_until'] ?? 0)) {
@@ -234,6 +240,7 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'trigger_update') {
         'to_version' => $targetVersion,
         'channel' => $config['update_channel'] ?? 'stable',
         'package_path' => $pkgPath,
+        'package_url' => $packageUrl,
         'status' => 'pending',
         'created' => time(),
         'expires' => time() + 600,
@@ -1832,7 +1839,25 @@ $banMsg = $_GET['bmsg'] ?? '';
     <div class="card" id="updateActionCard" style="display:none">
         <div class="card-title"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>执行更新</div>
         <div id="updateActionContent">
-            <p style="color:var(--text-secondary)">发现新版本 <strong id="newVersionText"></strong>，点击下方按钮开始更新流程。</p>
+            <p style="color:var(--text-secondary)">发现新版本 <strong id="newVersionText"></strong>，请选择更新包类型后开始更新。</p>
+            <!-- v3.2.0：在线更新自动识别仓库发布的全量包 / 增量包，由站长选择 -->
+            <div id="pkgSelectArea" style="margin-top:14px;display:none">
+                <div class="bg-type-grid" style="max-width:640px">
+                    <label class="bg-type-card" id="pkgFullCard">
+                        <input type="radio" name="pkg_type" value="full">
+                        <div class="type-icon full"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M6 3l3 3-3 3M18 15l-3 3 3 3"/></svg></div>
+                        <div class="type-name">全量包更新</div>
+                        <div class="type-desc" style="font-size:0.74em">完整覆盖全部文件，适合大版本升级</div>
+                    </label>
+                    <label class="bg-type-card" id="pkgIncCard">
+                        <input type="radio" name="pkg_type" value="inc">
+                        <div class="type-icon inc"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div>
+                        <div class="type-name">增量包更新</div>
+                        <div class="type-desc" style="font-size:0.74em">仅覆盖变更文件，体积小、速度快</div>
+                    </label>
+                </div>
+                <p id="pkgHint" style="color:var(--text-muted);font-size:0.82em;margin-top:10px"></p>
+            </div>
             <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap">
                 <button class="btn btn-primary" onclick="showChallengeModal()" id="startUpdateBtn">
                     <svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -1901,6 +1926,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     var updatePollTimer = null;
     var pendingUpdateVersion = '';
     var pendingUpdatePath = '';
+    var pendingUpdateUrl = ''; // v3.2.0：在线更新选中的仓库包下载地址（全量/增量包）
 
     function switchChannel(ch) {
         var code = prompt('切换更新通道为敏感操作，请在 SSH 中执行 sudo ym-admin challenge 获取确认码后输入：');
@@ -1938,6 +1964,14 @@ $banMsg = $_GET['bmsg'] ?? '';
                     document.getElementById('updateActionCard').style.display = 'block';
                     document.getElementById('newVersionText').textContent = 'v' + d.latest_version;
                     pendingUpdateVersion = d.latest_version;
+                    // v3.2.0：仓库发布含全量/增量包 → 展示选择；否则回退 archive 全量下载
+                    if (d.packages && d.packages.length > 0) {
+                        renderPkgSelect(d.packages);
+                    } else {
+                        document.getElementById('pkgSelectArea').style.display = 'none';
+                        pendingUpdateUrl = '';
+                        pendingUpdatePath = '';
+                    }
                 } else {
                     resultDiv.innerHTML = '<div class="msg" style="margin:0;background:var(--accent-glass);color:var(--text)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>当前已是最新版本 v' + d.current_version + '</div>';
                     document.getElementById('updateActionCard').style.display = 'none';
@@ -1964,6 +1998,54 @@ $banMsg = $_GET['bmsg'] ?? '';
         document.getElementById('challengeModal').style.display = 'none';
     }
 
+    // v3.2.0：渲染全量/增量包选择（仓库 Releases assets 自动识别）
+    function renderPkgSelect(pkgs) {
+        var full = null, inc = null;
+        pkgs.forEach(function(p) { if (p.type === 'full') full = p; else if (p.type === 'inc') inc = p; });
+        var area = document.getElementById('pkgSelectArea');
+        var fCard = document.getElementById('pkgFullCard');
+        var iCard = document.getElementById('pkgIncCard');
+        var hint = document.getElementById('pkgHint');
+        fCard.style.display = full ? '' : 'none';
+        iCard.style.display = inc ? '' : 'none';
+        if (full) {
+            fCard.querySelector('.type-desc').textContent = full.name + '（' + fmtSize(full.size) + '）完整覆盖，适合大版本升级';
+        }
+        if (inc) {
+            iCard.querySelector('.type-desc').textContent = inc.name + '（' + fmtSize(inc.size) + '）仅覆盖变更文件，速度快';
+        }
+        // 默认选中增量包（体积小），无增量包则选全量包
+        var sel = inc ? 'inc' : 'full';
+        var radios = document.querySelectorAll('input[name="pkg_type"]');
+        radios.forEach(function(r) { r.checked = (r.value === sel); });
+        var fullRadio = fCard.querySelector('input');
+        var incRadio = iCard.querySelector('input');
+        fullRadio.onchange = function() { if (this.checked) { pendingUpdateUrl = full ? full.url : ''; pendingUpdatePath = ''; syncPkgCardActive(); } };
+        incRadio.onchange = function() { if (this.checked) { pendingUpdateUrl = inc ? inc.url : ''; pendingUpdatePath = ''; syncPkgCardActive(); } };
+        if (sel === 'inc' && inc) { pendingUpdateUrl = inc.url; } else if (full) { pendingUpdateUrl = full.url; }
+        pendingUpdatePath = '';
+        area.style.display = 'block';
+        syncPkgCardActive();
+        hint.textContent = sel === 'inc'
+            ? '将下载增量包更新至 v' + pendingUpdateVersion + '（下载后自动校验签名）'
+            : '将下载全量包更新至 v' + pendingUpdateVersion + '（下载后自动校验签名）';
+    }
+
+    function syncPkgCardActive() {
+        var radios = document.querySelectorAll('input[name="pkg_type"]');
+        radios.forEach(function(r) {
+            var card = r.closest('.bg-type-card');
+            if (card) card.classList.toggle('active', r.checked);
+        });
+    }
+
+    function fmtSize(n) {
+        n = Number(n) || 0;
+        if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+        if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+        return n + ' B';
+    }
+
     function submitChallenge() {
         var code = document.getElementById('challengeCodeInput').value.trim().toUpperCase();
         if (!code || code.length < 4) {
@@ -1981,6 +2063,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         formData.append('challenge_code', code);
         formData.append('target_version', pendingUpdateVersion);
         formData.append('package_path', pendingUpdatePath);
+        formData.append('package_url', pendingUpdateUrl); // v3.2.0：在线更新选中的仓库包下载地址
 
         fetch('<?= $_SERVER['SCRIPT_NAME'] ?>', {
             method: 'POST',
@@ -2088,6 +2171,9 @@ $banMsg = $_GET['bmsg'] ?? '';
                             document.getElementById('updateActionCard').style.display = 'block';
                             document.getElementById('newVersionText').textContent = verText;
                             pendingUpdateVersion = d.target_version || 'uploaded';
+                            // 上传包路径交给 trigger_update（踩坑 #3：不提交则走仓库分支）；清空在线包选择
+                            pendingUpdatePath = d.package_path || '';
+                            pendingUpdateUrl = '';
                         }, 800);
                     } else {
                         document.getElementById('mUpStep1').className = 'update-progress-step failed';

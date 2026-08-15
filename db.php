@@ -158,6 +158,19 @@ function db_init_schema($pdo) {
     $pdo->exec('CREATE TABLE IF NOT EXISTS pinned (
         article TEXT PRIMARY KEY
     )');
+    // v3.1.6：公告表（站长后台「公告管理」tab 全权管理；type=update 为 apply-update 自动写入的更新公告）
+    //   id: 唯一 ID；type: manual(站长手动) / update(更新公告)；article: 关联文章文件名（可空）；
+    //   author_id: 创建人；title: 公告标题；summary: 摘要/更新描述；date: 发布日期；order: 排序（越小越前）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS announcement (
+        id TEXT PRIMARY KEY,
+        type TEXT DEFAULT \'manual\',
+        article TEXT,
+        author_id TEXT,
+        title TEXT,
+        summary TEXT,
+        date TEXT,
+        ord INTEGER DEFAULT 0
+    )');
     $pdo->exec('CREATE TABLE IF NOT EXISTS login_fails (ip TEXT, t INTEGER, acc TEXT)');
     // v2.11.0：老库 login_fails 无 acc 列（登录失败按账号维度计数），幂等补齐
     try { $pdo->exec('ALTER TABLE login_fails ADD COLUMN acc TEXT'); } catch (Exception $e) { /* 列已存在 */ }

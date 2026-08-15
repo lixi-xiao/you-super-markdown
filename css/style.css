@@ -1836,3 +1836,110 @@ kbd {
     border-radius: 8px;
 }
 .cmt-pw-toggle:hover { background: var(--hover-bg); color: var(--text); }
+
+/* ================================================================
+   v3.1.6：首页公告卡片（玻璃拟态 + 主题色变量；横向左右分栏）
+   左：类型标识 / 标题 / 元数据(日历+日期, 文档+字数) / 摘要 / 标签
+   右：封面图（正文第一张图，黑白水墨滤镜 + 轻阴影）；无图退化为纯文字
+   ================================================================ */
+.announcement-section { margin-bottom: 22px; }
+.ann-header {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 15px; font-weight: 700; color: var(--text);
+    margin-bottom: 12px;
+}
+.ann-header-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 9px;
+    background: var(--accent-light); color: var(--accent);
+}
+.ann-header-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ann-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.ann-filter-label { font-size: 12px; color: var(--text-muted); }
+.ann-filter-tag {
+    cursor: pointer; padding: 3px 12px; border-radius: 999px;
+    background: var(--accent-light); color: var(--accent);
+    font-size: 12px; font-weight: 500;
+    border: 1px solid transparent; transition: all 0.2s;
+}
+.ann-filter-tag:hover { border-color: var(--accent); }
+.ann-filter-tag.active { background: var(--accent); color: #fff; }
+.ann-list { display: flex; flex-direction: column; gap: 14px; }
+.ann-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px; }
+
+.ann-card {
+    display: flex; align-items: stretch; gap: 0;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+    overflow: hidden; transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: fadeSlideUp 0.4s ease both;
+}
+.ann-card[data-file] { cursor: pointer; }
+.ann-card[data-file]:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--accent); }
+.ann-card-left { flex: 1; min-width: 0; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
+.ann-card-type {
+    align-self: flex-start; display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600;
+}
+.ann-card-type.manual { background: var(--accent-light); color: var(--accent); }
+.ann-card-type.update { background: #fef3c7; color: #b45309; }
+.ann-card-type svg { stroke: currentColor; fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.ann-card-title { font-size: 1.18em; font-weight: 700; color: var(--text); line-height: 1.4; }
+.ann-card-meta { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.82em; color: var(--text-muted); }
+.ann-meta-item { display: inline-flex; align-items: center; }
+.ann-meta-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--accent-light); border-radius: 6px; padding: 3px; margin-right: 5px;
+    color: var(--accent);
+}
+.ann-meta-icon svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ann-card-summary {
+    font-size: 0.92em; color: var(--text-secondary); line-height: 1.7;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ann-card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.ann-card-tag {
+    cursor: pointer; padding: 2px 10px; border-radius: 6px;
+    background: var(--accent-light); color: var(--accent);
+    font-size: 0.78em; font-weight: 500; transition: all 0.2s;
+}
+.ann-card-tag:hover { border: 1px solid var(--accent); padding: 1px 9px; }
+.ann-card-media {
+    width: 220px; flex-shrink: 0; position: relative; overflow: hidden;
+    border-left: 1px solid var(--border);
+}
+.ann-card-cover {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+    filter: grayscale(1) contrast(1.05) brightness(1.02);
+    transition: filter 0.4s ease, transform 0.4s ease;
+}
+.ann-card[data-file]:hover .ann-card-cover { transform: scale(1.04); }
+.ann-card-cover-ink {
+    position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 24px rgba(0,0,0,0.18);
+}
+@media (max-width: 640px) {
+    .ann-card-media { width: 120px; }
+    .ann-card-left { padding: 16px; }
+    .ann-card-title { font-size: 1.05em; }
+}
+@media (max-width: 480px) {
+    .ann-card-media { width: 96px; }
+    .ann-card-summary { -webkit-line-clamp: 2; }
+}
+
+/* 背景玻璃拟态：公告卡片与 doc-card 同源材质 */
+body.bg-blur .ann-card {
+    backdrop-filter: blur(var(--bg-blur-level, 0px));
+    -webkit-backdrop-filter: blur(var(--bg-blur-level, 0px));
+    background: rgba(255, 255, 255, var(--bg-card-opacity, 0.8));
+}
+[data-theme="dark"] body.bg-blur .ann-card { background: rgba(22, 27, 34, var(--bg-card-opacity, 0.8)); }
+[data-theme="dark"] body.bg-blur .ann-card:hover { background: rgba(22, 27, 34, calc(var(--bg-card-opacity, 0.8) + 0.05)); }
+body:not(.bg-blur) .ann-card { background: rgba(255, 255, 255, var(--bg-card-opacity, 1)); }
+[data-theme="dark"] body:not(.bg-blur) .ann-card { background: rgba(22, 27, 34, var(--bg-card-opacity, 1)); }
+[data-theme="dark"] .ann-card { border-color: #30363d; background: #161b22; }
+[data-theme="dark"] .ann-card:hover { border-color: hsl(var(--accent-hue), var(--accent-sat), 40%); }
+[data-theme="dark"] .ann-card-type.update { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+[data-theme="dark"] .ann-header-icon { background: rgba(255, 255, 255, 0.08); }
+[data-theme="dark"] .ann-card-cover-ink { box-shadow: inset 0 0 24px rgba(0,0,0,0.35); }

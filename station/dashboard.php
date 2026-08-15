@@ -35,9 +35,30 @@ $siteTitle = $config['site_title'] ?? 'You Markdown';
 $currentUser = $_SESSION['cmt_user'] ?? [];
 $myId = $currentUser['id'] ?? '';
 $msg = $_GET['msg'] ?? '';
-// v2.6.0 起 tab 结构（authors 写作者管理 / background 网站背景 / music 音乐设置 / banlog 封禁日志只读）；v2.6.3 新增 profile 个人信息
+// v2.6.0 起 tab 结构（authors 写作者管理 / background 网站背景 / music 音乐设置 / banlog 封禁日志只读）；v2.6.3 新增 profile 个人信息；v3.1.6 新增 announce 公告管理
 $tab = $_GET['tab'] ?? 'authors';
-if (!in_array($tab, ['authors', 'background', 'music', 'banlog', 'profile'], true)) $tab = 'authors';
+if (!in_array($tab, ['authors', 'background', 'music', 'banlog', 'profile', 'announce'], true)) $tab = 'authors';
+
+// v3.1.6：文章列表（公告选择关联文章用：读 META title / 一级标题 / 文件名）
+function stArticleOptions() {
+    $opts = [];
+    if (!is_dir(__DIR__ . '/../data/articles')) return $opts;
+    foreach (glob(__DIR__ . '/../data/articles/*.md') as $af) {
+        $fn = basename($af);
+        if (strpos($fn, '.') === 0) continue;
+        $title = preg_replace('/\.md$/i', '', $fn);
+        $raw = @file_get_contents($af);
+        if ($raw && preg_match('/<!--META(.*?)-->/s', $raw, $am)) {
+            $meta = json_decode(trim($am[1]), true);
+            if (!empty($meta['title'])) $title = $meta['title'];
+        }
+        if (!$raw || !preg_match('/<!--META(.*?)-->/s', $raw)) {
+            if (preg_match('/^#\s+(.+)/m', $raw, $tm)) $title = trim($tm[1]);
+        }
+        $opts[$fn] = $title;
+    }
+    return $opts;
+}
 
 // 站长只能管理自己的写作者
 $myAuthors = array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_AUTHOR && ($u['station_id'] ?? '') === $myId);
@@ -282,6 +303,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         } else {
             $msg = 'avatar_fail';
         }
+    } elseif (isset($_POST['announce_action'])) {
+        // v3.1.6：公告管理（站长全权：添加/编辑/删除/排序，含更新公告）。内容管理操作，CSRF 校验 + 审计，无需挑战码。
+        $annAct = $_POST['announce_action'];
+        if ($annAct === 'add') {
+            $aType = ($_POST['a_type'] ?? '') === 'update' ? 'update' : 'manual';
+            $aArticle = trim($_POST['a_article'] ?? '');
+            $aTitle = trim($_POST['a_title'] ?? '');
+            $aSummary = trim($_POST['a_summary'] ?? '');
+            if ($aTitle === '') $aTitle = $aArticle !== '' ? $aArticle : '公告';
+            if ($aArticle !== '') { // 校验文章存在
+                if (!is_file(__DIR__ . '/../data/articles/' . basename($aArticle))) $aArticle = '';
+            }
+            addAnnouncement($aType, $aArticle !== '' ? basename($aArticle) : '', $myId, $aTitle, $aSummary);
+            auditLog('announce_add', $aTitle, "站长新增公告: {$aTitle}" . ($aArticle !== '' ? "（关联文章 {$aArticle}）" : ''));
+            $msg = 'announce_added';
+        } elseif ($annAct === 'update') {
+            $aId = $_POST['a_id'] ?? '';
+            $aArticle = trim($_POST['a_article'] ?? '');
+            $aTitle = trim($_POST['a_title'] ?? '');
+            $aSummary = trim($_POST['a_summary'] ?? '');
+            $ex = getAnnouncement($aId);
+            if ($ex) {
+                if ($aArticle !== '' && !is_file(__DIR__ . '/../data/articles/' . basename($aArticle))) $aArticle = '';
+                if ($aTitle === '') $aTitle = $ex['title'] ?? '公告';
+                updateAnnouncement($aId, $aArticle !== '' ? basename($aArticle) : '', $aTitle, $aSummary);
+                auditLog('announce_update', $aId, "站长编辑公告: {$aTitle}");
+                $msg = 'announce_updated';
+            } else {
+                $msg = 'announce_not_found';
+            }
+        } elseif ($annAct === 'delete') {
+            $aId = $_POST['a_id'] ?? '';
+            $ex = getAnnouncement($aId);
+            if ($ex) {
+                deleteAnnouncement($aId);
+                auditLog('announce_delete', $aId, "站长删除公告: {$ex['title']}");
+                $msg = 'announce_deleted';
+            } else {
+                $msg = 'announce_not_found';
+            }
+        } elseif ($annAct === 'reorder') {
+            // 上移/下移：读取当前列表，交换相邻两条的 ord
+            $aId = $_POST['a_id'] ?? '';
+            $dir = $_POST['dir'] ?? 'up';
+            $list = getAnnouncements();
+            $ids = array_column($list, 'id');
+            $idx = array_search($aId, $ids, true);
+            if ($idx !== false) {
+                $swap = $dir === 'up' ? $idx - 1 : $idx + 1;
+                if ($swap >= 0 && $swap < count($ids)) {
+                    $tmp = $ids[$idx]; $ids[$idx] = $ids[$swap]; $ids[$swap] = $tmp;
+                    reorderAnnouncements($ids);
+                    auditLog('announce_reorder', $aId, '站长调整公告排序');
+                }
+            }
+            $msg = 'announce_reordered';
+        }
     }
     header("Location: dashboard.php?msg={$msg}&tab={$tab}");
     exit;
@@ -337,6 +415,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <a href="dashboard.php?tab=banlog" class="sidebar-link <?= $tab==='banlog'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             封禁日志（只读）
+        </a>
+        <a href="dashboard.php?tab=announce" class="sidebar-link <?= $tab==='announce'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            公告管理
         </a>
         <a href="dashboard.php?tab=profile" class="sidebar-link <?= $tab==='profile'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -750,6 +832,105 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <?php endif; ?>
     </div>
 
+    <?php elseif ($tab === 'announce'): ?>
+    <?php
+    // v3.1.6：公告管理（站长全权：添加/编辑/删除/排序；type=update 为升级自动生成的更新公告，站长可删可排序）
+    $annList = getAnnouncements();
+    $annArticleOpts = stArticleOptions();
+    ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            公告管理
+        </div>
+        <div class="page-subtitle">发布首页公告卡片（选择文章或填写标题摘要；排序即首页显示顺序）</div>
+    </div>
+    <?php if ($msg === 'announce_added'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>公告已发布</div><?php endif; ?>
+    <?php if ($msg === 'announce_updated'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>公告已更新</div><?php endif; ?>
+    <?php if ($msg === 'announce_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>公告已删除</div><?php endif; ?>
+    <?php if ($msg === 'announce_reordered'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>排序已更新</div><?php endif; ?>
+    <?php if ($msg === 'announce_not_found'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>公告不存在或已被删除</div><?php endif; ?>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            发布新公告
+        </div>
+        <form method="post" id="announceAddForm">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="announce_action" value="add">
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">类型</label>
+                    <select class="form-input" name="a_type" id="aTypeSel">
+                        <option value="manual" selected>手动公告</option>
+                        <option value="update">更新公告</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">关联文章（可选，用于封面图/标签/跳转详情）</label>
+                    <select class="form-input" name="a_article" id="aArticleSel">
+                        <option value="">— 不关联文章（纯文字公告） —</option>
+                        <?php foreach ($annArticleOpts as $afn => $atitle): ?>
+                        <option value="<?= htmlspecialchars($afn) ?>"><?= htmlspecialchars($atitle) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">公告标题</label>
+                <input class="form-input" name="a_title" id="aTitleInput" maxlength="120" placeholder="公告标题（留空则取文章标题）">
+            </div>
+            <div class="form-group">
+                <label class="form-label">公告内容 / 摘要</label>
+                <textarea class="form-input" name="a_summary" id="aSummaryInput" rows="3" maxlength="2000" placeholder="填写公告内容（纯文字公告时展示；关联文章时可留空则展示文章摘要）"></textarea>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px">
+                <button type="submit" class="btn btn-primary">发布公告</button>
+            </div>
+        </form>
+    </div>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            公告列表（<?= count($annList) ?> 条）
+        </div>
+        <?php if (empty($annList)): ?>
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <p>暂无公告，在上方发布第一条</p>
+        </div>
+        <?php else: ?>
+        <div class="table-wrap">
+        <table>
+            <tr><th style="width:64px">排序</th><th>标题</th><th>类型</th><th>关联文章</th><th>日期</th><th style="width:150px">操作</th></tr>
+            <?php foreach ($annList as $ai => $an): ?>
+            <tr>
+                <td>
+                    <div style="display:flex;gap:2px">
+                        <form method="post" style="display:inline"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>"><input type="hidden" name="announce_action" value="reorder"><input type="hidden" name="a_id" value="<?= htmlspecialchars($an['id']) ?>"><input type="hidden" name="dir" value="up"><button type="submit" class="btn btn-sm btn-outline" title="上移" <?= $ai === 0 ? 'disabled' : '' ?>>↑</button></form>
+                        <form method="post" style="display:inline"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>"><input type="hidden" name="announce_action" value="reorder"><input type="hidden" name="a_id" value="<?= htmlspecialchars($an['id']) ?>"><input type="hidden" name="dir" value="down"><button type="submit" class="btn btn-sm btn-outline" title="下移" <?= $ai === count($annList) - 1 ? 'disabled' : '' ?>>↓</button></form>
+                    </div>
+                </td>
+                <td><div style="font-weight:600"><?= htmlspecialchars($an['title']) ?></div><div style="font-size:12px;color:var(--text-muted);max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><?= htmlspecialchars($an['summary'] ?? '') ?></div></td>
+                <td><?= ($an['type'] === 'update') ? '<span class="ban-tag type-login">更新</span>' : '<span class="ban-tag type-comment">公告</span>' ?></td>
+                <td style="color:var(--text-muted);font-size:0.85em"><?= $an['article'] !== '' ? htmlspecialchars($an['article']) : '—' ?></td>
+                <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($an['date']) ?></td>
+                <td>
+                    <button type="button" class="btn-link" onclick="stEditAnnounce(this)" data-id="<?= htmlspecialchars($an['id']) ?>" data-type="<?= htmlspecialchars($an['type']) ?>" data-article="<?= htmlspecialchars($an['article']) ?>" data-title="<?= htmlspecialchars($an['title']) ?>" data-summary="<?= htmlspecialchars($an['summary']) ?>">编辑</button>
+                    <form method="post" style="display:inline" onsubmit="return confirm('确定删除该公告？')">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+                        <input type="hidden" name="announce_action" value="delete">
+                        <input type="hidden" name="a_id" value="<?= htmlspecialchars($an['id']) ?>">
+                        <button type="submit" class="btn-link danger">删除</button>
+                    </form>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        </div>
+        <?php endif; ?>
+    </div>
+
     <?php elseif ($tab === 'profile'): ?>
     <div class="page-header">
         <div class="page-title">
@@ -874,6 +1055,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     </div>
 </div>
 
+<!-- v3.1.6：公告编辑弹窗（骨架放 tab 链外，所有 tab 可用） -->
+<div class="modal-overlay" id="stAnnounceModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box">
+        <div class="modal-head">
+            <div class="modal-title">编辑公告</div>
+            <button class="modal-close" onclick="document.getElementById('stAnnounceModal').style.display='none'">&times;</button>
+        </div>
+        <form method="post" id="stAnnounceForm">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="announce_action" value="update">
+            <input type="hidden" name="a_id" id="stAnnEditId">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">关联文章（可选）</label>
+                    <select class="form-input" name="a_article" id="stAnnEditArticle">
+                        <option value="">— 不关联文章（纯文字公告） —</option>
+                        <?php foreach (stArticleOptions() as $afn => $atitle): ?>
+                        <option value="<?= htmlspecialchars($afn) ?>"><?= htmlspecialchars($atitle) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">公告标题</label>
+                    <input class="form-input" name="a_title" id="stAnnEditTitle" maxlength="120">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">公告内容 / 摘要</label>
+                    <textarea class="form-input" name="a_summary" id="stAnnEditSummary" rows="3" maxlength="2000"></textarea>
+                </div>
+            </div>
+            <div class="modal-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:12px 20px">
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('stAnnounceModal').style.display='none'">取消</button>
+                <button type="submit" class="btn btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
 function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
@@ -948,6 +1167,14 @@ function stOpenDetail(btn) {
     document.getElementById('stDetailTitle').textContent = '写作者参数 - ' + (d.nickname || d.qq || '');
     document.getElementById('stDetailBody').innerHTML = h;
     document.getElementById('stDetailModal').style.display = 'flex';
+}
+// v3.1.6：公告编辑弹窗（从行内 data-* 填充表单）
+function stEditAnnounce(btn) {
+    document.getElementById('stAnnEditId').value = btn.getAttribute('data-id') || '';
+    document.getElementById('stAnnEditArticle').value = btn.getAttribute('data-article') || '';
+    document.getElementById('stAnnEditTitle').value = btn.getAttribute('data-title') || '';
+    document.getElementById('stAnnEditSummary').value = btn.getAttribute('data-summary') || '';
+    document.getElementById('stAnnounceModal').style.display = 'flex';
 }
 </script>
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])): ?>

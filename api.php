@@ -271,6 +271,38 @@ if ($action === 'avatar_upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     jsonOut(['success' => true, 'avatar' => $res]);
 }
 
+// ===== v3.1.6：文章图片上传（站长/写作者 + CSRF；multipart/form-data，字段名 image；≤5MB） =====
+if ($action === 'article_image_upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    // 写作者与站长均可上传文章配图
+    if (!checkRole(ROLE_AUTHOR)) jsonOut(['success' => false, 'error' => '无权限'], 403);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $file = $_FILES['image'] ?? null;
+    if (!$file || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        jsonOut(['success' => false, 'error' => '未收到文件'], 400);
+    }
+    if ($file['size'] <= 0 || $file['size'] > 5 * 1024 * 1024) {
+        jsonOut(['success' => false, 'error' => '图片大小需在 5MB 以内'], 400);
+    }
+    // MIME 白名单：getimagesize 实测 + 扩展名双重校验（防伪装文件）
+    $extMap = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif', 'webp' => 'image/webp'];
+    $info = @getimagesize($file['tmp_name']);
+    if (!$info || !in_array($info['mime'], array_values($extMap), true)) {
+        jsonOut(['success' => false, 'error' => '仅支持 JPG/PNG/GIF/WebP 图片'], 400);
+    }
+    $origExt = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if (!isset($extMap[$origExt])) $origExt = array_search($info['mime'], $extMap) ?: 'png';
+    // 内容必须为图片（getimagesize 返回宽高 > 0）
+    if ($info[0] <= 0 || $info[1] <= 0) jsonOut(['success' => false, 'error' => '图片文件无效'], 400);
+    $dir = __DIR__ . '/data/images/';
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    $fname = date('Ymd') . '_' . bin2hex(random_bytes(8)) . '.' . $origExt;
+    if (!move_uploaded_file($file['tmp_name'], $dir . $fname)) {
+        jsonOut(['success' => false, 'error' => '保存失败，请检查 data/images/ 目录权限'], 500);
+    }
+    auditLog('article_image_upload', $fname, '上传文章图片');
+    jsonOut(['success' => true, 'url' => 'data/images/' . $fname]);
+}
+
 if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $siteCfg = loadSiteConfig();
     if (empty($siteCfg['registration_enabled'])) {

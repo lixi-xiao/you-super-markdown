@@ -2036,6 +2036,16 @@ td code {
     /* 背景类型卡 3→2 列 */
     .bg-type-grid { grid-template-columns: repeat(2, 1fr); }
 
+    /* v3.2.1：公告可视范围三选一卡在手机端改为单列紧凑横向布局（避免 3 卡 2 列突兀） */
+    .ann-vis-grid { grid-template-columns: 1fr; gap: 8px; }
+    .ann-vis-grid .bg-type-card {
+        display: flex; align-items: center; gap: 10px;
+        text-align: left; padding: 10px 12px;
+    }
+    .ann-vis-grid .bg-type-card .type-icon { margin: 0; flex: 0 0 34px; width: 34px; height: 34px; }
+    .ann-vis-grid .bg-type-card .type-name { font-size: 0.88em; }
+    .ann-vis-grid .bg-type-card .type-desc { font-size: 0.74em; color: var(--text-muted); margin-top: 2px; }
+
     /* 行内操作按钮组不折行挤压 */
     .ban-item-actions, .modal-actions { gap: 8px; }
 }

@@ -1152,7 +1152,10 @@ case "${1:-}" in
             \$cfg = loadSiteConfig();
             \$to = \$cfg['admin_email'] ?? '';
             if (\$to === '') { echo 'NO_ADMIN_EMAIL'; exit(0); }
-            [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown] SMTP 授权码已更新', 'SMTP 授权码已更新成功。若收到此邮件说明新的授权码配置正确，安全告警可正常发送。');
+            \$site = \$cfg['site_title'] ?? 'You Super Markdown';
+            \$msg = 'SMTP 授权码已更新成功。若收到此邮件说明新的授权码配置正确，安全告警可正常发送。';
+            \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')]);
+            [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown] SMTP 授权码已更新', \$msg, \$html);
             echo \$ok ? 'MAIL_OK' : ('MAIL_FAIL: ' . \$err);
         " 2>/dev/null)
         case "$TEST_RESULT" in

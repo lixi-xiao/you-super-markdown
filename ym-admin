@@ -325,14 +325,17 @@ case "${1:-}" in
         fi
         # ③ 写审计日志（不记录授权码明文）
         php -r "require_once '$WEB_ROOT/utils.php'; auditLog('smtp_pass_update', 'smtp', 'CLI 更新 SMTP 授权码（密钥不落盘，未记录明文）');" 2>/dev/null || true
-        # ④ 自动发送测试邮件验证新授权码（注入 YM_SMTP_PASS 走新值）
+        # ④ 自动发送测试邮件验证新授权码（注入 YM_SMTP_PASS 走新值；复用统一 HTML 邮件模板）
         echo "[3/3] 发送测试邮件..."
         TEST_RESULT=$(YM_SMTP_PASS="$SMTP_PASS" php -r "
             require_once '$WEB_ROOT/utils.php';
             \$cfg = loadSiteConfig();
             \$to = \$cfg['admin_email'] ?? '';
             if (\$to === '') { echo 'NO_ADMIN_EMAIL'; exit(0); }
-            [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown] SMTP 授权码已更新', 'SMTP 授权码已更新成功。若收到此邮件说明新的授权码配置正确，安全告警可正常发送。');
+            \$site = \$cfg['site_title'] ?? 'You Super Markdown';
+            \$msg = 'SMTP 授权码已更新成功。若收到此邮件说明新的授权码配置正确，安全告警可正常发送。';
+            \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')]);
+            [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown] SMTP 授权码已更新', \$msg, \$html);
             echo \$ok ? 'MAIL_OK' : ('MAIL_FAIL: ' . \$err);
         " 2>/dev/null)
         case "$TEST_RESULT" in

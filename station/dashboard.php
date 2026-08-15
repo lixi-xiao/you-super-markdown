@@ -308,7 +308,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         $annAct = $_POST['announce_action'];
         if ($annAct === 'add') {
             $aType = ($_POST['a_type'] ?? '') === 'update' ? 'update' : 'manual';
-            $aArticle = trim($_POST['a_article'] ?? '');
+            // v3.2.4：取消「关联文章」功能——站长发布的公告不再关联文章（纯内容展示，不跳文章、不显示评论）
+            $aArticle = '';
             $aTitle = trim($_POST['a_title'] ?? '');
             $aSummary = trim($_POST['a_summary'] ?? '');
             $aBody = trim($_POST['a_body'] ?? '');
@@ -318,29 +319,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 $aSummary = trim(mb_substr($aSummary, 0, 200));
                 if ($aSummary === '') $aSummary = '（公告正文，点击查看）';
             }
-            if ($aTitle === '') $aTitle = $aArticle !== '' ? $aArticle : '公告';
-            if ($aArticle !== '') { // 校验文章存在
-                if (!is_file(__DIR__ . '/../data/articles/' . basename($aArticle))) $aArticle = '';
-            }
-            addAnnouncement($aType, $aArticle !== '' ? basename($aArticle) : '', $myId, $aTitle, $aSummary, $aBody);
-            auditLog('announce_add', $aTitle, "站长新增公告: {$aTitle}" . ($aArticle !== '' ? "（关联文章 {$aArticle}）" : ''));
+            if ($aTitle === '') $aTitle = '公告';
+            addAnnouncement($aType, '', $myId, $aTitle, $aSummary, $aBody);
+            auditLog('announce_add', $aTitle, "站长新增公告: {$aTitle}");
             $msg = 'announce_added';
         } elseif ($annAct === 'update') {
             $aId = $_POST['a_id'] ?? '';
-            $aArticle = trim($_POST['a_article'] ?? '');
+            // v3.2.4：编辑公告同样取消「关联文章」（系统注入的更新公告 article 保持不变）
             $aTitle = trim($_POST['a_title'] ?? '');
             $aSummary = trim($_POST['a_summary'] ?? '');
             $aBody = trim($_POST['a_body'] ?? '');
             $ex = getAnnouncement($aId);
             if ($ex) {
-                if ($aArticle !== '' && !is_file(__DIR__ . '/../data/articles/' . basename($aArticle))) $aArticle = '';
+                $aArticle = $ex['article'] ?? '';
+                if ($ex['type'] !== 'update') $aArticle = ''; // 手动公告不保留关联文章
                 if ($aTitle === '') $aTitle = $ex['title'] ?? '公告';
                 if ($aSummary === '' && $aBody !== '') {
                     $aSummary = preg_replace('/[#>*_`\[\]()!-]/u', '', $aBody);
                     $aSummary = trim(mb_substr($aSummary, 0, 200));
                     if ($aSummary === '') $aSummary = '（公告正文，点击查看）';
                 }
-                updateAnnouncement($aId, $aArticle !== '' ? basename($aArticle) : '', $aTitle, $aSummary, $aBody);
+                updateAnnouncement($aId, $aArticle, $aTitle, $aSummary, $aBody);
                 auditLog('announce_update', $aId, "站长编辑公告: {$aTitle}");
                 $msg = 'announce_updated';
             } else {
@@ -901,27 +900,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <form method="post" id="announceAddForm">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="announce_action" value="add">
-            <div class="form-row">
-                <div class="form-group">
-                    <label class="form-label">类型</label>
-                    <select class="form-input" name="a_type" id="aTypeSel">
-                        <option value="manual" selected>手动公告</option>
-                        <option value="update">更新公告</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">关联文章（可选，用于封面图/标签/跳转详情）</label>
-                    <select class="form-input" name="a_article" id="aArticleSel">
-                        <option value="">— 不关联文章（纯文字公告） —</option>
-                        <?php foreach ($annArticleOpts as $afn => $atitle): ?>
-                        <option value="<?= htmlspecialchars($afn) ?>"><?= htmlspecialchars($atitle) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
+            <div class="form-group">
+                <label class="form-label">类型</label>
+                <select class="form-input" name="a_type" id="aTypeSel" style="max-width:260px">
+                    <option value="manual" selected>手动公告</option>
+                    <option value="update">更新公告</option>
+                </select>
             </div>
+            <!-- v3.2.4：取消「关联文章」功能——公告为独立内容，不再关联文章 -->
             <div class="form-group">
                 <label class="form-label">公告标题</label>
-                <input class="form-input" name="a_title" id="aTitleInput" maxlength="120" placeholder="公告标题（留空则取文章标题）">
+                <input class="form-input" name="a_title" id="aTitleInput" maxlength="120" placeholder="公告标题">
             </div>
             <!-- v3.2.3：.md 文件导入正文（小白友好：直接把写好的公告文档传上来，自动填正文与摘要） -->
             <div class="form-group">
@@ -1120,15 +1109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <input type="hidden" name="announce_action" value="update">
             <input type="hidden" name="a_id" id="stAnnEditId">
             <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">关联文章（可选）</label>
-                    <select class="form-input" name="a_article" id="stAnnEditArticle">
-                        <option value="">— 不关联文章（纯文字公告） —</option>
-                        <?php foreach (stArticleOptions() as $afn => $atitle): ?>
-                        <option value="<?= htmlspecialchars($afn) ?>"><?= htmlspecialchars($atitle) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
+                <!-- v3.2.4：取消「关联文章」——编辑公告不再提供文章关联选项 -->
                 <div class="form-group">
                     <label class="form-label">公告标题</label>
                     <input class="form-input" name="a_title" id="stAnnEditTitle" maxlength="120">
@@ -1231,9 +1212,9 @@ function stOpenDetail(btn) {
     document.getElementById('stDetailModal').style.display = 'flex';
 }
 // v3.1.6：公告编辑弹窗（从行内 data-* 填充表单）
+// v3.2.4：取消「关联文章」——不再填充关联文章下拉
 function stEditAnnounce(btn) {
     document.getElementById('stAnnEditId').value = btn.getAttribute('data-id') || '';
-    document.getElementById('stAnnEditArticle').value = btn.getAttribute('data-article') || '';
     document.getElementById('stAnnEditTitle').value = btn.getAttribute('data-title') || '';
     document.getElementById('stAnnEditSummary').value = btn.getAttribute('data-summary') || '';
     document.getElementById('stAnnEditBody').value = btn.getAttribute('data-body') || '';

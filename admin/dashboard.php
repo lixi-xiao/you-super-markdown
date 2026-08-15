@@ -176,8 +176,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'update_status') {
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'update_history') {
     header('Content-Type: application/json; charset=utf-8');
     $uhQ = trim((string)($_GET['q'] ?? ''));
-    $uhPerPage = (int)($_GET['per_page'] ?? 20);
-    if (!in_array($uhPerPage, [10, 20, 50, 100], true)) $uhPerPage = 20;
+    $uhPerPage = (int)($_GET['per_page'] ?? 10);
+    if (!in_array($uhPerPage, [10, 20, 50, 100], true)) $uhPerPage = 10;
     $uhData = paginateList(getUpdateHistory(100), ['from_version', 'to_version', 'completed_at', 'status'], $uhQ, (int)($_GET['page'] ?? 1), $uhPerPage);
     echo json_encode([
         'history' => $uhData['items'],
@@ -773,69 +773,8 @@ $banMsg = $_GET['bmsg'] ?? '';
     $authorCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_AUTHOR));
     $userCount = count(array_filter($users, fn($u) => ($u['role'] ?? 'user') === ROLE_USER));
 
-    // v2.6.6：日志分页控件渲染（GET 无副作用，无需 CSRF）
-    // $p: paginateList() 结果；$pageParam: 页码参数名；$extra: 需保持的额外查询参数（如 tab/q，不含分页参数）
-    // $perPageParam: 每页条数参数名。分页栏 = 总数+每页条数选择 + 页码按钮 + 页码跳转（每页自定义 v2.6.6 同次更新）
-    function renderPager(array $p, string $pageParam, array $extra = [], string $perPageParam = 'per_page'): string {
-        $page = $p['page'];
-        $pages = $p['pages'];
-        $perPage = (int)($p['per_page'] ?? 50);
-        $enc = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
-        // 页码按钮 URL 模板：固定 per_page，page 用 __PAGE__ 占位
-        $urlTpl = 'dashboard.php?' . http_build_query(array_merge($extra, [$perPageParam => $perPage, $pageParam => '__PAGE__']));
-        $link = fn($pg) => $enc(str_replace('__PAGE__', (string)$pg, $urlTpl));
-        // 每页条数切换 URL 模板：per_page 用 __PP__ 占位，页码回第 1 页
-        $ppTpl = 'dashboard.php?' . http_build_query(array_merge($extra, [$perPageParam => '__PP__', $pageParam => 1]));
-        // 页码跳转 URL 模板：page 用 __PG__ 占位
-        $pgTpl = 'dashboard.php?' . http_build_query(array_merge($extra, [$perPageParam => $perPage, $pageParam => '__PG__']));
-        // 单页时仅保留「总数 + 每页条数选择器」，隐藏页码按钮与跳转区（避免分页栏整体消失）
-        $showNav = $pages > 1;
-        // 页码序列：页数少全显示，多则首末+当前±1+省略号
-        $seq = [];
-        if ($pages <= 7) {
-            $seq = range(1, $pages);
-        } else {
-            $seq = [1];
-            for ($i = max(2, $page - 1); $i <= min($pages - 1, $page + 1); $i++) $seq[] = $i;
-            $seq[] = $pages;
-            $seq = array_values(array_unique($seq));
-        }
-        $html = '<nav class="pagination">';
-        // 左：总数 + 每页条数（始终显示）
-        $html .= '<div class="pagination-info"><span class="page-info">共 <strong>' . $p['total'] . '</strong> 条</span>'
-               . '<label class="per-page">每页 <select data-pp-url="' . $enc($ppTpl) . '" onchange="if(this.dataset.ppUrl)location.href=this.dataset.ppUrl.replace(\'__PP__\',this.value)">';
-        foreach ([10, 20, 50, 100] as $opt) {
-            $html .= '<option value="' . $opt . '"' . ($opt === $perPage ? ' selected' : '') . '>' . $opt . '</option>';
-        }
-        $html .= '</select> 条</label></div>';
-        // 中：页码按钮（仅多页时显示）
-        if ($showNav) {
-            $html .= '<div class="pagination-btns">';
-            $html .= '<a class="page-btn" href="' . $link(1) . '" title="首页">« 首页</a>';
-            $html .= '<a class="page-btn" href="' . $link(max(1, $page - 1)) . '" title="上一页">‹ 上一页</a>';
-            $prev = 0;
-            foreach ($seq as $pg) {
-                if ($pg - $prev > 1) $html .= '<span class="page-btn page-ellipsis">…</span>';
-                $html .= ($pg === $page)
-                    ? '<span class="page-btn current">' . $pg . '</span>'
-                    : '<a class="page-btn" href="' . $link($pg) . '">' . $pg . '</a>';
-                $prev = $pg;
-            }
-            $html .= '<a class="page-btn" href="' . $link(min($pages, $page + 1)) . '" title="下一页">下一页 ›</a>';
-            $html .= '<a class="page-btn" href="' . $link($pages) . '" title="末页">末页 »</a>';
-            $html .= '</div>';
-        }
-        // 右：页码信息 + 跳转（仅多页时显示）
-        if ($showNav) {
-            $html .= '<div class="pagination-jump"><span class="page-info">第 ' . $page . ' / ' . $pages . ' 页</span>'
-                   . '<input type="number" class="page-jump" min="1" max="' . $pages . '" placeholder="页码" data-pg-url="' . $enc($pgTpl) . '" '
-                   . 'onchange="if(this.value&&this.dataset.pgUrl)location.href=this.dataset.pgUrl.replace(\'__PG__\',this.value)" '
-                   . 'onkeydown="if(event.key===\'Enter\')this.onchange()">'
-                   . '<button type="button" class="page-btn" onclick="var i=this.previousElementSibling;if(i&&i.value&&i.dataset.pgUrl)location.href=i.dataset.pgUrl.replace(\'__PG__\',i.value)">跳转</button></div>';
-        }
-        return $html . '</nav>';
-    }
-    ?>
+    // v2.6.6：日志分页控件渲染（v3.3.9 起 renderPager 抽为 utils.php 公用函数，超管/站长后台复用；GET 无副作用，无需 CSRF）
+    ?> 
 
     <?php if ($tab === 'overview'): ?>
     <div class="page-header">
@@ -1118,8 +1057,8 @@ $banMsg = $_GET['bmsg'] ?? '';
     </div>
     <?php
     $q = trim((string)($_GET['q'] ?? ''));
-    $perPage = (int)($_GET['per_page'] ?? 50);
-    if (!in_array($perPage, [10, 20, 50, 100], true)) $perPage = 50;
+    $perPage = (int)($_GET['per_page'] ?? 10);
+    if (!in_array($perPage, [10, 20, 50, 100], true)) $perPage = 10;
     $pageData = paginateList(loadAuditLogs(), ['ts', 'user_name', 'user_id', 'role', 'action', 'target', 'detail', 'ip'], $q, (int)($_GET['page'] ?? 1), $perPage);
     $chainResult = verifyAuditChain();
     ?>
@@ -1476,12 +1415,12 @@ $banMsg = $_GET['bmsg'] ?? '';
     <!-- 越权访问日志 -->
     <?php
     // v2.6.6：三个日志区域的每页条数需互相保留（切换任一区域时其它区域不回退默认值）
-    $unauthPerPage = (int)($_GET['unauth_per_page'] ?? 50);
-    $loginPerPage = (int)($_GET['login_per_page'] ?? 50);
-    $auditPerPage = (int)($_GET['audit_per_page'] ?? 50);
-    if (!in_array($unauthPerPage, [10, 20, 50, 100], true)) $unauthPerPage = 50;
-    if (!in_array($loginPerPage, [10, 20, 50, 100], true)) $loginPerPage = 50;
-    if (!in_array($auditPerPage, [10, 20, 50, 100], true)) $auditPerPage = 50;
+    $unauthPerPage = (int)($_GET['unauth_per_page'] ?? 10);
+    $loginPerPage = (int)($_GET['login_per_page'] ?? 10);
+    $auditPerPage = (int)($_GET['audit_per_page'] ?? 10);
+    if (!in_array($unauthPerPage, [10, 20, 50, 100], true)) $unauthPerPage = 10;
+    if (!in_array($loginPerPage, [10, 20, 50, 100], true)) $loginPerPage = 10;
+    if (!in_array($auditPerPage, [10, 20, 50, 100], true)) $auditPerPage = 10;
     $unauthQ = trim((string)($_GET['unauth_q'] ?? ''));
     $unauthData = paginateList(db_all('SELECT * FROM unauthorized ORDER BY time DESC'), ['time', 'ip', 'action', 'user', 'user_id', 'ua'], $unauthQ, (int)($_GET['unauth_page'] ?? 1), $unauthPerPage);
     ?>
@@ -2227,7 +2166,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     });
 
     var backupSearchQ = '';
-    var backupPerPage = 20;
+    var backupPerPage = 10;
     var backupInitPage = 1;
     // v2.6.6 同次更新：初始每页条数/页码/搜索词从 URL 读取，修复"选择每页条数后刷新被重置为 20"的 bug
     (function() {
@@ -2711,10 +2650,10 @@ $banMsg = $_GET['bmsg'] ?? '';
     $verifyMsg = $_GET['msg'] ?? '';
     $codeRows = db_all('SELECT * FROM email_codes ORDER BY created DESC');
     $codePage = max(1, (int)($_GET['vp'] ?? 1));
-    $codesPaged = paginateList($codeRows, ['email', 'purpose', 'code', 'ip'], trim($_GET['vq'] ?? ''), $codePage, 15);
+    $codesPaged = paginateList($codeRows, ['email', 'purpose', 'code', 'ip'], trim($_GET['vq'] ?? ''), $codePage, 10);
     $pendRows = db_all('SELECT * FROM pending_author_creates ORDER BY created DESC');
     $pendPage = max(1, (int)($_GET['pp'] ?? 1));
-    $pendsPaged = paginateList($pendRows, ['email', 'nickname', 'qq', 'status'], trim($_GET['pq'] ?? ''), $pendPage, 15);
+    $pendsPaged = paginateList($pendRows, ['email', 'nickname', 'qq', 'status'], trim($_GET['pq'] ?? ''), $pendPage, 10);
     $purposeLabel = fn($p) => ['register' => '注册', 'author_verify' => '写作者验证', 'author_confirm' => '超管确认'][$p] ?? $p;
     $statusLabel = fn($s) => ['verify_pending' => '等写作者验证', 'pending' => '待超管确认', 'confirmed' => '已确认', 'rejected' => '已拒绝', 'expired' => '已过期'][$s] ?? $s;
     ?>

@@ -761,10 +761,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 
     <?php elseif ($tab === 'banlog'): ?>
     <?php
+    // v3.3.9：封禁/登录/越权三个只读日志列表均支持分页 + 搜索（与超管后台一致，默认每页 10 条）
     $typeLabels = ['register' => '注册', 'comment' => '评论', 'login' => '登录'];
-    $banTypes = loadBansList();
-    $loginLogs = array_reverse(loadLogsList());
-    $unauthLogs = db_all('SELECT * FROM unauthorized ORDER BY time DESC');
+    $allBans = loadBansList();
+    $allLogins = array_reverse(loadLogsList());
+    $allUnauth = db_all('SELECT * FROM unauthorized ORDER BY time DESC');
+    // 封禁列表（搜索 ip/reason）
+    $banQ = trim((string)($_GET['ban_q'] ?? ''));
+    $banPerPage = (int)($_GET['ban_per_page'] ?? 10);
+    if (!in_array($banPerPage, [10, 20, 50, 100], true)) $banPerPage = 10;
+    $banData = paginateList($allBans, ['ip', 'reason'], $banQ, (int)($_GET['ban_page'] ?? 1), $banPerPage);
+    $banTypes = $banData['items'];
+    // 登录日志（搜索 time/ip/action）
+    $loginQ = trim((string)($_GET['login_q'] ?? ''));
+    $loginPerPage = (int)($_GET['login_per_page'] ?? 10);
+    if (!in_array($loginPerPage, [10, 20, 50, 100], true)) $loginPerPage = 10;
+    $loginData = paginateList($allLogins, ['time', 'ip', 'action'], $loginQ, (int)($_GET['login_page'] ?? 1), $loginPerPage);
+    $loginLogs = $loginData['items'];
+    // 越权访问记录（搜索 time/ip/action/user）
+    $unauthQ = trim((string)($_GET['unauth_q'] ?? ''));
+    $unauthPerPage = (int)($_GET['unauth_per_page'] ?? 10);
+    if (!in_array($unauthPerPage, [10, 20, 50, 100], true)) $unauthPerPage = 10;
+    $unauthData = paginateList($allUnauth, ['time', 'ip', 'action', 'user'], $unauthQ, (int)($_GET['unauth_page'] ?? 1), $unauthPerPage);
+    $unauthLogs = $unauthData['items'];
+    // 每页条数/搜索词跨区域互相保留
+    $banExtra = ['tab' => 'banlog', 'login_per_page' => $loginPerPage, 'unauth_per_page' => $unauthPerPage];
+    $loginExtra = ['tab' => 'banlog', 'ban_per_page' => $banPerPage, 'unauth_per_page' => $unauthPerPage];
+    $unauthExtra = ['tab' => 'banlog', 'ban_per_page' => $banPerPage, 'login_per_page' => $loginPerPage];
     ?>
     <div class="page-header">
         <div class="page-title">
@@ -776,12 +799,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-            封禁列表（<?= count($banTypes) ?> 条）
+            封禁列表（共 <?= $banData['total'] ?> 条）
+        </div>
+        <div class="log-toolbar">
+            <form method="get" action="dashboard.php" class="log-toolbar-search">
+                <input type="hidden" name="tab" value="banlog">
+                <input type="text" class="form-input" name="ban_q" value="<?= htmlspecialchars($banQ) ?>" placeholder="搜索 IP/原因..." autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
+                <?php if ($banQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=banlog">清除</a><?php endif; ?>
+            </form>
+            <span class="toolbar-spacer"></span>
+            <?php if ($banQ !== ''): ?><span class="result-count">匹配 <?= $banData['total'] ?> 条</span><?php endif; ?>
         </div>
         <?php if (empty($banTypes)): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-            <p>暂无封禁记录</p>
+            <p><?= $banQ !== '' ? '未找到匹配「' . htmlspecialchars($banQ) . '」的记录' : '暂无封禁记录' ?></p>
         </div>
         <?php else: ?>
         <div class="ban-list">
@@ -802,17 +835,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             </div>
             <?php endforeach; ?>
         </div>
+        <?= renderPager($banData, 'ban_page', $banExtra, 'ban_per_page') ?>
         <?php endif; ?>
     </div>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-            登录日志
+            登录日志（共 <?= $loginData['total'] ?> 条）
+        </div>
+        <div class="log-toolbar">
+            <form method="get" action="dashboard.php" class="log-toolbar-search">
+                <input type="hidden" name="tab" value="banlog">
+                <input type="text" class="form-input" name="login_q" value="<?= htmlspecialchars($loginQ) ?>" placeholder="搜索 时间/IP/操作..." autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
+                <?php if ($loginQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=banlog">清除</a><?php endif; ?>
+            </form>
+            <span class="toolbar-spacer"></span>
+            <?php if ($loginQ !== ''): ?><span class="result-count">匹配 <?= $loginData['total'] ?> 条</span><?php endif; ?>
         </div>
         <?php if (empty($loginLogs)): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-            <p>暂无登录日志</p>
+            <p><?= $loginQ !== '' ? '未找到匹配「' . htmlspecialchars($loginQ) . '」的记录' : '暂无登录日志' ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
@@ -827,17 +871,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <?php endforeach; ?>
         </table>
         </div>
+        <?= renderPager($loginData, 'login_page', $loginExtra, 'login_per_page') ?>
         <?php endif; ?>
     </div>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            越权访问记录
+            越权访问记录（共 <?= $unauthData['total'] ?> 条）
+        </div>
+        <div class="log-toolbar">
+            <form method="get" action="dashboard.php" class="log-toolbar-search">
+                <input type="hidden" name="tab" value="banlog">
+                <input type="text" class="form-input" name="unauth_q" value="<?= htmlspecialchars($unauthQ) ?>" placeholder="搜索 时间/IP/操作/用户..." autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
+                <?php if ($unauthQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=banlog">清除</a><?php endif; ?>
+            </form>
+            <span class="toolbar-spacer"></span>
+            <?php if ($unauthQ !== ''): ?><span class="result-count">匹配 <?= $unauthData['total'] ?> 条</span><?php endif; ?>
         </div>
         <?php if (empty($unauthLogs)): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            <p>暂无越权访问记录</p>
+            <p><?= $unauthQ !== '' ? '未找到匹配「' . htmlspecialchars($unauthQ) . '」的记录' : '暂无越权访问记录' ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
@@ -853,6 +908,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <?php endforeach; ?>
         </table>
         </div>
+        <?= renderPager($unauthData, 'unauth_page', $unauthExtra, 'unauth_per_page') ?>
         <?php endif; ?>
     </div>
 

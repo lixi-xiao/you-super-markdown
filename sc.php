@@ -571,6 +571,8 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                 <button type="button" class="btn btn-primary" id="richSubmitBtn">导入富媒体压缩包</button>
                 <span class="form-hint" id="richStatusHint" style="margin-left:10px"></span>
             </div>
+            <!-- v3.3.1-fix：纯文档（文件/链接/粘贴）通用字段区——富媒体 tab 激活时由 JS 隐藏，避免与富媒体自己的字段重复 -->
+            <div id="docCommonFields">
             <div class="form-group">
                 <label class="form-label">标题（留空则自动提取）</label>
                 <input class="form-input" name="title" placeholder="文档标题">
@@ -608,6 +610,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                 <textarea class="form-input" name="excerpt" style="min-height:56px" placeholder="可选"></textarea>
             </div>
             <button type="submit" class="btn btn-primary">上传文档</button>
+            </div>
         </form>
     </div>
 
@@ -753,13 +756,15 @@ function confirmDelete(fn, dn) {
     document.getElementById('deleteModal').classList.add('active');
 }
 
-// 方法切换
+// 方法切换（v3.3.1-fix：富媒体 tab 激活时隐藏纯文档通用字段区，避免字段重复）
 document.querySelectorAll('.method-tab').forEach(function(b) {
     b.addEventListener('click', function() {
         document.querySelectorAll('.method-tab').forEach(function(x) { x.classList.remove('active'); });
         document.querySelectorAll('.method-panel').forEach(function(x) { x.classList.remove('active'); });
         b.classList.add('active');
         document.querySelector('.method-panel[data-panel="' + b.dataset.method + '"]').classList.add('active');
+        var common = document.getElementById('docCommonFields');
+        if (common) common.style.display = (b.dataset.method === 'rich') ? 'none' : '';
     });
 });
 

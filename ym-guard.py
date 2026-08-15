@@ -10,6 +10,7 @@
 
 import os
 import sys
+import re
 import json
 import glob
 import tarfile
@@ -42,6 +43,10 @@ BACKUP_ARTICLES_DIR = os.path.join(BACKUP_DIR, 'articles')
 BACKUP_CONF = '/opt/you-markdown/backup.conf'
 DB_BACKUP_FILE = os.path.join(BACKUP_DB_DIR, 'ym-db-latest.tar.gz')  # 数据库备份：固定 1 份滚动
 ARTICLES_DIR = os.path.join(WEB_ROOT, 'data', 'articles')
+# v3.3.5：PHP 上传文章成功后写该标记 → 守护进程检测到立即备份文章（写在此处因备份目录 root 锁定不可写）
+UPLOAD_TRIGGER = os.path.join(WEB_ROOT, 'data', '.backup_trigger')
+# 单篇还原去抖间隔（秒）：同一文件还原后 5 分钟内不重复触发
+SINGLE_RESTORE_COOLDOWN = 300
 DEFAULT_BACKUP_CONF = {'DB_BACKUP_INTERVAL_MIN': '30', 'ARTICLE_BACKUP_KEEP': '7', 'MANUAL_BACKUP_KEEP': '5'}
 
 # 核心监控文件列表（相对 WEB_ROOT 的路径）
@@ -481,6 +486,9 @@ def recover_audit():
 
 # === 自动备份 / 恢复 / 清理（2026-08-14 新增） ===
 last_restore_info = ''  # 最近一次自动恢复记录（供后台展示）
+last_upload_backup_info = ''  # v3.3.5：最近一次「上传触发备份」记录
+last_single_restore_info = ''  # v3.3.5：最近一次「单篇篡改还原」记录
+_single_restore_cooldown = {}  # v3.3.5：单篇还原去抖 {文件名: 上次还原时间戳}
 
 def _chattr(path, flag):
     """对目录设置/清除 immutable 标志（chattr +i / -i），失败静默（非关键错误）"""
@@ -491,11 +499,14 @@ def _chattr(path, flag):
 
 
 def load_backup_conf() -> dict:
-    """读取备份配置（/opt/you-markdown/backup.conf），缺失/非法回落默认值"""
+    """读取备份配置（/opt/you-markdown/backup.conf），缺失/非法回落默认值
+    v3.3.5：新增 trigger_backup（上传触发立即备份）与 single_restore（单篇篡改还原）开关"""
     cfg = {
         'interval_min': 30,   # 数据库备份间隔（5~1440 分钟）
         'article_keep': 7,    # 每日文章备份保留份数（1~90）
         'manual_keep': 5,     # 手动整站备份保留份数（1~30）
+        'trigger_backup': True,   # 上传文章后立即备份（v3.3.5）
+        'single_restore': True,   # 单篇篡改还原：hidden + META 异常（v3.3.5）
     }
     try:
         with open(BACKUP_CONF, 'r', encoding='utf-8') as f:
@@ -511,6 +522,10 @@ def load_backup_conf() -> dict:
                     cfg['article_keep'] = int(v)
                 elif k == 'MANUAL_BACKUP_KEEP':
                     cfg['manual_keep'] = int(v)
+                elif k == 'ARTICLE_TRIGGER_BACKUP':   # v3.3.5
+                    cfg['trigger_backup'] = v.strip().lower() in ('1', 'true', 'yes', 'on')
+                elif k == 'ARTICLE_SINGLE_RESTORE':   # v3.3.5
+                    cfg['single_restore'] = v.strip().lower() in ('1', 'true', 'yes', 'on')
     except Exception:
         pass
     # 白名单约束
@@ -546,11 +561,12 @@ def backup_db() -> bool:
 
 
 def backup_articles() -> bool:
-    """每日文章备份：打包 data/articles/ → ym-articles-YYYYMMDD.tar.gz（保留 N 份，超时清除）"""
+    """文章备份：打包 data/articles/ → ym-articles-YYYYMMDD-HHMMSS.tar.gz（保留 N 份，超时清除）
+    v3.3.5：命名从日期改为时间戳——支持一天内多次备份（上传触发），按 article_keep 轮换"""
     if not os.path.isdir(ARTICLES_DIR):
         return False
     os.makedirs(BACKUP_ARTICLES_DIR, exist_ok=True)
-    pkg = os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-' + time.strftime('%Y%m%d') + '.tar.gz')
+    pkg = os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-' + time.strftime('%Y%m%d-%H%M%S') + '.tar.gz')
     _chattr(BACKUP_ARTICLES_DIR, '-i')
     try:
         with tarfile.open(pkg, 'w:gz') as t:
@@ -568,8 +584,104 @@ def backup_articles() -> bool:
             os.remove(f)
         except Exception:
             pass
-    log(f"文章每日备份完成: {pkg}（保留 {keep} 份）")
+    log(f"文章备份完成: {pkg}（保留 {keep} 份）")
     return True
+
+
+# v3.3.5：上传触发备份——PHP 上传文章成功后写 data/.backup_trigger，守护进程检测到立即备份
+def check_upload_trigger():
+    global last_upload_backup_info
+    try:
+        if not load_backup_conf()['trigger_backup']:
+            return  # 超管后台关闭了「上传触发立即备份」
+        if not os.path.exists(UPLOAD_TRIGGER):
+            return
+        log("检测到文章上传触发标记，立即备份文章")
+        if backup_articles():
+            last_upload_backup_info = time.strftime('%Y-%m-%d %H:%M:%S')
+        os.remove(UPLOAD_TRIGGER)
+    except Exception as e:
+        log(f"上传触发备份失败: {e}")
+
+
+def _parse_meta_first_line(content: str):
+    """解析文章首行 META 块：<!--META {...}--> → dict；缺失/JSON 非法/非 dict → None"""
+    try:
+        m = re.search(r'<!--META(.*?)-->', content, re.S)
+        if not m:
+            return None
+        meta = json.loads(m.group(1).strip())
+        return meta if isinstance(meta, dict) else None
+    except Exception:
+        return None
+
+
+def _find_hidden_in_backup(pkg: str, rel_name: str) -> bool:
+    """在备份包中查同名文件，若存在且 META 标记 hidden=true 返回 True（系统文章）"""
+    try:
+        with tarfile.open(pkg, 'r:gz') as t:
+            if rel_name not in t.getnames():
+                return False
+            fobj = t.extractfile(rel_name)
+            if fobj is None:
+                return False
+            head = fobj.read(4096).decode('utf-8', 'replace')
+        meta = _parse_meta_first_line(head)
+        return bool(meta and meta.get('hidden') is True)
+    except Exception:
+        return False
+
+
+# v3.3.5：单篇篡改还原——仅还原「当前 META 无法解析 且 备份中标记 hidden（系统文章）」的单篇。
+# 过滤：正常编辑（sc.php/api.php/ym-admin 注入）总会生成合法 META，解析成功即永不触发；
+# 只有 META 被破坏（攻击者直接改文件/抹掉 META 头）才符合还原条件。
+def restore_single_hidden_articles():
+    global last_single_restore_info
+    if is_update_in_progress():
+        return
+    if not load_backup_conf()['single_restore']:
+        return  # 超管后台关闭了「单篇篡改还原」
+    if not os.path.isdir(ARTICLES_DIR):
+        return
+    backups = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-*.tar.gz')))
+    if not backups:
+        return
+    latest = backups[-1]
+    now = time.time()
+    for name in os.listdir(ARTICLES_DIR):
+        if not name.endswith('.md'):
+            continue
+        fp = os.path.join(ARTICLES_DIR, name)
+        try:
+            with open(fp, 'r', encoding='utf-8', errors='replace') as f:
+                head = f.read(4096)
+        except Exception:
+            continue
+        # 条件 1：当前 META 可解析 → 正常编辑/合法文章，永不触发
+        if _parse_meta_first_line(head) is not None:
+            continue
+        # 条件 2：备份中同名文件必须是 hidden（系统文章），普通文章即使 META 异常也不动（防误伤）
+        if not _find_hidden_in_backup(latest, name):
+            continue
+        # 条件 3：去抖——同一文件 5 分钟内不重复还原
+        if now - _single_restore_cooldown.get(name, 0) < SINGLE_RESTORE_COOLDOWN:
+            continue
+        # 从最新备份还原该单篇
+        try:
+            with tarfile.open(latest, 'r:gz') as t:
+                fobj = t.extractfile(name)
+                if fobj is None:
+                    continue
+                data = fobj.read()
+            with open(fp, 'wb') as f:
+                f.write(data)
+            _single_restore_cooldown[name] = now
+            last_single_restore_info = f"{time.strftime('%Y-%m-%d %H:%M:%S')} 还原单篇 {name}"
+            log(f"单篇篡改还原: {name}（META 异常，从备份恢复）")
+            send_alert("单篇还原", f"文章 {name} META 异常（疑似篡改），已从最新备份自动还原")
+        except Exception as e:
+            log(f"单篇还原失败: {name} - {e}")
+            send_alert("单篇还原失败", f"文章 {name} 还原失败，请人工介入: {e}")
 
 
 def cleanup_backups():
@@ -715,7 +827,8 @@ def articles_health_check():
 def periodic_backup_thread():
     """自动备份与健康检测线程：
     - 数据库：每 N 分钟（可配 5~1440，默认 30）健康检查 + 滚动备份 1 份
-    - 文章：每天 1 次备份 + 统一清除过时备份
+    - 文章：每天 1 次兜底备份（当天已有任意时间戳备份则跳过）+ 统一清除过时备份
+    - 单篇篡改还原（v3.3.5：仅 hidden + META 异常）
     - 文章目录健康检查（防被清空）"""
     while running:
         interval = load_backup_conf()['interval_min'] * 60
@@ -723,14 +836,24 @@ def periodic_backup_thread():
         # 1. 主库健康检查（损坏 → 自动恢复；恢复成功则本轮跳过备份）
         if db_health_check():
             backup_db()
-        # 2. 文章每日备份（当天已有备份文件则跳过）+ 统一清理
-        today_pkg = os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-' + time.strftime('%Y%m%d') + '.tar.gz')
-        if not os.path.exists(today_pkg):
+        # 2. 文章每日兜底备份（当天已有任意备份则跳过；v3.3.5 时间戳命名后，上传触发会产生当天备份，此处即跳过）
+        today_prefix = os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-' + time.strftime('%Y%m%d'))
+        if not glob.glob(today_prefix + '-*.tar.gz'):
             backup_articles()
             cleanup_backups()
-        # 3. 文章目录健康检查
+        # 3. 单篇篡改还原（v3.3.5）
+        restore_single_hidden_articles()
+        # 4. 文章目录健康检查
         articles_health_check()
         save_guard_state()
+
+
+# v3.3.5：上传触发快速检测线程——每 10 秒检测 data/.backup_trigger，
+# 存在则立即备份文章并清标记（PHP 上传成功后写入，效果为「写完文章几秒内备份」）
+def upload_trigger_thread():
+    while running:
+        time.sleep(10)
+        check_upload_trigger()
 
 
 def save_guard_state():
@@ -750,6 +873,8 @@ def save_guard_state():
         'next_db_backup': '',
         'last_articles_backup': '',
         'last_restore': last_restore_info or '',
+        'last_upload_backup': last_upload_backup_info or '',   # v3.3.5：最近上传触发备份
+        'last_single_restore': last_single_restore_info or '',  # v3.3.5：最近单篇篡改还原
         'db_backup_size': 0,
         'articles_backup_count': 0,
         'mirror_locked': False,
@@ -874,6 +999,10 @@ def run_inotify_watch():
     backup_thread = threading.Thread(target=periodic_backup_thread, daemon=True)
     backup_thread.start()
 
+    # v3.3.5：上传触发快速备份线程（每 10 秒检测）
+    ut_thread = threading.Thread(target=upload_trigger_thread, daemon=True)
+    ut_thread.start()
+
     # 初始全量校验
     verify_all_files()
 
@@ -916,6 +1045,10 @@ def run_polling_mode():
 
     backup_thread = threading.Thread(target=periodic_backup_thread, daemon=True)
     backup_thread.start()
+
+    # v3.3.5：上传触发快速备份线程
+    ut_thread = threading.Thread(target=upload_trigger_thread, daemon=True)
+    ut_thread.start()
 
     verify_all_files()
 

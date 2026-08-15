@@ -169,6 +169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['rich_zip']) && ($_FI
     }
     $zip->close();
     @unlink($_FILES['rich_zip']['tmp_name']); // 解析完即删，不占服务器空间
+    if ($cnt['md'] > 0) triggerArticleBackup(); // v3.3.5：上传含 md → 触发守护进程立即备份
     if ($zipSafe) {
         header('Location: sc.php?rich_zip=ok&md=' . $cnt['md'] . '&img=' . $cnt['img'] . '&vid=' . $cnt['vid']);
     } else {
@@ -357,6 +358,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
             }
         }
     }
+    // v3.3.5：纯 MD 上传/新建/编辑成功 → 触发守护进程立即备份（富媒体 zip 已在上面单独触发）
+    if ($editSuccess) triggerArticleBackup();
     $qs = $editSuccess ? 'success=1' : 'error=' . urlencode($editError);
     header('Location: sc.php?' . $qs);
     exit;

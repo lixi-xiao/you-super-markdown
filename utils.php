@@ -1773,7 +1773,7 @@ function getBackupList() {
 // 自动备份配置（backup.conf，与守护进程 ym-guard.py 同源）
 // ============================================================
 function getBackupConfig() {
-    $cfg = ['interval_min' => 30, 'article_keep' => 7, 'manual_keep' => 5];
+    $cfg = ['interval_min' => 30, 'article_keep' => 7, 'manual_keep' => 5, 'trigger_backup' => true, 'single_restore' => true];
     if (is_file(BACKUP_CONF)) {
         foreach (file(BACKUP_CONF, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
             $line = trim($line);
@@ -1783,6 +1783,8 @@ function getBackupConfig() {
             if ($k === 'DB_BACKUP_INTERVAL_MIN') $cfg['interval_min'] = (int)$v;
             elseif ($k === 'ARTICLE_BACKUP_KEEP') $cfg['article_keep'] = (int)$v;
             elseif ($k === 'MANUAL_BACKUP_KEEP') $cfg['manual_keep'] = (int)$v;
+            elseif ($k === 'ARTICLE_TRIGGER_BACKUP') $cfg['trigger_backup'] = in_array(strtolower($v), ['1', 'true', 'yes', 'on'], true);
+            elseif ($k === 'ARTICLE_SINGLE_RESTORE') $cfg['single_restore'] = in_array(strtolower($v), ['1', 'true', 'yes', 'on'], true);
         }
     }
     // 白名单约束（与守护进程一致）
@@ -1792,18 +1794,29 @@ function getBackupConfig() {
     return $cfg;
 }
 
-function saveBackupConfig($intervalMin, $articleKeep, $manualKeep) {
+function saveBackupConfig($intervalMin, $articleKeep, $manualKeep, $triggerBackup = true, $singleRestore = true) {
     $intervalMin = (int)$intervalMin;
     $articleKeep = (int)$articleKeep;
     $manualKeep = (int)$manualKeep;
     $intervalMin = ($intervalMin >= 5 && $intervalMin <= 1440) ? $intervalMin : 30;
     $articleKeep = ($articleKeep >= 1 && $articleKeep <= 90) ? $articleKeep : 7;
     $manualKeep = ($manualKeep >= 1 && $manualKeep <= 30) ? $manualKeep : 5;
+    // v3.3.5：上传触发备份 / 单篇篡改还原 开关（守护进程读取）
+    $triggerBackup = !empty($triggerBackup) ? 1 : 0;
+    $singleRestore = !empty($singleRestore) ? 1 : 0;
     $content = "# 自动备份配置（守护进程 ym-guard.py 读取；超管后台/SSH 可改）\n"
         . "DB_BACKUP_INTERVAL_MIN={$intervalMin}\n"
         . "ARTICLE_BACKUP_KEEP={$articleKeep}\n"
-        . "MANUAL_BACKUP_KEEP={$manualKeep}\n";
+        . "MANUAL_BACKUP_KEEP={$manualKeep}\n"
+        . "ARTICLE_TRIGGER_BACKUP={$triggerBackup}\n"
+        . "ARTICLE_SINGLE_RESTORE={$singleRestore}\n";
     return file_put_contents(BACKUP_CONF, $content, LOCK_EX) !== false;
+}
+
+// v3.3.5：上传文章成功后写触发标记 → 守护进程 10 秒内立即备份文章（备份目录 root 锁定，Web 只能写标记）
+function triggerArticleBackup() {
+    $trigger = __DIR__ . '/data/.backup_trigger';
+    @file_put_contents($trigger, (string)time(), LOCK_EX);
 }
 
 function getGuardState() {

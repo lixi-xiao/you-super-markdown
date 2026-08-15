@@ -1833,6 +1833,25 @@ $banMsg = $_GET['bmsg'] ?? '';
             <div class="channel-tab <?= ($config['update_channel'] ?? 'stable') === 'stable' ? 'active' : '' ?>" onclick="switchChannel('stable')"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 正式版</div>
             <div class="channel-tab <?= ($config['update_channel'] ?? '') === 'beta' ? 'active' : '' ?>" onclick="switchChannel('beta')"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> 测试版</div>
         </div>
+        <!-- v3.2.4：更新方式与更新包类型详细说明（面向小白，三种通道一目了然） -->
+        <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;font-size:0.88em;color:var(--text-secondary);line-height:1.8">
+            <div style="font-weight:600;color:var(--text);margin-bottom:6px">系统支持三种更新方式：</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+                <div><span style="font-weight:600;color:var(--accent)">① SSH 服务器连接更新（推荐）</span><br>
+                在服务器终端（SSH）执行 <code>sudo ym-admin apply-update</code>，从本页已确认的更新包直接应用；适合习惯命令行的用户，全程自动备份、校验签名、失败自动回滚。</div>
+                <div><span style="font-weight:600;color:var(--accent)">② 上传更新包更新（手动上传）</span><br>
+                在下方「手动更新」区上传 <code>ZIP / tar.gz</code> 更新包到服务器，再执行 <code>sudo ym-admin apply-update</code>；适合更新包已下载到本地、不想从仓库拉取的场景。</div>
+                <div><span style="font-weight:600;color:var(--accent)">③ 在线更新（后台检查更新）</span><br>
+                点击上方「检查更新」自动连接 GitHub 仓库，识别最新版本并展示可用的更新包，选定后按提示在 SSH 执行 <code>sudo ym-admin apply-update</code>。</div>
+            </div>
+            <div style="font-weight:600;color:var(--text);margin:10px 0 6px">更新包类型：</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+                <div><span style="font-weight:600;color:var(--accent)">全量包</span>（<code>-full.tar.gz</code>）：包含全部源码文件，适用于<b>跨大版本</b>升级或异常环境修复，体积最大；跨版本更新<b>必须</b>使用全量包。</div>
+                <div><span style="font-weight:600;color:var(--accent)">增量包</span>（<code>-to-*-inc.tar.gz</code>）：仅包含本次变更的文件，适用于<b>同版本内</b>的小版本升级，体积小、速度快。</div>
+                <div><span style="font-weight:600;color:var(--accent)">初始化安装包</span>（<code>-install.tar.gz</code>）：用于<b>全新部署</b>（首次安装），包含完整源码与一键安装脚本，不用于升级。</div>
+            </div>
+            <div style="margin-top:10px;color:var(--text-muted)">当前通道：<?= htmlspecialchars($config['update_channel'] ?? 'stable') === 'beta' ? '测试版（优先拉取测试包）' : '正式版（仅拉取正式包）' ?></div>
+        </div>
     </div>
 
     <!-- 执行更新 -->

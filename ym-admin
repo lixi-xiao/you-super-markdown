@@ -419,17 +419,39 @@ case "${1:-}" in
             }
         " 2>/dev/null
 
-        # 4.7 更新公告注入（v3.1.6）：changelog 已在 4.7a 提前读取（TMP_DIR 已清理），
-        # 升级成功后自动写入公告表（type=update，首页公告区自动公开显示）。
-        # CHANGELOG_B64 为空 → 跳过；同版本已存在 → 跳过（幂等）。
+        # 4.7 更新历史注入（v3.1.9）：changelog 已在 4.7a 提前读取（TMP_DIR 已清理）。
+        # 不再逐版本生成独立公告——把本次更新内容追加到「更新历史.md」文章（首页公告只保留
+        # 一条指向该文章的公告，点进去即可查看全部历史版本更新）。
+        # CHANGELOG_B64 为空 → 跳过；文章已含该版本 → 跳过（幂等）。
         if [ -n "$CHANGELOG_B64" ]; then
             php -r "
                 require_once '$WEB_ROOT/utils.php';
                 \$cl = base64_decode('$CHANGELOG_B64');
-                if (!updateAnnouncementExists('v${TO_VER}')) {
-                    addAnnouncement('update', '', '', '更新至 v${TO_VER}', \$cl);
+                \$toVer = '$TO_VER';
+                \$artPath = '$WEB_ROOT/data/articles/更新历史.md';
+                // 1) 文章不存在则创建骨架（META + 标题）
+                if (!file_exists(\$artPath)) {
+                    \$meta = json_encode(['title' => '更新历史', 'category' => '系统', 'tags' => '更新,版本,日志', 'author' => '系统'], JSON_UNESCAPED_UNICODE);
+                    file_put_contents(\$artPath, \"<!--META \$meta -->\n\n# 更新历史\n\n> 全部版本更新记录，最新在前。\n\n\", LOCK_EX);
+                }
+                \$content = file_get_contents(\$artPath);
+                // 2) 该版本已存在 → 跳过（幂等）
+                if (strpos(\$content, \"## v{\$toVer}\") !== false) { exit; }
+                \$section = \"## v{\$toVer}（\" . date('Y-m-d') . \"）\n\n{\$cl}\n\n\";
+                \$pos = strpos(\$content, '## ');
+                if (\$pos === false) {
+                    \$content .= \"\n{\$section}\";
+                } else {
+                    \$content = substr(\$content, 0, \$pos) . \$section . substr(\$content, \$pos);
+                }
+                file_put_contents(\$artPath, \$content, LOCK_EX);
+                // 3) 清理历史逐版本 update 公告，确保首页只保留一条指向更新历史文章的公告
+                db_exec(\"DELETE FROM announcement WHERE type = 'update'\");
+                if (!db_one('SELECT 1 FROM announcement WHERE article = ? LIMIT 1', ['更新历史.md'])) {
+                    addAnnouncement('manual', '更新历史.md', '', '更新历史', '全部版本更新记录整合于此，点击查看完整更新历史');
                 }
             " 2>/dev/null
+            chown www-data:www-data "$WEB_ROOT/data/articles/更新历史.md" 2>/dev/null || true
         fi
 
         # 5. 锁定母本

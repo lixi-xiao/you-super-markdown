@@ -188,6 +188,9 @@ def main():
         for a in attacks:
             if a['attack_cnt'] >= threshold:
                 if skip_private and is_private_ip(a['ip']):
+                    # v4.1.7-fix：超阈值但内网/链路本地豁免 → 快照标记，后台展示豁免原因（避免"超阈值未封禁"困惑）
+                    a['skip'] = True
+                    a['skip_reason'] = '内网/链路本地地址豁免'
                     continue  # 内网/私有 IP 豁免，仅记录不自动封禁
                 if apply_ban(a['ip'], threshold):
                     newly_banned.append(a['ip'])

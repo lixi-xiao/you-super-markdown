@@ -20,8 +20,9 @@ get_domain() {
 
 # v3.1.0：更新完成收尾（必须定义为顶部函数——apply-update 会覆盖 /usr/local/bin/ym-admin 自身，
 # bash 惰性解析时仅对已读入内存的函数体免疫「新旧文件混合」语法错误，case 内联代码会在覆盖后解析失败）
+# v3.1.7：新增第 4 参 CHANGELOG_B64——更新通知邮件自动附带本次更新内容（changelog 脱敏文案）
 post_update_finish() {
-    local TO_VER="$1" CHANNEL="$2" FROM_VER="$3"
+    local TO_VER="$1" CHANNEL="$2" FROM_VER="$3" CHANGELOG_B64="$4"
     # 请求文件 root 可删，避免以 php 回写时 /tmp 属主权限拒绝
     rm -f /tmp/ym-update-request.json
     # 清理旧备份（保留最近2次）
@@ -33,7 +34,18 @@ post_update_finish() {
     echo "  版本: v$FROM_VER → v$TO_VER"
     echo "============================================"
     # v3.1.0：更新完成自动发送通知邮件到管理员（失败不阻断）
-    /usr/local/bin/ym-admin notify "系统已更新至 v$TO_VER（$CHANNEL 更新通道）—— 更新完成，web↔母本 MD5 一致、守护进程正常运行。" 2>/dev/null || true
+    # v3.1.7：邮件正文附带本次更新内容（changelog），管理者无需再翻公告即可知道本次改了什么
+    NOTIFY_MSG="系统已更新至 v$TO_VER（$CHANNEL 更新通道）—— 更新完成，web↔母本 MD5 一致、守护进程正常运行。"
+    if [ -n "$CHANGELOG_B64" ]; then
+        CL_TEXT=$(printf '%s' "$CHANGELOG_B64" | base64 -d 2>/dev/null)
+        if [ -n "$CL_TEXT" ]; then
+            NOTIFY_MSG="$NOTIFY_MSG
+
+【本次更新内容】
+$CL_TEXT"
+        fi
+    fi
+    /usr/local/bin/ym-admin notify "$NOTIFY_MSG" 2>/dev/null || true
 }
 
 case "${1:-}" in
@@ -433,7 +445,8 @@ case "${1:-}" in
         systemctl start ym-guard 2>/dev/null || true
         rm -f /tmp/ym-update.lock
         # v3.1.0：收尾逻辑抽到顶部函数（自更新后 case 内联代码会混合解析失败）
-        post_update_finish "$TO_VER" "$CHANNEL" "$FROM_VER"
+        # v3.1.7：把 changelog（4.7a 已读取）传给收尾函数，更新通知邮件附带本次更新内容
+        post_update_finish "$TO_VER" "$CHANNEL" "$FROM_VER" "$CHANGELOG_B64"
         # 自更新已覆盖本脚本文件：立即退出，避免 bash 继续解析磁盘上的新内容导致混合语法错误
         exit 0
         ;;

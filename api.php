@@ -303,6 +303,37 @@ if ($action === 'article_image_upload' && $_SERVER['REQUEST_METHOD'] === 'POST')
     jsonOut(['success' => true, 'url' => 'data/images/' . $fname]);
 }
 
+// ===== v3.3.0：文章视频上传（站长/写作者 + CSRF；multipart/form-data，字段名 video；≤20MB） =====
+// 合法性强制校验：扩展名白名单 → finfo MIME → 容器结构（ftyp box / EBML 魔数）三重校验
+if ($action === 'article_video_upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!checkRole(ROLE_AUTHOR)) jsonOut(['success' => false, 'error' => '无权限'], 403);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $file = $_FILES['video'] ?? null;
+    if (!$file || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        jsonOut(['success' => false, 'error' => '未收到文件'], 400);
+    }
+    if ($file['size'] <= 0 || $file['size'] > 20 * 1024 * 1024) {
+        jsonOut(['success' => false, 'error' => '视频大小需在 20MB 以内'], 400);
+    }
+    $extMap = ['mp4' => 'video/mp4', 'webm' => 'video/webm'];
+    $origExt = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if (!isset($extMap[$origExt])) {
+        jsonOut(['success' => false, 'error' => '仅支持 MP4/WebM 视频'], 400);
+    }
+    // 强制校验：内容与声明格式一致、容器结构合法（防伪装/损坏文件）
+    if (!validateVideoFile($file['tmp_name'], $origExt)) {
+        jsonOut(['success' => false, 'error' => '视频文件校验失败（内容与声明格式不符或文件损坏）'], 400);
+    }
+    $dir = __DIR__ . '/data/videos/';
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    $fname = date('Ymd') . '_' . bin2hex(random_bytes(8)) . '.' . $origExt;
+    if (!move_uploaded_file($file['tmp_name'], $dir . $fname)) {
+        jsonOut(['success' => false, 'error' => '保存失败，请检查 data/videos/ 目录权限'], 500);
+    }
+    auditLog('article_video_upload', $fname, '上传文章视频');
+    jsonOut(['success' => true, 'url' => 'data/videos/' . $fname]);
+}
+
 if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $siteCfg = loadSiteConfig();
     if (empty($siteCfg['registration_enabled'])) {

@@ -471,6 +471,9 @@ code, pre, .markdown-body code, .markdown-body pre {
 /* v3.2.5：mermaid 流程图渲染适配（宽屏居中、可横向滚动、暗色主题兼容） */
 .markdown-body .mermaid { max-width: 100%; overflow-x: auto; margin: 1.5em 0; text-align: center; }
 .markdown-body .mermaid svg { max-width: 100%; height: auto; }
+/* v3.3.0：文章视频播放器适配（宽屏居中、圆角、标题说明） */
+.markdown-body video { max-width: 100%; border-radius: 12px; margin: 1em auto; display: block; background: #000; }
+.markdown-body .ym-video-cap { text-align: center; color: var(--text-muted); font-size: 0.85em; margin: 0.4em 0 1.2em; }
 .markdown-body code {
     background: #f0f0f0; padding: 2px 6px; border-radius: 6px;
     font-size: 0.85em; font-weight: 500;

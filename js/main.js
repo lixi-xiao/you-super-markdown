@@ -349,7 +349,15 @@
         var content = m.querySelector('.ann-modal-content');
         if (a.body && window.marked) {
             content.classList.add('markdown-body');
-            content.innerHTML = marked.parse(a.body);
+            // v3.3.0：公告正文视频语法提取（与文章阅读一致）
+            var annVideoSlots = [];
+            var annBody = a.body.replace(/!video\[([^\]]*)\]\(([^)\s]+)\)/g, function(m, t, s) {
+                annVideoSlots.push({ title: t, src: s.trim() });
+                return '@@YM_VIDEO_' + (annVideoSlots.length - 1) + '@@';
+            });
+            content.innerHTML = marked.parse(annBody);
+            // v3.3.0：公告视频渲染（仅站内 data/videos/；外链按纯文本保留）
+            renderYmVideos(content, annVideoSlots);
             // v3.2.5：公告正文 mermaid 流程图渲染（与文章阅读一致）
             if (typeof mermaid !== 'undefined') {
                 content.querySelectorAll('pre code.language-mermaid').forEach(function(code) {
@@ -391,6 +399,54 @@
             link.style.display = 'none';
         }
         m.classList.add('active');
+    }
+    // v3.3.0：!video[标题](站内相对路径) → <video> 播放器
+    // 安全策略：src 仅允许站内相对路径 data/videos/xxx.mp4（防外链跳转/防盗链/防 IP 泄露给第三方）；
+    // 外链/绝对 URL 一律按原始语法纯文本展示（不渲染播放器、不发网络请求）
+    function renderYmVideos(root, slots) {
+        if (!root || !slots || !slots.length) return;
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        var textNodes = [];
+        while (walker.nextNode()) textNodes.push(walker.currentNode);
+        textNodes.forEach(function(node) {
+            var val = node.nodeValue;
+            if (val.indexOf('@@YM_VIDEO_') === -1) return;
+            var frag = document.createDocumentFragment();
+            var re = /@@YM_VIDEO_(\d+)@@/g;
+            var last = 0, m;
+            while ((m = re.exec(val)) !== null) {
+                if (m.index > last) frag.appendChild(document.createTextNode(val.slice(last, m.index)));
+                var slot = slots[parseInt(m[1], 10)];
+                if (slot) {
+                    var src = slot.src;
+                    // 仅站内 data/videos/ 且为安全文件名（字母数字下划线连字符点）才渲染播放器
+                    if (/^data\/videos\/[A-Za-z0-9_.\-]+\.[A-Za-z0-9]+$/.test(src)) {
+                        var vid = document.createElement('video');
+                        vid.controls = true;
+                        vid.preload = 'metadata';
+                        vid.playsInline = true;
+                        vid.setAttribute('controlslist', 'nodownload');
+                        if (slot.title) vid.title = slot.title;
+                        var srcEl = document.createElement('source');
+                        srcEl.src = src;
+                        vid.appendChild(srcEl);
+                        frag.appendChild(vid);
+                        if (slot.title) {
+                            var cap = document.createElement('p');
+                            cap.className = 'ym-video-cap';
+                            cap.textContent = '▶ ' + slot.title;
+                            frag.appendChild(cap);
+                        }
+                    } else {
+                        // 不合法（外链/绝对地址/路径穿越）→ 按原始语法文本展示，不发任何网络请求
+                        frag.appendChild(document.createTextNode('!video[' + slot.title + '](' + slot.src + ')'));
+                    }
+                }
+                last = m.index + m[0].length;
+            }
+            if (last < val.length) frag.appendChild(document.createTextNode(val.slice(last)));
+            node.parentNode.replaceChild(frag, node);
+        });
     }
     // v3.1.8：公告弹窗交互（关闭/遮罩点击/跳转文章）
     (function() {
@@ -781,6 +837,12 @@
                 document.title = fileMeta.displayName + ' - ' + (window.YM_SITE_TITLE || 'You Markdown');
                 currentFileName = filename;
                 let mdContent = data.content;
+                // v3.3.0：提取 !video[标题](站内相对路径) 语法为占位符，marked 渲染后转 <video> 播放器（防跳转）
+                var videoSlots = [];
+                mdContent = mdContent.replace(/!video\[([^\]]*)\]\(([^)\s]+)\)/g, function(m, t, s) {
+                    videoSlots.push({ title: t, src: s.trim() });
+                    return '@@YM_VIDEO_' + (videoSlots.length - 1) + '@@';
+                });
                 mdContent = mdContent.replace(/^(<!--.*?-->)?\s*#\s+.*\r?\n?/, '');
                 const parsedHtml = typeof marked !== 'undefined' ? marked.parse(mdContent) : '<pre>' + escapeHTML(mdContent) + '</pre>';
                 markdownBody.innerHTML = buildDocHeader(fileMeta) + parsedHtml + buildBottomCards(fileMeta);
@@ -816,6 +878,8 @@
                         });
                     } catch (e) { /* mermaid 初始化失败不阻断正文 */ }
                 }
+                // v3.3.0：视频语法 → 播放器（仅站内 data/videos/ 相对路径；外链按纯文本保留）
+                renderYmVideos(markdownBody, videoSlots);
                 if (typeof hljs !== 'undefined') {
                     markdownBody.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
                 }

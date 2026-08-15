@@ -729,6 +729,54 @@ function decryptSecret($stored) {
     $plain = openssl_decrypt($cipher, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
     return $plain === false ? '' : $plain;
 }
+// v3.3.0：视频文件合法性强制校验（防伪装文件/损坏文件）
+// 三重校验：扩展名（调用方已校验）→ finfo MIME → 容器魔数/Box 结构
+// MP4：文件头 8 字节必须为大端长度 + 'ftyp'（ftyp box 是 MP4 容器第一个 box）
+// WebM：EBML 魔数 1A 45 DF A3
+function validateVideoFile($path, $ext) {
+    if (!is_file($path)) return false;
+    $size = @filesize($path);
+    if ($size === false || $size <= 0) return false;
+    $head = (string)@file_get_contents($path, false, null, 0, 128);
+    if (strlen($head) < 16) return false;
+    if (!class_exists('finfo')) {
+        // 无 fileinfo 扩展时仅做容器结构校验
+        if ($ext === 'mp4') return substr($head, 4, 4) === 'ftyp';
+        if ($ext === 'webm') return bin2hex(substr($head, 0, 4)) === '1a45dfa3';
+        return false;
+    }
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mime = (string)$finfo->file($path);
+    if ($ext === 'mp4') {
+        // ftyp box：前 4 字节大端长度（8~128），第 5~8 字节 'ftyp'
+        $boxLen = @unpack('Nlen', substr($head, 0, 4))['len'] ?? 0;
+        $ftypOk = substr($head, 4, 4) === 'ftyp' && $boxLen >= 8 && $boxLen <= 128;
+        // MIME 需为 video/mp4（部分环境识别为 application/octet-stream 时靠 ftyp 兜底）
+        $mimeOk = in_array($mime, ['video/mp4', 'application/mp4', 'video/quicktime'], true);
+        return $ftypOk && ($mimeOk || $mime === 'application/octet-stream');
+    }
+    if ($ext === 'webm') {
+        $ebmlOk = bin2hex(substr($head, 0, 4)) === '1a45dfa3';
+        return $mime === 'video/webm' && $ebmlOk;
+    }
+    return false;
+}
+// v3.3.0：内存版校验（供富媒体 zip 解析用，zip 内文件不落盘直接校验）
+function validateVideoBuffer($content, $ext) {
+    if (strlen($content) < 16) return false;
+    if ($ext === 'mp4') {
+        $boxLen = @unpack('Nlen', substr($content, 0, 4))['len'] ?? 0;
+        return substr($content, 4, 4) === 'ftyp' && $boxLen >= 8 && $boxLen <= 128;
+    }
+    if ($ext === 'webm') return bin2hex(substr($content, 0, 4)) === '1a45dfa3';
+    return false;
+}
+function validateImageBuffer($content) {
+    if (!class_exists('finfo')) return false;
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mime = (string)$finfo->buffer($content);
+    return in_array($mime, ['image/jpeg', 'image/png', 'image/gif', 'image/webp'], true);
+}
 // SMTP 密码来源：环境变量注入（YM_SMTP_PASS，php-fpm pool env，root 只读、Web 不可见）优先；
 // 未注入时回退 config 表密文（AES-GCM 同机加密兜底，兼容旧部署）
 // v3.2.2：SMTP 密码三级来源（env → config 密文 → CLI root 密钥文件），

@@ -1470,6 +1470,7 @@ function getAnnouncements($limit = 0) {
         $r['summary'] = htmlspecialchars($r['summary'] ?? '', ENT_QUOTES, 'UTF-8');
         $r['date'] = htmlspecialchars($r['date'] ?? '', ENT_QUOTES, 'UTF-8');
         $r['article'] = htmlspecialchars($r['article'] ?? '', ENT_QUOTES, 'UTF-8');
+        // v3.2.3：body 为 markdown 原文，前端 marked 渲染，不做 HTML 转义（由前端 escapeHTML/DOMPurify 兜底）
     }
     return $rows;
 }
@@ -1484,23 +1485,26 @@ function getAnnouncement($id) {
 /**
  * 新增公告
  * @param string $type  manual / update
+ * @param string $body  markdown 正文（可选，v3.2.3 起支持 .md 导入的富文本公告）
  */
-function addAnnouncement($type, $article, $authorId, $title, $summary) {
+function addAnnouncement($type, $article, $authorId, $title, $summary, $body = '') {
     $id = bin2hex(random_bytes(8));
-    db_exec('INSERT INTO announcement (id, type, article, author_id, title, summary, date, ord) VALUES (?,?,?,?,?,?,?,?)', [
+    db_exec('INSERT INTO announcement (id, type, article, author_id, title, summary, body, date, ord) VALUES (?,?,?,?,?,?,?,?,?)', [
         $id, $type, $article, $authorId,
         mb_substr($title, 0, 120), mb_substr($summary, 0, 2000),
+        mb_substr($body, 0, 60000),
         date('Y-m-d'), 0,
     ]);
     return $id;
 }
 
 /**
- * 更新公告（站长编辑标题/摘要/关联文章）
+ * 更新公告（站长编辑标题/摘要/关联文章/正文）
  */
-function updateAnnouncement($id, $article, $title, $summary) {
-    db_exec('UPDATE announcement SET article = ?, title = ?, summary = ? WHERE id = ?', [
-        $article, mb_substr($title, 0, 120), mb_substr($summary, 0, 2000), $id,
+function updateAnnouncement($id, $article, $title, $summary, $body = '') {
+    db_exec('UPDATE announcement SET article = ?, title = ?, summary = ?, body = ? WHERE id = ?', [
+        $article, mb_substr($title, 0, 120), mb_substr($summary, 0, 2000),
+        mb_substr($body, 0, 60000), $id,
     ]);
 }
 

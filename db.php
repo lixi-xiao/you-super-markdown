@@ -168,9 +168,12 @@ function db_init_schema($pdo) {
         author_id TEXT,
         title TEXT,
         summary TEXT,
+        body TEXT,
         date TEXT,
         ord INTEGER DEFAULT 0
     )');
+    // v3.2.3：公告表补 body 列（markdown 正文，站长可上传 .md 导入；老库幂等补齐）
+    try { $pdo->exec('ALTER TABLE announcement ADD COLUMN body TEXT'); } catch (Exception $e) { /* 列已存在 */ }
     $pdo->exec('CREATE TABLE IF NOT EXISTS login_fails (ip TEXT, t INTEGER, acc TEXT)');
     // v2.11.0：老库 login_fails 无 acc 列（登录失败按账号维度计数），幂等补齐
     try { $pdo->exec('ALTER TABLE login_fails ADD COLUMN acc TEXT'); } catch (Exception $e) { /* 列已存在 */ }

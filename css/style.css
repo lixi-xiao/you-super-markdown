@@ -2007,6 +2007,10 @@ kbd {
     white-space: pre-wrap; word-break: break-word;
     border-top: 1px solid var(--border); padding-top: 14px; margin-top: 2px;
 }
+/* v3.2.3：公告正文 markdown 渲染时取消 pre-wrap（HTML 已排版，避免空白折叠问题） */
+.ann-modal-content.markdown-body {
+    white-space: normal; font-size: 0.95em; max-width: 100%;
+}
 .ann-modal-link {
     align-self: flex-start; display: inline-flex; align-items: center; gap: 4px;
     padding: 8px 18px; border-radius: 8px; border: none; cursor: pointer;

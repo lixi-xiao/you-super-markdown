@@ -339,13 +339,32 @@
         });
     }
     // v3.1.8：公告详情弹窗（完整内容；有关联文章时提供跳转按钮）
+    // v3.2.3：body 为 markdown 原文 → 用 marked 渲染富文本，提升公告可读性（小白也能看懂排版）
     function openAnnounceDetail(a) {
         var m = document.getElementById('announceModal');
         if (!m) return;
         m.querySelector('.ann-modal-type').textContent = a.type === 'update' ? '更新公告' : '公告';
         m.querySelector('.ann-modal-title').textContent = a.title;
         m.querySelector('.ann-modal-date').textContent = a.date || '';
-        m.querySelector('.ann-modal-content').textContent = a.summary || '（暂无内容）';
+        var content = m.querySelector('.ann-modal-content');
+        if (a.body && window.marked) {
+            content.classList.add('markdown-body');
+            content.innerHTML = marked.parse(a.body);
+            // 外链安全：禁止外链在当前页直接跳转（防 tabnabbing/钓鱼），与文章渲染一致
+            content.querySelectorAll('a[href]').forEach(function(a) {
+                var href = a.getAttribute('href') || '';
+                if (/^(https?:)?\/\//i.test(href) && href.indexOf(window.location.host) === -1) {
+                    a.setAttribute('target', '_blank');
+                    a.setAttribute('rel', 'noopener noreferrer');
+                }
+            });
+            if (typeof hljs !== 'undefined') {
+                content.querySelectorAll('pre code').forEach(function(b) { hljs.highlightElement(b); });
+            }
+        } else {
+            content.classList.remove('markdown-body');
+            content.textContent = a.summary || '（暂无内容）';
+        }
         var link = m.querySelector('.ann-modal-link');
         if (a.article) {
             link.style.display = 'inline-flex';

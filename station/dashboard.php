@@ -311,11 +311,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             $aArticle = trim($_POST['a_article'] ?? '');
             $aTitle = trim($_POST['a_title'] ?? '');
             $aSummary = trim($_POST['a_summary'] ?? '');
+            $aBody = trim($_POST['a_body'] ?? '');
+            // v3.2.3：.md 导入的正文可自动生成摘要（无手工摘要时取正文前 200 字）
+            if ($aSummary === '' && $aBody !== '') {
+                $aSummary = preg_replace('/[#>*_`\[\]()!-]/u', '', $aBody);
+                $aSummary = trim(mb_substr($aSummary, 0, 200));
+                if ($aSummary === '') $aSummary = '（公告正文，点击查看）';
+            }
             if ($aTitle === '') $aTitle = $aArticle !== '' ? $aArticle : '公告';
             if ($aArticle !== '') { // 校验文章存在
                 if (!is_file(__DIR__ . '/../data/articles/' . basename($aArticle))) $aArticle = '';
             }
-            addAnnouncement($aType, $aArticle !== '' ? basename($aArticle) : '', $myId, $aTitle, $aSummary);
+            addAnnouncement($aType, $aArticle !== '' ? basename($aArticle) : '', $myId, $aTitle, $aSummary, $aBody);
             auditLog('announce_add', $aTitle, "站长新增公告: {$aTitle}" . ($aArticle !== '' ? "（关联文章 {$aArticle}）" : ''));
             $msg = 'announce_added';
         } elseif ($annAct === 'update') {
@@ -323,11 +330,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             $aArticle = trim($_POST['a_article'] ?? '');
             $aTitle = trim($_POST['a_title'] ?? '');
             $aSummary = trim($_POST['a_summary'] ?? '');
+            $aBody = trim($_POST['a_body'] ?? '');
             $ex = getAnnouncement($aId);
             if ($ex) {
                 if ($aArticle !== '' && !is_file(__DIR__ . '/../data/articles/' . basename($aArticle))) $aArticle = '';
                 if ($aTitle === '') $aTitle = $ex['title'] ?? '公告';
-                updateAnnouncement($aId, $aArticle !== '' ? basename($aArticle) : '', $aTitle, $aSummary);
+                if ($aSummary === '' && $aBody !== '') {
+                    $aSummary = preg_replace('/[#>*_`\[\]()!-]/u', '', $aBody);
+                    $aSummary = trim(mb_substr($aSummary, 0, 200));
+                    if ($aSummary === '') $aSummary = '（公告正文，点击查看）';
+                }
+                updateAnnouncement($aId, $aArticle !== '' ? basename($aArticle) : '', $aTitle, $aSummary, $aBody);
                 auditLog('announce_update', $aId, "站长编辑公告: {$aTitle}");
                 $msg = 'announce_updated';
             } else {
@@ -910,8 +923,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <label class="form-label">公告标题</label>
                 <input class="form-input" name="a_title" id="aTitleInput" maxlength="120" placeholder="公告标题（留空则取文章标题）">
             </div>
+            <!-- v3.2.3：.md 文件导入正文（小白友好：直接把写好的公告文档传上来，自动填正文与摘要） -->
             <div class="form-group">
-                <label class="form-label">公告内容 / 摘要</label>
+                <label class="form-label">上传 .md 文件（可选，自动填入下方正文与摘要）</label>
+                <input class="form-input" type="file" id="aMdFileInput" accept=".md,.markdown,text/markdown,text/plain">
+                <p class="form-hint" style="margin-top:4px">选择写好的公告 Markdown 文档后自动读取内容；也可直接在下方粘贴 Markdown 正文。首页将按富文本展示，支持标题/列表/加粗/图片等排版。</p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">公告正文（Markdown，可选）</label>
+                <textarea class="form-input" name="a_body" id="aBodyInput" rows="8" placeholder="支持 Markdown 排版：标题、列表、加粗、图片、链接等，内容会自动渲染，阅读更清晰"></textarea>
+            </div>
+            <div class="form-group">
+                <label class="form-label">公告内容 / 摘要（留空时自动取正文前 200 字）</label>
                 <textarea class="form-input" name="a_summary" id="aSummaryInput" rows="3" maxlength="2000" placeholder="填写公告内容（纯文字公告时展示；关联文章时可留空则展示文章摘要）"></textarea>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px">
@@ -946,7 +969,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <td style="color:var(--text-muted);font-size:0.85em"><?= $an['article'] !== '' ? htmlspecialchars($an['article']) : '—' ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($an['date']) ?></td>
                 <td>
-                    <button type="button" class="btn-link" onclick="stEditAnnounce(this)" data-id="<?= htmlspecialchars($an['id']) ?>" data-type="<?= htmlspecialchars($an['type']) ?>" data-article="<?= htmlspecialchars($an['article']) ?>" data-title="<?= htmlspecialchars($an['title']) ?>" data-summary="<?= htmlspecialchars($an['summary']) ?>">编辑</button>
+                    <button type="button" class="btn-link" onclick="stEditAnnounce(this)" data-id="<?= htmlspecialchars($an['id']) ?>" data-type="<?= htmlspecialchars($an['type']) ?>" data-article="<?= htmlspecialchars($an['article']) ?>" data-title="<?= htmlspecialchars($an['title']) ?>" data-summary="<?= htmlspecialchars($an['summary']) ?>" data-body="<?= htmlspecialchars($an['body'] ?? '') ?>">编辑</button>
                     <form method="post" style="display:inline" onsubmit="return confirm('确定删除该公告？')">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="announce_action" value="delete">
@@ -1110,8 +1133,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                     <label class="form-label">公告标题</label>
                     <input class="form-input" name="a_title" id="stAnnEditTitle" maxlength="120">
                 </div>
+                <!-- v3.2.3：编辑弹窗 .md 导入 + 正文编辑 -->
                 <div class="form-group">
-                    <label class="form-label">公告内容 / 摘要</label>
+                    <label class="form-label">上传 .md 文件覆盖正文（可选）</label>
+                    <input class="form-input" type="file" id="stAnnEditMdFile" accept=".md,.markdown,text/markdown,text/plain">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">公告正文（Markdown，可选）</label>
+                    <textarea class="form-input" name="a_body" id="stAnnEditBody" rows="6"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">公告内容 / 摘要（留空时自动取正文前 200 字）</label>
                     <textarea class="form-input" name="a_summary" id="stAnnEditSummary" rows="3" maxlength="2000"></textarea>
                 </div>
             </div>
@@ -1204,8 +1236,43 @@ function stEditAnnounce(btn) {
     document.getElementById('stAnnEditArticle').value = btn.getAttribute('data-article') || '';
     document.getElementById('stAnnEditTitle').value = btn.getAttribute('data-title') || '';
     document.getElementById('stAnnEditSummary').value = btn.getAttribute('data-summary') || '';
+    document.getElementById('stAnnEditBody').value = btn.getAttribute('data-body') || '';
     document.getElementById('stAnnounceModal').style.display = 'flex';
 }
+// v3.2.3：.md 文件导入公告正文（发布表单 + 编辑弹窗共用）——读取文件内容填入正文框，
+// 标题留空时取文件名，摘要留空时保存时后端自动从正文生成
+function stImportMd(input, titleId, bodyId, summaryId) {
+    var f = input.files && input.files[0];
+    if (!f) return;
+    if (!/\.(md|markdown|txt)$/i.test(f.name) && f.type.indexOf('text') !== 0) {
+        alert('请选择 .md / .markdown / .txt 文件'); input.value = ''; return;
+    }
+    var rd = new FileReader();
+    rd.onload = function() {
+        var txt = String(rd.result || '').slice(0, 60000);
+        document.getElementById(bodyId).value = txt;
+        if (!document.getElementById(titleId).value.trim()) {
+            document.getElementById(titleId).value = f.name.replace(/\.(md|markdown|txt)$/i, '');
+        }
+        if (!document.getElementById(summaryId).value.trim()) {
+            var plain = txt.replace(/[#>*_`\[\]()!-]/g, ' ').replace(/\s+/g, ' ').trim();
+            document.getElementById(summaryId).value = plain.slice(0, 200);
+        }
+    };
+    rd.onerror = function() { alert('文件读取失败'); };
+    rd.readAsText(f, 'UTF-8');
+}
+// v3.2.3：发布表单 .md 导入绑定
+(function() {
+    var addFile = document.getElementById('aMdFileInput');
+    if (addFile) addFile.addEventListener('change', function() {
+        stImportMd(this, 'aTitleInput', 'aBodyInput', 'aSummaryInput');
+    });
+    var editFile = document.getElementById('stAnnEditMdFile');
+    if (editFile) editFile.addEventListener('change', function() {
+        stImportMd(this, 'stAnnEditTitle', 'stAnnEditBody', 'stAnnEditSummary');
+    });
+})();
 </script>
 <?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])): ?>
 <?php

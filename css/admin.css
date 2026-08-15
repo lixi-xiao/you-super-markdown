@@ -1099,6 +1099,52 @@ td code {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-glass);
 }
+/* v4.1.1：分页栏移动端适配——手机/平板下三段纵向堆叠，页码横向滚动，避免挤压错乱 */
+@media (max-width: 768px) {
+    .pagination {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+    .pagination-info {
+        justify-content: space-between;
+        width: 100%;
+    }
+    .pagination-btns {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 4px;
+        width: 100%;
+    }
+    .pagination-btns .page-btn {
+        flex-shrink: 0;
+        min-width: 32px;
+        height: 32px;
+        padding: 0 10px;
+    }
+    .pagination-jump {
+        justify-content: flex-start;
+        width: 100%;
+    }
+    .page-jump {
+        height: 32px;
+        width: 56px;
+    }
+    .pagination-jump .page-btn {
+        height: 32px;
+        padding: 0 10px;
+    }
+}
+@media (max-width: 480px) {
+    .pagination-btns .page-btn[title="首页"],
+    .pagination-btns .page-btn[title="末页"] {
+        display: none;
+    }
+    .per-page select {
+        height: 32px;
+    }
+}
 .btn-link {
     background: none;
     border: none;

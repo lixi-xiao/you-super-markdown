@@ -125,6 +125,17 @@ if ($hideDefaults) {
     }
 }
 
+// v4.0.0：未知路径返回 404 页（nginx try_files 会把不存在的路径 fallback 到 index.php，
+//          此时非空路径且不是已知入口/接口/静态页 → 统一 404，避免裸首页外壳）
+if ($firstSegment !== '' && !in_array($firstSegment, [
+    'index.php', 'api.php', 'img.php', 'music.php', 'sc.php', 'user.php',
+    'verify-author.php', 'verify-confirm.php', '404.php', 'robots.txt', 'favicon.ico',
+], true)) {
+    http_response_code(404);
+    require __DIR__ . '/404.php';
+    exit;
+}
+
 $action = isset($_GET['action']) ? $_GET['action'] : '';
 
 // CSRF 防护：index.php 所有 POST 操作（pin/unpin/delete/update）统一校验
@@ -165,6 +176,10 @@ if ($action === 'list') {
     $pinnedList = getPinnedList();
     // v3.1.11：设为公告的文章不在文章列表展示（公告单独展示，不产生文章卡片）
     $annArticles = array_flip(array_column(db_all("SELECT article FROM announcement WHERE article != ''"), 'article'));
+    // v4.0.0：浏览量一次取回构建 map，避免逐篇查询
+    $viewsMap = [];
+    foreach (db_all('SELECT article, views FROM page_views') as $v) $viewsMap[$v['article']] = (int)$v['views'];
+    $nowStr = date('Y-m-d H:i');
     if ($files) {
         usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
         foreach ($files as $file) {
@@ -172,9 +187,14 @@ if ($action === 'list') {
             if (strpos($filename, '.') === 0) continue;
             $content = file_get_contents($file);
             // v3.1.10：META 标记 hidden 的文章不进首页列表（如「更新历史」仅保留公告入口）
+            // v4.0.0：草稿（status=draft）不进列表；定时（status=scheduled 且未到 publish_at）也不进列表
             if (preg_match('/<!--META(.*?)-->/s', $content, $hm)) {
                 $hmeta = json_decode(trim($hm[1]), true);
                 if (!empty($hmeta['hidden'])) continue;
+                $mStatus = $hmeta['status'] ?? 'published';
+                $mPublishAt = $hmeta['publish_at'] ?? '';
+                if ($mStatus === 'draft') continue;
+                if ($mStatus === 'scheduled' && $mPublishAt !== '' && $mPublishAt > $nowStr) continue;
             }
             // v3.1.11：公告关联文章不进列表
             if (isset($annArticles[$filename])) continue;
@@ -188,7 +208,10 @@ if ($action === 'list') {
                 $meta = json_decode(trim($metaMatch[1]), true);
                 if ($meta) {
                     $category = $meta['category'] ?? '';
-                    $tags = array_map('trim', explode(',', $meta['tags'] ?? ''));
+                    // v4.0.0：过滤空标签（META tags 为空字符串时 explode 产生 '' 空项，导致前端标签云出现孤立 #）
+                    $rawTags = $meta['tags'] ?? '';
+                    $tags = is_array($rawTags) ? array_values(array_filter(array_map('trim', $rawTags), fn($t) => $t !== ''))
+                                               : array_values(array_filter(array_map('trim', explode(',', (string)$rawTags)), fn($t) => $t !== ''));
                     $excerpt = $meta['excerpt'] ?? '';
                     $author = $meta['author'] ?? '';
                     if (!empty($meta['license'])) {
@@ -233,6 +256,9 @@ if ($action === 'list') {
                 'wordCount' => $wordCount, 'tags' => $tags, 'author' => $author,
                 'license' => $license, 'licenseUrl' => $licenseUrl, 'pinned' => $isPinned,
                 'cover' => $cover,
+                'views' => $viewsMap[$filename] ?? 0,
+                'status' => $mStatus ?? 'published',
+                'publishAt' => $mPublishAt ?? '',
             ];
         }
     }
@@ -270,7 +296,38 @@ if ($action === 'read') {
         echo json_encode(['success' => false, 'error' => '禁止访问'], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    $content = file_get_contents($filepath);
+    // v4.0.0：草稿（status=draft）与未到发布时间的定时文章（status=scheduled）对外不可读
+    $rawRead = file_get_contents($filepath);
+    if (preg_match('/<!--META(.*?)-->/s', $rawRead, $rm)) {
+        $rmeta = json_decode(trim($rm[1]), true) ?: [];
+        $rStatus = $rmeta['status'] ?? 'published';
+        $rPublishAt = $rmeta['publish_at'] ?? '';
+        if ($rStatus === 'draft') {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'error' => '文件不存在'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($rStatus === 'scheduled' && $rPublishAt !== '' && $rPublishAt > date('Y-m-d H:i')) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'error' => '文件不存在'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    }
+    // v4.0.0：站内访问统计——同 IP 同文章同一天只计一次（views_log 去重），避免刷量
+    $viewIp = getClientIP();
+    $viewDay = date('Y-m-d');
+    $stmtV = db()->prepare('INSERT OR IGNORE INTO views_log (article, ip, day) VALUES (?, ?, ?)');
+    $stmtV->execute([$filename, $viewIp, $viewDay]);
+    if ($stmtV->rowCount() > 0) {
+        db()->prepare('INSERT INTO page_views (article, views, updated) VALUES (?, 1, ?)
+                       ON CONFLICT(article) DO UPDATE SET views = views + 1, updated = excluded.updated')
+            ->execute([$filename, date('Y-m-d H:i:s')]);
+    }
+    // v4.0.1：views_log 概率清理（1/64 触发，保留 30 天）——防表无限增长（存储 DoS）
+    if (random_int(0, 63) === 0) {
+        db_exec('DELETE FROM views_log WHERE day < ?', [date('Y-m-d', time() - 2592000)]);
+    }
+    $content = $rawRead;
     $displayName = preg_replace('/\.md$/i', '', $filename);
     if (preg_match('/<!--META(.*?)-->/s', $content, $metaMatch)) {
         $meta = json_decode(trim($metaMatch[1]), true);
@@ -279,13 +336,35 @@ if ($action === 'read') {
         }
     }
     $content = preg_replace('/<!--META.*?-->\n?/s', '', $content);
+    // v3.3.17：站内大图超过 3MB 默认展示缩略图、不加载原图（轻量站——富媒体文章里的
+    //          MB 级大图（如航拍截图）点进文章不再拖慢加载；原图保留但页面不再请求）。
+    //          仅站内 data/images/ 图片、跳过 gif（动图保动画）与已是缩略图的引用。
+    $content = preg_replace_callback('/!\[([^\]]*)\]\(([^)\s]+)/', function($m) {
+        $url = $m[2];
+        if (strpos($url, 'img.php') !== false || preg_match('/\.gif$/i', $url)) return $m[0];
+        $p = null;
+        if (strpos($url, 'data/images/') === 0) $p = __DIR__ . '/' . $url;
+        elseif (strpos($url, '/data/images/') === 0) $p = __DIR__ . $url;
+        else return $m[0];
+        if (!is_file($p)) return $m[0];
+        if (filesize($p) > 3 * 1024 * 1024) {
+            $thumb = 'img.php?src=' . urlencode('/' . ltrim($url, '/')) . '&w=1600';
+            return '![' . $m[1] . '](' . $thumb;
+        }
+        return $m[0];
+    }, $content);
     $contentWithoutCode = preg_replace('/```[\s\S]*?```/', '', $content);
     if ($displayName === preg_replace('/\.md$/i', '', $filename) && preg_match('/^#\s+(.+)/m', $contentWithoutCode, $tm)) $displayName = $tm[1];
+    // v3.3.15：read 接口返回字数——公告关联文章（如「更新历史」，META hidden 不进首页列表）
+    //          首页公告卡片能显示字数、点进文章后却因不在 allFiles 显示 0 字，前端据此修正
+    $wordCount = mb_strlen(preg_replace('/\s+/', '', $content), 'UTF-8');
     echo json_encode([
         'success' => true, 'name' => $filename,
         'displayName' => $displayName,
         'content' => $content, 'size' => filesize($filepath),
-        'modified' => date('Y-m-d H:i', filemtime($filepath))
+        'modified' => date('Y-m-d H:i', filemtime($filepath)),
+        'wordCount' => $wordCount,
+        'views' => (int)db_one('SELECT views FROM page_views WHERE article = ?', [$filename])['views'] ?? 0
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -351,6 +430,199 @@ if ($action === 'update') {
     }
     exit;
 }
+
+// ===================== v4.0.0 新增接口 =====================
+
+/**
+ * 收集已发布文章（供全文搜索 / RSS 共用）
+ * 过滤：hidden、公告关联、草稿、未到发布时间的定时文章
+ * @param string $q 关键词（全文搜索用，可留空取全部）
+ * @return array 文章数组
+ */
+function _publishedArticles($q = '') {
+    $files = glob('./data/articles/*.md');
+    $out = [];
+    $annArticles = array_flip(array_column(db_all("SELECT article FROM announcement WHERE article != ''"), 'article'));
+    $nowStr = date('Y-m-d H:i');
+    $qLow = mb_strtolower(trim($q), 'UTF-8');
+    if ($files) {
+        usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
+        foreach ($files as $file) {
+            $filename = basename($file);
+            if (strpos($filename, '.') === 0) continue;
+            $content = @file_get_contents($file);
+            if ($content === false) continue;
+            if (preg_match('/<!--META(.*?)-->/s', $content, $hm)) {
+                $hmeta = json_decode(trim($hm[1]), true) ?: [];
+                if (!empty($hmeta['hidden'])) continue;
+                $mStatus = $hmeta['status'] ?? 'published';
+                $mPublishAt = $hmeta['publish_at'] ?? '';
+                if ($mStatus === 'draft') continue;
+                if ($mStatus === 'scheduled' && $mPublishAt !== '' && $mPublishAt > $nowStr) continue;
+            }
+            if (isset($annArticles[$filename])) continue;
+            $plain = preg_replace('/<!--META.*?-->\n?/s', '', $content);
+            $title = '';
+            if (preg_match('/^#\s+(.+)/m', $plain, $tm)) $title = trim($tm[1]);
+            if ($title === '') $title = preg_replace('/\.md$/i', '', $filename);
+            $category = $hmeta['category'] ?? '';
+            $rawTags = $hmeta['tags'] ?? '';
+            $tags = is_array($rawTags) ? array_values(array_filter(array_map('trim', $rawTags), fn($t) => $t !== ''))
+                                       : array_values(array_filter(array_map('trim', explode(',', (string)$rawTags)), fn($t) => $t !== ''));
+            $excerpt = $hmeta['excerpt'] ?? '';
+            $author = $hmeta['author'] ?? '';
+            // v4.0.0：搜索摘要——META 无手写摘要时自动生成（与 list 接口同算法，保证搜索结果有预览）
+            if ($excerpt === '') {
+                $textContent = preg_replace('/^#.*$/m', '', $plain);
+                $textContent = preg_replace('/```.*?```/s', '', $textContent);
+                $textContent = preg_replace('/\[([^\]]+)\]\([^\)]+\)/', '$1', $textContent);
+                $textContent = preg_replace('/[#*>`\-_\|~\[\]]/', '', $textContent);
+                $textContent = trim(preg_replace('/\s+/', ' ', $textContent));
+                $excerpt = mb_substr($textContent, 0, 120, 'UTF-8');
+                if (mb_strlen($textContent, 'UTF-8') > 120) $excerpt .= '...';
+            }
+            // 全文搜索：标题 / 标签 / 摘要 / 正文关键词匹配（忽略大小写）
+            if ($qLow !== '') {
+                $haystack = mb_strtolower($title . ' ' . $plain . ' ' . $tags . ' ' . $excerpt . ' ' . $author, 'UTF-8');
+                if (mb_strpos($haystack, $qLow, 0, 'UTF-8') === false) continue;
+            }
+            $out[] = [
+                'name' => $filename,
+                'displayName' => $title,
+                'category' => $category,
+                'tags' => $tags,
+                'excerpt' => $excerpt,
+                'author' => $author,
+                'modified' => date('Y-m-d', filemtime($file)),
+                'modifiedTimestamp' => filemtime($file),
+                'size' => filesize($file),
+            ];
+        }
+    }
+    return $out;
+}
+
+// v4.0.0：站内全文搜索（标题/标签/摘要/正文），GET /?action=search&q=关键词
+if ($action === 'search') {
+    header('Content-Type: application/json; charset=utf-8');
+    $q = trim($_GET['q'] ?? '');
+    if (mb_strlen($q, 'UTF-8') < 1 || mb_strlen($q, 'UTF-8') > 100) {
+        echo json_encode(['success' => true, 'query' => $q, 'files' => [], 'count' => 0], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    // v4.0.1：搜索接口速率限制（滑动窗口，同 IP 每分钟 ≤30 次；复用 comment_rates 表防 DoS 刷量）
+    $searchIp = getClientIP();
+    db_rate_add('comment_rates', $searchIp);
+    if (db_rate_count('comment_rates', $searchIp, 60) > 30) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => '搜索太频繁，请稍后再试'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $hits = _publishedArticles($q);
+    echo json_encode(['success' => true, 'query' => $q, 'files' => $hits, 'count' => count($hits)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// v4.0.0：RSS 订阅（最近 20 篇已发布文章），GET /?action=rss
+if ($action === 'rss') {
+    header('Content-Type: application/xml; charset=utf-8');
+    $feed = _publishedArticles();
+    $siteTitle = htmlspecialchars($_siteTitle, ENT_XML1, 'UTF-8');
+    // v4.1.0：Host 头加固——仅接受合法域名/端口格式，防 Host 注入伪造订阅链接域名
+    $_rawHost = $_SERVER['HTTP_HOST'] ?? '';
+    if (!preg_match('/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/', $_rawHost) || $_rawHost === '') {
+        $_rawHost = 'localhost';
+    }
+    $baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . $_rawHost;
+    $self = $baseUrl . '/index.php?action=rss';
+    echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+    echo '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>' . "\n";
+    echo '<title>' . $siteTitle . '</title>' . "\n";
+    echo '<link>' . htmlspecialchars($baseUrl, ENT_XML1, 'UTF-8') . '</link>' . "\n";
+    echo '<description>' . $siteTitle . ' 的最新内容</description>' . "\n";
+    echo '<atom:link href="' . htmlspecialchars($self, ENT_XML1, 'UTF-8') . '" rel="self" type="application/rss+xml"/>' . "\n";
+    echo '<lastBuildDate>' . date(DATE_RFC2822) . '</lastBuildDate>' . "\n";
+    foreach (array_slice($feed, 0, 20) as $f) {
+        echo '<item>' . "\n";
+        echo '<title>' . htmlspecialchars($f['displayName'], ENT_XML1, 'UTF-8') . '</title>' . "\n";
+        echo '<link>' . htmlspecialchars($baseUrl . '/index.php?action=read&file=' . rawurlencode($f['name']), ENT_XML1, 'UTF-8') . '</link>' . "\n";
+        echo '<guid>' . htmlspecialchars($baseUrl . '/index.php?action=read&file=' . rawurlencode($f['name']), ENT_XML1, 'UTF-8') . '</guid>' . "\n";
+        $desc = $f['excerpt'] !== '' ? $f['excerpt'] : $f['displayName'];
+        echo '<description>' . htmlspecialchars($desc, ENT_XML1, 'UTF-8') . '</description>' . "\n";
+        echo '<pubDate>' . date(DATE_RFC2822, $f['modifiedTimestamp']) . '</pubDate>' . "\n";
+        if ($f['author'] !== '') echo '<author>' . htmlspecialchars($f['author'], ENT_XML1, 'UTF-8') . '</author>' . "\n";
+        echo '</item>' . "\n";
+    }
+    echo '</channel></rss>' . "\n";
+    exit;
+}
+
+// v4.1.0：RSS 订阅引导页——浏览器点击 RSS 图标不再直接弹 XML 树，改为友好说明页（阅读器抓取仍走 ?action=rss）
+if ($action === 'rss_guide') {
+    $_rawHost2 = $_SERVER['HTTP_HOST'] ?? '';
+    if (!preg_match('/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/', $_rawHost2) || $_rawHost2 === '') {
+        $_rawHost2 = 'localhost';
+    }
+    $guideBase = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . $_rawHost2;
+    $rssAbs = $guideBase . '/index.php?action=rss';
+    $feedCount = count(_publishedArticles());
+    ?>
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RSS 订阅 · <?= htmlspecialchars($_siteTitle) ?></title>
+<script>
+(function() {
+    try {
+        var saved = localStorage.getItem('md-theme');
+        var dark = saved ? saved === 'dark'
+            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="/css/style.css?v=<?= @filemtime(__DIR__ . '/css/style.css') ?>">
+<style>
+    .rss-guide-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .rss-guide-card { max-width: 560px; width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 24px; padding: 40px 36px; box-shadow: var(--shadow-md); }
+    .rss-guide-card h1 { font-size: 20px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
+    .rss-guide-card p { color: var(--text-secondary); font-size: 14px; line-height: 1.75; margin-bottom: 18px; }
+    .rss-guide-url { display: flex; gap: 8px; margin: 6px 0 20px; }
+    .rss-guide-url input { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; color: var(--text); background: var(--bg); min-width: 0; }
+    .rss-guide-url button { flex-shrink: 0; }
+    .rss-guide-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }
+    .rss-guide-list li { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; color: var(--text-secondary); line-height: 1.6; }
+    .rss-guide-list li b { color: var(--text); font-weight: 600; }
+    .rss-guide-foot { font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 14px; }
+    .rss-guide-foot a { color: var(--accent); }
+    @media (max-width: 480px) { .rss-guide-card { padding: 28px 20px; border-radius: 18px; } .rss-guide-url { flex-direction: column; } }
+</style>
+</head>
+<body style="padding-left:0">
+<div class="rss-guide-page">
+    <div class="rss-guide-card">
+        <h1>📡 RSS 订阅</h1>
+        <p>本站提供标准 RSS 2.0 订阅源（最近 <?= intval($feedCount) ?> 篇文章，发布后自动更新）。用任意 RSS 阅读器添加下面地址即可追更：</p>
+        <div class="rss-guide-url">
+            <input type="text" readonly value="<?= htmlspecialchars($rssAbs) ?>" id="rssGuideUrl">
+            <button class="btn btn-primary" type="button" onclick="var i=document.getElementById('rssGuideUrl'); i.select(); try{document.execCommand('copy');}catch(e){}; this.textContent='已复制'; setTimeout(()=>this.textContent='复制地址',1600);">复制地址</button>
+        </div>
+        <ol class="rss-guide-list">
+            <li>1️⃣ 打开你常用的 RSS 阅读器（如 Feedly、Inoreader、NetNewsWire，或浏览器 RSS 扩展）</li>
+            <li>2️⃣ 选择「添加订阅 / Add Feed」，粘贴上面的地址</li>
+            <li>3️⃣ 之后新文章发布，阅读器会自动拉取提醒，无需再打开本站</li>
+        </ol>
+        <p style="margin-bottom:0"><a href="/index.php?action=rss" target="_blank" rel="noopener">查看原始 XML 订阅源 →</a></p>
+        <p class="rss-guide-foot">也可以直接复制地址到任意支持订阅的客户端使用。</p>
+    </div>
+</div>
+</body>
+</html>
+    <?php
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="zh-CN" data-theme="light">
@@ -358,6 +630,19 @@ if ($action === 'update') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="<?= htmlspecialchars(generateCsrfToken()) ?>">
+    <!-- v4.0.0：深色模式跟随系统——在 CSS 加载前同步设置 data-theme，避免闪白 -->
+    <script>
+        (function() {
+            try {
+                var saved = localStorage.getItem('md-theme');
+                var dark = saved ? saved === 'dark'
+                    : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+            } catch (e) {}
+        })();
+    </script>
+    <!-- v4.0.0：RSS 订阅（浏览器可发现） -->
+    <link rel="alternate" type="application/rss+xml" title="<?= htmlspecialchars($_siteTitle) ?> RSS" href="/index.php?action=rss">
     <title><?= htmlspecialchars($_siteTitle) ?></title>
     <!-- v3.1.4：链接解析/分享预览卡片使用自定义站名（微信/QQ/Telegram 等读取 og 标签） -->
     <meta property="og:title" content="<?= htmlspecialchars($_siteTitle) ?>">
@@ -382,6 +667,14 @@ if ($action === 'update') {
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($_siteTitle) ?></a></div>
     <div class="header-right">
+        <!-- v4.1.0：RSS 订阅入口（点击进友好引导页，不再直接弹 XML；阅读器自动发现仍走 ?action=rss） -->
+        <a class="icon-btn rss-btn" id="btnRss" title="RSS 订阅" href="/index.php?action=rss_guide" target="_blank" rel="noopener" aria-label="RSS 订阅">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 13a6 6 0 0 1 6 6"/>
+                <path d="M5 7a12 12 0 0 1 12 12"/>
+                <path d="M5 19a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" fill="currentColor" stroke="none"/>
+            </svg>
+        </a>
         <button class="icon-btn" id="btnSearch" title="搜索"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
         <button class="icon-btn" id="btnToc" title="目录"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
         <button class="icon-btn" id="btnFont" title="字体设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg></button>
@@ -474,7 +767,7 @@ if ($action === 'update') {
     <div class="color-panel-content"><div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-weight:600;">选择主题色</span><button class="color-reset-btn" id="colorResetBtn">重置</button></div><input type="range" min="0" max="360" value="220" class="hue-slider" id="hueSlider"></div>
 </div>
 <main class="main-container" id="mainContainer">
-    <div id="homeView"><div class="category-bar" id="categoryBar"></div><!-- v3.1.6：公告卡片区块（有公告才显示） --><div class="announcement-section" id="announcementSection"></div><div class="cards-grid" id="cardsGrid"></div><div class="empty-state" id="emptyHome" style="display:none;">📭 暂无文档</div></div>
+    <div id="homeView"><div class="category-bar" id="categoryBar"></div><!-- v3.1.6：公告卡片区块（有公告才显示） --><div class="announcement-section" id="announcementSection"></div><div class="cards-grid" id="cardsGrid"></div><!-- v4.0.0：归档视图（按年月分组；默认隐藏，点分类栏「归档」切换） --><div class="archive-view" id="archiveView" style="display:none"></div><div class="empty-state" id="emptyHome" style="display:none;">📭 暂无文档</div></div>
     <div class="reading-view" id="readingView">
         <div class="markdown-body" id="markdownBody"></div>
         <div class="cmt-capsule-section" id="commentSection" style="display:none;">
@@ -535,6 +828,7 @@ if ($action === 'update') {
         </div>
         <div class="ann-modal-title"></div>
         <div class="ann-modal-date"></div>
+        <div class="ann-modal-words"></div>
         <div class="ann-modal-content"></div>
         <button class="ann-modal-link" id="announceModalLink">查看文章 →</button>
     </div>
@@ -604,7 +898,8 @@ if ($action === 'update') {
                 <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtLoginQQ" autocomplete="username">
                 <div class="cmt-pw-row">
                     <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="密码" id="cmtLoginPw" autocomplete="current-password">
-                    <button type="button" class="cmt-pw-toggle" id="cmtLoginPwToggle" tabindex="-1" title="显示/隐藏密码">👁</button>
+                    <!-- v3.3.16：密码显示切换——线稿眼睛图标（隐藏/可见两态） -->
+                    <button type="button" class="cmt-pw-toggle" id="cmtLoginPwToggle" tabindex="-1" title="显示/隐藏密码" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
                 </div>
                 <div class="cmt-modal-err" id="cmtLoginErr"></div>
                 <button class="cmt-modal-submit" id="cmtLoginBtn">登录</button>
@@ -614,7 +909,11 @@ if ($action === 'update') {
                 <div class="cmt-sec-title"><span>账号信息</span></div>
                 <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtRegQQ">
                 <input class="cmt-modal-input" type="text" placeholder="昵称" maxlength="20" id="cmtRegNick">
-                <input class="cmt-modal-input" type="password" placeholder="密码（至少8位，含大小写与数字）" id="cmtRegPw">
+                <div class="cmt-pw-row">
+                    <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="密码（至少8位，含大小写与数字）" id="cmtRegPw">
+                    <!-- v3.3.16：注册密码显示切换（与登录一致，线稿眼睛图标） -->
+                    <button type="button" class="cmt-pw-toggle" id="cmtRegPwToggle" tabindex="-1" title="显示/隐藏密码" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                </div>
                 <div class="cmt-reg-verify" id="cmtRegVerifyBox" style="display:none">
                     <div class="cmt-sec-title"><span>身份验证</span></div>
                     <div class="cmt-reg-email-row">

@@ -198,6 +198,19 @@ function db_init_schema($pdo) {
         ip TEXT, action TEXT, user TEXT, user_id TEXT, ua TEXT, time TEXT
     )');
     $pdo->exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
+    // v4.0.0：站内访问统计——page_views 每文章累计 PV；views_log 按 文章+IP+日期 去重计数防刷
+    $pdo->exec('CREATE TABLE IF NOT EXISTS page_views (
+        article TEXT PRIMARY KEY,
+        views INTEGER DEFAULT 0,
+        updated TEXT
+    )');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS views_log (
+        article TEXT,
+        ip TEXT,
+        day TEXT,
+        PRIMARY KEY (article, ip, day)
+    )');
+    // v4.0.0：评论邮件订阅设置（key 复用 config 表，无需新表）
 }
 
 /**

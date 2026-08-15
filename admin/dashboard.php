@@ -1839,6 +1839,11 @@ $banMsg = $_GET['bmsg'] ?? '';
     <div class="card" id="updateActionCard" style="display:none">
         <div class="card-title"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>执行更新</div>
         <div id="updateActionContent">
+            <!-- v3.2.2：跨版本更新必须使用全量包提示 -->
+            <div id="crossVerHint" class="msg" style="display:none;margin:0 0 12px;background:rgba(245,158,11,0.14);color:#b45309">
+                <svg viewBox="0 0 24 24" width="16" height="16" style="vertical-align:-3px;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <strong>检测到跨版本更新</strong>（主版本号变化），必须使用<b>全量包</b>，请勿选择增量包。
+            </div>
             <p style="color:var(--text-secondary)">发现新版本 <strong id="newVersionText"></strong>，请选择更新包类型后开始更新。</p>
             <!-- v3.2.0：在线更新自动识别仓库发布的全量包 / 增量包，由站长选择 -->
             <div id="pkgSelectArea" style="margin-top:14px;display:none">
@@ -1960,15 +1965,20 @@ $banMsg = $_GET['bmsg'] ?? '';
                 btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> 检查更新';
                 var resultDiv = document.getElementById('updateCheckResult');
                 if (d.available) {
-                    resultDiv.innerHTML = '<div class="msg msg-success" style="margin:0"><svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>发现新版本 <strong>v' + d.latest_version + '</strong>（当前 v' + d.current_version + '）</div>';
+                    // v3.2.2：更新通道标识（稳定版/测试版）+ 跨版本检测（主版本号变化必须全量包）
+                    var chLabel = '<?= ($config['update_channel'] ?? 'stable') === 'beta' ? '测试版通道' : '稳定版通道' ?>';
+                    var cross = d.latest_version && d.current_version && String(d.latest_version).split('.')[0] !== String(d.current_version).split('.')[0];
+                    resultDiv.innerHTML = '<div class="msg msg-success" style="margin:0"><svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>发现新版本 <strong>v' + d.latest_version + '</strong>（当前 v' + d.current_version + '）· ' + chLabel + '</div>' +
+                        (cross ? '<div class="msg" style="margin:8px 0 0;background:rgba(245,158,11,0.14);color:#b45309"><svg viewBox="0 0 24 24" width="16" height="16" style="vertical-align:-3px;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><strong>跨版本更新</strong>：主版本号变化，必须使用<strong>全量包</strong>，已为你默认选中全量包</div>' : '');
                     document.getElementById('updateActionCard').style.display = 'block';
                     document.getElementById('newVersionText').textContent = 'v' + d.latest_version;
                     pendingUpdateVersion = d.latest_version;
                     // v3.2.0：仓库发布含全量/增量包 → 展示选择；否则回退 archive 全量下载
                     if (d.packages && d.packages.length > 0) {
-                        renderPkgSelect(d.packages);
+                        renderPkgSelect(d.packages, cross);
                     } else {
                         document.getElementById('pkgSelectArea').style.display = 'none';
+                        document.getElementById('crossVerHint').style.display = cross ? 'block' : 'none';
                         pendingUpdateUrl = '';
                         pendingUpdatePath = '';
                     }
@@ -1999,13 +2009,15 @@ $banMsg = $_GET['bmsg'] ?? '';
     }
 
     // v3.2.0：渲染全量/增量包选择（仓库 Releases assets 自动识别）
-    function renderPkgSelect(pkgs) {
+    // v3.2.2：跨版本更新（forceFull）时默认选中全量包并显示强制提示
+    function renderPkgSelect(pkgs, forceFull) {
         var full = null, inc = null;
         pkgs.forEach(function(p) { if (p.type === 'full') full = p; else if (p.type === 'inc') inc = p; });
         var area = document.getElementById('pkgSelectArea');
         var fCard = document.getElementById('pkgFullCard');
         var iCard = document.getElementById('pkgIncCard');
         var hint = document.getElementById('pkgHint');
+        var crossHint = document.getElementById('crossVerHint');
         fCard.style.display = full ? '' : 'none';
         iCard.style.display = inc ? '' : 'none';
         if (full) {
@@ -2014,8 +2026,9 @@ $banMsg = $_GET['bmsg'] ?? '';
         if (inc) {
             iCard.querySelector('.type-desc').textContent = inc.name + '（' + fmtSize(inc.size) + '）仅覆盖变更文件，速度快';
         }
-        // 默认选中增量包（体积小），无增量包则选全量包
-        var sel = inc ? 'inc' : 'full';
+        if (crossHint) crossHint.style.display = forceFull ? 'block' : 'none';
+        // 默认选中：跨版本强制全量包；否则优先增量包（体积小）
+        var sel = (inc && !forceFull) ? 'inc' : (full ? 'full' : 'inc');
         var radios = document.querySelectorAll('input[name="pkg_type"]');
         radios.forEach(function(r) { r.checked = (r.value === sel); });
         var fullRadio = fCard.querySelector('input');
@@ -2594,6 +2607,8 @@ $banMsg = $_GET['bmsg'] ?? '';
                         <span style="color:#34c759;font-size:0.85em">✅ 已通过服务器环境变量 <code>YM_SMTP_PASS</code> 注入（php-fpm 配置，Web 端不可见；修改需在服务器操作）</span>
                         <?php elseif ($smtpPassSrc === 'config'): ?>
                         <span style="color:#f59e0b;font-size:0.85em">⚠️ 使用 config 表密文兜底。建议迁移到环境变量：在 php-fpm pool 配置添加 <code>env[YM_SMTP_PASS] = "授权码"</code> 后 <code>systemctl reload php8.3-fpm</code></span>
+                        <?php elseif ($smtpPassSrc === 'file'): ?>
+                        <span style="color:#34c759;font-size:0.85em">✅ 已通过服务器密钥文件 <code>/opt/you-markdown/secrets/smtp_pass</code> 提供（CLI/守护进程告警可用；Web 端仍优先环境变量）</span>
                         <?php else: ?>
                         <span style="color:#ef4444;font-size:0.85em">❌ 未配置密码。请在服务器 php-fpm pool 配置添加 <code>env[YM_SMTP_PASS] = "授权码"</code>（独立专用发信账号），并 <code>systemctl reload php8.3-fpm</code></span>
                         <?php endif; ?></td></tr>

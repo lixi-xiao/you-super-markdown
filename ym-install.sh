@@ -503,14 +503,25 @@ server {
     }
 
     # v3.1.6：放行文章图片目录（data/ 其余内容仍禁止；仅图片可公开访问）
+    # v3.3.2：补强缓存——随机文件名不可变，30 天强缓存 + open_file_cache，减少重复下载
     location ^~ /data/images/ {
         allow all;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        open_file_cache max=1000 inactive=60s;
+        open_file_cache_valid 60s;
     }
 
-    # v3.3.0：放行文章视频目录（data/videos/ 仅视频可公开访问；静态服务默认支持 Range 拖拽播放）
+    # v3.3.0：放行文章视频目录（data/videos/ 仅视频可公开访问）
+    # v3.3.2：启用 ngx_http_mp4_module 伪流媒体（拖动 seek 更流畅）+ 强缓存头
     location ^~ /data/videos/ {
         allow all;
         add_header Accept-Ranges bytes always;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        open_file_cache max=1000 inactive=60s;
+        open_file_cache_valid 60s;
+        mp4;  # 需 nginx 编译 --with-http_mp4_module（官方包默认包含）；未编译会报错请删除此行
     }
 
     # 禁止访问脚本/配置/备份等敏感文件（安装脚本、守护进程、蜜罐同步等源码不得外泄）

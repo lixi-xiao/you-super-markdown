@@ -373,6 +373,7 @@
         var displayFiles = currentCategory ? allFiles.filter(f => f.category === currentCategory) : allFiles;
         cardsGrid.innerHTML = displayFiles.map((file, i) => `
             <div class="doc-card" data-filename="${escapeHTML(file.name)}" style="animation-delay:${i*0.05}s">
+                ${file.cover ? `<div class="doc-cover"><img src="${escapeHTML(file.cover)}" alt="" loading="lazy" onerror="this.parentNode.style.display='none'"></div>` : ''}
                 <div class="card-title">${file.pinned ? '<span class="card-pin-icon" title="置顶"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" fill="currentColor" stroke="none"/></svg></span>' : ''}${escapeHTML(file.displayName)}</div>
                 <div class="card-meta">
                     <span><span class="meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>${file.modified}</span>

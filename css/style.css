@@ -302,6 +302,25 @@ code, pre, .markdown-body code, .markdown-body pre {
 }
 .doc-card:hover::before { opacity: 1; }
 .doc-card:hover { transform: translateY(-4px); box-shadow: 0 10px 32px rgba(0,0,0,0.08); border-color: var(--accent); }
+/* v3.1.13：文章卡片封面——图片全卡叠底（背景），左侧 1/2 完全透明、从 1/2 起向右渐显（黑白水墨） */
+.doc-cover {
+    position: absolute; inset: 0;
+    overflow: hidden; z-index: 0; pointer-events: none;
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, transparent 50%, #000 100%);
+    mask-image: linear-gradient(to right, transparent 0%, transparent 50%, #000 100%);
+}
+.doc-cover img {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+    filter: grayscale(1) contrast(1.05) brightness(1.02);
+    transition: transform 0.4s ease;
+}
+.doc-card:hover .doc-cover img { transform: scale(1.03); }
+.doc-cover::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 22px rgba(0,0,0,0.12);
+}
+/* 卡片内容浮于叠底图之上 */
+.doc-card > *:not(.doc-cover) { position: relative; z-index: 1; }
 .card-title { font-size: 1.15em; font-weight: 650; color: var(--text); }
 .card-pin-icon { display: inline-flex; align-items: center; justify-content: center; margin-right: 4px; color: var(--accent); vertical-align: middle; position: relative; top: -1px; }
 .card-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.82em; color: var(--text-muted); }

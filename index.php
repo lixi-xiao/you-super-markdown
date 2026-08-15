@@ -61,16 +61,19 @@ function _annCoverTag($article) {
     return [$cover, array_slice($tags, 0, 5), $words, $meta];
 }
 // v3.1.10：公告可见范围（站长后台可调）——all 所有人 / users 仅登录用户 / managers 仅站长及以上
+// v3.1.12：可见范围仅作用于「更新公告」（更新历史.md）；其他公告始终可见
+//          封面不再作为公告展示（图片仅作为文章内配图，cover 恒为空）
 $_annVis = $_siteConfig['announce_visibility'] ?? 'all';
 $_announcements = [];
 foreach (getAnnouncements(20) as $_an) {
-    if ($_annVis === 'managers' && !checkRole(ROLE_STATION_ADMIN)) continue;
-    if ($_annVis === 'users' && !checkRole(ROLE_USER)) continue;
-    [$cov, $tg, $wc, $mt] = _annCoverTag($_an['article'] ?? '');
+    $isUpdate = ($_an['article'] ?? '') === '更新历史.md';
+    if ($isUpdate && $_annVis === 'managers' && !checkRole(ROLE_STATION_ADMIN)) continue;
+    if ($isUpdate && $_annVis === 'users' && !checkRole(ROLE_USER)) continue;
+    [, $tg, $wc, ] = _annCoverTag($_an['article'] ?? '');
     $_announcements[] = [
         'id' => $_an['id'], 'type' => $_an['type'], 'article' => $_an['article'],
         'title' => $_an['title'], 'summary' => $_an['summary'], 'date' => $_an['date'],
-        'cover' => $cov, 'tags' => $tg, 'words' => $wc,
+        'cover' => '', 'tags' => $tg, 'words' => $wc,
     ];
 }
 // 音乐播放器：网易云（music_cookies）或 QQ（music_cookies_qq）任一配置后显示入口（v2.6.0 起支持双平台独立开关）
@@ -216,12 +219,19 @@ if ($action === 'list') {
                 if (empty($tags)) $tags = ['markdown', '文档'];
             }
             $isPinned = in_array($filename, $pinnedList);
+            // v3.1.12：文章卡片封面——正文第一张图片（图片仅作为文章展示，公告不再使用）
+            $cover = '';
+            if (preg_match('/!\[[^\]]*\]\(([^)\s]+)\)/', $content, $im)) {
+                $cover = $im[1];
+                if (strpos($cover, 'data/') === 0) $cover = '/' . $cover;
+            }
             $fileList[] = [
                 'name' => $filename, 'displayName' => $title, 'category' => $category,
                 'size' => filesize($file), 'modified' => date('Y-m-d', filemtime($file)),
                 'modifiedTimestamp' => filemtime($file), 'excerpt' => $excerpt,
                 'wordCount' => $wordCount, 'tags' => $tags, 'author' => $author,
-                'license' => $license, 'licenseUrl' => $licenseUrl, 'pinned' => $isPinned
+                'license' => $license, 'licenseUrl' => $licenseUrl, 'pinned' => $isPinned,
+                'cover' => $cover,
             ];
         }
     }

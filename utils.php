@@ -731,18 +731,32 @@ function decryptSecret($stored) {
 }
 // SMTP 密码来源：环境变量注入（YM_SMTP_PASS，php-fpm pool env，root 只读、Web 不可见）优先；
 // 未注入时回退 config 表密文（AES-GCM 同机加密兜底，兼容旧部署）
+// v3.2.2：SMTP 密码三级来源（env → config 密文 → CLI root 密钥文件），
+// 修复 CLI（ym-admin/守护进程）场景拿不到密码导致告警邮件发不出的问题
+function smtpSecretFile() {
+    return '/opt/you-markdown/secrets/smtp_pass';
+}
 function smtpPassSource() {
     $env = getenv('YM_SMTP_PASS');
     if ($env !== false && $env !== '') return 'env';
     $cfg = loadSiteConfig();
     $stored = (string)($cfg['smtp_pass'] ?? '');
     if ($stored !== '') return 'config';
+    if (is_readable(smtpSecretFile()) && trim((string)@file_get_contents(smtpSecretFile())) !== '') return 'file';
     return 'none';
 }
 function getSmtpConfig() {
     $c = loadSiteConfig();
     $env = getenv('YM_SMTP_PASS');
-    $pass = ($env !== false && $env !== '') ? $env : decryptSecret((string)($c['smtp_pass'] ?? ''));
+    $pass = '';
+    if ($env !== false && $env !== '') {
+        $pass = $env;
+    } else {
+        $pass = decryptSecret((string)($c['smtp_pass'] ?? ''));
+        if ($pass === '' && is_readable(smtpSecretFile())) {
+            $pass = trim((string)@file_get_contents(smtpSecretFile()));
+        }
+    }
     return [
         'host' => trim($c['smtp_host'] ?? ''),
         'port' => (int)($c['smtp_port'] ?? 465),

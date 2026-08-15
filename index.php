@@ -299,6 +299,11 @@ if ($action === 'update') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="<?= htmlspecialchars(generateCsrfToken()) ?>">
     <title><?= htmlspecialchars($_siteTitle) ?></title>
+    <!-- v3.1.4：链接解析/分享预览卡片使用自定义站名（微信/QQ/Telegram 等读取 og 标签） -->
+    <meta property="og:title" content="<?= htmlspecialchars($_siteTitle) ?>">
+    <meta property="og:site_name" content="<?= htmlspecialchars($_siteTitle) ?>">
+    <meta property="og:type" content="website">
+    <meta property="og:description" content="一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>" type="image/svg+xml">
     <meta name="description" content="一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器">
     <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js" crossorigin="anonymous"
@@ -606,6 +611,7 @@ if ($action === 'update') {
         </div>
     </div>
 </div>
+<script>window.YM_SITE_TITLE = <?= json_encode($_siteTitle, JSON_UNESCAPED_UNICODE) ?>;</script>
 <script src="js/main.js?v=<?= filemtime(__DIR__ . '/js/main.js') ?>"></script>
 <script>
 // 背景图片应用

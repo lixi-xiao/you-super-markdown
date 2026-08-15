@@ -542,7 +542,7 @@
         isReadingView = false; floatingButtons.style.display = 'none'; prevNextNav.style.display = 'none';
         tocPopup.classList.remove('active'); musicPopup.classList.remove('active'); shareModalOverlay.classList.remove('active'); shareQrcode.innerHTML = '';
         showSidebarFileList(); highlightSidebarItem('');
-        document.title = 'You Markdown';
+        document.title = (window.YM_SITE_TITLE || 'You Markdown');
         cmtOnArticleHide();
         const savedScroll = sessionStorage.getItem('md-list-scroll');
         if (savedScroll) { requestAnimationFrame(() => window.scrollTo(0, parseInt(savedScroll))); } else { window.scrollTo(0, 0); }
@@ -622,7 +622,7 @@
             '<div style="color:var(--text-secondary);margin-bottom:24px;">' + (filename ? '文件 ' + escapeHTML(filename) + ' 未找到，可能已被删除。' : '你访问的页面不存在。') + '</div>' +
             '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">返回首页</a>' +
             '</div>';
-        document.title = '404 - 文档不存在 | You Markdown';
+        document.title = '404 - 文档不存在 | ' + (window.YM_SITE_TITLE || 'You Markdown');
     }
     async function loadFile(filename, pushState = true) {
         showReading();
@@ -635,7 +635,7 @@
             const data = await resp.json();
             if (data.success) {
                 const fileMeta = allFiles[currentFileIndex] || { displayName: filename.replace(/\.md$/i,''), wordCount: 0, modified: '', tags: [], category: '' };
-                document.title = fileMeta.displayName + ' - You Markdown';
+                document.title = fileMeta.displayName + ' - ' + (window.YM_SITE_TITLE || 'You Markdown');
                 currentFileName = filename;
                 let mdContent = data.content;
                 mdContent = mdContent.replace(/^(<!--.*?-->)?\s*#\s+.*\r?\n?/, '');

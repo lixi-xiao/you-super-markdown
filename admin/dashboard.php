@@ -2520,7 +2520,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td style="font-size:0.85em"><?= htmlspecialchars(implode(', ', array_keys($a['honeypots'] ?? [])) ?: '-') ?></td>
                 <td style="font-size:0.82em;color:var(--text-muted)"><?= htmlspecialchars(implode(', ', array_keys($a['uas'] ?? [])) ?: '-') ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['date'] ?? '') ?></td>
-                <td><?= !empty($a['banned']) ? '<span class="chain-badge chain-invalid">已封禁</span>' : '<span class="chain-badge chain-valid">未封禁</span>' ?></td>
+                <td><?php if (!empty($a['banned'])): ?><span class="chain-badge chain-invalid">已封禁</span><?php elseif (!empty($a['skip'])): ?><span class="chain-badge" style="background:rgba(251,191,36,.15);color:#d97706" title="<?= htmlspecialchars($a['skip_reason'] ?? '内网/链路本地地址豁免') ?>">已豁免</span><?php else: ?><span class="chain-badge chain-valid">未封禁</span><?php endif; ?></td>
             </tr>
             <?php endforeach; ?>
         </table></div>

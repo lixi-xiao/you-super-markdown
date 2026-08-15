@@ -6,6 +6,18 @@ header('Content-Type: application/json; charset=utf-8');
 // v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
 security_check();
 
+// v3.3.11：公告为单向通知，禁止评论——公告关联文章（当前即「更新历史.md」）的评论读写全部拦截
+function isAnnouncementArticle($article) {
+    static $set = null;
+    if ($set === null) {
+        $set = [];
+        foreach (getAnnouncements() as $a) {
+            if (!empty($a['article'])) $set[$a['article']] = true;
+        }
+    }
+    return isset($set[$article]);
+}
+
 // 评论树组装：把评论表（parent_id 自关联）还原为嵌套结构（前端零改动）
 // $sanitize=true 时对外脱敏：qq 置空、avatar 若为 QQ 头像 URL（含 qq 号）也置空，
 // 防止 ?action=get&article=<任意> 批量枚举评论者的真实 QQ 号（v2.6.2）
@@ -581,6 +593,8 @@ if ($action === 'admin_setup' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($action === 'get') {
     $article = $_GET['article'] ?? '';
     if (empty($article)) jsonOut(['success' => false, 'error' => '缺少文章参数'], 400);
+    // v3.3.11：公告关联文章不展示评论区
+    if (isAnnouncementArticle($article)) jsonOut(['success' => true, 'comments' => []]);
     // v2.6.2：对外脱敏评论者的 qq 与 QQ 头像 URL（防枚举真实 QQ 号）
     $comments = loadComments($article, true);
     usort($comments, function($a, $b) { return strcmp($b['created_at'] ?? '', $a['created_at'] ?? ''); });
@@ -617,6 +631,7 @@ if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $content = trim($input['content'] ?? '');
     $content = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $content);
     if (empty($article)) jsonOut(['success' => false, 'error' => '缺少文章参数'], 400);
+    if (isAnnouncementArticle($article)) jsonOut(['success' => false, 'error' => '公告不支持评论'], 403);
     if (empty($content)) jsonOut(['success' => false, 'error' => '内容不能为空'], 400);
     if (mb_strlen($content, 'UTF-8') > 1000) jsonOut(['success' => false, 'error' => '评论不能超过1000字'], 400);
     $comments = loadComments($article);
@@ -666,6 +681,7 @@ if ($action === 'reply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $content = trim($input['content'] ?? '');
     $content = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $content);
     if (empty($article) || empty($parentId) || empty($content)) jsonOut(['success' => false, 'error' => '参数不完整'], 400);
+    if (isAnnouncementArticle($article)) jsonOut(['success' => false, 'error' => '公告不支持评论'], 403);
     if (mb_strlen($content, 'UTF-8') > 1000) jsonOut(['success' => false, 'error' => '回复不能超过1000字'], 400);
     $comments = loadComments($article);
     $users = loadUsers();

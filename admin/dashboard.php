@@ -527,6 +527,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
     // v4.0.0：评论邮件订阅通知
     $config['comment_notify_enabled'] = !empty($_POST['comment_notify_enabled']);
     $config['comment_notify_email'] = trim($_POST['comment_notify_email'] ?? '');
+    // v4.1.7：蜜罐攻击封禁阈值（1-100，ym-hfish-sync.py 读取；写入 config 表供后台可配）
+    $config['hfish_ban_threshold'] = min(100, max(1, intval($_POST['hfish_ban_threshold'] ?? 10)));
     saveSiteConfig($config);
     auditLog('config_update', 'site_config', '修改系统配置');
     header('Location: dashboard.php?tab=config&msg=saved');
@@ -1184,6 +1186,11 @@ $banMsg = $_GET['bmsg'] ?? '';
             <div class="toggle-row">
                 <div><div class="toggle-label">自动封禁越权用户</div><div class="toggle-desc">尝试越权访问的 IP 将自动被封禁</div></div>
                 <label class="toggle"><input type="checkbox" name="auto_ban_unauthorized" <?= empty($config['auto_ban_unauthorized']) ? '' : 'checked' ?>><span class="slider"></span></label>
+            </div>
+            <!-- v4.1.7：蜜罐攻击封禁阈值（后台可配，ym-hfish-sync.py 读取） -->
+            <div class="toggle-row" style="align-items:center">
+                <div><div class="toggle-label">蜜罐攻击封禁阈值</div><div class="toggle-desc">攻击次数达到该值自动封禁 IP（当前 <span style="color:var(--accent);font-weight:600"><?= (int)($config['hfish_ban_threshold'] ?? 10) ?></span> 次；调低更敏感）</div></div>
+                <input type="number" class="form-input" name="hfish_ban_threshold" value="<?= (int)($config['hfish_ban_threshold'] ?? 10) ?>" min="1" max="100" style="width:88px;flex-shrink:0" title="蜜罐攻击封禁阈值（1-100）">
             </div>
             <div class="toggle-row" onclick="openRateLimitModal()" style="cursor:pointer">
                 <div><div class="toggle-label">频率限制设置</div><div class="toggle-desc">登录/评论/注册频率上限</div></div>

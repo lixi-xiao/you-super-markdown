@@ -31,6 +31,23 @@ def load_config():
     return cfg
 
 
+def load_site_config():
+    """站点配置：SQLite config 表优先（超管后台可配），app-config.json 兜底（v4.1.7）"""
+    cfg = load_config()
+    try:
+        con = sqlite3.connect('file:%s?mode=ro' % DB_FILE, uri=True)
+        cur = con.execute("SELECT key, value FROM config")
+        for k, v in cur.fetchall():
+            try:
+                cfg[k] = json.loads(v)
+            except Exception:
+                cfg[k] = v
+        con.close()
+    except Exception:
+        pass
+    return cfg
+
+
 def read_hfish_attacks(db_path):
     """只读读取 ip_profile 攻击者画像，返回列表"""
     result = []
@@ -150,8 +167,8 @@ def find_hfish_db(cfg):
 
 
 def main():
-    cfg = load_config()
-    threshold = int(cfg.get('hfish_ban_threshold', 3) or 3)
+    cfg = load_site_config()  # v4.1.7：config 表优先（后台可配），回退 app-config.json
+    threshold = int(cfg.get('hfish_ban_threshold', 10) or 10)
     db_path = find_hfish_db(cfg)
 
     attacks, err = read_hfish_attacks(db_path)

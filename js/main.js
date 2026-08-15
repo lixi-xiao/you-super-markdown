@@ -266,24 +266,16 @@
             if (data.success) { allFiles = data.files; renderCategoryBar(); renderAnnouncements(); renderCards(); renderSidebarList(allFiles); }
         } catch (err) { cardsGrid.innerHTML = '<div class="empty-state">⚠️ 加载失败</div>'; }
     }
-    // v3.1.6：首页公告卡片（服务端 window.YM_ANNOUNCEMENTS 数据；整卡可点跳详情，标签可点击前端即时筛选）
+    // v3.1.6：首页公告卡片（服务端 window.YM_ANNOUNCEMENTS 数据；整卡可点跳详情）
     // v3.1.8：无关联文章的公告（纯文字/更新公告）点击弹出完整内容弹窗，手机端可看全文
-    var annFilterTag = '';
+    // v3.3.4：取消公告筛选条——公告数量少、筛公告意义不大，标签改为纯展示（可点跳详情保留）
     function renderAnnouncements() {
         var sec = document.getElementById('announcementSection');
         if (!sec) return;
         var anns = window.YM_ANNOUNCEMENTS || [];
         if (!anns.length) { sec.innerHTML = ''; sec.style.display = 'none'; return; }
         sec.style.display = '';
-        // 收集全部标签（用于筛选条）
-        var allTags = [];
-        anns.forEach(function(a) { (a.tags || []).forEach(function(t) { if (allTags.indexOf(t) === -1) allTags.push(t); }); });
-        var visible = annFilterTag ? anns.filter(function(a) { return (a.tags || []).indexOf(annFilterTag) !== -1; }) : anns;
-        var filterHTML = allTags.length > 1 ? '<div class="ann-filter"><span class="ann-filter-label">筛选</span>' +
-            '<span class="ann-filter-tag' + (annFilterTag === '' ? ' active' : '') + '" data-tag="">全部</span>' +
-            allTags.map(function(t) { return '<span class="ann-filter-tag' + (annFilterTag === t ? ' active' : '') + '" data-tag="' + escapeHTML(t) + '">#' + escapeHTML(t) + '</span>'; }).join('') +
-            '</div>' : '';
-        var listHTML = visible.map(function(a) {
+        var listHTML = anns.map(function(a) {
             // 有关联文章 → 点击跳文章详情；无 → 点击弹出完整公告弹窗
             var clickAttr = a.article
                 ? ' data-file="' + escapeHTML(a.article) + '"'
@@ -294,7 +286,7 @@
             var typeHTML = a.type === 'update'
                 ? '<span class="ann-card-type update"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M20 6L9 17l-5-5"/></svg>更新</span>'
                 : '<span class="ann-card-type manual">公告</span>';
-            var tagHTML = (a.tags || []).map(function(t) { return '<span class="ann-card-tag" data-tag="' + escapeHTML(t) + '">#' + escapeHTML(t) + '</span>'; }).join('');
+            var tagHTML = (a.tags || []).map(function(t) { return '<span class="ann-card-tag">#' + escapeHTML(t) + '</span>'; }).join('');
             return '<div class="ann-card' + (a.cover ? ' has-media' : '') + '"' + clickAttr + '>' +
                 '<div class="ann-card-left">' +
                     typeHTML +
@@ -311,23 +303,7 @@
             '</div>';
         }).join('');
         sec.innerHTML = '<div class="ann-header"><span class="ann-header-icon"><svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></span>公告</div>' +
-            filterHTML +
-            '<div class="ann-list">' + (listHTML || '<div class="ann-empty">该标签下暂无公告</div>') + '</div>';
-        // 事件：筛选标签
-        sec.querySelectorAll('.ann-filter-tag').forEach(function(t) {
-            t.addEventListener('click', function() {
-                annFilterTag = this.getAttribute('data-tag') || '';
-                renderAnnouncements();
-            });
-        });
-        // 事件：卡片内标签点击 = 筛选（阻止卡片跳转）
-        sec.querySelectorAll('.ann-card-tag').forEach(function(t) {
-            t.addEventListener('click', function(e) {
-                e.stopPropagation();
-                annFilterTag = this.getAttribute('data-tag') || '';
-                renderAnnouncements();
-            });
-        });
+            '<div class="ann-list">' + (listHTML || '<div class="ann-empty">暂无公告</div>') + '</div>';
         // 事件：整卡点击跳文章详情
         sec.querySelectorAll('.ann-card[data-file]').forEach(function(c) {
             c.addEventListener('click', function() { loadFile(c.getAttribute('data-file')); });

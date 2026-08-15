@@ -1886,16 +1886,6 @@ kbd {
     background: var(--accent-light); color: var(--accent);
 }
 .ann-header-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.ann-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
-.ann-filter-label { font-size: 12px; color: var(--text-muted); }
-.ann-filter-tag {
-    cursor: pointer; padding: 3px 12px; border-radius: 999px;
-    background: var(--accent-light); color: var(--accent);
-    font-size: 12px; font-weight: 500;
-    border: 1px solid transparent; transition: all 0.2s;
-}
-.ann-filter-tag:hover { border-color: var(--accent); }
-.ann-filter-tag.active { background: var(--accent); color: #fff; }
 .ann-list { display: flex; flex-direction: column; gap: 14px; }
 .ann-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px; }
 
@@ -1931,11 +1921,11 @@ kbd {
 }
 .ann-card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .ann-card-tag {
-    cursor: pointer; padding: 2px 10px; border-radius: 6px;
+    /* v3.3.4：纯展示标签（不再可点击筛选） */
+    padding: 2px 10px; border-radius: 6px;
     background: var(--accent-light); color: var(--accent);
-    font-size: 0.78em; font-weight: 500; transition: all 0.2s;
+    font-size: 0.78em; font-weight: 500;
 }
-.ann-card-tag:hover { border: 1px solid var(--accent); padding: 1px 9px; }
 .ann-card-cover {
     width: 100%; height: 100%; object-fit: cover; display: block;
     filter: grayscale(1) contrast(1.05) brightness(1.02);

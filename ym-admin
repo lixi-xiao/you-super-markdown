@@ -551,6 +551,33 @@ case "${1:-}" in
             }
         " 2>/dev/null
 
+        # v3.3.4：更新后健康检查——主页必须 200 且 web↔母本核心文件 MD5 一致，否则自动回滚
+        # （修复：此前仅在脚本步骤失败时回滚；「文件应用成功但站点实际不可用」（如目录权限 700 / rsync 同步异常）
+        #  不触发回滚，导致主页 403 等故障未自动恢复）
+        echo "[4.8/6] 健康检查..."
+        HC_DOMAIN=$(get_domain)
+        HC_CODE=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YM-HealthCheck/1.0' "https://$HC_DOMAIN/" 2>/dev/null || echo 000)
+        if [ "$HC_CODE" != "200" ]; then
+            echo "错误：更新后健康检查失败——主页返回 HTTP $HC_CODE，触发自动回滚"
+            mark_failed "更新后健康检查失败（主页 HTTP $HC_CODE）"
+            exit 1
+        fi
+        # 核心文件 MD5 校验：web 与母本必须逐字节一致（排除 data/ 与签名元数据）
+        HC_BAD=""
+        for HC_F in index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ym-admin ym-guard.py; do
+            HC_A=$(md5sum "$WEB_ROOT/$HC_F" 2>/dev/null | awk '{print $1}')
+            HC_B=$(md5sum "/opt/you-markdown/install-base/$HC_F" 2>/dev/null | awk '{print $1}')
+            if [ -z "$HC_A" ] || [ "$HC_A" != "$HC_B" ]; then
+                HC_BAD="$HC_BAD $HC_F"
+            fi
+        done
+        if [ -n "$HC_BAD" ]; then
+            echo "错误：更新后健康检查失败——web↔母本 MD5 不一致:$HC_BAD，触发自动回滚"
+            mark_failed "更新后健康检查失败（MD5 不一致:$HC_BAD）"
+            exit 1
+        fi
+        echo "  健康检查通过：主页 HTTP $HC_CODE，web↔母本核心文件 MD5 一致"
+
         # 4.7 更新历史注入（v3.1.9）：changelog 已在 4.7a 提前读取（TMP_DIR 已清理）。
         # 不再逐版本生成独立公告——把本次更新内容追加到「更新历史.md」文章（首页公告只保留
         # 一条指向该文章的公告，点进去即可查看全部历史版本更新）。

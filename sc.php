@@ -62,6 +62,113 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_file'])) {
     exit;
 }
 
+// ====== v3.3.0：富媒体压缩包批量上传（md + 图片 + 视频 一体导入，独立于纯 MD 上传） ======
+// 图片 → data/images/、视频 → data/videos/（均强制合法性校验）、md → data/articles/ 且引用路径自动重写；
+// 解析完即删临时 zip，不占服务器空间
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['rich_zip']) && ($_FILES['rich_zip']['error'] ?? -1) === UPLOAD_ERR_OK) {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: sc.php?rich_zip=csrf_error');
+        exit;
+    }
+    if ($_FILES['rich_zip']['size'] > 80 * 1024 * 1024) {
+        header('Location: sc.php?rich_zip=too_large');
+        exit;
+    }
+    $zip = new ZipArchive();
+    if ($zip->open($_FILES['rich_zip']['tmp_name']) !== true) {
+        header('Location: sc.php?rich_zip=open_failed');
+        exit;
+    }
+    $imgDir = './data/images';
+    $vidDir = './data/videos';
+    if (!is_dir($imgDir)) mkdir($imgDir, 0755, true);
+    if (!is_dir($vidDir)) mkdir($vidDir, 0755, true);
+    $imgExt = ['jpg' => 1, 'jpeg' => 1, 'png' => 1, 'gif' => 1, 'webp' => 1];
+    $vidExt = ['mp4' => 1, 'webm' => 1];
+    $imgMap = []; // 原 basename => data/images/新名
+    $vidMap = []; // 原 basename => data/videos/新名
+    $mdList = []; // ['name' => 原相对路径, 'content' => 内容]
+    $cnt = ['md' => 0, 'img' => 0, 'vid' => 0];
+    $zipSafe = true;
+    $errKey = '';
+    if ($zip->numFiles > 200) { $zipSafe = false; $errKey = 'too_many'; }
+    $totalZipSize = 0;
+    for ($i = 0; $zipSafe && $i < $zip->numFiles; $i++) {
+        $stat = $zip->statIndex($i);
+        $totalZipSize += (int)($stat['size'] ?? 0);
+        if ($totalZipSize > 80 * 1024 * 1024) { $zipSafe = false; $errKey = 'too_large'; break; }
+        $entryName = $zip->getNameIndex($i);
+        if (substr($entryName, -1) === '/' || strpos(basename($entryName), '.') === 0) continue; // 目录/隐藏文件跳过
+        $entryExt = strtolower(pathinfo($entryName, PATHINFO_EXTENSION));
+        $content = $zip->getFromIndex($i);
+        if ($content === false) continue;
+        if (strlen($content) > 40 * 1024 * 1024) { $zipSafe = false; $errKey = 'file_too_large'; break; }
+        if (in_array($entryExt, ['md', 'txt', 'markdown'], true)) {
+            $mdList[] = ['name' => $entryName, 'content' => $content];
+        } elseif (isset($imgExt[$entryExt])) {
+            // 图片强制校验：内容必须为真实图片（finfo buffer MIME）
+            if (!validateImageBuffer($content)) continue; // 伪装/损坏 → 跳过该文件（不中断整体）
+            $fname = date('Ymd') . '_' . bin2hex(random_bytes(8)) . '.' . $entryExt;
+            if (file_put_contents($imgDir . '/' . $fname, $content, LOCK_EX)) {
+                $imgMap[basename($entryName)] = 'data/images/' . $fname;
+                $cnt['img']++;
+            }
+        } elseif (isset($vidExt[$entryExt])) {
+            // 视频强制校验：容器结构（ftyp box / EBML 魔数）+ MIME
+            if (!validateVideoBuffer($content, $entryExt)) continue;
+            $fname = date('Ymd') . '_' . bin2hex(random_bytes(8)) . '.' . $entryExt;
+            if (file_put_contents($vidDir . '/' . $fname, $content, LOCK_EX)) {
+                $vidMap[basename($entryName)] = 'data/videos/' . $fname;
+                $cnt['vid']++;
+            }
+        }
+        // 其他类型忽略（不导入）
+    }
+    // md 导入 + 路径重写（第二遍，图片/视频映射已齐）
+    if ($zipSafe) {
+        $licenseUrlMap = ['CC BY 4.0' => 'https://creativecommons.org/licenses/by/4.0/', 'CC BY-SA 4.0' => 'https://creativecommons.org/licenses/by-sa/4.0/', 'CC BY-NC 4.0' => 'https://creativecommons.org/licenses/by-nc/4.0/', 'CC BY-NC-SA 4.0' => 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'CC BY-ND 4.0' => 'https://creativecommons.org/licenses/by-nd/4.0/', 'CC BY-NC-ND 4.0' => 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'CC0 1.0' => 'https://creativecommons.org/publicdomain/zero/1.0/'];
+        foreach ($mdList as $md) {
+            $baseName = basename($md['name']);
+            if (empty($baseName)) continue;
+            $safeName = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '', pathinfo($baseName, PATHINFO_FILENAME));
+            if (empty($safeName)) $safeName = 'doc_' . time() . '_' . $cnt['md'];
+            $targetName = $safeName . '.md';
+            if (file_exists($dataDir . '/' . $targetName)) {
+                $targetName = $safeName . '_' . time() . '.md';
+            }
+            $content = $md['content'];
+            // 路径自动重写：!video[]() 与 ![]() 引用命中本次导入文件则改为站内路径（外链/已是站内路径不动）
+            $content = preg_replace_callback('/!video\[([^\]]*)\]\(([^)\s]+)\)/', function ($m) use ($vidMap) {
+                if (preg_match('/^(https?:)?\/\//i', $m[2]) || strpos($m[2], 'data/videos/') === 0) return $m[0];
+                $b = basename($m[2]);
+                if (!isset($vidMap[$b])) return $m[0];
+                return substr($m[0], 0, strrpos($m[0], '(') + 1) . $vidMap[$b] . ')';
+            }, $content);
+            $content = preg_replace_callback('/!\[([^\]]*)\]\(([^)\s]+)\)/', function ($m) use ($imgMap) {
+                if (preg_match('/^(https?:)?\/\//i', $m[2]) || strpos($m[2], 'data/images/') === 0) return $m[0];
+                $b = basename($m[2]);
+                if (!isset($imgMap[$b])) return $m[0];
+                return substr($m[0], 0, strrpos($m[0], '(') + 1) . $imgMap[$b] . ')';
+            }, $content);
+            if (!preg_match('/^<!--META/', $content)) {
+                $meta = json_encode(['category' => $_POST['category'] ?? '', 'tags' => $_POST['tags'] ?? '', 'excerpt' => $_POST['excerpt'] ?? '', 'author' => $_POST['author'] ?? '', 'author_id' => $myId, 'license' => $_POST['license'] ?? 'CC BY-NC-SA 4.0', 'licenseUrl' => ($licenseUrlMap[$_POST['license'] ?? 'CC BY-NC-SA 4.0'] ?? '')], JSON_UNESCAPED_UNICODE);
+                $content = "<!--META" . $meta . "-->\n" . $content;
+            }
+            if (file_put_contents($dataDir . '/' . $targetName, $content, LOCK_EX)) {
+                $cnt['md']++;
+            }
+        }
+    }
+    $zip->close();
+    @unlink($_FILES['rich_zip']['tmp_name']); // 解析完即删，不占服务器空间
+    if ($zipSafe) {
+        header('Location: sc.php?rich_zip=ok&md=' . $cnt['md'] . '&img=' . $cnt['img'] . '&vid=' . $cnt['vid']);
+    } else {
+        header('Location: sc.php?rich_zip=' . ($errKey ?: 'aborted'));
+    }
+    exit;
+}
+
 // 获取文章内容（AJAX）
 if (isset($_GET['action']) && $_GET['action'] === 'get_content') {
     header('Content-Type: application/json; charset=utf-8');
@@ -285,6 +392,20 @@ usort($fileList, function($a, $b) {
 $showSuccess = isset($_GET['success']);
 $showError = $_GET['error'] ?? '';
 $showDeleted = isset($_GET['deleted']);
+// v3.3.0：富媒体压缩包导入结果（md/图片/视频 计数）
+$richZipOk = isset($_GET['rich_zip']) && $_GET['rich_zip'] === 'ok';
+$richZipMd = (int)($_GET['md'] ?? 0);
+$richZipImg = (int)($_GET['img'] ?? 0);
+$richZipVid = (int)($_GET['vid'] ?? 0);
+$richZipErr = isset($_GET['rich_zip']) && $_GET['rich_zip'] !== 'ok' ? $_GET['rich_zip'] : '';
+$richZipErrMsg = [
+    'csrf_error' => 'CSRF 校验失败，请刷新后重试',
+    'too_large' => '压缩包超过 80MB 上限，已拒绝',
+    'open_failed' => '无法打开 ZIP 文件',
+    'too_many' => 'ZIP 内文件过多（最多 200 个），已拒绝导入',
+    'file_too_large' => 'ZIP 内单个文件超过 40MB，已拒绝导入',
+    'aborted' => '导入中止（解压超限）',
+][$richZipErr] ?? '';
 $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
 ?>
 <!DOCTYPE html>
@@ -343,6 +464,8 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
     <?php if ($showSuccess): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= htmlspecialchars($editSuccess ?: '操作成功') ?></div><?php endif; ?>
     <?php if ($showError): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= htmlspecialchars($showError) ?></div><?php endif; ?>
     <?php if ($showDeleted): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>文档已删除</div><?php endif; ?>
+    <?php if ($richZipOk): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>富媒体压缩包导入完成：文档 <?= $richZipMd ?> 篇、图片 <?= $richZipImg ?> 张、视频 <?= $richZipVid ?> 个（zip 已自动删除）</div><?php endif; ?>
+    <?php if ($richZipErrMsg): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= htmlspecialchars($richZipErrMsg) ?></div><?php endif; ?>
 
     <div class="card">
         <div class="card-title">
@@ -425,6 +548,62 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
 
     <div class="card">
         <div class="card-title">
+            <svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="1"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+            富媒体压缩包批量上传
+        </div>
+        <p style="color:var(--text-muted);font-size:0.85em;margin-top:0">一个 zip 包内可同时包含 <strong>Markdown 文档 + 图片（jpg/png/gif/webp）+ 视频（mp4/webm）</strong>，导入时自动：文档存为文章、图片与视频解压到站内媒体目录、md 里的图片/视频引用路径自动改写，主页即可正常显示图片与播放视频。解析完自动删除 zip，不占服务器空间。上限：包 ≤80MB、单文件 ≤40MB、≤200 个文件。</p>
+        <form method="post" enctype="multipart/form-data" onsubmit="return confirm('确认导入该富媒体压缩包？')">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <div class="form-group">
+                <div class="upload-zone" id="richZipZone">
+                    <div class="upload-zone-icon"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+                    <div class="upload-zone-text">拖拽压缩包到此处，或点击选择</div>
+                    <div class="upload-zone-hint">支持 .zip（内含 .md + 图片 + 视频）</div>
+                    <input type="file" name="rich_zip" accept=".zip" id="richZipInput" class="upload-zone-input">
+                </div>
+                <div class="file-info" id="richZipInfo" style="display:none">
+                    <span class="file-info-name" id="richZipInfoName"></span>
+                    <button type="button" class="file-info-remove" id="richZipRemoveBtn">&times;</button>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">作者</label>
+                    <input class="form-input" name="author" placeholder="作者名称">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">许可证书</label>
+                    <select class="form-select" name="license">
+                        <option value="CC BY-NC-SA 4.0" selected>CC BY-NC-SA 4.0</option>
+                        <option value="CC BY 4.0">CC BY 4.0</option>
+                        <option value="CC BY-SA 4.0">CC BY-SA 4.0</option>
+                        <option value="CC BY-NC 4.0">CC BY-NC 4.0</option>
+                        <option value="CC BY-ND 4.0">CC BY-ND 4.0</option>
+                        <option value="CC BY-NC-ND 4.0">CC BY-NC-ND 4.0</option>
+                        <option value="CC0 1.0">CC0 1.0</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">分类</label>
+                    <input class="form-input" name="category" placeholder="例如：技术、随笔">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">标签（逗号分隔）</label>
+                    <input class="form-input" name="tags" placeholder="PHP, Markdown">
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">预览摘要（留空自动生成）</label>
+                <textarea class="form-input" name="excerpt" style="min-height:56px" placeholder="可选"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">导入富媒体压缩包</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="card-title">
             <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             已有文章（<?= count($fileList) ?> 篇）
         </div>
@@ -492,6 +671,9 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                         <button type="button" class="btn btn-sm btn-outline" id="btnInsertImage">插入图片</button>
                         <input type="file" id="imageUploadInput" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none">
                         <span class="form-hint" id="imageUploadHint" style="margin-left:10px"></span>
+                        <button type="button" class="btn btn-sm btn-outline" id="btnInsertVideo" style="margin-left:8px">插入视频</button>
+                        <input type="file" id="videoUploadInput" accept="video/mp4,video/webm" style="display:none">
+                        <span class="form-hint" id="videoUploadHint" style="margin-left:10px"></span>
                     </div>
                     <textarea class="form-input" name="content" id="editContent" style="min-height:200px;font-family:monospace" placeholder="Markdown 内容..."></textarea>
                     <p class="form-hint" id="editCharCount"></p>
@@ -590,6 +772,24 @@ document.querySelectorAll('.method-tab').forEach(function(b) {
     });
 })();
 
+// v3.3.0：富媒体压缩包（md + 图片 + 视频）上传交互
+(function() {
+    var dz = document.getElementById('richZipZone'), fi = document.getElementById('richZipInput');
+    var info = document.getElementById('richZipInfo'), nm = document.getElementById('richZipInfoName');
+    var rb = document.getElementById('richZipRemoveBtn');
+    if (!dz || !fi) return;
+    function show(f) { nm.textContent = f.name + ' (' + (f.size/1024/1024).toFixed(2) + ' MB)'; info.style.display = 'flex'; dz.style.display = 'none'; }
+    function clearF() { fi.value = ''; info.style.display = 'none'; dz.style.display = 'block'; }
+    fi.addEventListener('change', function() { if (this.files.length) show(this.files[0]); });
+    if (rb) rb.addEventListener('click', clearF);
+    ['dragenter','dragover'].forEach(function(e) { dz.addEventListener(e, function(ev) { ev.preventDefault(); dz.classList.add('dragover'); }); });
+    ['dragleave','drop'].forEach(function(e) { dz.addEventListener(e, function(ev) { ev.preventDefault(); dz.classList.remove('dragover'); }); });
+    dz.addEventListener('drop', function(e) {
+        var f = e.dataTransfer.files;
+        if (f.length && f[0].name.match(/\.zip$/i)) { fi.files = f; show(f[0]); }
+    });
+})();
+
 // 字数统计
 (function() {
     var ta = document.getElementById('contentArea'), ct = document.getElementById('charCount');
@@ -660,6 +860,41 @@ document.getElementById('editContent')?.addEventListener('input', function() {
             hint.textContent = '已上传 ✓';
             var ta = document.getElementById('editContent');
             var ins = '\n![图片](' + d.url + ')\n';
+            var start = ta.selectionStart, end = ta.selectionEnd;
+            ta.value = ta.value.slice(0, start) + ins + ta.value.slice(end);
+            ta.selectionStart = ta.selectionEnd = start + ins.length;
+            ta.focus();
+            var l = ta.value.replace(/\s/g,'').length;
+            document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
+        }).catch(function() { hint.textContent = '网络错误，上传失败'; });
+        this.value = '';
+    });
+})();
+
+// v3.3.0：文章视频上传（站长/写作者；上传成功后以 !video[]() 语法插入光标处；≤20MB，服务端强制合法性校验）
+(function() {
+    var btn = document.getElementById('btnInsertVideo');
+    var input = document.getElementById('videoUploadInput');
+    var hint = document.getElementById('videoUploadHint');
+    if (!btn || !input) return;
+    btn.addEventListener('click', function() { input.click(); });
+    input.addEventListener('change', function() {
+        if (!this.files.length) return;
+        var file = this.files[0];
+        if (file.size > 20 * 1024 * 1024) { hint.textContent = '视频需 ≤20MB，请先压缩后再传'; this.value = ''; return; }
+        var csrf = (document.querySelector('#editModal input[name=csrf_token]') || {}).value || '';
+        hint.textContent = '上传中...';
+        var fd = new FormData();
+        fd.append('video', file);
+        fetch('api.php?action=article_video_upload', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrf },
+            body: fd
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (!d.success) { hint.textContent = '上传失败：' + (d.error || '未知错误'); return; }
+            hint.textContent = '已上传 ✓';
+            var ta = document.getElementById('editContent');
+            var ins = '\n!video[视频](' + d.url + ')\n';
             var start = ta.selectionStart, end = ta.selectionEnd;
             ta.value = ta.value.slice(0, start) + ins + ta.value.slice(end);
             ta.selectionStart = ta.selectionEnd = start + ins.length;

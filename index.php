@@ -498,6 +498,19 @@ if ($action === 'update') {
         <button class="share-modal-close" id="shareModalClose">关闭</button>
     </div>
 </div>
+<!-- v3.1.8：公告详情弹窗（无关联文章的公告点击后显示完整内容） -->
+<div class="ann-modal-overlay" id="announceModal">
+    <div class="ann-modal-box">
+        <div class="ann-modal-head">
+            <span class="ann-modal-type"></span>
+            <button class="ann-modal-close" id="announceModalClose" title="关闭">&times;</button>
+        </div>
+        <div class="ann-modal-title"></div>
+        <div class="ann-modal-date"></div>
+        <div class="ann-modal-content"></div>
+        <button class="ann-modal-link" id="announceModalLink">查看文章 →</button>
+    </div>
+</div>
 <div class="toc-popup" id="tocPopup"><div class="toc-popup-header"><div class="toc-popup-title">目录</div></div><div class="toc-popup-list" id="tocPopupList"></div></div>
 <div class="music-popup" id="musicPopup">
     <button class="music-lyric-toggle" id="musicLyrToggle" title="歌词">词</button>

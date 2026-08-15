@@ -263,6 +263,7 @@
         } catch (err) { cardsGrid.innerHTML = '<div class="empty-state">⚠️ 加载失败</div>'; }
     }
     // v3.1.6：首页公告卡片（服务端 window.YM_ANNOUNCEMENTS 数据；整卡可点跳详情，标签可点击前端即时筛选）
+    // v3.1.8：无关联文章的公告（纯文字/更新公告）点击弹出完整内容弹窗，手机端可看全文
     var annFilterTag = '';
     function renderAnnouncements() {
         var sec = document.getElementById('announcementSection');
@@ -279,7 +280,10 @@
             allTags.map(function(t) { return '<span class="ann-filter-tag' + (annFilterTag === t ? ' active' : '') + '" data-tag="' + escapeHTML(t) + '">#' + escapeHTML(t) + '</span>'; }).join('') +
             '</div>' : '';
         var listHTML = visible.map(function(a) {
-            var clickable = a.article ? ' data-file="' + escapeHTML(a.article) + '"' : '';
+            // 有关联文章 → 点击跳文章详情；无 → 点击弹出完整公告弹窗
+            var clickAttr = a.article
+                ? ' data-file="' + escapeHTML(a.article) + '"'
+                : ' data-ann-id="' + escapeHTML(a.id) + '"';
             var coverHTML = a.cover
                 ? '<div class="ann-card-media"><img class="ann-card-cover" src="' + escapeHTML(a.cover) + '" alt="" loading="lazy" onerror="this.parentNode.style.display=\'none\'"><div class="ann-card-cover-ink"></div></div>'
                 : '';
@@ -287,7 +291,7 @@
                 ? '<span class="ann-card-type update"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M20 6L9 17l-5-5"/></svg>更新</span>'
                 : '<span class="ann-card-type manual">公告</span>';
             var tagHTML = (a.tags || []).map(function(t) { return '<span class="ann-card-tag" data-tag="' + escapeHTML(t) + '">#' + escapeHTML(t) + '</span>'; }).join('');
-            return '<div class="ann-card' + (a.cover ? ' has-media' : '') + '"' + clickable + '>' +
+            return '<div class="ann-card' + (a.cover ? ' has-media' : '') + '"' + clickAttr + '>' +
                 '<div class="ann-card-left">' +
                     typeHTML +
                     '<h3 class="ann-card-title">' + escapeHTML(a.title) + '</h3>' +
@@ -297,6 +301,7 @@
                     '</div>' +
                     (a.summary ? '<p class="ann-card-summary">' + escapeHTML(a.summary) + '</p>' : '') +
                     (tagHTML ? '<div class="ann-card-tags">' + tagHTML + '</div>' : '') +
+                    '<span class="ann-card-more">' + (a.article ? '查看文章 →' : '查看详情 →') + '</span>' +
                 '</div>' +
                 coverHTML +
             '</div>';
@@ -323,7 +328,45 @@
         sec.querySelectorAll('.ann-card[data-file]').forEach(function(c) {
             c.addEventListener('click', function() { loadFile(c.getAttribute('data-file')); });
         });
+        // v3.1.8：无关联文章公告点击 → 弹出完整内容
+        sec.querySelectorAll('.ann-card[data-ann-id]').forEach(function(c) {
+            c.addEventListener('click', function() {
+                var id = c.getAttribute('data-ann-id');
+                var ann = null;
+                (window.YM_ANNOUNCEMENTS || []).forEach(function(a) { if (a.id === id) ann = a; });
+                if (ann) openAnnounceDetail(ann);
+            });
+        });
     }
+    // v3.1.8：公告详情弹窗（完整内容；有关联文章时提供跳转按钮）
+    function openAnnounceDetail(a) {
+        var m = document.getElementById('announceModal');
+        if (!m) return;
+        m.querySelector('.ann-modal-type').textContent = a.type === 'update' ? '更新公告' : '公告';
+        m.querySelector('.ann-modal-title').textContent = a.title;
+        m.querySelector('.ann-modal-date').textContent = a.date || '';
+        m.querySelector('.ann-modal-content').textContent = a.summary || '（暂无内容）';
+        var link = m.querySelector('.ann-modal-link');
+        if (a.article) {
+            link.style.display = 'inline-flex';
+            link.dataset.file = a.article;
+        } else {
+            link.style.display = 'none';
+        }
+        m.classList.add('active');
+    }
+    // v3.1.8：公告弹窗交互（关闭/遮罩点击/跳转文章）
+    (function() {
+        var m = document.getElementById('announceModal');
+        if (!m) return;
+        var close = function() { m.classList.remove('active'); };
+        document.getElementById('announceModalClose').addEventListener('click', close);
+        m.addEventListener('click', function(e) { if (e.target === m) close(); });
+        document.getElementById('announceModalLink').addEventListener('click', function() {
+            var f = this.dataset.file;
+            if (f) { close(); loadFile(f); }
+        });
+    })();
     function renderCards() {
         if (allFiles.length === 0) { emptyHome.style.display = 'block'; cardsGrid.innerHTML = ''; return; }
         emptyHome.style.display = 'none';

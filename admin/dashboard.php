@@ -2568,7 +2568,8 @@ $banMsg = $_GET['bmsg'] ?? '';
     $smtpMsg = $_GET['msg'] ?? '';
     $alertLogTail = [];
     if (is_file(ALERT_LOG)) {
-        $lines = array_slice(array_filter(explode("\n", (string)@file_get_contents(ALERT_LOG))), -6);
+        // v4.1.9：逐行 trim，去除文件里行首/行尾多余空白，避免 pre-wrap 显示错位
+        $lines = array_slice(array_filter(array_map('trim', explode("\n", (string)@file_get_contents(ALERT_LOG)))), -6);
         $alertLogTail = array_reverse($lines);
     }
     ?>

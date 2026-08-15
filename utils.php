@@ -1438,6 +1438,89 @@ function savePinnedList($list) {
         throw $e;
     }
 }
+// ============ 公告（v3.1.6）============
+// 公告数据存 announcement 表；站长后台「公告管理」tab 全权管理（添加/排序/删除，含更新公告）。
+// 首页公告区 = 公告列表（ord 升序、date 降序），支持按公告标签即时筛选。
+
+/**
+ * 读取公告列表（默认按 ord 升序，其次 date 降序）
+ * @param int $limit 0 为全部
+ * @return array 公告数组
+ */
+function getAnnouncements($limit = 0) {
+    $sql = 'SELECT * FROM announcement ORDER BY ord ASC, date DESC, rowid ASC';
+    if ($limit > 0) $sql .= " LIMIT " . (int)$limit;
+    $rows = db_all($sql);
+    foreach ($rows as &$r) {
+        $r['title'] = htmlspecialchars($r['title'] ?? '', ENT_QUOTES, 'UTF-8');
+        $r['summary'] = htmlspecialchars($r['summary'] ?? '', ENT_QUOTES, 'UTF-8');
+        $r['date'] = htmlspecialchars($r['date'] ?? '', ENT_QUOTES, 'UTF-8');
+        $r['article'] = htmlspecialchars($r['article'] ?? '', ENT_QUOTES, 'UTF-8');
+    }
+    return $rows;
+}
+
+/**
+ * 读取单条公告
+ */
+function getAnnouncement($id) {
+    return db_one('SELECT * FROM announcement WHERE id = ?', [$id]);
+}
+
+/**
+ * 新增公告
+ * @param string $type  manual / update
+ */
+function addAnnouncement($type, $article, $authorId, $title, $summary) {
+    $id = bin2hex(random_bytes(8));
+    db_exec('INSERT INTO announcement (id, type, article, author_id, title, summary, date, ord) VALUES (?,?,?,?,?,?,?,?)', [
+        $id, $type, $article, $authorId,
+        mb_substr($title, 0, 120), mb_substr($summary, 0, 2000),
+        date('Y-m-d'), 0,
+    ]);
+    return $id;
+}
+
+/**
+ * 更新公告（站长编辑标题/摘要/关联文章）
+ */
+function updateAnnouncement($id, $article, $title, $summary) {
+    db_exec('UPDATE announcement SET article = ?, title = ?, summary = ? WHERE id = ?', [
+        $article, mb_substr($title, 0, 120), mb_substr($summary, 0, 2000), $id,
+    ]);
+}
+
+/**
+ * 删除公告
+ */
+function deleteAnnouncement($id) {
+    db_exec('DELETE FROM announcement WHERE id = ?', [$id]);
+}
+
+/**
+ * 公告排序：接收 id 有序数组，按数组顺序重写 ord
+ */
+function reorderAnnouncements($ids) {
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $st = $pdo->prepare('UPDATE announcement SET ord = ? WHERE id = ?');
+        foreach (array_values($ids) as $i => $id) {
+            $st->execute([$i, $id]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+/**
+ * 更新公告是否已存在（apply-update 注入用：避免同版本重复生成）
+ */
+function updateAnnouncementExists($version) {
+    return (bool)db_one('SELECT 1 FROM announcement WHERE type = ? AND title LIKE ? LIMIT 1', ['update', '%' . $version . '%']);
+}
 // 频率计数（滑动窗口）：table 为 login_fails / reg_rates / comment_rates
 function db_rate_count($table, $ip, $window) {
     $now = time();

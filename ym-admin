@@ -359,6 +359,14 @@ case "${1:-}" in
             rsync -a --delete --exclude='data/' --exclude='app-config.json' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
             rsync -a --delete --exclude='data/' --exclude='app-config.json' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
         fi
+        # 4.7a 提前读取更新包 changelog（v3.1.6：必须在清理 TMP_DIR 前读取，否则 version.json 已不存在；
+        # base64 传参规避引号/特殊字符；无 changelog 字段 → 空，后续跳过）
+        CHANGELOG_B64=$(php -r "
+            \$vf = '$STAGE_DIR/version.json';
+            if (!file_exists(\$vf)) { exit; }
+            \$v = json_decode(@file_get_contents(\$vf), true) ?: [];
+            echo base64_encode(trim((string)(\$v['changelog'] ?? '')));
+        " 2>/dev/null)
         rm -rf "$TMP_DIR" 2>/dev/null || true
         echo "  文件更新完成"
 
@@ -398,6 +406,19 @@ case "${1:-}" in
                 @copy(\$cfgFile, '/opt/you-markdown/install-base/app-config.json');
             }
         " 2>/dev/null
+
+        # 4.7 更新公告注入（v3.1.6）：changelog 已在 4.7a 提前读取（TMP_DIR 已清理），
+        # 升级成功后自动写入公告表（type=update，首页公告区自动公开显示）。
+        # CHANGELOG_B64 为空 → 跳过；同版本已存在 → 跳过（幂等）。
+        if [ -n "$CHANGELOG_B64" ]; then
+            php -r "
+                require_once '$WEB_ROOT/utils.php';
+                \$cl = base64_decode('$CHANGELOG_B64');
+                if (!updateAnnouncementExists('v${TO_VER}')) {
+                    addAnnouncement('update', '', '', '更新至 v${TO_VER}', \$cl);
+                }
+            " 2>/dev/null
+        fi
 
         # 5. 锁定母本
         echo "[5/6] 锁定母本目录..."

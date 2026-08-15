@@ -464,6 +464,11 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                 <input type="hidden" name="update_file" id="editUpdateFile" value="">
                 <div class="form-group">
                     <label class="form-label">Markdown 内容</label>
+                    <div class="editor-toolbar">
+                        <button type="button" class="btn btn-sm btn-outline" id="btnInsertImage">插入图片</button>
+                        <input type="file" id="imageUploadInput" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none">
+                        <span class="form-hint" id="imageUploadHint" style="margin-left:10px"></span>
+                    </div>
                     <textarea class="form-input" name="content" id="editContent" style="min-height:200px;font-family:monospace" placeholder="Markdown 内容..."></textarea>
                     <p class="form-hint" id="editCharCount"></p>
                 </div>
@@ -572,6 +577,7 @@ function openEditModal(fn) {
     document.getElementById('editExcerpt').value = '';
     document.getElementById('editLicense').value = 'CC BY-NC-SA 4.0';
     document.getElementById('editCharCount').textContent = '';
+    document.getElementById('imageUploadHint').textContent = '';
     document.getElementById('editModal').classList.add('active');
     fetch('sc.php?action=get_content&file=' + encodeURIComponent(fn))
         .then(function(r) { return r.json(); })
@@ -594,6 +600,40 @@ document.getElementById('editContent')?.addEventListener('input', function() {
     var l = this.value.replace(/\s/g,'').length;
     document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
 });
+
+// v3.1.6：文章图片上传（站长/写作者；上传成功后以 Markdown 语法插入光标处）
+(function() {
+    var btn = document.getElementById('btnInsertImage');
+    var input = document.getElementById('imageUploadInput');
+    var hint = document.getElementById('imageUploadHint');
+    if (!btn || !input) return;
+    btn.addEventListener('click', function() { input.click(); });
+    input.addEventListener('change', function() {
+        if (!this.files.length) return;
+        var file = this.files[0];
+        var csrf = (document.querySelector('#editModal input[name=csrf_token]') || {}).value || '';
+        hint.textContent = '上传中...';
+        var fd = new FormData();
+        fd.append('image', file);
+        fetch('api.php?action=article_image_upload', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrf },
+            body: fd
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (!d.success) { hint.textContent = '上传失败：' + (d.error || '未知错误'); return; }
+            hint.textContent = '已上传 ✓';
+            var ta = document.getElementById('editContent');
+            var ins = '\n![图片](' + d.url + ')\n';
+            var start = ta.selectionStart, end = ta.selectionEnd;
+            ta.value = ta.value.slice(0, start) + ins + ta.value.slice(end);
+            ta.selectionStart = ta.selectionEnd = start + ins.length;
+            ta.focus();
+            var l = ta.value.replace(/\s/g,'').length;
+            document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
+        }).catch(function() { hint.textContent = '网络错误，上传失败'; });
+        this.value = '';
+    });
+})();
 
 // 支持 ?edit=<文件名>：从写作者/站长后台直接进入编辑弹窗（v2.5.1）
 (function() {

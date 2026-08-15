@@ -33,6 +33,42 @@ if (!is_dir('./data/articles')) {
 }
 $_siteConfig = loadSiteConfig();
 $_siteTitle = $_siteConfig['site_title'] ?? 'You Markdown';
+// v3.1.6：首页公告卡片数据（公告表 + 关联文章提取封面图/标签/字数；纯文字公告无关联文章）
+function _annCoverTag($article) {
+    $cover = ''; $tags = []; $words = 0; $meta = [];
+    $p = __DIR__ . '/data/articles/' . basename($article);
+    if ($article !== '' && is_file($p)) {
+        $raw = @file_get_contents($p);
+        if ($raw !== false) {
+            if (preg_match('/<!--META(.*?)-->/s', $raw, $m)) {
+                $meta = json_decode(trim($m[1]), true) ?: [];
+            }
+            // 封面图：正文第一张 markdown 图片
+            if (preg_match('/!\[[^\]]*\]\(([^)\s]+)\)/', $raw, $im)) {
+                $cover = $im[1];
+                if (strpos($cover, 'data/images/') === 0) $cover = '/' . $cover; // 站内图片补根路径
+            }
+            // 标签：META tags → 正文 #tag
+            if (!empty($meta['tags'])) {
+                $tags = array_filter(array_map('trim', explode(',', $meta['tags'])));
+            }
+            if (empty($tags) && preg_match_all('/#([\p{L}\p{N}_-]+)/u', $raw, $tm)) {
+                $tags = array_slice(array_unique($tm[1]), 0, 5);
+            }
+            $words = mb_strlen(preg_replace('/\s+/u', '', preg_replace('/<!--.*?-->/s', '', $raw)), 'UTF-8');
+        }
+    }
+    return [$cover, array_slice($tags, 0, 5), $words, $meta];
+}
+$_announcements = [];
+foreach (getAnnouncements(20) as $_an) {
+    [$cov, $tg, $wc, $mt] = _annCoverTag($_an['article'] ?? '');
+    $_announcements[] = [
+        'id' => $_an['id'], 'type' => $_an['type'], 'article' => $_an['article'],
+        'title' => $_an['title'], 'summary' => $_an['summary'], 'date' => $_an['date'],
+        'cover' => $cov, 'tags' => $tg, 'words' => $wc,
+    ];
+}
 // 音乐播放器：网易云（music_cookies）或 QQ（music_cookies_qq）任一配置后显示入口（v2.6.0 起支持双平台独立开关）
 $musicEnabled = !empty($_siteConfig['music_cookies']) || !empty($_siteConfig['music_cookies_qq']);
 // 置顶列表读写由 utils.php 提供（SQLite）；此处仅作全局别名
@@ -410,7 +446,7 @@ if ($action === 'update') {
     <div class="color-panel-content"><div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-weight:600;">选择主题色</span><button class="color-reset-btn" id="colorResetBtn">重置</button></div><input type="range" min="0" max="360" value="220" class="hue-slider" id="hueSlider"></div>
 </div>
 <main class="main-container" id="mainContainer">
-    <div id="homeView"><div class="category-bar" id="categoryBar"></div><div class="cards-grid" id="cardsGrid"></div><div class="empty-state" id="emptyHome" style="display:none;">📭 暂无文档</div></div>
+    <div id="homeView"><div class="category-bar" id="categoryBar"></div><!-- v3.1.6：公告卡片区块（有公告才显示） --><div class="announcement-section" id="announcementSection"></div><div class="cards-grid" id="cardsGrid"></div><div class="empty-state" id="emptyHome" style="display:none;">📭 暂无文档</div></div>
     <div class="reading-view" id="readingView">
         <div class="markdown-body" id="markdownBody"></div>
         <div class="cmt-capsule-section" id="commentSection" style="display:none;">
@@ -611,7 +647,9 @@ if ($action === 'update') {
         </div>
     </div>
 </div>
-<script>window.YM_SITE_TITLE = <?= json_encode($_siteTitle, JSON_UNESCAPED_UNICODE) ?>;</script>
+<script>window.YM_SITE_TITLE = <?= json_encode($_siteTitle, JSON_UNESCAPED_UNICODE) ?>;
+// v3.1.6：公告卡片数据（服务端已转义标题/摘要，tags/cover 由文章提取）
+window.YM_ANNOUNCEMENTS = <?= json_encode($_announcements, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;</script>
 <script src="js/main.js?v=<?= filemtime(__DIR__ . '/js/main.js') ?>"></script>
 <script>
 // 背景图片应用

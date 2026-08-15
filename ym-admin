@@ -55,6 +55,51 @@ $CL_TEXT"
     /usr/local/bin/ym-admin notify "$NOTIFY_MSG" 2>/dev/null || true
 }
 
+# v3.3.13：环境自检与依赖补装——apply-update 完成后自动检测 php-gd（缩略图依赖）与缓存目录，
+# 缺失时自动安装（apt/yum）并重启 php-fpm；失败不阻断更新（img.php 降级透传原图），仅给出提示。
+ensure_env_deps() {
+    local cache_dir="$WEB_ROOT/data/cache/thumbs" fpm="" os_id=""
+    # ① 缩略图缓存目录（img.php 写缓存需 www-data 可写）
+    if [ ! -d "$cache_dir" ]; then
+        mkdir -p "$cache_dir" 2>/dev/null
+        chown -R www-data:www-data "$WEB_ROOT/data/cache" 2>/dev/null
+        echo "  [环境] 已创建缩略图缓存目录 $cache_dir"
+    fi
+    # ② php-gd 扩展检测
+    if php -m 2>/dev/null | grep -qi '^gd$'; then
+        echo "  [环境] php-gd 已就绪（缩略图功能可用）"
+        return 0
+    fi
+    echo "  [环境] 缺少 php-gd 扩展（缩略图依赖），自动补装..."
+    [ -r /etc/os-release ] && os_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
+    case "$os_id" in
+        ubuntu|debian)
+            apt-get install -y "php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-gd" >/dev/null 2>&1 \
+                || apt-get install -y php-gd >/dev/null 2>&1 \
+                || { echo "  [环境] 警告：php-gd 安装失败（无网络/软件源问题），缩略图将降级为原图（可稍后运行 sudo apt-get install php-gd）"; return 1; }
+            ;;
+        centos|rhel|fedora|almalinux|rocky|ol)
+            yum install -y php-gd >/dev/null 2>&1 || dnf install -y php-gd >/dev/null 2>&1 \
+                || { echo "  [环境] 警告：php-gd 安装失败，缩略图将降级为原图（可稍后运行 sudo yum install php-gd）"; return 1; }
+            ;;
+        *)
+            echo "  [环境] 未知发行版，跳过自动补装（缩略图将降级为原图，可手动安装 php-gd 扩展）"
+            return 1
+            ;;
+    esac
+    # ③ 重启 php-fpm 使扩展生效
+    for f in php-fpm "php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm"; do
+        if systemctl list-unit-files "$f.service" 2>/dev/null | grep -q "$f"; then fpm="$f"; break; fi
+    done
+    [ -n "$fpm" ] && systemctl restart "$fpm" 2>/dev/null || true
+    if php -m 2>/dev/null | grep -qi '^gd$'; then
+        echo "  [环境] php-gd 安装成功，缩略图功能已生效"
+    else
+        echo "  [环境] php-gd 已安装，但 php-fpm 重启后仍未检测到（请手动重启 php-fpm 后确认）"
+    fi
+    return 0
+}
+
 # v3.2.0：更新包签名验证（RSA 非对称）——服务器内置公钥 /opt/you-markdown/update_signing_public.pem，
 # 正式更新包在包根内置 manifest.json（全文件 SHA256）+ manifest.json.sig（私钥签名）。
 # 返回 0 通过；非 0 失败（失败封闭）。未部署公钥 → 跳过验证（旧环境兼容）。
@@ -650,6 +695,10 @@ case "${1:-}" in
             exit 1
         fi
         echo "  健康检查通过：主页 HTTP $HC_CODE，web↔母本核心文件 MD5 一致"
+
+        # 4.9 环境自检与依赖补装（v3.3.13）：php-gd + 缩略图缓存目录；失败不阻断更新
+        echo "[4.9/6] 环境自检与依赖补装..."
+        ensure_env_deps || true
 
         # 4.7 更新历史注入（v3.1.9）：changelog 已在 4.7a 提前读取（TMP_DIR 已清理）。
         # 不再逐版本生成独立公告——把本次更新内容追加到「更新历史.md」文章（首页公告只保留

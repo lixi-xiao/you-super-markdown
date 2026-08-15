@@ -1108,6 +1108,61 @@ case "${1:-}" in
         echo "挑战码: $CODE (300秒有效)"
         ;;
 
+    set-smtp-pass)
+        # v3.3.7：快捷修改 SMTP 授权码（密钥不落盘：root 密钥文件 + php-fpm 环境变量双写 + reload + 测试邮件）
+        if [ "$(id -u)" -ne 0 ]; then
+            echo "错误：修改 SMTP 授权码需 root 权限（sudo ym-admin set-smtp-pass）"
+            exit 1
+        fi
+        SMTP_PASS=""
+        case "${2:-}" in
+            "")
+                read -s -p "请输入新的 SMTP 授权码（输入时不可见）: " SMTP_PASS
+                echo ""
+                ;;
+            --pass=*)
+                SMTP_PASS="${2#--pass=}"
+                ;;
+            *)
+                echo "用法: ym-admin set-smtp-pass [--pass=新授权码]"
+                exit 1
+                ;;
+        esac
+        if [ -z "$SMTP_PASS" ]; then echo "错误：授权码不能为空"; exit 1; fi
+        SECRETS_DIR="/opt/you-markdown/secrets"
+        mkdir -p "$SECRETS_DIR"
+        printf '%s' "$SMTP_PASS" > "$SECRETS_DIR/smtp_pass"
+        chmod 600 "$SECRETS_DIR/smtp_pass"
+        echo "[1/3] 已更新 CLI 密钥文件: $SECRETS_DIR/smtp_pass (0600)"
+        PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)
+        POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/www.conf"
+        if [ -f "$POOL_CONF" ]; then
+            sed -i '/env\[YM_SMTP_PASS\]/d' "$POOL_CONF" 2>/dev/null || true
+            ESC_PASS=$(printf '%s' "$SMTP_PASS" | sed 's/[\\"]/\\&/g')
+            printf '\nenv[YM_SMTP_PASS] = "%s"\n' "$ESC_PASS" >> "$POOL_CONF"
+            systemctl reload "php${PHP_VER}-fpm" 2>/dev/null || true
+            echo "[2/3] 已更新 Web 端 php-fpm 环境变量并 reload ($POOL_CONF)"
+        else
+            echo "[2/3] 警告：未找到 php-fpm pool 配置 ($POOL_CONF)，仅更新了 CLI 密钥文件"
+        fi
+        php -r "require_once '$WEB_ROOT/utils.php'; auditLog('smtp_pass_update', 'smtp', 'CLI 更新 SMTP 授权码（密钥不落盘，未记录明文）');" 2>/dev/null || true
+        echo "[3/3] 发送测试邮件..."
+        TEST_RESULT=$(YM_SMTP_PASS="$SMTP_PASS" php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$cfg = loadSiteConfig();
+            \$to = \$cfg['admin_email'] ?? '';
+            if (\$to === '') { echo 'NO_ADMIN_EMAIL'; exit(0); }
+            [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown] SMTP 授权码已更新', 'SMTP 授权码已更新成功。若收到此邮件说明新的授权码配置正确，安全告警可正常发送。');
+            echo \$ok ? 'MAIL_OK' : ('MAIL_FAIL: ' . \$err);
+        " 2>/dev/null)
+        case "$TEST_RESULT" in
+            MAIL_OK) echo "测试邮件发送成功，新的授权码已生效" ;;
+            NO_ADMIN_EMAIL) echo "警告：未设置管理员邮箱，跳过测试邮件（后台「系统配置」可设置 admin_email）" ;;
+            *) echo "警告：测试邮件发送失败: ${TEST_RESULT#MAIL_FAIL: }（可在后台「邮件设置」检查 SMTP 配置）" ;;
+        esac
+        echo "SMTP 授权码更新完成"
+        ;;
+
     hfish-panel)
         PORTS_FILE="/opt/you-markdown/hfish-ports.conf"
         if [ ! -f "$PORTS_FILE" ]; then
@@ -1167,6 +1222,7 @@ case "${1:-}" in
         echo "  log-verify                校验审计日志哈希链"
         echo "  audit-report              每日审计报告（校验结果经 SMTP 发送给管理员）"
         echo "  challenge                 生成挑战码"
+        echo "  set-smtp-pass [--pass=授权码] 修改 SMTP 授权码（需 sudo；密钥文件 + php-fpm 环境变量双写，自动发测试邮件）"
         echo "  hfish-panel               建立 SSH 隧道访问 Hfish 管理面板"
         echo "  hfish-status              查看 Hfish 蜜罐状态"
         echo ""

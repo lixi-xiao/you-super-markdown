@@ -297,9 +297,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 </head>
 <body>
 
-<button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleSidebar()">
-    <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-</button>
+<!-- v3.1.5：移动端顶栏（菜单按钮融入顶栏，与后台统一视觉） -->
+<div class="mobile-topbar" id="mobileTopbar">
+    <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleSidebar()" aria-label="打开菜单">
+        <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="mobile-topbar-title">站长后台</div>
+    <div class="mobile-topbar-user">
+        <span class="mobile-topbar-name"><?= htmlspecialchars($currentUser['nickname'] ?? '站长') ?></span>
+    </div>
+</div>
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
 
 <div class="sidebar" id="sidebar">

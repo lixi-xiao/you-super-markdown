@@ -617,7 +617,7 @@ def _parse_meta_first_line(content: str):
 
 
 def _find_hidden_in_backup(pkg: str, rel_name: str) -> bool:
-    """在备份包中查同名文件，若存在且 META 标记 hidden=true 返回 True（系统文章）"""
+    """在单个备份包中查同名文件，若存在且 META 标记 hidden=true 返回 True（系统文章）"""
     try:
         with tarfile.open(pkg, 'r:gz') as t:
             if rel_name not in t.getnames():
@@ -630,6 +630,15 @@ def _find_hidden_in_backup(pkg: str, rel_name: str) -> bool:
         return bool(meta and meta.get('hidden') is True)
     except Exception:
         return False
+
+
+def _find_hidden_in_backups(rel_name: str):
+    """在所有备份包中从新到旧查找同名文件，返回第一个「META 标记 hidden=true」的备份包路径；无则 None。
+    v3.3.5：必须遍历全部备份——当日最早备份可能不含后上传的文章，只查最新包会漏源"""
+    for pkg in sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-*.tar.gz')), reverse=True):
+        if _find_hidden_in_backup(pkg, rel_name):
+            return pkg
+    return None
 
 
 # v3.3.5：单篇篡改还原——仅还原「当前 META 无法解析 且 备份中标记 hidden（系统文章）」的单篇。
@@ -646,7 +655,6 @@ def restore_single_hidden_articles():
     backups = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-*.tar.gz')))
     if not backups:
         return
-    latest = backups[-1]
     now = time.time()
     for name in os.listdir(ARTICLES_DIR):
         if not name.endswith('.md'):
@@ -660,15 +668,16 @@ def restore_single_hidden_articles():
         # 条件 1：当前 META 可解析 → 正常编辑/合法文章，永不触发
         if _parse_meta_first_line(head) is not None:
             continue
-        # 条件 2：备份中同名文件必须是 hidden（系统文章），普通文章即使 META 异常也不动（防误伤）
-        if not _find_hidden_in_backup(latest, name):
+        # 条件 2：从新到旧遍历备份，找同名且 hidden 的系统文章备份源（防漏源）
+        src_pkg = _find_hidden_in_backups(name)
+        if not src_pkg:
             continue
         # 条件 3：去抖——同一文件 5 分钟内不重复还原
         if now - _single_restore_cooldown.get(name, 0) < SINGLE_RESTORE_COOLDOWN:
             continue
-        # 从最新备份还原该单篇
+        # 从找到的备份还原该单篇
         try:
-            with tarfile.open(latest, 'r:gz') as t:
+            with tarfile.open(src_pkg, 'r:gz') as t:
                 fobj = t.extractfile(name)
                 if fobj is None:
                     continue
@@ -677,8 +686,8 @@ def restore_single_hidden_articles():
                 f.write(data)
             _single_restore_cooldown[name] = now
             last_single_restore_info = f"{time.strftime('%Y-%m-%d %H:%M:%S')} 还原单篇 {name}"
-            log(f"单篇篡改还原: {name}（META 异常，从备份恢复）")
-            send_alert("单篇还原", f"文章 {name} META 异常（疑似篡改），已从最新备份自动还原")
+            log(f"单篇篡改还原: {name}（META 异常，从备份 {os.path.basename(src_pkg)} 恢复）")
+            send_alert("单篇还原", f"文章 {name} META 异常（疑似篡改），已从备份自动还原")
         except Exception as e:
             log(f"单篇还原失败: {name} - {e}")
             send_alert("单篇还原失败", f"文章 {name} 还原失败，请人工介入: {e}")
@@ -849,11 +858,16 @@ def periodic_backup_thread():
 
 
 # v3.3.5：上传触发快速检测线程——每 10 秒检测 data/.backup_trigger，
-# 存在则立即备份文章并清标记（PHP 上传成功后写入，效果为「写完文章几秒内备份」）
+# 存在则立即备份文章并清标记（PHP 上传成功后写入，效果为「写完文章几秒内备份」）；
+# 同时每 60 秒跑一次单篇篡改还原（快速响应，无需等 30 分钟周期）
 def upload_trigger_thread():
+    tick = 0
     while running:
         time.sleep(10)
+        tick += 1
         check_upload_trigger()
+        if tick % 6 == 0:
+            restore_single_hidden_articles()
 
 
 def save_guard_state():

@@ -1509,7 +1509,8 @@ td code {
     }
     .main {
         margin-left: 0;
-        padding: 20px 16px 60px;
+        /* v3.1.4：左侧留出 fixed 展开按钮（40px+12px 边距）空间，避免遮挡标题文字 */
+        padding: 20px 16px 60px 56px;
     }
     .stats-grid {
         grid-template-columns: repeat(2, 1fr);

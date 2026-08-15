@@ -928,7 +928,10 @@
                 }
                 const savedReadScroll = sessionStorage.getItem('md-read-scroll-' + filename);
                 if (savedReadScroll) { requestAnimationFrame(() => window.scrollTo(0, parseInt(savedReadScroll))); }
-                cmtOnArticleLoad();
+                // v3.3.11：公告为单向通知——公告关联文章（如「更新历史」）不显示评论区
+                var _annFileMap = {};
+                (window.YM_ANNOUNCEMENTS || []).forEach(function(_a) { if (_a.article) _annFileMap[_a.article] = 1; });
+                if (_annFileMap[filename]) { cmtOnArticleHide(); } else { cmtOnArticleLoad(); }
             } else {
                 showNotFound(filename);
                 cmtOnArticleHide();

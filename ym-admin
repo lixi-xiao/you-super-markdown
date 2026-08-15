@@ -104,7 +104,9 @@ verify_package_signature() {
 }
 
 # v3.2.0：更新失败自动回退——从最新备份恢复 WEB_ROOT 与母本（停守护→解锁→恢复→锁定→重启）
+# v3.2.0-fix：回退完成自动向管理员发送通知邮件（$1 = 失败原因）
 auto_rollback() {
+    local reason="${1:-}"
     local BACKUP_DIR="/opt/you-markdown/backups"
     local LATEST
     LATEST=$(ls -t "$BACKUP_DIR"/pre-update-*.tar.gz 2>/dev/null | head -1)
@@ -122,6 +124,8 @@ auto_rollback() {
     systemctl start ym-guard 2>/dev/null || true
     rm -f /tmp/ym-update.lock
     echo "  [回退] 自动回退完成，系统已恢复至更新前状态"
+    # 回退完成自动通知管理员（失败不阻断）
+    /usr/local/bin/ym-admin notify "系统更新失败，已自动回退并恢复正常。${reason:+失败原因：${reason}。}系统已恢复至更新前状态，请登录后台查看更新状态。" 2>/dev/null || true
     return 0
 }
 
@@ -297,7 +301,7 @@ case "${1:-}" in
         mark_failed() {
             local reason="$1"
             if [ -n "${BACKUP_FILE:-}" ] && [ -f "$BACKUP_FILE" ] && [ -n "${FILES_APPLIED:-}" ]; then
-                auto_rollback && reason="$reason（已自动回退）"
+                auto_rollback "$reason" && reason="$reason（已自动回退）"
             fi
             # v3.2.0：failed 状态写入改 rm + 重建（实测文件 inode 可能被安全防护瞬时锁定，
             # 直接 truncate/open-for-write 报 Permission denied，rm 后重建新文件即可写）

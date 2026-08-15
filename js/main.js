@@ -350,6 +350,24 @@
         if (a.body && window.marked) {
             content.classList.add('markdown-body');
             content.innerHTML = marked.parse(a.body);
+            // v3.2.5：公告正文 mermaid 流程图渲染（与文章阅读一致）
+            if (typeof mermaid !== 'undefined') {
+                content.querySelectorAll('pre code.language-mermaid').forEach(function(code) {
+                    var pre = code.parentElement;
+                    var div = document.createElement('div');
+                    div.className = 'mermaid';
+                    div.textContent = code.textContent;
+                    if (pre) pre.replaceWith(div);
+                });
+                try {
+                    mermaid.initialize({ startOnLoad: false });
+                    content.querySelectorAll('.mermaid').forEach(function(el) {
+                        mermaid.run({ nodes: [el] }).catch(function() {
+                            el.innerHTML = '<pre style="overflow:auto">' + escapeHTML(el.textContent) + '</pre>';
+                        });
+                    });
+                } catch (e) { /* mermaid 初始化失败不阻断公告 */ }
+            }
             // 外链安全：禁止外链在当前页直接跳转（防 tabnabbing/钓鱼），与文章渲染一致
             content.querySelectorAll('a[href]').forEach(function(a) {
                 var href = a.getAttribute('href') || '';
@@ -780,6 +798,24 @@
                         a.setAttribute('rel', 'noopener noreferrer');
                     }
                 });
+                // v3.2.5：mermaid 流程图渲染（```mermaid 代码块 → 实际图表；优先于 hljs 高亮处理）
+                if (typeof mermaid !== 'undefined') {
+                    markdownBody.querySelectorAll('pre code.language-mermaid').forEach(function(code) {
+                        var pre = code.parentElement;
+                        var div = document.createElement('div');
+                        div.className = 'mermaid';
+                        div.textContent = code.textContent;
+                        if (pre) pre.replaceWith(div);
+                    });
+                    try {
+                        mermaid.initialize({ startOnLoad: false });
+                        markdownBody.querySelectorAll('.mermaid').forEach(function(el) {
+                            mermaid.run({ nodes: [el] }).catch(function() {
+                                el.innerHTML = '<pre style="overflow:auto">' + escapeHTML(el.textContent) + '</pre>';
+                            });
+                        });
+                    } catch (e) { /* mermaid 初始化失败不阻断正文 */ }
+                }
                 if (typeof hljs !== 'undefined') {
                     markdownBody.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
                 }

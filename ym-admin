@@ -482,6 +482,9 @@ case "${1:-}" in
                 exit 1
             fi
             echo "  增量更新：仅覆盖变更文件，不删除现有文件"
+            # v3.3.1-fix：STAGE_DIR 常为 mktemp -d（700），rsync -a 会把 WEB_ROOT/母本目录权限同步为 700
+            # 导致 nginx（www-data）无法遍历目录 → 主页 403；统一先固定为 755 再同步
+            chmod 755 "$STAGE_DIR" 2>/dev/null || true
             rsync -a --exclude='data/' --exclude='version.json' --exclude='manifest.json*' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
             rsync -a --exclude='data/' --exclude='version.json' --exclude='manifest.json*' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
         else
@@ -493,6 +496,8 @@ case "${1:-}" in
             fi
             # v3.0.0：全量更新排除 app-config.json（服务器配置唯一真源，--delete 不得删除/覆盖）
             # v3.2.0：同时排除签名元数据 manifest.json*
+            # v3.3.1-fix：同增量——先固定 STAGE_DIR 目录权限 755，防 rsync -a 覆盖目标目录为 700
+            chmod 755 "$STAGE_DIR" 2>/dev/null || true
             rsync -a --delete --exclude='data/' --exclude='app-config.json' --exclude='manifest.json*' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
             rsync -a --delete --exclude='data/' --exclude='app-config.json' --exclude='manifest.json*' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
         fi

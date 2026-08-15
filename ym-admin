@@ -407,23 +407,25 @@ case "${1:-}" in
                     exit 1
                 }
             fi
-            # 定位包含核心文件的目录（兼容带顶层目录的更新包）
-            if [ -f "$TMP_DIR/index.php" ] || [ -f "$TMP_DIR/utils.php" ]; then
-                STAGE_DIR="$TMP_DIR"
-            else
-                INNER=$(find "$TMP_DIR" -mindepth 1 -maxdepth 2 \( -name index.php -o -name utils.php \) 2>/dev/null | head -1)
-                if [ -n "$INNER" ]; then
-                    STAGE_DIR=$(dirname "$INNER")
+            # v3.3.0-fix：增量包识别优先——只要 version.json 声明 type=incremental 即按增量包处理
+            # （修复：增量包若含核心文件（utils.php/index.php 等）会被下方「含核心文件=全量包」逻辑误判，
+            #   触发 rsync --delete 清空 WEB_ROOT/母本中包外文件，导致站点文件大面积丢失的严重故障）
+            VFILE=$(find "$TMP_DIR" -maxdepth 3 -name version.json 2>/dev/null | head -1)
+            if [ -n "$VFILE" ]; then
+                PTYPE=$(php -r "\$v = json_decode(@file_get_contents('$VFILE'), true); echo \$v['type'] ?? '';" 2>/dev/null)
+                if [ "$PTYPE" = "incremental" ]; then
+                    PKG_TYPE="incremental"
+                    STAGE_DIR=$(dirname "$VFILE")
                 fi
             fi
-            # 增量包识别：无核心文件但带 version.json 且 type=incremental
+            # 全量包定位（含核心文件的顶层/子目录；兼容带顶层目录的更新包）
             if [ -z "$STAGE_DIR" ]; then
-                VFILE=$(find "$TMP_DIR" -maxdepth 3 -name version.json 2>/dev/null | head -1)
-                if [ -n "$VFILE" ]; then
-                    PTYPE=$(php -r "\$v = json_decode(@file_get_contents('$VFILE'), true); echo \$v['type'] ?? '';" 2>/dev/null)
-                    if [ "$PTYPE" = "incremental" ]; then
-                        PKG_TYPE="incremental"
-                        STAGE_DIR=$(dirname "$VFILE")
+                if [ -f "$TMP_DIR/index.php" ] || [ -f "$TMP_DIR/utils.php" ]; then
+                    STAGE_DIR="$TMP_DIR"
+                else
+                    INNER=$(find "$TMP_DIR" -mindepth 1 -maxdepth 2 \( -name index.php -o -name utils.php \) 2>/dev/null | head -1)
+                    if [ -n "$INNER" ]; then
+                        STAGE_DIR=$(dirname "$INNER")
                     fi
                 fi
             fi

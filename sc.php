@@ -307,8 +307,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
             }
             $licenseUrlMap = ['CC BY 4.0' => 'https://creativecommons.org/licenses/by/4.0/', 'CC BY-SA 4.0' => 'https://creativecommons.org/licenses/by-sa/4.0/', 'CC BY-NC 4.0' => 'https://creativecommons.org/licenses/by-nc/4.0/', 'CC BY-NC-SA 4.0' => 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'CC BY-ND 4.0' => 'https://creativecommons.org/licenses/by-nd/4.0/', 'CC BY-NC-ND 4.0' => 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'CC0 1.0' => 'https://creativecommons.org/publicdomain/zero/1.0/'];
             $licenseUrl = $licenseUrlMap[$license] ?? '';
-            $meta = json_encode(['category' => $category, 'tags' => $tags, 'excerpt' => $excerpt, 'author' => $author, 'author_id' => $myId, 'license' => $license, 'licenseUrl' => $licenseUrl], JSON_UNESCAPED_UNICODE);
-            $fullContent = "<!--META" . $meta . "-->\n" . $content;
+            // v4.0.0：发布状态——published 立即发布 / draft 存草稿 / scheduled 定时发布（publish_at 格式 Y-m-d\TH:i）
+            $publishStatus = $_POST['publish_status'] ?? 'published';
+            if (!in_array($publishStatus, ['published', 'draft', 'scheduled'], true)) $publishStatus = 'published';
+            $publishAt = trim($_POST['publish_at'] ?? '');
+            if ($publishStatus === 'scheduled' && $publishAt === '') $publishStatus = 'published';
+            // 定时时间转 "Y-m-d H:i" 存 META（list/read 均按此格式比较）
+            $publishAtStored = '';
+            if ($publishAt !== '') {
+                $publishAtStored = str_replace('T', ' ', $publishAt);
+            }
+            $meta = ['category' => $category, 'tags' => $tags, 'excerpt' => $excerpt, 'author' => $author, 'author_id' => $myId, 'license' => $license, 'licenseUrl' => $licenseUrl];
+            if ($publishStatus !== 'published') {
+                $meta['status'] = $publishStatus;
+                if ($publishStatus === 'scheduled' && $publishAtStored !== '') $meta['publish_at'] = $publishAtStored;
+            } else {
+                unset($meta['status'], $meta['publish_at']);
+            }
+            $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE);
+            $fullContent = "<!--META" . $metaJson . "-->\n" . $content;
 
             if (!empty($updateFile)) {
                 $fn = basename($updateFile);
@@ -395,7 +412,7 @@ if ($files) {
         $displayName = preg_replace('/\.md$/i', '', $filename);
         if (preg_match('/^#\s+(.+)/m', $content, $m)) { $displayName = $m[1]; }
         $isPinned = in_array($filename, $pinnedNames);
-        $fileList[] = ['name' => $filename, 'displayName' => $displayName, 'pinned' => $isPinned];
+        $fileList[] = ['name' => $filename, 'displayName' => $displayName, 'pinned' => $isPinned, 'meta' => $listMeta];
     }
 }
 usort($fileList, function($a, $b) {
@@ -612,6 +629,21 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                 <label class="form-label">预览摘要（留空自动生成）</label>
                 <textarea class="form-input" name="excerpt" style="min-height:56px" placeholder="可选"></textarea>
             </div>
+            <!-- v4.0.0：发布状态（立即发布 / 存草稿 / 定时发布） -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">发布方式</label>
+                    <select class="form-select" name="publish_status" onchange="this.form.querySelector('.publish-at-row').style.display = this.value==='scheduled' ? 'flex' : 'none'">
+                        <option value="published" selected>立即发布</option>
+                        <option value="draft">存为草稿（不公开）</option>
+                        <option value="scheduled">定时发布</option>
+                    </select>
+                </div>
+                <div class="form-group publish-at-row" style="display:none">
+                    <label class="form-label">发布时间</label>
+                    <input type="datetime-local" class="form-input" name="publish_at">
+                </div>
+            </div>
             <button type="submit" class="btn btn-primary">上传文档</button>
             </div>
         </form>
@@ -630,10 +662,19 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
         <?php else: ?>
         <div class="table-wrap">
         <table>
-            <tr><th>标题</th><th>置顶</th><th>查看</th><th>编辑</th><th>删除</th></tr>
+            <tr><th>标题</th><th>状态</th><th>置顶</th><th>查看</th><th>编辑</th><th>删除</th></tr>
             <?php foreach ($fileList as $f): ?>
+            <?php
+            // v4.0.0：列表状态标记（草稿 / 定时 / 已发布）
+            $fStatus = $f['meta']['status'] ?? 'published';
+            $fStatusLabel = '已发布';
+            $fStatusBadge = '';
+            if ($fStatus === 'draft') { $fStatusLabel = '草稿'; $fStatusBadge = ' style="color:#f59e0b"'; }
+            elseif ($fStatus === 'scheduled') { $fStatusLabel = '定时'; $fStatusBadge = ' style="color:#3b82f6"'; }
+            ?>
             <tr>
-                <td style="font-weight:500"><?= htmlspecialchars($f['displayName']) ?></td>
+                <td style="font-weight:500"><?= htmlspecialchars($f['displayName']) ?><?php if ($fStatus !== 'published'): ?> <span class="status-badge"<?= $fStatusBadge ?>><?= $fStatusLabel ?></span><?php endif; ?></td>
+                <td><?= $fStatusLabel ?></td>
                 <td>
                     <button class="btn-link pin-btn <?= $f['pinned'] ? 'pinned' : '' ?>" data-name="<?= htmlspecialchars($f['name']) ?>" data-pinned="<?= $f['pinned'] ? '1' : '0' ?>"><?= $f['pinned'] ? '已置顶' : '置顶' ?></button>
                 </td>
@@ -728,6 +769,21 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                 <div class="form-group">
                     <label class="form-label">预览摘要</label>
                     <textarea class="form-input" name="excerpt" id="editExcerpt" style="min-height:56px" placeholder="可选"></textarea>
+                </div>
+                <!-- v4.0.0：编辑时发布状态（立即发布 / 存草稿 / 定时发布） -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">发布方式</label>
+                        <select class="form-select" name="publish_status" id="editPublishStatus" onchange="var r=this.closest('form').querySelector('.edit-publish-at-row');if(r)r.style.display=this.value==='scheduled'?'flex':'none'">
+                            <option value="published">立即发布</option>
+                            <option value="draft">存为草稿（不公开）</option>
+                            <option value="scheduled">定时发布</option>
+                        </select>
+                    </div>
+                    <div class="form-group edit-publish-at-row" style="display:none">
+                        <label class="form-label">发布时间</label>
+                        <input type="datetime-local" class="form-input" name="publish_at" id="editPublishAt">
+                    </div>
                 </div>
                 <?php if ($isStationAdmin): ?>
                 <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface-2,var(--bg));border:1px solid var(--border);border-radius:10px">
@@ -904,6 +960,16 @@ function openEditModal(fn) {
                 document.getElementById('editTags').value = d.meta.tags || '';
                 document.getElementById('editExcerpt').value = d.meta.excerpt || '';
                 if (d.meta.license) document.getElementById('editLicense').value = d.meta.license;
+                // v4.0.0：回显发布状态与定时时间
+                var st = d.meta.status || 'published';
+                var stSel = document.getElementById('editPublishStatus');
+                if (stSel) stSel.value = st;
+                var paInput = document.getElementById('editPublishAt');
+                var paRow = stSel ? stSel.closest('form').querySelector('.edit-publish-at-row') : null;
+                if (st === 'scheduled' && d.meta.publish_at) {
+                    if (paInput) paInput.value = String(d.meta.publish_at).replace(' ', 'T');
+                }
+                if (paRow) paRow.style.display = st === 'scheduled' ? 'flex' : 'none';
             }
             if (annChk && d.is_announce) annChk.checked = true;
             var l = d.content.replace(/\s/g,'').length;

@@ -159,6 +159,17 @@ function delReplyRecursive(&$replies, $delId, $userId, $isAdmin) {
     }
     return false;
 }
+// v4.0.0：递归查找评论昵称（回复邮件通知带出被回复者；找不到返回 null）
+function findCommentNickname($replies, $findId) {
+    foreach ($replies as $r) {
+        if ($r['id'] === $findId) return $r['nickname'] ?? '';
+        if (!empty($r['replies'])) {
+            $n = findCommentNickname($r['replies'], $findId);
+            if ($n !== null) return $n;
+        }
+    }
+    return null;
+}
 // CSRF 防护：所有 POST 请求需携带有效 X-CSRF-Token
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) {
@@ -594,11 +605,19 @@ if ($action === 'get') {
     $article = $_GET['article'] ?? '';
     if (empty($article)) jsonOut(['success' => false, 'error' => '缺少文章参数'], 400);
     // v3.3.11：公告关联文章不展示评论区
-    if (isAnnouncementArticle($article)) jsonOut(['success' => true, 'comments' => []]);
-    // v2.6.2：对外脱敏评论者的 qq 与 QQ 头像 URL（防枚举真实 QQ 号）
-    $comments = loadComments($article, true);
-    usort($comments, function($a, $b) { return strcmp($b['created_at'] ?? '', $a['created_at'] ?? ''); });
-    jsonOut(['success' => true, 'comments' => $comments]);
+    if (isAnnouncementArticle($article)) jsonOut(['success' => true, 'comments' => [], 'total' => 0, 'page' => 1, 'per_page' => 20, 'total_pages' => 0]);
+    // v3.2.6：对外脱敏评论者的 qq 与 QQ 头像 URL（防枚举真实 QQ 号）
+    // v3.3.15：评论区根评论分页（默认每页 20 条，独立实现不复用后台组件；回复随根评论整棵展示不单独分页）
+    $perPage = max(1, min(100, (int)($_GET['per_page'] ?? 20)));
+    $page = max(1, (int)($_GET['page'] ?? 1));
+    $all = loadComments($article, true);
+    // 根评论按时间倒序（新评论在前）
+    usort($all, function($a, $b) { return strcmp($b['created_at'] ?? '', $a['created_at'] ?? ''); });
+    $total = count($all);
+    $totalPages = max(1, (int)ceil($total / $perPage));
+    $page = min($page, $totalPages);
+    $comments = array_slice($all, ($page - 1) * $perPage, $perPage);
+    jsonOut(['success' => true, 'comments' => $comments, 'total' => $total, 'page' => $page, 'per_page' => $perPage, 'total_pages' => $totalPages]);
 }
 if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $clientIP = getClientIP();
@@ -656,6 +675,8 @@ if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     ];
     $comments[] = $new;
     saveComments($article, $comments);
+    // v4.0.0：评论邮件订阅通知（受 config comment_notify_enabled 控制，失败不阻断评论）
+    notifyComment($article, $userNick, $content);
     jsonOut(['success' => true, 'comment' => $new]);
 }
 if ($action === 'reply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -702,22 +723,30 @@ if ($action === 'reply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         'likes' => 0, 'replies' => [], 'created_at' => date('Y-m-d H:i:s')
     ];
     $added = false;
+    $parentNickForMail = ''; // v4.0.0：回复通知带出被回复者昵称
     foreach ($comments as &$c) {
         if ($c['id'] === $parentId) {
             if (!isset($c['replies'])) $c['replies'] = [];
             $c['replies'][] = $reply;
             $added = true;
+            $parentNickForMail = $c['nickname'] ?? '';
             break;
         }
         if (!empty($c['replies'])) {
             if (addReplyRecursive($c['replies'], $parentId, $reply)) {
                 $added = true;
+                $parentNickForMail = findCommentNickname($c['replies'], $parentId) ?? ($c['nickname'] ?? '');
                 break;
             }
         }
     }
     unset($c);
-    if ($added) { saveComments($article, $comments); jsonOut(['success' => true]); }
+    if ($added) {
+        saveComments($article, $comments);
+        // v4.0.0：回复邮件订阅通知（受 config comment_notify_enabled 控制）
+        notifyComment($article, $userNick, $content, true, $parentNickForMail);
+        jsonOut(['success' => true]);
+    }
     jsonOut(['success' => false, 'error' => '父评论不存在'], 404);
 }
 if ($action === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {

@@ -39,6 +39,7 @@
     const tocFileList = document.getElementById('tocFileList');
     const homeView = document.getElementById('homeView');
     const cardsGrid = document.getElementById('cardsGrid');
+    const archiveView = document.getElementById('archiveView');
     const emptyHome = document.getElementById('emptyHome');
     const readingView = document.getElementById('readingView');
     const markdownBody = document.getElementById('markdownBody');
@@ -102,6 +103,8 @@
     const nextTitle = document.getElementById('nextTitle');
     let allFiles = [];
     let currentCategory = '';
+    let currentTag = '';          // v4.0.0：标签聚合过滤
+    let archiveMode = false;      // v4.0.0：归档视图开关
     let isReadingView = false;
     let currentHeadings = [];
     let activeHeadingIndex = -1;
@@ -230,10 +233,7 @@
                 readingProgress.style.width = pct + '%';
             }
             readingProgress.classList.add('active');
-            if (readingProgressText) {
-                readingProgressText.textContent = Math.round(pct) + '%';
-                readingProgressText.classList.add('active');
-            }
+            // v4.1.4：进度条只显示进度条本身，不再显示百分比文字
         } else {
             topBar.classList.remove('hidden');
             readingProgress.classList.remove('active');
@@ -252,18 +252,31 @@
             ? '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'
             : '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
     });
+    // v4.0.0：深色模式跟随系统——首次访问未手动设置时，按系统偏好（prefers-color-scheme）决定；
+    //         手动切换后写入 localStorage 记住用户选择
     (function() {
-        const saved = localStorage.getItem('md-theme') || 'light';
-        document.documentElement.setAttribute('data-theme', saved);
-        if (saved === 'dark') {
+        const saved = localStorage.getItem('md-theme');
+        const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = saved || (systemDark ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+        if (theme === 'dark') {
             btnThemeToggle.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
+        }
+        // 用户未手动设置过时，跟随系统主题变化实时切换
+        if (!saved && window.matchMedia) {
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+                document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+                btnThemeToggle.innerHTML = e.matches
+                    ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
+                    : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+            });
         }
     })();
     async function loadFileList() {
         try {
             const resp = await fetch('?action=list');
             const data = await resp.json();
-            if (data.success) { allFiles = data.files; renderCategoryBar(); renderAnnouncements(); renderCards(); renderSidebarList(allFiles); }
+            if (data.success) { allFiles = data.files; renderCategoryBar(); renderAnnouncements(); renderHomeContent(); renderSidebarList(allFiles); }
         } catch (err) { cardsGrid.innerHTML = '<div class="empty-state">⚠️ 加载失败</div>'; }
     }
     // v3.1.6：首页公告卡片（服务端 window.YM_ANNOUNCEMENTS 数据；整卡可点跳详情）
@@ -289,8 +302,8 @@
             var tagHTML = (a.tags || []).map(function(t) { return '<span class="ann-card-tag">#' + escapeHTML(t) + '</span>'; }).join('');
             return '<div class="ann-card' + (a.cover ? ' has-media' : '') + '"' + clickAttr + '>' +
                 '<div class="ann-card-left">' +
-                    typeHTML +
-                    '<h3 class="ann-card-title">' + escapeHTML(a.title) + '</h3>' +
+                    // v3.3.16：类型徽章与标题同一行（移动到标题旁边），不再是标题上方独立一行
+                    '<div class="ann-card-title-row">' + typeHTML + '<h3 class="ann-card-title">' + escapeHTML(a.title) + '</h3></div>' +
                     '<div class="ann-card-meta">' +
                         '<span class="ann-meta-item"><span class="ann-meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>' + escapeHTML(a.date) + '</span>' +
                         (a.words ? '<span class="ann-meta-item"><span class="ann-meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>' + (a.words / 1000).toFixed(1) + 'k字</span>' : '') +
@@ -326,6 +339,16 @@
         m.querySelector('.ann-modal-type').textContent = a.type === 'update' ? '更新公告' : '公告';
         m.querySelector('.ann-modal-title').textContent = a.title;
         m.querySelector('.ann-modal-date').textContent = a.date || '';
+        // v3.3.15：公告弹窗展示字数（首页公告卡片有字数、点进纯文字公告弹窗却无——补齐）
+        var annWordsEl = m.querySelector('.ann-modal-words');
+        if (annWordsEl) {
+            if (a.words && a.words > 0) {
+                annWordsEl.style.display = 'inline-flex';
+                annWordsEl.innerHTML = '<span class="ann-modal-words-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>' + a.words + ' 字';
+            } else {
+                annWordsEl.style.display = 'none';
+            }
+        }
         var content = m.querySelector('.ann-modal-content');
         if (a.body && window.marked) {
             content.classList.add('markdown-body');
@@ -458,8 +481,11 @@
         });
     })();
     function renderCards() {
+        if (archiveMode && archiveView) { cardsGrid.style.display = 'none'; if (archiveView) archiveView.style.display = 'block'; }
+        else if (archiveView) archiveView.style.display = 'none';
         if (allFiles.length === 0) { emptyHome.style.display = 'block'; cardsGrid.innerHTML = ''; return; }
         emptyHome.style.display = 'none';
+        cardsGrid.style.display = '';
         // v3.3.12：首页卡片封面走缩略图（大图只在文章阅读页加载，首页不再下载 MB 级原图）
         function cardCover(src) {
             if (!src) return src;
@@ -468,7 +494,7 @@
             }
             return src;
         }
-        var displayFiles = currentCategory ? allFiles.filter(f => f.category === currentCategory) : allFiles;
+        var displayFiles = filteredFiles();
         cardsGrid.innerHTML = displayFiles.map((file, i) => `
             <div class="doc-card" data-filename="${escapeHTML(file.name)}" style="animation-delay:${i*0.05}s">
                 ${file.cover ? `<div class="doc-cover"><img src="${escapeHTML(cardCover(file.cover))}" alt="" loading="lazy" onerror="this.parentNode.style.display='none'"></div>` : ''}
@@ -477,39 +503,162 @@
                     <span><span class="meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>${file.modified}</span>
                     <span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>${file.wordCount}字</span>
                     ${file.category ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>${escapeHTML(file.category)}</span>` : ''}
+                    ${(file.views || 0) > 0 ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>${file.views}</span>` : ''}
                 </div>
                 <div class="card-excerpt">${escapeHTML(file.excerpt || '')}</div>
-                <div class="card-tags">${file.tags.map(t => `<span class="tag">#${escapeHTML(t)}</span>`).join('')}</div>
+                <div class="card-tags">${file.tags.map(t => `<span class="tag" data-tag="${escapeHTML(t)}">#${escapeHTML(t)}</span>`).join('')}</div>
             </div>`).join('');
         document.querySelectorAll('.doc-card').forEach(card => card.addEventListener('click', () => loadFile(card.dataset.filename)));
+        // v4.0.0：卡片标签点击 → 标签聚合过滤（阻止冒泡，避免误触进入文章）
+        document.querySelectorAll('.doc-card .card-tags .tag').forEach(tag => {
+            tag.addEventListener('click', function(e) {
+                e.stopPropagation();
+                currentTag = currentTag === this.dataset.tag ? '' : this.dataset.tag;
+                currentCategory = '';
+                renderCategoryBar();
+                renderHomeContent();
+            });
+        });
     }
     function renderCategoryBar() {
         var bar = document.getElementById('categoryBar');
         if (!bar) return;
         var map = {};
+        var tagMap = {};
         allFiles.forEach(f => {
             var c = f.category || '';
             if (c) map[c] = (map[c] || 0) + 1;
+            (f.tags || []).forEach(t => { if (t && t !== '#') tagMap[t] = (tagMap[t] || 0) + 1; });
         });
         var cats = Object.keys(map);
-        if (cats.length === 0) { bar.classList.remove('has-categories'); bar.innerHTML = ''; return; }
+        var tags = Object.keys(tagMap);
+        if (cats.length === 0 && tags.length === 0) { bar.classList.remove('has-categories'); bar.innerHTML = ''; return; }
         bar.classList.add('has-categories');
         var total = allFiles.length;
-        var leftHTML = `<div class="category-bar-left"><div class="category-bar-item${currentCategory === '' ? ' active' : ''}" data-category="">全部 <span class="category-bar-count">${total}</span></div></div>`;
+        // v4.0.0：归档视图切换按钮 + 标签聚合条
+        var archiveBtn = archiveMode
+            ? `<div class="category-bar-item active" data-view="archive">归档</div>`
+            : `<div class="category-bar-item" data-view="archive">归档</div>`;
+        var leftHTML = `<div class="category-bar-left">${archiveBtn}<div class="category-bar-item${currentCategory === '' && !currentTag ? ' active' : ''}" data-category="">全部 <span class="category-bar-count">${total}</span></div></div>`;
         var divider = '<div class="category-bar-divider"></div>';
         var rightItems = '';
+        if (currentTag) {
+            rightItems += `<div class="category-bar-item active tag-filter" data-tag="${escapeHTML(currentTag)}">#${escapeHTML(currentTag)} <span class="category-bar-count">${tagMap[currentTag] || 0}</span></div>`;
+        }
         cats.forEach(c => {
-            rightItems += `<div class="category-bar-item${currentCategory === c ? ' active' : ''}" data-category="${escapeHTML(c)}">${escapeHTML(c)} <span class="category-bar-count">${map[c]}</span></div>`;
+            rightItems += `<div class="category-bar-item${currentCategory === c && !currentTag ? ' active' : ''}" data-category="${escapeHTML(c)}">${escapeHTML(c)} <span class="category-bar-count">${map[c]}</span></div>`;
         });
+        // v4.1.1：标签云独立一行（不再与分类按钮同排挤压导致重叠/挤出）
+        var tagCloudHTML = '';
+        if (currentCategory === '' && tags.length > 0) {
+            tagCloudHTML = `<div class="tag-cloud-row"><div class="tag-cloud">${tags.slice(0, 20).map(t => `<span class="tag-cloud-item${currentTag === t ? ' active' : ''}" data-tag="${escapeHTML(t)}">#${escapeHTML(t)}</span>`).join('')}</div></div>`;
+        }
         var rightHTML = `<div class="category-bar-right">${rightItems}</div>`;
-        bar.innerHTML = leftHTML + divider + rightHTML;
+        bar.innerHTML = leftHTML + divider + rightHTML + tagCloudHTML;
         bar.querySelectorAll('.category-bar-item').forEach(item => {
             item.addEventListener('click', function() {
-                currentCategory = this.dataset.category;
+                if (this.dataset.view === 'archive') { archiveMode = !archiveMode; renderCategoryBar(); renderHomeContent(); return; }
+                if (this.dataset.tag !== undefined) { currentTag = currentTag === this.dataset.tag ? '' : this.dataset.tag; }
+                else {
+                    // v4.0.0：点「全部」（data-category=""）同时清除标签筛选
+                    currentCategory = this.dataset.category;
+                    currentTag = '';
+                }
                 renderCategoryBar();
-                renderCards();
+                renderHomeContent();
             });
         });
+        bar.querySelectorAll('.tag-cloud-item').forEach(item => {
+            item.addEventListener('click', function() {
+                currentTag = currentTag === this.dataset.tag ? '' : this.dataset.tag;
+                renderCategoryBar();
+                renderHomeContent();
+            });
+        });
+        // v4.1.4：分类栏/标签云启用横向滚动（滚轮+拖拽），超出部分电脑端可查看
+        enableHScroll(bar.querySelector('.category-bar-right'));
+        enableHScroll(bar.querySelector('.tag-cloud'));
+    }
+    // v4.1.4：分类/标签栏横向滚动增强——桌面端鼠标滚轮垂直滚动转横向，并支持按住拖动
+    function enableHScroll(el) {
+        if (!el || el.__ymHScroll) return;
+        el.__ymHScroll = true;
+        // 滚轮：垂直滚动（deltaY）转为横向滚动（deltaX），Shift 不依赖
+        el.addEventListener('wheel', function(e) {
+            if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && el.scrollWidth > el.clientWidth + 2) {
+                e.preventDefault();
+                el.scrollLeft += e.deltaY;
+            }
+        }, { passive: false });
+        // 按住拖动（桌面鼠标；移动端原生触摸滚动不受影响）
+        var down = false, startX = 0, startLeft = 0, moved = false;
+        el.addEventListener('mousedown', function(e) {
+            if (e.button !== 0) return;
+            if (el.scrollWidth <= el.clientWidth + 2) return; // 无溢出不启用拖拽，避免干扰点击
+            down = true; moved = false;
+            startX = e.clientX; startLeft = el.scrollLeft;
+            el.style.cursor = 'grabbing';
+        });
+        document.addEventListener('mousemove', function(e) {
+            if (!down) return;
+            var dx = e.clientX - startX;
+            if (Math.abs(dx) > 4) moved = true;
+            el.scrollLeft = startLeft - dx;
+        });
+        document.addEventListener('mouseup', function() {
+            if (!down) return;
+            down = false;
+            el.style.cursor = '';
+            // 拖动后本次点击不触发子元素 click（避免误点分类/标签）
+            if (moved) {
+                var t = document.activeElement;
+                document.addEventListener('click', function h(e) {
+                    e.stopPropagation(); e.preventDefault();
+                    document.removeEventListener('click', h);
+                }, true);
+            }
+        });
+        // 子元素点击：若刚拖动过则忽略
+        el.addEventListener('click', function(e) {
+            if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; }
+        }, true);
+    }
+    // v4.0.0：根据 currentCategory/currentTag 过滤 + 归档视图渲染（按年月分组）
+    function filteredFiles() {
+        return allFiles.filter(f =>
+            (!currentCategory || f.category === currentCategory) &&
+            (!currentTag || (f.tags || []).includes(currentTag))
+        );
+    }
+    function renderHomeContent() {
+        if (archiveMode) { renderArchive(); return; }
+        renderCards();
+    }
+    function renderArchive() {
+        if (!archiveView) return;
+        emptyHome.style.display = 'none';
+        cardsGrid.style.display = 'none';
+        archiveView.style.display = 'block';
+        var files = filteredFiles();
+        if (!files.length) { archiveView.innerHTML = '<div class="archive-empty">暂无归档内容</div>'; return; }
+        // 按 modified 年月分组（倒序）
+        var groups = {};
+        files.forEach(f => {
+            var key = (f.modified || '').slice(0, 7);
+            if (!key) key = '未分类';
+            (groups[key] = groups[key] || []).push(f);
+        });
+        var years = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+        var html = years.map(y => {
+            var items = groups[y].map(f => `
+                <a class="archive-item" data-filename="${escapeHTML(f.name)}">
+                    <span class="archive-item-title">${escapeHTML(f.displayName)}</span>
+                    <span class="archive-item-meta">${escapeHTML(f.modified)}${(f.views || 0) > 0 ? ' · ' + f.views + ' 浏览' : ''}</span>
+                </a>`).join('');
+            return `<div class="archive-group"><div class="archive-year">${escapeHTML(y)} <span class="archive-year-count">${groups[y].length} 篇</span></div><div class="archive-items">${items}</div></div>`;
+        }).join('');
+        archiveView.innerHTML = html;
+        archiveView.querySelectorAll('.archive-item').forEach(item => item.addEventListener('click', () => loadFile(item.dataset.filename)));
     }
     function renderSidebarList(files) {
         if (!sidebarFileList) return;
@@ -558,37 +707,51 @@
         renderTocItems(sidebarTocList, headings);
     }
     if (sidebarSearchInput) {
+        // v4.1.0：侧边栏搜索同步升级为后端全文搜索（与顶部搜索一致，防抖 250ms）
         sidebarSearchInput.addEventListener('input', function() {
-            const q = this.value.trim().toLowerCase();
+            const q = this.value.trim();
             if (!q) { renderSidebarList(allFiles); return; }
-            const filtered = allFiles.filter(f =>
-                f.displayName.toLowerCase().includes(q) || f.excerpt.toLowerCase().includes(q) || f.tags.some(t => t.toLowerCase().includes(q))
-            );
-            renderSidebarList(filtered);
+            clearTimeout(sidebarSearchInput._timer);
+            sidebarSearchInput._timer = setTimeout(async function() {
+                try {
+                    const resp = await fetch('?action=search&q=' + encodeURIComponent(q));
+                    const data = await resp.json();
+                    if (data.success) renderSidebarList(data.files || []);
+                } catch (err) { /* 失败保持原列表 */ }
+            }, 250);
         });
     }
     if (sidebarBackBtn) {
         sidebarBackBtn.addEventListener('click', showHome);
     }
     searchInput.addEventListener('input', function() {
-        const query = this.value.trim().toLowerCase();
+        const query = this.value.trim();
         if (!query) { searchResults.innerHTML = ''; return; }
-        const filtered = allFiles.filter(f =>
-            f.displayName.toLowerCase().includes(query) ||
-            f.excerpt.toLowerCase().includes(query) ||
-            f.tags.some(t => t.toLowerCase().includes(query))
-        );
-        searchResults.innerHTML = filtered.map(file => `
-            <div class="dropdown-item" data-filename="${escapeHTML(file.name)}">
-                <div class="file-icon"><svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
-                <div class="file-info"><div class="file-name">${escapeHTML(file.displayName)}</div></div>
-            </div>`).join('');
-        document.querySelectorAll('#searchResults .dropdown-item').forEach(item => {
-            item.addEventListener('click', () => {
-                loadFile(item.dataset.filename);
-                closePanel(searchPanel); searchInput.value = ''; searchResults.innerHTML = '';
-            });
-        });
+        // v4.0.0：全文搜索升级——防抖后请求后端 ?action=search（标题/标签/摘要/正文匹配）
+        clearTimeout(searchInput._timer);
+        searchInput._timer = setTimeout(async function() {
+            searchResults.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">搜索中…</div>';
+            try {
+                const resp = await fetch('?action=search&q=' + encodeURIComponent(query));
+                const data = await resp.json();
+                if (!data.success) { searchResults.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">搜索失败</div>'; return; }
+                const files = data.files || [];
+                if (!files.length) { searchResults.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">未找到匹配「' + escapeHTML(query) + '」的文章</div>'; return; }
+                searchResults.innerHTML = files.map(file => `
+                    <div class="dropdown-item" data-filename="${escapeHTML(file.name)}">
+                        <div class="file-icon"><svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                        <div class="file-info"><div class="file-name">${escapeHTML(file.displayName)}</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escapeHTML((file.excerpt || '').slice(0, 60))}</div></div>
+                    </div>`).join('');
+                document.querySelectorAll('#searchResults .dropdown-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        loadFile(item.dataset.filename);
+                        closePanel(searchPanel); searchInput.value = ''; searchResults.innerHTML = '';
+                    });
+                });
+            } catch (err) {
+                searchResults.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">搜索失败</div>';
+            }
+        }, 250);
     });
     function renderTocList() {
         tocFileList.innerHTML = allFiles.map(file => `
@@ -745,6 +908,17 @@
         homeView.style.display = 'block'; readingView.classList.remove('active');
         isReadingView = false; floatingButtons.style.display = 'none'; prevNextNav.style.display = 'none';
         tocPopup.classList.remove('active'); musicPopup.classList.remove('active'); shareModalOverlay.classList.remove('active'); shareQrcode.innerHTML = '';
+        // v4.1.3：返回首页显式隐藏阅读进度条并清空文本——此前依赖 scrollTo 触发 scroll 事件，
+        // 页面已在顶部时不触发，导致残留 "0%" 进度文本显示在主页右上角
+        readingProgress.classList.remove('active');
+        readingProgress.style.width = '0%';
+        if (readingProgressText) {
+            readingProgressText.classList.remove('active');
+            readingProgressText.textContent = '';
+        }
+        // v4.0.0：返回首页时按当前视图模式（卡片/归档）恢复显示
+        if (archiveMode) { cardsGrid.style.display = 'none'; if (archiveView) archiveView.style.display = 'block'; }
+        else if (archiveView) archiveView.style.display = 'none';
         showSidebarFileList(); highlightSidebarItem('');
         document.title = (window.YM_SITE_TITLE || 'You Markdown');
         cmtOnArticleHide();
@@ -838,7 +1012,17 @@
             const resp = await fetch(`?action=read&file=${encodeURIComponent(filename)}`);
             const data = await resp.json();
             if (data.success) {
-                const fileMeta = allFiles[currentFileIndex] || { displayName: filename.replace(/\.md$/i,''), wordCount: 0, modified: '', tags: [], category: '' };
+                // v3.3.15：公告关联文章（如「更新历史」META hidden）不在 allFiles 列表，
+                //          findIndex 为 -1 时旧逻辑回退 wordCount:0 → 文章详情显示"0 字"。
+                //          改用 read 接口返回的字数（服务端统一算法）修正。
+                const listMeta = allFiles[currentFileIndex];
+                const fileMeta = Object.assign(
+                    { displayName: filename.replace(/\.md$/i,''), wordCount: 0, modified: '', tags: [], category: '', author: '', license: 'CC BY-NC-SA 4.0', licenseUrl: '', pinned: false },
+                    listMeta || {},
+                    { displayName: data.displayName || (listMeta && listMeta.displayName) || filename.replace(/\.md$/i,''),
+                      wordCount: (data.wordCount > 0) ? data.wordCount : ((listMeta && listMeta.wordCount) || 0),
+                      modified: data.modified || (listMeta && listMeta.modified) || '' }
+                );
                 document.title = fileMeta.displayName + ' - ' + (window.YM_SITE_TITLE || 'You Markdown');
                 currentFileName = filename;
                 let mdContent = data.content;
@@ -1066,7 +1250,9 @@
             </div>
             <div class="kbd-help-section">
                 <h4>导航</h4>
-                <div class="kbd-row"><span class="kbd-label">搜索文档</span><span class="kbd-keys"><kbd>/</kbd></span></div>
+                <div class="kbd-row"><span class="kbd-label">搜索文档（全文）</span><span class="kbd-keys"><kbd>/</kbd></span></div>
+                <div class="kbd-row"><span class="kbd-label">归档视图切换</span><span class="kbd-keys"><kbd>A</kbd></span></div>
+                <div class="kbd-row"><span class="kbd-label">打开 RSS 订阅</span><span class="kbd-keys"><kbd>R</kbd></span></div>
                 <div class="kbd-row"><span class="kbd-label">上一篇文章</span><span class="kbd-keys"><kbd>←</kbd></span></div>
                 <div class="kbd-row"><span class="kbd-label">下一篇文章</span><span class="kbd-keys"><kbd>→</kbd></span></div>
                 <div class="kbd-row"><span class="kbd-label">返回首页</span><span class="kbd-keys"><kbd>Esc</kbd></span></div>
@@ -1130,6 +1316,19 @@
                 toggleSidebar();
                 return;
             }
+            // v4.1.0：新增功能快捷键——A 归档视图切换、R 打开 RSS 订阅
+            if (e.key === 'a' && !e.ctrlKey && !e.metaKey && !isReadingView) {
+                e.preventDefault();
+                archiveMode = !archiveMode;
+                renderCategoryBar();
+                renderHomeContent();
+                return;
+            }
+            if (e.key === 'r' && !e.ctrlKey && !e.metaKey) {
+                e.preventDefault();
+                window.open('/index.php?action=rss_guide', '_blank', 'noopener');
+                return;
+            }
             if (e.key === 'p' && !e.ctrlKey && !e.metaKey && isReadingView) {
                 e.preventDefault();
                 window.print();
@@ -1164,6 +1363,25 @@
     const cmtRegPw = document.getElementById('cmtRegPw');
     const cmtRegErr = document.getElementById('cmtRegErr');
     const cmtRegBtn = document.getElementById('cmtRegBtn');
+    // v3.3.16：密码显示切换（登录/注册）——线稿眼睛两态图标 + 输入框 type 切换
+    // 此前按钮仅有 emoji 👁 且无绑定事件（死按钮），本次补齐逻辑并统一为 SVG 线稿
+    (function bindPwToggles() {
+        const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+        const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="3" y1="3" x2="21" y2="21"/></svg>';
+        ['cmtLoginPwToggle', 'cmtRegPwToggle'].forEach(id => {
+            const btn = document.getElementById(id);
+            const input = btn ? btn.closest('.cmt-pw-row').querySelector('input') : null;
+            if (!btn || !input) return;
+            btn.innerHTML = EYE;
+            btn.addEventListener('click', () => {
+                const show = input.type === 'password';
+                input.type = show ? 'text' : 'password';
+                btn.innerHTML = show ? EYE_OFF : EYE;
+                btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+                btn.title = show ? '隐藏密码' : '显示/隐藏密码';
+            });
+        });
+    })();
     // v2.9.0 注册验证控件
     const cmtRegVerifyBox = document.getElementById('cmtRegVerifyBox');
     const cmtRegEmail = document.getElementById('cmtRegEmail');
@@ -1559,10 +1777,14 @@
         cmtSendBtn.disabled = true;
         fetch('api.php?action=post', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ article: currentFileName, content }) })
             .then(r => r.json()).then(d => {
-                if (d.success) { cmtTextarea.value = ''; cmtSendBtn.classList.remove('has-content'); cmtLoad(); }
+                if (d.success) { cmtTextarea.value = ''; cmtSendBtn.classList.remove('has-content'); cmtPage = 1; cmtLoad(); }
                 else showToast(d.error || '评论失败');
             }).catch(() => showToast('网络错误')).finally(() => { cmtSendBtn.disabled = false; });
     });
+    var cmtPage = 1, cmtPerPage = 20; // v3.3.15：评论区根评论分页（默认每页 20 条，独立实现）
+    // v3.3.16：回复展开后默认只显示前 5 条，更多点「查看全部」——大量回复不刷屏
+    var REPLY_PREVIEW = 5;
+    var cmtLoadedComments = []; // 「查看全部」需要重新读取当前页根评论数据
     function cmtLoad() {
         if (!currentFileName) return;
         cmtExpandedItems.clear();
@@ -1576,8 +1798,8 @@
                 cmtExpandedItems.add(item.dataset.id);
             }
         });
-        fetch('api.php?action=get&article=' + encodeURIComponent(currentFileName))
-            .then(r => r.json()).then(d => { if (d.success) { cmtRender(d.comments); cmtRestoreExpandState(); } })
+        fetch('api.php?action=get&article=' + encodeURIComponent(currentFileName) + '&page=' + cmtPage + '&per_page=' + cmtPerPage)
+            .then(r => r.json()).then(d => { if (d.success) { cmtRender(d.comments, d); cmtRestoreExpandState(); } })
             .catch(() => {});
     }
     function cmtRestoreExpandState() {
@@ -1614,19 +1836,26 @@
             (rDel ? '<button class="cmt-reply-act cmt-del-btn" data-id="' + r.id + '"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>删除</button>' : '') +
             '</div>' + nestedHtml + '</div>';
     }
-    function cmtRender(comments) {
+    function cmtRender(comments, meta) {
         if (!comments || !comments.length) {
             cmtList.innerHTML = '<div class="cmt-empty"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>暂无评论，快来抢沙发吧</div>';
             return;
         }
         const isAdmin = cmtUser && cmtUser.role === 'admin';
+        cmtLoadedComments = comments;
         cmtList.innerHTML = comments.map(c => {
             const isOwner = cmtUser && cmtUser.id === c.user_id;
             const canDel = isAdmin || isOwner;
             const sign = c.signature ? '<div class="cmt-sign">' + cmtEscape(c.signature) + '</div>' : '';
             let repliesHtml = '';
             if (c.replies && c.replies.length) {
-                repliesHtml = '<div class="cmt-reply-list">' + c.replies.map(r => cmtRenderReply(r, 1, c.nickname || '')).join('') + '</div>';
+                // v3.3.16：回复展开后默认只显示前 5 条，更多点「查看全部」——大量回复不刷屏
+                const preview = c.replies.slice(0, REPLY_PREVIEW);
+                repliesHtml = '<div class="cmt-reply-list">' + preview.map(r => cmtRenderReply(r, 1, c.nickname || '')).join('');
+                if (c.replies.length > REPLY_PREVIEW) {
+                    repliesHtml += '<button class="cmt-more-replies" data-id="' + c.id + '"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>查看全部 ' + c.replies.length + ' 条回复</button>';
+                }
+                repliesHtml += '</div>';
             }
             const totalReplies = (function countReplies(arr) { return arr.reduce((n, r) => n + 1 + countReplies(r.replies || []), 0); })(c.replies || []);
             const expandBtn = totalReplies ? '<button class="cmt-reply-expand"><span>' + totalReplies + '条回复</span><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></button>' : '';
@@ -1645,8 +1874,36 @@
                 (canDel ? '<button class="cmt-act cmt-del-btn" data-id="' + c.id + '"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>删除</button>' : '') +
                 expandBtn + '</div>' + repliesHtml +
                 '<div class="cmt-reply-input-wrap"><textarea placeholder="写下你的回复..."></textarea><div class="cmt-reply-input-bottom"><button class="cmt-reply-send-btn">发送</button></div></div></div>';
-        }).join('');
+        }).join('') + renderCmtPager(meta || {});
         cmtBindEvents();
+        cmtBindPagerEvents();
+    }
+    // v3.3.15：评论区根评论分页器（独立实现，不复用后台分页组件）
+    function renderCmtPager(meta) {
+        if (!meta || !meta.total || meta.total <= (meta.per_page || 20)) return '';
+        var p = meta.page, tp = meta.total_pages;
+        var html = '<div class="cmt-pager">' +
+            '<span class="cmt-pager-info">共 ' + meta.total + ' 条评论 · 第 ' + p + '/' + tp + ' 页</span>' +
+            '<div class="cmt-pager-btns">' +
+            '<button class="cmt-pg-btn" data-pg="' + (p - 1) + '"' + (p <= 1 ? ' disabled' : '') + '>上一页</button>';
+        var start = Math.max(1, p - 2), end = Math.min(tp, p + 2);
+        if (start > 1) html += '<span class="cmt-pg-ellipsis">…</span>';
+        for (var i = start; i <= end; i++) html += '<button class="cmt-pg-btn' + (i === p ? ' active' : '') + '" data-pg="' + i + '">' + i + '</button>';
+        if (end < tp) html += '<span class="cmt-pg-ellipsis">…</span>';
+        html += '<button class="cmt-pg-btn" data-pg="' + (p + 1) + '"' + (p >= tp ? ' disabled' : '') + '>下一页</button>' +
+            '</div></div>';
+        return html;
+    }
+    function cmtBindPagerEvents() {
+        cmtList.querySelectorAll('.cmt-pg-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                if (btn.disabled) return;
+                cmtPage = parseInt(btn.getAttribute('data-pg'), 10) || 1;
+                cmtLoad();
+                var top = cmtListSection.getBoundingClientRect().top + (window.pageYOffset || document.documentElement.scrollTop) - 80;
+                window.scrollTo({ top: top, behavior: 'smooth' });
+            });
+        });
     }
     function cmtSendReply(wrap, target) {
         const ta = wrap.querySelector('textarea');
@@ -1664,15 +1921,17 @@
             .then(r => r.json()).then(d => { if (d.success) { ta.value = ''; wrap.classList.remove('show'); cmtLoad(); } else showToast(d.error || '回复失败'); })
             .catch(() => showToast('网络错误'));
     }
-    function cmtBindEvents() {
-        cmtList.querySelectorAll('.cmt-like-btn').forEach(btn => {
+    function cmtBindEvents(root) {
+        // v3.3.16：支持传入子树 root——「查看全部」插入的回复节点单独绑定交互事件
+        root = root || cmtList;
+        root.querySelectorAll('.cmt-like-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 btn.classList.toggle('liked');
                 const span = btn.querySelector('span');
                 if (span) { let n = parseInt(span.textContent); span.textContent = btn.classList.contains('liked') ? n + 1 : Math.max(0, n - 1); }
             });
         });
-        cmtList.querySelectorAll('.cmt-reply-btn').forEach(btn => {
+        root.querySelectorAll('.cmt-reply-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (!cmtUser && !guestCommentsEnabled) { cmtCapsuleBtn && cmtCapsuleBtn.click(); return; }
                 const target = btn.closest('.cmt-item, .cmt-reply-item');
@@ -1692,20 +1951,20 @@
                 if (wrap.classList.contains('show')) wrap.querySelector('textarea').focus();
             });
         });
-        cmtList.querySelectorAll('.cmt-reply-send-btn').forEach(btn => {
+        root.querySelectorAll('.cmt-reply-send-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const wrap = btn.closest('.cmt-reply-input-wrap');
                 const target = btn.closest('.cmt-item, .cmt-reply-item');
                 cmtSendReply(wrap, target);
             });
         });
-        cmtList.querySelectorAll('.cmt-reply-input-wrap textarea').forEach(ta => {
+        root.querySelectorAll('.cmt-reply-input-wrap textarea').forEach(ta => {
             ta.addEventListener('input', () => {
                 const btn = ta.closest('.cmt-reply-input-wrap').querySelector('.cmt-reply-send-btn');
                 if (btn) btn.classList.toggle('has-content', ta.value.trim().length > 0);
             });
         });
-        cmtList.querySelectorAll('.cmt-del-btn').forEach(btn => {
+        root.querySelectorAll('.cmt-del-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const id = btn.dataset.id;
@@ -1719,14 +1978,37 @@
                 }
             });
         });
-        cmtList.querySelectorAll('.cmt-reply-expand').forEach(btn => {
+        root.querySelectorAll('.cmt-reply-expand').forEach(btn => {
             btn.addEventListener('click', () => {
                 btn.classList.toggle('open');
                 const list = btn.closest('.cmt-item').querySelector('.cmt-reply-list');
                 if (list) list.classList.toggle('show');
             });
         });
-        cmtList.querySelectorAll('.cmt-reply-item[data-del="true"]').forEach(el => {
+        // v3.3.16：回复「查看全部」——把剩余回复渲染进当前回复列表（数据已保存在 cmtLoadedComments）
+        root.querySelectorAll('.cmt-more-replies').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.id;
+                const all = cmtLoadedComments.find(x => x.id === id);
+                if (!all || !all.replies || all.replies.length <= REPLY_PREVIEW) return;
+                const rest = all.replies.slice(REPLY_PREVIEW);
+                const nodes = [];
+                rest.forEach(r => {
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = cmtRenderReply(r, 1, all.nickname || '');
+                    const node = tmp.firstElementChild;
+                    if (node) { btn.parentNode.insertBefore(node, btn); nodes.push(node); }
+                });
+                btn.remove();
+                // 新插入的回复单独绑定交互（点赞/回复/删除等）
+                if (nodes.length) {
+                    const wrap = document.createElement('div');
+                    nodes.forEach(n => wrap.appendChild(n));
+                    cmtBindEvents(wrap);
+                }
+            });
+        });
+        root.querySelectorAll('.cmt-reply-item[data-del="true"]').forEach(el => {
             let timer;
             const start = (e) => { e.stopPropagation(); timer = setTimeout(() => cmtShowConfirm(el), 600); };
             const clear = () => clearTimeout(timer);
@@ -1735,7 +2017,7 @@
             el.addEventListener('pointercancel', clear);
             el.addEventListener('pointermove', clear);
         });
-        cmtList.querySelectorAll('.cmt-item[data-del="true"]').forEach(el => {
+        root.querySelectorAll('.cmt-item[data-del="true"]').forEach(el => {
             let timer;
             const start = () => { timer = setTimeout(() => cmtShowConfirm(el), 600); };
             const clear = () => clearTimeout(timer);

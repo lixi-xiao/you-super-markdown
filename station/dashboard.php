@@ -35,9 +35,9 @@ $siteTitle = $config['site_title'] ?? 'You Markdown';
 $currentUser = $_SESSION['cmt_user'] ?? [];
 $myId = $currentUser['id'] ?? '';
 $msg = $_GET['msg'] ?? '';
-// v2.6.0 起 tab 结构（authors 写作者管理 / background 网站背景 / music 音乐设置 / banlog 封禁日志只读）；v2.6.3 新增 profile 个人信息；v3.1.6 新增 announce 公告管理
+// v2.6.0 起 tab 结构（authors 写作者管理 / background 网站背景 / music 音乐设置 / banlog 封禁日志只读）；v2.6.3 新增 profile 个人信息；v3.1.6 新增 announce 公告管理；v4.0.0 新增 images 图片管理
 $tab = $_GET['tab'] ?? 'authors';
-if (!in_array($tab, ['authors', 'background', 'music', 'banlog', 'profile', 'announce'], true)) $tab = 'authors';
+if (!in_array($tab, ['authors', 'background', 'music', 'banlog', 'profile', 'announce', 'images'], true)) $tab = 'authors';
 
 // v3.1.6：文章列表（公告选择关联文章用：读 META title / 一级标题 / 文件名）
 function stArticleOptions() {
@@ -303,6 +303,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         } else {
             $msg = 'avatar_fail';
         }
+    } elseif (isset($_POST['image_delete'])) {
+        // v4.0.0：图片资源管理——删除站内图片（内容管理操作，CSRF + 审计）
+        $imgName = basename($_POST['image_delete']);
+        $imgPath = __DIR__ . '/../data/images/' . $imgName;
+        // 安全校验：只能删 data/images 下的真实文件，拒绝隐藏文件与路径穿越
+        $imagesReal = realpath(__DIR__ . '/../data/images');
+        $imgReal = realpath($imgPath);
+        if ($imgName === '' || strpos($imgName, '.') === 0 || $imgReal === false || strpos($imgReal, $imagesReal) !== 0) {
+            $msg = 'image_delete_fail';
+        } elseif (@unlink($imgPath)) {
+            auditLog('image_delete', $imgName, '站长删除图片资源: ' . $imgName);
+            $msg = 'image_deleted';
+        } else {
+            $msg = 'image_delete_fail';
+        }
     } elseif (isset($_POST['announce_action'])) {
         // v3.1.6：公告管理（站长全权：添加/编辑/删除/排序，含更新公告）。内容管理操作，CSRF 校验 + 审计，无需挑战码。
         $annAct = $_POST['announce_action'];
@@ -444,6 +459,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             公告管理
         </a>
+        <!-- v4.0.0：图片资源管理 -->
+        <a href="dashboard.php?tab=images" class="sidebar-link <?= $tab==='images'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            图片管理
+        </a>
         <a href="dashboard.php?tab=profile" class="sidebar-link <?= $tab==='profile'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             个人信息
@@ -479,6 +499,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <?php if ($msg === 'uploaded'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>上传成功</div><?php endif; ?>
     <?php if ($msg === 'upload_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>上传失败，请检查文件格式与 data/bg/ 目录权限</div><?php endif; ?>
     <?php if ($msg === 'music_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>音乐设置已保存</div><?php endif; ?>
+    <?php if ($msg === 'image_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>图片已删除</div><?php endif; ?>
+    <?php if ($msg === 'image_delete_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>图片删除失败（文件不存在或权限不足）</div><?php endif; ?>
 
     <?php if ($tab === 'authors'): ?>
     <div class="page-header">
@@ -1143,6 +1165,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             </div>
         </form>
     </div>
+    <?php endif; ?>
+
+    <?php if ($tab === 'images'): ?>
+    <?php
+    // v4.0.0：图片资源管理——列出 data/images 下全部图片（缩略图 + 大小 + 修改时间），支持删除
+    $imgDir = __DIR__ . '/../data/images';
+    $stImages = [];
+    if (is_dir($imgDir)) {
+        foreach (glob($imgDir . '/*') as $if) {
+            $ifn = basename($if);
+            if (strpos($ifn, '.') === 0) continue;
+            $ext = strtolower(pathinfo($ifn, PATHINFO_EXTENSION));
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'], true)) continue;
+            if (is_file($if)) {
+                $stImages[] = [
+                    'name' => $ifn,
+                    'size' => filesize($if),
+                    'modified' => date('Y-m-d H:i', filemtime($if)),
+                ];
+            }
+        }
+        usort($stImages, fn($a, $b) => strcmp($b['modified'], $a['modified']));
+    }
+    // 图片被引用情况：扫描全部文章正文，统计引用计数
+    $stRefCount = [];
+    if (is_dir(__DIR__ . '/../data/articles')) {
+        foreach (glob(__DIR__ . '/../data/articles/*.md') as $af) {
+            $raw = @file_get_contents($af);
+            if ($raw === false) continue;
+            foreach ($stImages as $img) {
+                if (strpos($raw, $img['name']) !== false) {
+                    $stRefCount[$img['name']] = ($stRefCount[$img['name']] ?? 0) + 1;
+                }
+            }
+        }
+    }
+    ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            图片管理
+        </div>
+        <div class="page-subtitle">站点文章使用的图片资源（<?= count($stImages) ?> 个）——删除前请确认该图片不再被任何文章引用</div>
+    </div>
+    <?php if (empty($stImages)): ?>
+    <div class="card"><div class="empty-state"><p>暂无图片资源</p></div></div>
+    <?php else: ?>
+    <div class="card">
+        <div class="table-wrap">
+        <table>
+            <tr><th>预览</th><th>文件名</th><th>大小</th><th>修改时间</th><th>被引用</th><th>操作</th></tr>
+            <?php foreach ($stImages as $img): ?>
+            <?php
+            $ref = $stRefCount[$img['name']] ?? 0;
+            $sizeTxt = $img['size'] >= 1048576 ? number_format($img['size'] / 1048576, 1) . ' MB' : number_format($img['size'] / 1024, 0) . ' KB';
+            ?>
+            <tr>
+                <td><a href="../data/images/<?= urlencode($img['name']) ?>" target="_blank"><img src="../img.php?src=<?= urlencode('/data/images/' . $img['name']) ?>&w=120" alt="" style="max-width:80px;max-height:48px;border-radius:6px;object-fit:cover;background:#f1f5f9"></a></td>
+                <td style="word-break:break-all"><?= htmlspecialchars($img['name']) ?></td>
+                <td><?= $sizeTxt ?></td>
+                <td><?= htmlspecialchars($img['modified']) ?></td>
+                <td><?= $ref > 0 ? '<span style="color:#2563eb">' . $ref . ' 篇</span>' : '<span style="color:#94a3b8">未引用</span>' ?></td>
+                <td>
+                    <form method="post" style="display:inline" onsubmit="return confirm('确定删除图片「<?= htmlspecialchars($img['name']) ?>」吗？'<?= $ref > 0 ? ' + \'\\n\\n警告：该图片正被 ' . $ref . ' 篇文章引用，删除后这些文章将无法显示此图。\'' : '' ?>)">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+                        <input type="hidden" name="image_delete" value="<?= htmlspecialchars($img['name']) ?>">
+                        <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                    </form>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        </div>
+    </div>
+    <?php endif; ?>
     <?php endif; ?>
 </div>
 

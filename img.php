@@ -21,10 +21,12 @@ if ($real === false || $imgRoot === false || strpos($real, $imgRoot . DIRECTORY_
 }
 if (!preg_match('/\.(jpe?g|png|webp|gif)$/i', $real)) { http_response_code(403); echo 'bad ext'; exit; }
 
-// 2. 磁盘缓存（源图更新后自动失效）
+// 2. 磁盘缓存（源图更新后自动失效；v3.3.17 起 key 含质量档，与输出段生成逻辑一致）
+// v4.1.1 修复：快速命中 key 与生成段命名统一为 md5(rel|w)|q.jpg——此前写 md5(rel|w|78).jpg 与
+//   生成段 md5(rel|targetW)|q.jpg 不一致，导致缓存永远不命中、每次请求都重新解码原图（大图卡顿）
 $cacheKey = md5($rel . '|' . $w);
 $cacheDir = $dataDir . '/cache/thumbs';
-$cacheFile = $cacheDir . '/' . $cacheKey . '.jpg';
+$cacheFile = $cacheDir . '/' . $cacheKey . '|78.jpg';
 $srcMtime = filemtime($real);
 if (is_file($cacheFile) && filemtime($cacheFile) >= $srcMtime) {
     header('Content-Type: image/jpeg');
@@ -58,19 +60,42 @@ switch ($info[2]) {
 }
 if (!$im) { http_response_code(400); echo 'decode fail'; exit; }
 $ow = imagesx($im); $oh = imagesy($im);
-if ($ow > $w) {
-    $nh = max(1, (int)round($oh * $w / $ow));
-    $thumb = imagecreatetruecolor($w, $nh);
+// v3.3.17：保证缩略图产物 ≤2MB——先等比缩放到目标宽；产物超限自动降质（q78→q63→…→q33），
+//           仍超限再按 0.8 逐级降宽（轻量站，阅读页大图转缩略图后不拖慢加载）
+$maxBytes = 2 * 1024 * 1024;
+$targetW = $w;
+$thumb = $im;
+if ($ow > $targetW) {
+    $nh = max(1, (int)round($oh * $targetW / $ow));
+    $thumb = imagecreatetruecolor($targetW, $nh);
     if ($thumb) {
-        imagecopyresampled($thumb, $im, 0, 0, 0, 0, $w, $nh, $ow, $oh);
-        imagedestroy($im);
-        $im = $thumb;
+        imagecopyresampled($thumb, $im, 0, 0, 0, 0, $targetW, $nh, $ow, $oh);
+    } else {
+        $thumb = $im;
     }
 }
-if (!is_dir($cacheDir)) @mkdir($cacheDir, 0775, true);
-imagejpeg($im, $cacheFile, 78);
-imagedestroy($im);
-if (!is_file($cacheFile)) { http_response_code(500); echo 'cache fail'; exit; }
+$cacheFile = '';
+for ($r = 0; $r < 4; $r++) {
+    $base = $dataDir . '/cache/thumbs/' . md5($rel . '|' . $targetW);
+    $done = false;
+    for ($q = 78; $q >= 33; $q -= 15) {
+        $cf = $base . '|' . $q . '.jpg';
+        if (is_file($cf) && filemtime($cf) >= $srcMtime) { $cacheFile = $cf; $done = true; break; }
+        @unlink($cf);
+        imagejpeg($thumb, $cf, $q);
+        if (is_file($cf) && filesize($cf) <= $maxBytes) { $cacheFile = $cf; $done = true; break; }
+        @unlink($cf);
+    }
+    if ($done) break;
+    // 全部质量档仍超限 → 降宽重缩放
+    $targetW = max(200, (int)round($targetW * 0.8));
+    if ($targetW < $ow) {
+        $nh = max(1, (int)round($oh * $targetW / $ow));
+        $t2 = imagecreatetruecolor($targetW, $nh);
+        if ($t2) { imagecopyresampled($t2, $im, 0, 0, 0, 0, $targetW, $nh, $ow, $oh); $thumb = $t2; }
+    }
+}
+if ($cacheFile === '' || !is_file($cacheFile)) { http_response_code(500); echo 'cache fail'; exit; }
 header('Content-Type: image/jpeg');
 header('Content-Length: ' . filesize($cacheFile));
 header('Cache-Control: public, max-age=31536000, immutable');

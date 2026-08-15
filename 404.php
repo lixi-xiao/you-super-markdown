@@ -1,130 +1,68 @@
 <?php
 http_response_code(404);
+require_once __DIR__ . '/utils.php';
+$_cfg404 = loadSiteConfig();
+$_siteTitle404 = $_cfg404['site_title'] ?? 'You Super Markdown';
+$_bgType404 = $_cfg404['bg_type'] ?? 'none';
+$_bgImage404 = $_cfg404['bg_image'] ?? '';
+$_bgApiUrl404 = $_cfg404['bg_api_url'] ?? '';
+$_bgBlur404 = !empty($_cfg404['bg_blur_enabled']) ? '1' : '0';
+$_bgBlurLevel404 = intval($_cfg404['bg_blur_level'] ?? 0);
+$_bgCardOpacity404 = intval($_cfg404['bg_card_opacity'] ?? 100);
 ?>
 <!DOCTYPE html>
 <html lang="zh-CN" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>404 - 页面未找到</title>
+    <title>404 - 页面未找到 · <?= htmlspecialchars($_siteTitle404) ?></title>
+    <!-- v4.0.0：深色模式跟随系统——在 CSS 加载前同步设置 data-theme，避免闪白（与主站一致） -->
+    <script>
+        (function() {
+            try {
+                var saved = localStorage.getItem('md-theme');
+                var dark = saved ? saved === 'dark'
+                    : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+            } catch (e) {}
+        })();
+    </script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>" type="image/svg+xml">
-    <style>
-        :root {
-            --accent-hue: 220;
-            --accent-sat: 60%;
-            --accent-lightness: 50%;
-            --accent: hsl(var(--accent-hue), var(--accent-sat), var(--accent-lightness));
-            --bg: hsl(var(--accent-hue), 60%, 96%);
-            --surface: #fff;
-            --border: #dce7f5;
-            --text: #1e293b;
-            --text-secondary: #475569;
-            --text-muted: #94a3b8;
-            --shadow: 0 2px 8px rgba(0,0,0,0.05), 0 1px 3px rgba(0,0,0,0.04);
-            --radius: 14px;
-        }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            -webkit-font-smoothing: antialiased;
-        }
-        .error-container {
-            text-align: center;
-            padding: 40px;
-            max-width: 480px;
-        }
-        .error-code {
-            font-size: 120px;
-            font-weight: 800;
-            color: var(--accent);
-            line-height: 1;
-            opacity: 0.15;
-            letter-spacing: -4px;
-            user-select: none;
-        }
-        .error-icon {
-            margin: -60px auto 24px;
-            width: 80px;
-            height: 80px;
-            background: var(--surface);
-            border-radius: 50%;
-            box-shadow: var(--shadow);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .error-icon svg {
-            width: 36px;
-            height: 36px;
-            stroke: var(--text-muted);
-            fill: none;
-            stroke-width: 1.5;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-        }
-        h1 {
-            font-size: 24px;
-            font-weight: 700;
-            color: var(--text);
-            margin-bottom: 12px;
-        }
-        p {
-            font-size: 15px;
-            color: var(--text-secondary);
-            line-height: 1.6;
-            margin-bottom: 32px;
-        }
-        .back-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 12px 28px;
-            background: var(--accent);
-            color: #fff;
-            border: none;
-            border-radius: var(--radius);
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            text-decoration: none;
-            transition: all 0.2s;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        .back-btn:hover {
-            background: hsl(var(--accent-hue), calc(var(--accent-sat) + 10%), calc(var(--accent-lightness) - 10%));
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        }
-        .back-btn svg {
-            width: 18px;
-            height: 18px;
-            stroke: currentColor;
-            fill: none;
-            stroke-width: 2;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-        }
-        @media (max-width: 480px) {
-            .error-container { padding: 24px 20px; }
-            .error-code { font-size: 88px; }
-            .error-icon { margin-top: -44px; width: 64px; height: 64px; }
-            .error-icon svg { width: 30px; height: 30px; }
-            h1 { font-size: 20px; }
-            p { font-size: 14px; margin-bottom: 26px; }
-            .back-btn { width: 100%; justify-content: center; padding: 13px 24px; }
-        }
-    </style>
+    <!-- v4.1.0：资源使用绝对路径——未知路径（如 /xxx/yyy/）下相对路径会解析到错误位置导致样式加载失败 -->
+    <link rel="stylesheet" href="/css/style.css?v=<?= @filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
-<body>
-    <div class="error-container">
-        <div class="error-code">404</div>
-        <div class="error-icon">
+<body data-bg-type="<?= htmlspecialchars($_bgType404) ?>" data-bg-image="<?= htmlspecialchars($_bgImage404) ?>" data-bg-api-url="<?= htmlspecialchars($_bgApiUrl404) ?>" data-bg-blur="<?= htmlspecialchars($_bgBlur404) ?>" data-bg-blur-level="<?= $_bgBlurLevel404 ?>" data-bg-card-opacity="<?= $_bgCardOpacity404 ?>" style="padding-left:0">
+<script>
+    // v4.1.0：404 页无侧边栏，覆盖 style.css 宽屏 body{padding-left:280px}（否则整页右移 280px 不居中）
+    // v4.0.0：背景应用（与 js/main.js applyBg 同一逻辑，404 页不加载 main.js 故内联）
+    (function() {
+        var body = document.body;
+        var bgType = body.dataset.bgType || 'none';
+        var bgImage = body.dataset.bgImage || '';
+        var bgApiUrl = body.dataset.bgApiUrl || '';
+        var bgBlur = body.dataset.bgBlur === '1';
+        var bgBlurLevel = parseInt(body.dataset.bgBlurLevel) || 0;
+        var bgCardOpacity = body.dataset.bgCardOpacity !== undefined ? parseInt(body.dataset.bgCardOpacity) : 100;
+        body.style.setProperty('--bg-card-opacity', (bgCardOpacity / 100));
+        if (bgBlur && bgBlurLevel > 0) {
+            body.classList.add('bg-blur');
+            body.style.setProperty('--bg-blur-level', bgBlurLevel + 'px');
+        }
+        if (bgType === 'image' && bgImage) {
+            body.classList.add('bg-active');
+            var bgUrl = (bgImage.indexOf('/') === 0 || /^https?:/i.test(bgImage)) ? bgImage : '/' + bgImage;
+            body.style.setProperty('--bg-url', 'url(' + bgUrl + ')');
+        } else if (bgType === 'api' && bgApiUrl) {
+            body.classList.add('bg-active');
+            var apiUrl = (bgApiUrl.indexOf('/') === 0 || /^https?:/i.test(bgApiUrl)) ? bgApiUrl : '/' + bgApiUrl;
+            body.style.setProperty('--bg-url', 'url(' + apiUrl + ')');
+        }
+    })();
+</script>
+<div class="nf-page">
+    <div class="nf-card">
+        <div class="nf-code" aria-hidden="true">404</div>
+        <div class="nf-icon">
             <svg viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="10"/>
                 <path d="M16 16s-1.5-2-4-2-4 2-4 2"/>
@@ -134,10 +72,17 @@ http_response_code(404);
         </div>
         <h1>页面走丢了</h1>
         <p>你访问的页面不存在或已被移除，请检查链接是否正确。</p>
-        <a href="/" class="back-btn">
-            <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-            返回首页
-        </a>
+        <div class="nf-actions">
+            <a href="/" class="btn btn-primary">
+                <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+                返回首页
+            </a>
+            <button type="button" class="btn btn-outline" onclick="history.length > 1 ? history.back() : location.href='/'">
+                <svg viewBox="0 0 24 24"><polyline points="11 17 6 12 11 7"/><line x1="18" y1="12" x2="6" y2="12"/></svg>
+                返回上一页
+            </button>
+        </div>
     </div>
+</div>
 </body>
 </html>

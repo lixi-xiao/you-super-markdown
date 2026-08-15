@@ -226,6 +226,11 @@ function loadSiteConfig() {
         'verify_code_ttl' => 300,            // 验证码有效期（秒）
         'confirm_link_ttl' => 86400,         // 超管确认链接有效期（秒）
         'resend_cooldown' => 60,             // 验证码重发冷却（秒），超管后台操作不受限
+        // v4.0.0：评论邮件订阅通知（新评论/回复时向站点管理员发信；默认关闭，超管后台可开）
+        'comment_notify_enabled' => false,
+        'comment_notify_email' => '',
+        // v4.0.0：站内全文搜索开关（关闭则前端仅按标题/摘要/标签过滤）
+        'fulltext_search_enabled' => true,
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;
@@ -1101,6 +1106,51 @@ function notifyLoginEvent($u, $clientIP) {
     }
     if (!file_exists(EMAIL_ALERT)) { logAlertFail("ym-alert 不存在({$subject})"); return; }
     $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($adminEmail) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
+    exec($cmd . ' > /dev/null 2>&1 &');
+}
+
+/**
+ * v4.0.0：新评论/回复邮件订阅通知（向站点管理员发信）
+ * 受 config comment_notify_enabled 控制；收件人优先 comment_notify_email，回退 admin_email。
+ * $isReply=true 表示这是对已有评论的回复。
+ */
+function notifyComment($article, $nickname, $content, $isReply = false, $parentNick = '') {
+    $config = loadSiteConfig();
+    if (empty($config['comment_notify_enabled'])) return;
+    $to = trim($config['comment_notify_email'] ?? '');
+    if ($to === '') $to = trim($config['admin_email'] ?? '');
+    if ($to === '' || !email_valid($to)) return;
+    $site = $config['site_title'] ?? 'You Super Markdown';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $kind = $isReply ? '新回复' : '新评论';
+    $subject = "[{$site} 通知] {$kind}：{$nickname}";
+    $articleTitle = $article;
+    if (preg_match('/<!--META(.*?)-->/s', @file_get_contents(__DIR__ . '/data/articles/' . basename($article)), $am)) {
+        $ameta = json_decode(trim($am[1]), true);
+        if (!empty($ameta['title'])) $articleTitle = $ameta['title'];
+    }
+    $now = date('Y-m-d H:i:s');
+    $body = "文章：《{$articleTitle}》\n"
+          . ($isReply && $parentNick !== '' ? "回复对象：{$parentNick}\n" : '')
+          . "评论者：{$nickname}\n"
+          . "内容：{$content}\n"
+          . "时间：{$now}";
+    $htmlDetail = '<div style="font-size:14.5px;line-height:2.0;color:#2d3748;">'
+        . '<p style="margin:0 0 10px;">文章：《<b>' . htmlspecialchars($articleTitle, ENT_QUOTES, 'UTF-8') . '</b>》</p>'
+        . ($isReply && $parentNick !== '' ? '<p style="margin:0 0 10px;color:#5b6b80;">回复对象：' . htmlspecialchars($parentNick, ENT_QUOTES, 'UTF-8') . '</p>' : '')
+        . '<p style="margin:0 0 10px;color:#5b6b80;">评论者：' . htmlspecialchars($nickname, ENT_QUOTES, 'UTF-8') . '</p>'
+        . '<div style="background:#f7f9fc;border:1px solid #eaeef4;border-radius:12px;padding:14px 18px;color:#334155;margin:12px 0;">'
+        . nl2br(htmlspecialchars($content, ENT_QUOTES, 'UTF-8')) . '</div></div>';
+    $html = renderMailHtml($site, $kind, $body, ['server' => $host, 'time' => $now], $htmlDetail);
+    $smtp = getSmtpConfig();
+    if ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '') {
+        [$ok, $err] = sendSmtpMail($to, $subject, $body, $html);
+        if ($ok) return;
+        logAlertFail("SMTP 发送失败({$subject}): {$err}");
+        return;
+    }
+    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ym-alert 不存在({$subject})"); return; }
+    $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($to) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
     exec($cmd . ' > /dev/null 2>&1 &');
 }
 

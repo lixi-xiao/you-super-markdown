@@ -524,6 +524,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
     $config['music_cookies'] = trim($_POST['music_cookies'] ?? '');
     $config['music_cookies_qq'] = trim($_POST['music_cookies_qq'] ?? '');
     $config['hide_default_paths'] = !empty($_POST['hide_default_paths']);
+    // v4.0.0：评论邮件订阅通知
+    $config['comment_notify_enabled'] = !empty($_POST['comment_notify_enabled']);
+    $config['comment_notify_email'] = trim($_POST['comment_notify_email'] ?? '');
     saveSiteConfig($config);
     auditLog('config_update', 'site_config', '修改系统配置');
     header('Location: dashboard.php?tab=config&msg=saved');
@@ -1146,6 +1149,20 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <label class="form-check"><input type="checkbox" name="registration_enabled" <?= empty($config['registration_enabled']) ? '' : 'checked' ?>> 允许注册</label>
                 <label class="form-check"><input type="checkbox" name="guest_comments_enabled" <?= empty($config['guest_comments_enabled']) ? '' : 'checked' ?>> 允许访客评论</label>
                 <label class="form-check"><input type="checkbox" name="super_admin_comment" <?= empty($config['super_admin_comment']) ? '' : 'checked' ?>> 允许超管主页评论（默认关闭，超管以访客身份浏览不参与前台评论）</label>
+            </div>
+            <!-- v4.0.0：评论邮件订阅通知 -->
+            <div style="padding:12px 16px;border:1px solid var(--border);border-radius:12px;margin-bottom:16px;background:var(--surface)">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                    <div>
+                        <div style="font-weight:600">评论邮件订阅通知</div>
+                        <div style="font-size:0.82em;color:var(--text-muted)">有新评论 / 新回复时向收件人发邮件（需已配置 SMTP 邮件）</div>
+                    </div>
+                    <label class="toggle" style="flex-shrink:0"><input type="checkbox" name="comment_notify_enabled" <?= empty($config['comment_notify_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label>
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">收件邮箱（留空默认用管理员邮箱）</label>
+                    <input class="form-input" name="comment_notify_email" value="<?= htmlspecialchars($config['comment_notify_email'] ?? '') ?>" placeholder="留空则使用管理员邮箱">
+                </div>
             </div>
             <div class="form-group">
                 <label class="form-label">更新通道</label>

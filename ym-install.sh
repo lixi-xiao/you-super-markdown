@@ -620,11 +620,14 @@ chattr -R +i /opt/you-markdown/backups/db /opt/you-markdown/backups/articles 2>/
 chattr +i /opt/you-markdown/logs 2>/dev/null || warn "chattr 不可用，日志镜像目录未锁定（建议安装 e2fsprogs）"
 
 # 初始化自动备份配置（默认：库 30 分钟 / 文章保留 7 份 / 手动备份保留 5 份，后台可改）
+# v3.3.6：模板补齐 v3.3.5 的两个开关（上传触发立即备份 / 单篇篡改还原），全新安装即完整
 cat > /opt/you-markdown/backup.conf << 'BACKUPCONF'
 # 自动备份配置（守护进程 ym-guard.py 读取；超管后台/SSH 可改）
 DB_BACKUP_INTERVAL_MIN=30
 ARTICLE_BACKUP_KEEP=7
 MANUAL_BACKUP_KEEP=5
+ARTICLE_TRIGGER_BACKUP=1
+ARTICLE_SINGLE_RESTORE=1
 BACKUPCONF
 chown root:www-data /opt/you-markdown/backup.conf
 chmod 664 /opt/you-markdown/backup.conf

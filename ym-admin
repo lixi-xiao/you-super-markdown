@@ -34,6 +34,11 @@ post_update_finish() {
     echo "  更新完成！"
     echo "  版本: v$FROM_VER → v$TO_VER"
     echo "============================================"
+    # v3.3.14：自更新场景（运行中的脚本被覆盖）下 [4.9/6] 自动补装可能未执行，给出一键命令兜底提示
+    if ! php -m 2>/dev/null | grep -qi '^gd$'; then
+        echo ""
+        echo "  提示：未检测到 php-gd（缩略图功能依赖），运行 sudo ym-admin deps 一键补装"
+    fi
     # v3.1.0：更新完成自动发送通知邮件到管理员（失败不阻断）
     # v3.1.7：邮件正文附带本次更新内容（changelog），管理者无需再翻公告即可知道本次改了什么
     NOTIFY_MSG="系统已更新至 v$TO_VER（$CHANNEL 更新通道）—— 更新完成，web↔母本 MD5 一致、守护进程正常运行。"
@@ -395,6 +400,13 @@ case "${1:-}" in
                 ;;
         esac
         echo "SMTP 授权码更新完成"
+        ;;
+
+    deps)
+        # v3.3.14：一键补装功能依赖（php-gd + 缩略图缓存目录）；与 apply-update [4.9/6] 共用 ensure_env_deps
+        [ "$(id -u)" -ne 0 ] && { echo "错误：deps 需 root 权限（sudo ym-admin deps）"; exit 1; }
+        echo "=== 环境依赖检查与补装 ==="
+        ensure_env_deps
         ;;
 
     apply-update)
@@ -876,6 +888,7 @@ case "${1:-}" in
         echo "  notify <消息>              发送通知邮件到管理员（测试/更新/运维消息）"
         echo "  set-smtp-pass [--pass=授权码] 修改 SMTP 授权码（需 sudo；密钥文件 + php-fpm 环境变量双写，自动发测试邮件）"
         echo "  apply-update              执行系统更新（完成后自动发通知邮件）"
+        echo "  deps                      检查并一键补装功能依赖（php-gd + 缩略图缓存目录，需 sudo）"
         echo "  rollback                  回滚到备份版本"
         echo "  hfish-panel               建立 SSH 隧道访问 Hfish 管理面板"
         echo "  hfish-status              查看 Hfish 蜜罐状态"

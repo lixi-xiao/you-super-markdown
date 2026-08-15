@@ -358,6 +358,11 @@
             content.innerHTML = marked.parse(annBody);
             // v3.3.0：公告视频渲染（仅站内 data/videos/；外链按纯文本保留）
             renderYmVideos(content, annVideoSlots);
+            // v3.3.2：公告正文图片懒加载
+            content.querySelectorAll('img').forEach(function(im) {
+                if (!im.getAttribute('loading')) im.setAttribute('loading', 'lazy');
+                im.setAttribute('decoding', 'async');
+            });
             // v3.2.5：公告正文 mermaid 流程图渲染（与文章阅读一致）
             if (typeof mermaid !== 'undefined') {
                 content.querySelectorAll('pre code.language-mermaid').forEach(function(code) {
@@ -427,9 +432,21 @@
                         vid.playsInline = true;
                         vid.setAttribute('controlslist', 'nodownload');
                         if (slot.title) vid.title = slot.title;
-                        var srcEl = document.createElement('source');
-                        srcEl.src = src;
-                        vid.appendChild(srcEl);
+                        // v3.3.2：懒加载——视频进入视口才发起请求（首屏不拉大文件；配合 nginx mp4/Range 更流畅）
+                        if ('IntersectionObserver' in window) {
+                            vid.dataset.ymSrc = src;
+                            var io = new IntersectionObserver(function(entries, obs) {
+                                entries.forEach(function(en) {
+                                    if (en.isIntersecting && !vid.src) {
+                                        vid.src = vid.dataset.ymSrc;
+                                        obs.unobserve(vid);
+                                    }
+                                });
+                            }, { rootMargin: '200px' });
+                            io.observe(vid);
+                        } else {
+                            vid.src = src;
+                        }
                         frag.appendChild(vid);
                         if (slot.title) {
                             var cap = document.createElement('p');
@@ -880,6 +897,11 @@
                 }
                 // v3.3.0：视频语法 → 播放器（仅站内 data/videos/ 相对路径；外链按纯文本保留）
                 renderYmVideos(markdownBody, videoSlots);
+                // v3.3.2：正文图片懒加载（首屏外的大图不预先下载，滚动到才加载）
+                markdownBody.querySelectorAll('img').forEach(function(im) {
+                    if (!im.getAttribute('loading')) im.setAttribute('loading', 'lazy');
+                    im.setAttribute('decoding', 'async');
+                });
                 if (typeof hljs !== 'undefined') {
                     markdownBody.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
                 }

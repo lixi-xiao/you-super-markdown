@@ -483,7 +483,7 @@ function _publishedArticles($q = '') {
             }
             // 全文搜索：标题 / 标签 / 摘要 / 正文关键词匹配（忽略大小写）
             if ($qLow !== '') {
-                $haystack = mb_strtolower($title . ' ' . $plain . ' ' . $tags . ' ' . $excerpt . ' ' . $author, 'UTF-8');
+                $haystack = mb_strtolower($title . ' ' . $plain . ' ' . implode(' ', $tags) . ' ' . $excerpt . ' ' . $author, 'UTF-8');
                 if (mb_strpos($haystack, $qLow, 0, 'UTF-8') === false) continue;
             }
             $out[] = [

@@ -380,12 +380,11 @@ code, pre, .markdown-body code, .markdown-body pre {
     display: flex; align-items: center; flex: 1;
     overflow-x: auto;
     gap: 6px;
-    /* v4.1.4：桌面端保留可见滚动条——此前 scrollbar-width:none 隐藏滚动条，电脑端无法拖动查看超出的分类 */
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
+    /* v4.1.5：隐藏滚动条（太丑），横向滚动全靠滚轮转横向 + 按住拖动（enableHScroll） */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
-.category-bar-right::-webkit-scrollbar { height: 6px; }
-.category-bar-right::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.category-bar-right::-webkit-scrollbar { display: none; }
 .category-bar-divider {
     width: 1px; height: 18px;
     background: var(--border);
@@ -433,17 +432,11 @@ code, pre, .markdown-body code, .markdown-body pre {
     overflow-x: auto;
     /* v4.1.2：占满独立行并在行内滚动（此前 flex-shrink:0 会把整行撑出容器圆角） */
     flex: 1; min-width: 0;
-    /* v4.1.4：桌面端保留可见滚动条，标签超出部分可拖动查看 */
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
+    /* v4.1.5：隐藏滚动条，横向滚动全靠滚轮转横向 + 按住拖动（enableHScroll） */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
-.tag-cloud::-webkit-scrollbar { height: 6px; }
-.tag-cloud::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-/* v4.1.4：移动端（无鼠标/滚动条触控屏）隐藏滚动条，保持原生滑动手势 */
-@media (max-width: 1024px) {
-    .category-bar-right, .tag-cloud { scrollbar-width: none; -ms-overflow-style: none; }
-    .category-bar-right::-webkit-scrollbar, .tag-cloud::-webkit-scrollbar { display: none; }
-}
+.tag-cloud::-webkit-scrollbar { display: none; }
 .tag-cloud-item {
     display: inline-flex; align-items: center;
     padding: 3px 10px;

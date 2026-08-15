@@ -589,6 +589,8 @@ def backup_articles() -> bool:
 
 
 # v3.3.5：上传触发备份——PHP 上传文章成功后写 data/.backup_trigger，守护进程检测到立即备份
+# v3.3.6：触发时同时备份 文章 + 数据库——公告/评论等 DB 数据变更（如公告上传）也走同一标记，
+#         保证「上传/发布后 10 秒内」文章与数据库都有最新备份
 def check_upload_trigger():
     global last_upload_backup_info
     try:
@@ -596,9 +598,10 @@ def check_upload_trigger():
             return  # 超管后台关闭了「上传触发立即备份」
         if not os.path.exists(UPLOAD_TRIGGER):
             return
-        log("检测到文章上传触发标记，立即备份文章")
+        log("检测到上传触发标记，立即备份文章与数据库")
         if backup_articles():
             last_upload_backup_info = time.strftime('%Y-%m-%d %H:%M:%S')
+        backup_db()  # v3.3.6：公告/评论等 DB 数据一并立即备份（滚动 1 份，多触发无副作用）
         os.remove(UPLOAD_TRIGGER)
     except Exception as e:
         log(f"上传触发备份失败: {e}")

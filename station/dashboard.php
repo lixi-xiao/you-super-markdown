@@ -322,6 +322,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             if ($aTitle === '') $aTitle = '公告';
             addAnnouncement($aType, '', $myId, $aTitle, $aSummary, $aBody);
             auditLog('announce_add', $aTitle, "站长新增公告: {$aTitle}");
+            // v3.3.6：公告变更（含 .md 上传导入的正文）触发守护进程立即备份 DB + 文章
+            if (function_exists('triggerArticleBackup')) triggerArticleBackup();
             $msg = 'announce_added';
         } elseif ($annAct === 'update') {
             $aId = $_POST['a_id'] ?? '';
@@ -341,6 +343,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 }
                 updateAnnouncement($aId, $aArticle, $aTitle, $aSummary, $aBody);
                 auditLog('announce_update', $aId, "站长编辑公告: {$aTitle}");
+                // v3.3.6：公告编辑触发守护进程立即备份 DB + 文章
+                if (function_exists('triggerArticleBackup')) triggerArticleBackup();
                 $msg = 'announce_updated';
             } else {
                 $msg = 'announce_not_found';

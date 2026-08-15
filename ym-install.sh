@@ -145,15 +145,15 @@ case $OS in
         [ -z "$PHP_VER" ] && PHP_VER="8.3"
         log "检测到 PHP 版本: $PHP_VER"
         # 依赖安装：失败时显示错误（v2.10.2 修复：原 > /dev/null 2>&1 + set -e 使失败静默终止，无法定位）
-        if ! apt-get install -y nginx "php${PHP_VER}-fpm" "php${PHP_VER}-cli" "php${PHP_VER}-zip" "php${PHP_VER}-mbstring" "php${PHP_VER}-curl" "php${PHP_VER}-sqlite3" certbot python3 python3-pip ufw 2>&1 | tail -15; then
+        if ! apt-get install -y nginx "php${PHP_VER}-fpm" "php${PHP_VER}-cli" "php${PHP_VER}-zip" "php${PHP_VER}-mbstring" "php${PHP_VER}-curl" "php${PHP_VER}-sqlite3" "php${PHP_VER}-gd" certbot python3 python3-pip ufw 2>&1 | tail -15; then
             warn "标准包名安装失败（php${PHP_VER} 可能不在当前源），尝试通用包名..."
-            if ! apt-get install -y nginx php-fpm php-cli php-zip php-mbstring php-curl php-sqlite3 certbot python3 python3-pip ufw 2>&1 | tail -15; then
+            if ! apt-get install -y nginx php-fpm php-cli php-zip php-mbstring php-curl php-sqlite3 php-gd certbot python3 python3-pip ufw 2>&1 | tail -15; then
                 warn "依赖安装失败！请检查 apt 源/网络后重新运行本脚本；上方输出为具体错误"
             fi
         fi
         ;;
     centos|rhel|fedora)
-        yum install -y -q nginx php php-fpm php-zip php-mbstring php-curl php-pdo php-sqlite3 certbot python3 python3-pip > /dev/null 2>&1
+        yum install -y -q nginx php php-fpm php-zip php-mbstring php-curl php-pdo php-sqlite3 php-gd certbot python3 python3-pip > /dev/null 2>&1
         ;;
     *)
         warn "未识别的系统，请手动安装: nginx, php8.x, python3, certbot"
@@ -299,7 +299,8 @@ if [ -d "$WEB_ROOT/data" ]; then
 fi
 
 # 创建必要的子目录
-mkdir -p "$WEB_ROOT/data/articles" "$WEB_ROOT/data/comments" "$WEB_ROOT/data/bg" "$WEB_ROOT/data/avatars"
+# v3.3.12：data/cache/thumbs 为缩略图缓存目录（img.php 写入，需 www-data 可写）
+mkdir -p "$WEB_ROOT/data/articles" "$WEB_ROOT/data/comments" "$WEB_ROOT/data/bg" "$WEB_ROOT/data/avatars" "$WEB_ROOT/data/cache/thumbs"
 chown -R www-data:www-data "$WEB_ROOT/data"
 
 # 将调用本脚本的管理员加入 www-data 组（CLI 只读命令无需 sudo 即可读取 SQLite）

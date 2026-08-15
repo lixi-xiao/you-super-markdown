@@ -2051,3 +2051,52 @@ body:not(.bg-blur) .ann-card { background: rgba(255, 255, 255, var(--bg-card-opa
 [data-theme="dark"] .ann-card-type.update { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
 [data-theme="dark"] .ann-header-icon { background: rgba(255, 255, 255, 0.08); }
 [data-theme="dark"] .ann-card-cover-ink { box-shadow: inset 0 0 24px rgba(0,0,0,0.35); }
+
+/* ================================================================
+   v3.3.3：手机版公告视觉强化——与文章卡片形成鲜明对比
+   公告区块头部横幅化（主题色渐变 + 白字 + 喇叭图标），一眼定位；
+   公告卡片加主题色左边条 + 浅色渐变底 + 放大类型徽章，与纯白文章卡区分。
+   ================================================================ */
+@media (max-width: 640px) {
+    /* 公告区块标题 → 横幅 */
+    .ann-header {
+        background: linear-gradient(135deg, var(--accent), hsl(calc(var(--accent-hue) + 25), var(--accent-sat), 46%));
+        color: #fff;
+        padding: 11px 16px;
+        border-radius: var(--radius-sm);
+        box-shadow: var(--shadow-md);
+        margin-bottom: 12px;
+    }
+    .ann-header-icon {
+        background: rgba(255, 255, 255, 0.22);
+        color: #fff;
+    }
+    .ann-header-icon svg { stroke: #fff; }
+
+    /* 公告卡片：主题色左边条 + 浅色渐变底（与 doc-card 纯白底区分） */
+    .ann-card {
+        border-left: 4px solid var(--accent);
+        background: linear-gradient(135deg, hsl(var(--accent-hue), var(--accent-sat), 97%), var(--surface));
+    }
+    /* v3.3.3：bg-blur 模式（背景模糊）下保持公告渐变底，避免被 rgba 纯色覆盖而失去对比 */
+    body.bg-blur .ann-card {
+        background: linear-gradient(135deg, hsla(var(--accent-hue), var(--accent-sat), 97%, 0.92), hsla(0, 0%, 100%, var(--bg-card-opacity, 0.8)));
+        backdrop-filter: blur(var(--bg-blur-level, 0px));
+        -webkit-backdrop-filter: blur(var(--bg-blur-level, 0px));
+    }
+    .ann-card-type { font-size: 12px; padding: 3px 12px; }
+
+    /* 深色主题适配 */
+    [data-theme="dark"] .ann-header {
+        background: linear-gradient(135deg, hsl(var(--accent-hue), var(--accent-sat), 38%), hsl(calc(var(--accent-hue) + 25), var(--accent-sat), 28%));
+    }
+    [data-theme="dark"] .ann-card {
+        border-left-color: hsl(var(--accent-hue), var(--accent-sat), 55%);
+        background: linear-gradient(135deg, hsl(var(--accent-hue), var(--accent-sat), 15%), var(--surface));
+    }
+    [data-theme="dark"] body.bg-blur .ann-card {
+        background: linear-gradient(135deg, hsla(var(--accent-hue), var(--accent-sat), 16%, 0.92), hsla(0, 0%, 0%, var(--bg-card-opacity, 0.8)));
+        backdrop-filter: blur(var(--bg-blur-level, 0px));
+        -webkit-backdrop-filter: blur(var(--bg-blur-level, 0px));
+    }
+}

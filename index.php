@@ -702,7 +702,9 @@ window.YM_ANNOUNCEMENTS = <?= json_encode($_announcements, JSON_UNESCAPED_UNICOD
     var bgBlurLevel = parseInt(body.getAttribute('data-bg-blur-level') || '0');
     var cardOpacity = parseInt(body.getAttribute('data-bg-card-opacity') || '100');
     if (bgType === 'image' && bgImage) {
-        body.style.backgroundImage = 'url(' + bgImage + ')';
+        // v3.3.3：背景图相对路径补前导斜杠（与 js/main.js applyBg 一致），避免 /css/data/bg/.. 404
+        var bgUrl = (bgImage.indexOf('/') === 0 || /^https?:/i.test(bgImage)) ? bgImage : '/' + bgImage;
+        body.style.backgroundImage = 'url(' + bgUrl + ')';
         body.style.backgroundSize = 'cover';
         body.style.backgroundPosition = 'center';
         body.style.backgroundAttachment = 'fixed';

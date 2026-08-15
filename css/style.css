@@ -905,6 +905,13 @@ code, pre, .markdown-body code, .markdown-body pre {
 .img-lightbox-close:hover { background: rgba(255,255,255,0.3); }
 @media (max-width: 640px) {
     .cards-grid { grid-template-columns: 1fr; gap: 14px; }
+    /* v3.1.15：手机端卡片紧凑化——缩小内边距 / 字号 / 间距，避免卡片过大影响阅读 */
+    .doc-card { padding: 14px 14px 16px; gap: 7px; border-radius: 12px; }
+    .doc-card .card-title { font-size: 1.02em; line-height: 1.45; }
+    .doc-card .card-meta { gap: 8px; font-size: 0.76em; }
+    .doc-card .card-excerpt { font-size: 0.85em; line-height: 1.6; }
+    .doc-card .card-author { font-size: 0.78em; }
+    .doc-card .tag { padding: 2px 7px; font-size: 0.7em; }
     .main-container { padding: 10px 6px 50px; }
     .category-bar { padding: 6px 8px; border-radius: 14px; gap: 4px; }
     .category-bar-item { padding: 4px 9px; font-size: 0.78em; }

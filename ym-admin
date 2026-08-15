@@ -21,8 +21,9 @@ get_domain() {
 # v3.1.0：更新完成收尾（必须定义为顶部函数——apply-update 会覆盖 /usr/local/bin/ym-admin 自身，
 # bash 惰性解析时仅对已读入内存的函数体免疫「新旧文件混合」语法错误，case 内联代码会在覆盖后解析失败）
 # v3.1.7：新增第 4 参 CHANGELOG_B64——更新通知邮件自动附带本次更新内容（changelog 脱敏文案）
+# v3.1.15：新增第 5 参 UPDATE_METHOD——邮件附带更新方式（外部上传更新包 / 服务器命令更新）
 post_update_finish() {
-    local TO_VER="$1" CHANNEL="$2" FROM_VER="$3" CHANGELOG_B64="$4"
+    local TO_VER="$1" CHANNEL="$2" FROM_VER="$3" CHANGELOG_B64="$4" UPDATE_METHOD="$5"
     # 请求文件 root 可删，避免以 php 回写时 /tmp 属主权限拒绝
     rm -f /tmp/ym-update-request.json
     # 清理旧备份（保留最近2次）
@@ -44,6 +45,12 @@ post_update_finish() {
 【本次更新内容】
 $CL_TEXT"
         fi
+    fi
+    # v3.1.15：邮件附带本次更新方式（区分后台外部上传更新包 / 服务器命令触发仓库下载更新）
+    if [ -n "$UPDATE_METHOD" ]; then
+        NOTIFY_MSG="$NOTIFY_MSG
+
+【更新方式】$UPDATE_METHOD"
     fi
     /usr/local/bin/ym-admin notify "$NOTIFY_MSG" 2>/dev/null || true
 }
@@ -238,9 +245,17 @@ case "${1:-}" in
         CHANNEL=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['channel'] ?? 'stable';")
         PKG_PATH=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['package_path'] ?? '';")
 
+        # v3.1.15：判定更新方式——PKG_PATH 非空且文件存在 → 后台外部上传更新包；否则 → 服务器命令更新（仓库下载）
+        if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
+            UPDATE_METHOD="外部上传更新包"
+        else
+            UPDATE_METHOD="服务器命令更新（仓库下载）"
+        fi
+
         echo "  当前版本: v$FROM_VER"
         echo "  目标版本: v$TO_VER"
         echo "  更新通道: $CHANNEL"
+        echo "  更新方式: $UPDATE_METHOD"
         echo ""
 
         # 防注入：目标版本仅允许数字与点（避免 preg_replace 写入 utils.php 时破坏/注入代码）
@@ -468,7 +483,8 @@ case "${1:-}" in
         rm -f /tmp/ym-update.lock
         # v3.1.0：收尾逻辑抽到顶部函数（自更新后 case 内联代码会混合解析失败）
         # v3.1.7：把 changelog（4.7a 已读取）传给收尾函数，更新通知邮件附带本次更新内容
-        post_update_finish "$TO_VER" "$CHANNEL" "$FROM_VER" "$CHANGELOG_B64"
+        # v3.1.15：把更新方式（外部上传更新包 / 服务器命令更新）传给收尾函数，邮件展示更新通道
+        post_update_finish "$TO_VER" "$CHANNEL" "$FROM_VER" "$CHANGELOG_B64" "$UPDATE_METHOD"
         # 自更新已覆盖本脚本文件：立即退出，避免 bash 继续解析磁盘上的新内容导致混合语法错误
         exit 0
         ;;

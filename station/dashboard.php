@@ -361,10 +361,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             $msg = 'announce_reordered';
         } elseif ($annAct === 'vis') {
             // v3.1.10：公告可视范围调控（all 所有人 / users 仅登录用户 / managers 仅站长及以上）
+            // v3.1.15：仅作用于「更新历史」更新公告，其他公告始终可见
             $vis = in_array($_POST['a_vis'] ?? '', ['all', 'users', 'managers'], true) ? $_POST['a_vis'] : 'all';
             $config['announce_visibility'] = $vis;
             saveSiteConfig($config);
-            auditLog('announce_vis', 'site_config', "站长设置公告可视范围: {$vis}");
+            auditLog('announce_vis', 'site_config', "站长设置更新公告可视范围: {$vis}");
             $msg = 'announce_vis_saved';
         }
     }
@@ -863,9 +864,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            公告可视范围
+            更新公告可视范围
         </div>
-        <p class="form-hint" style="margin-bottom:12px">控制首页公告区对访客 / 普通用户 / 后台角色的开放程度</p>
+        <p class="form-hint" style="margin-bottom:12px">仅控制「更新历史」更新公告对访客 / 普通用户 / 后台角色的开放程度，其他公告始终可见</p>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="announce_action" value="vis">

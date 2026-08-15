@@ -75,8 +75,11 @@ if (isset($_POST['save_backup_config'])) {
     $bkInterval = (int)($_POST['interval_min'] ?? 0);
     $bkArtKeep = (int)($_POST['article_keep'] ?? 0);
     $bkManKeep = (int)($_POST['manual_keep'] ?? 0);
-    $bkOk = saveBackupConfig($bkInterval, $bkArtKeep, $bkManKeep);
-    auditLog('backup_config_update', 'backup.conf', "数据库备份间隔={$bkInterval}分钟/文章保留{$bkArtKeep}份/手动保留{$bkManKeep}份", $bkOk ? 'success' : 'failed');
+    // v3.3.5：上传触发备份 / 单篇篡改还原 开关
+    $bkTrigger = !empty($_POST['trigger_backup']);
+    $bkSingle = !empty($_POST['single_restore']);
+    $bkOk = saveBackupConfig($bkInterval, $bkArtKeep, $bkManKeep, $bkTrigger, $bkSingle);
+    auditLog('backup_config_update', 'backup.conf', "数据库备份间隔={$bkInterval}分钟/文章保留{$bkArtKeep}份/手动保留{$bkManKeep}份/上传触发备份=" . ($bkTrigger ? '开' : '关') . "/单篇还原=" . ($bkSingle ? '开' : '关'), $bkOk ? 'success' : 'failed');
     header('Location: dashboard.php?tab=data&msg=' . ($bkOk ? 'saved' : 'save_failed'));
     exit;
 }
@@ -2432,6 +2435,8 @@ $banMsg = $_GET['bmsg'] ?? '';
             <tr><td style="color:var(--text-muted)">下次数据库备份</td><td><?= htmlspecialchars($gState['next_db_backup'] ?: '—') ?></td></tr>
             <tr><td style="color:var(--text-muted)">数据库备份大小</td><td><?= $gState['db_backup_size'] ? number_format((float)$gState['db_backup_size'] / 1024, 1) . ' KB' : '—' ?></td></tr>
             <tr><td style="color:var(--text-muted)">文章每日备份</td><td>保留 <?= (int)($gState['article_backup_keep'] ?? $bCfg['article_keep']) ?> 份；上次：<?= htmlspecialchars($gState['last_articles_backup'] ?: '尚未生成') ?>（当前 <?= (int)($gState['articles_backup_count'] ?? 0) ?> 份）</td></tr>
+            <tr><td style="color:var(--text-muted)">上传触发备份（v3.3.5）</td><td><?= !empty($bCfg['trigger_backup']) ? '开' : '关' ?>；最近触发：<?= htmlspecialchars($gState['last_upload_backup'] ?? '无记录') ?></td></tr>
+            <tr><td style="color:var(--text-muted)">单篇篡改还原（v3.3.5）</td><td><?= !empty($bCfg['single_restore']) ? '开' : '关' ?>；最近还原：<?= htmlspecialchars($gState['last_single_restore'] ?? '无记录') ?></td></tr>
             <tr><td style="color:var(--text-muted)">手动备份保留</td><td><?= (int)($gState['manual_backup_keep'] ?? $bCfg['manual_keep']) ?> 份（超时自动清除）</td></tr>
             <tr><td style="color:var(--text-muted)">最近自动恢复</td><td><?= htmlspecialchars($gState['last_restore'] ?: '无记录') ?></td></tr>
             <tr><td style="color:var(--text-muted)">备份锁定</td><td>backups/db、backups/articles、logs 目录 chattr +i 锁定（root），PHP 权限不可篡改</td></tr>
@@ -2455,6 +2460,14 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <tr>
                     <td style="color:var(--text-muted)">手动备份保留份数</td>
                     <td><input class="form-input" style="width:160px" type="number" min="1" max="30" name="manual_keep" value="<?= (int)$bCfg['manual_keep'] ?>" required></td>
+                </tr>
+                <tr>
+                    <td style="color:var(--text-muted)">上传触发立即备份（v3.3.5）</td>
+                    <td><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="trigger_backup" value="1" <?= !empty($bCfg['trigger_backup']) ? 'checked' : '' ?> style="width:auto"> 上传新文章后立即备份（10 秒内）</label></td>
+                </tr>
+                <tr>
+                    <td style="color:var(--text-muted)">单篇篡改还原（v3.3.5）</td>
+                    <td><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="single_restore" value="1" <?= !empty($bCfg['single_restore']) ? 'checked' : '' ?> style="width:auto"> 仅还原「系统隐藏文章 META 异常」的单篇，正常编辑不受影响</label></td>
                 </tr>
             </table>
             <div style="margin-top:12px">

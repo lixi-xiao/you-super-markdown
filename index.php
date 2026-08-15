@@ -159,6 +159,8 @@ if ($action === 'list') {
     $files = glob('./data/articles/*.md');
     $fileList = [];
     $pinnedList = getPinnedList();
+    // v3.1.11：设为公告的文章不在文章列表展示（公告单独展示，不产生文章卡片）
+    $annArticles = array_flip(array_column(db_all("SELECT article FROM announcement WHERE article != ''"), 'article'));
     if ($files) {
         usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
         foreach ($files as $file) {
@@ -170,6 +172,8 @@ if ($action === 'list') {
                 $hmeta = json_decode(trim($hm[1]), true);
                 if (!empty($hmeta['hidden'])) continue;
             }
+            // v3.1.11：公告关联文章不进列表
+            if (isset($annArticles[$filename])) continue;
             $lines = explode("\n", $content);
             $title = '';
             $wordCount = mb_strlen(preg_replace('/\s+/', '', $content), 'UTF-8');

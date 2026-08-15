@@ -359,6 +359,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 }
             }
             $msg = 'announce_reordered';
+        } elseif ($annAct === 'vis') {
+            // v3.1.10：公告可视范围调控（all 所有人 / users 仅登录用户 / managers 仅站长及以上）
+            $vis = in_array($_POST['a_vis'] ?? '', ['all', 'users', 'managers'], true) ? $_POST['a_vis'] : 'all';
+            $config['announce_visibility'] = $vis;
+            saveSiteConfig($config);
+            auditLog('announce_vis', 'site_config', "站长设置公告可视范围: {$vis}");
+            $msg = 'announce_vis_saved';
         }
     }
     header("Location: dashboard.php?msg={$msg}&tab={$tab}");
@@ -835,8 +842,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <?php elseif ($tab === 'announce'): ?>
     <?php
     // v3.1.6：公告管理（站长全权：添加/编辑/删除/排序；type=update 为升级自动生成的更新公告，站长可删可排序）
+    // v3.1.10：公告可视范围调控（all 所有人 / users 仅登录用户 / managers 仅站长及以上）
     $annList = getAnnouncements();
     $annArticleOpts = stArticleOptions();
+    $annVis = $config['announce_visibility'] ?? 'all';
     ?>
     <div class="page-header">
         <div class="page-title">
@@ -849,7 +858,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <?php if ($msg === 'announce_updated'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>公告已更新</div><?php endif; ?>
     <?php if ($msg === 'announce_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>公告已删除</div><?php endif; ?>
     <?php if ($msg === 'announce_reordered'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>排序已更新</div><?php endif; ?>
+    <?php if ($msg === 'announce_vis_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>公告可视范围已保存</div><?php endif; ?>
     <?php if ($msg === 'announce_not_found'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>公告不存在或已被删除</div><?php endif; ?>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            公告可视范围
+        </div>
+        <p class="form-hint" style="margin-bottom:12px">控制首页公告区对访客 / 普通用户 / 后台角色的开放程度</p>
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="announce_action" value="vis">
+            <div class="bg-type-grid" style="max-width:640px">
+                <label class="bg-type-card <?= $annVis==='all'?'active':'' ?>" data-type="all"><input type="radio" name="a_vis" value="all" <?= $annVis==='all'?'checked':'' ?>><div class="type-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div><div class="type-name">所有人可见</div><div class="type-desc">访客与普通用户均可看到公告</div></label>
+                <label class="bg-type-card <?= $annVis==='users'?'active':'' ?>" data-type="users"><input type="radio" name="a_vis" value="users" <?= $annVis==='users'?'checked':'' ?>><div class="type-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><div class="type-name">仅登录用户可见</div><div class="type-desc">访客看不到公告，登录后可见</div></label>
+                <label class="bg-type-card <?= $annVis==='managers'?'active':'' ?>" data-type="managers"><input type="radio" name="a_vis" value="managers" <?= $annVis==='managers'?'checked':'' ?>><div class="type-icon"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div class="type-name">仅站长及以上可见</div><div class="type-desc">访客与普通用户均看不到公告</div></label>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px">
+                <button type="submit" class="btn btn-primary">保存可视范围</button>
+            </div>
+        </form>
+    </div>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>

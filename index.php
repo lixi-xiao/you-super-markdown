@@ -60,8 +60,12 @@ function _annCoverTag($article) {
     }
     return [$cover, array_slice($tags, 0, 5), $words, $meta];
 }
+// v3.1.10：公告可见范围（站长后台可调）——all 所有人 / users 仅登录用户 / managers 仅站长及以上
+$_annVis = $_siteConfig['announce_visibility'] ?? 'all';
 $_announcements = [];
 foreach (getAnnouncements(20) as $_an) {
+    if ($_annVis === 'managers' && !checkRole(ROLE_STATION_ADMIN)) continue;
+    if ($_annVis === 'users' && !checkRole(ROLE_USER)) continue;
     [$cov, $tg, $wc, $mt] = _annCoverTag($_an['article'] ?? '');
     $_announcements[] = [
         'id' => $_an['id'], 'type' => $_an['type'], 'article' => $_an['article'],
@@ -161,6 +165,11 @@ if ($action === 'list') {
             $filename = basename($file);
             if (strpos($filename, '.') === 0) continue;
             $content = file_get_contents($file);
+            // v3.1.10：META 标记 hidden 的文章不进首页列表（如「更新历史」仅保留公告入口）
+            if (preg_match('/<!--META(.*?)-->/s', $content, $hm)) {
+                $hmeta = json_decode(trim($hm[1]), true);
+                if (!empty($hmeta['hidden'])) continue;
+            }
             $lines = explode("\n", $content);
             $title = '';
             $wordCount = mb_strlen(preg_replace('/\s+/', '', $content), 'UTF-8');

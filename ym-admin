@@ -429,9 +429,9 @@ case "${1:-}" in
                 \$cl = base64_decode('$CHANGELOG_B64');
                 \$toVer = '$TO_VER';
                 \$artPath = '$WEB_ROOT/data/articles/更新历史.md';
-                // 1) 文章不存在则创建骨架（META + 标题）
+                // 1) 文章不存在则创建骨架（META + 标题；v3.1.10：hidden 标记使文章不进首页列表，仅保留公告入口）
                 if (!file_exists(\$artPath)) {
-                    \$meta = json_encode(['title' => '更新历史', 'category' => '系统', 'tags' => '更新,版本,日志', 'author' => '系统'], JSON_UNESCAPED_UNICODE);
+                    \$meta = json_encode(['title' => '更新历史', 'category' => '系统', 'tags' => '更新,版本,日志', 'author' => '系统', 'hidden' => true], JSON_UNESCAPED_UNICODE);
                     file_put_contents(\$artPath, \"<!--META \$meta -->\n\n# 更新历史\n\n> 全部版本更新记录，最新在前。\n\n\", LOCK_EX);
                 }
                 \$content = file_get_contents(\$artPath);

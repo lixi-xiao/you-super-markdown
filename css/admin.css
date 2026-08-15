@@ -1111,10 +1111,9 @@ td code {
         width: 100%;
     }
     .pagination-btns {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        padding-bottom: 4px;
+        flex-wrap: wrap;
+        gap: 6px 8px;
+        overflow: visible;
         width: 100%;
     }
     .pagination-btns .page-btn {

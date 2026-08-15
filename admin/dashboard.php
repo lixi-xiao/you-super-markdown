@@ -531,6 +531,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
     $config['hfish_ban_threshold'] = min(100, max(1, intval($_POST['hfish_ban_threshold'] ?? 10)));
     saveSiteConfig($config);
     auditLog('config_update', 'site_config', '修改系统配置');
+    // v4.1.8：安全配置（含蜜罐阈值）变更后立即刷新蜜罐快照——界面阈值/封禁状态即时生效，无需等 5 分钟轮询
+    if (is_file(__DIR__ . '/../ym-hfish-sync.py')) {
+        exec('python3 ' . escapeshellarg(__DIR__ . '/../ym-hfish-sync.py') . ' > /dev/null 2>&1 &');
+    }
     header('Location: dashboard.php?tab=config&msg=saved');
     exit;
 }
@@ -1297,6 +1301,11 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php elseif ($tab === 'security'): ?>
     <?php
     $banTypes = loadBans();
+    // v4.1.8：封禁列表分页（与日志分页同模式）
+    $banPerPage = (int)($_GET['ban_per_page'] ?? 10);
+    if (!in_array($banPerPage, [10, 20, 50, 100], true)) $banPerPage = 10;
+    $banQ = trim((string)($_GET['ban_q'] ?? ''));
+    $banData = paginateList($banTypes, ['ip', 'reason', 'time'], $banQ, (int)($_GET['ban_page'] ?? 1), $banPerPage);
     ?>
     <div class="page-header">
         <div class="page-title">
@@ -1347,16 +1356,16 @@ $banMsg = $_GET['bmsg'] ?? '';
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-            封禁列表（<?= count($banTypes) ?> 条）
+            封禁列表（共 <?= $banData['total'] ?> 条）
         </div>
-        <?php if (empty($banTypes)): ?>
+        <?php if (empty($banData['items'])): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
             <p>暂无封禁记录</p>
         </div>
         <?php else: ?>
         <div class="ban-list">
-            <?php foreach ($banTypes as $ban): ?>
+            <?php foreach ($banData['items'] as $ban): ?>
             <div class="ban-item">
                 <div class="ban-item-top">
                     <span class="ban-item-ip"><?= htmlspecialchars($ban['ip']) ?></span>
@@ -1384,6 +1393,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <?php endforeach; ?>
         </div>
         <?php endif; ?>
+        <?= renderPager($banData, 'ban_page', ['tab' => 'security', 'ban_q' => $banQ], 'ban_per_page') ?>
     </div>
     <!-- 编辑封禁弹窗 -->
     <div class="modal-overlay" id="banEditModal">
@@ -2480,10 +2490,15 @@ $banMsg = $_GET['bmsg'] ?? '';
         $hfishSnapshot = json_decode(file_get_contents($hfishSnapFile), true) ?: [];
     }
     $hfishAttacks = $hfishSnapshot['attacks'] ?? [];
-    $hfishThreshold = $hfishSnapshot['threshold'] ?? 3;
+    // v4.1.8：阈值显示以后台最新配置为准（保存后即时生效，无需等快照轮询）；快照阈值兜底
+    $hfishThreshold = (int)($config['hfish_ban_threshold'] ?? ($hfishSnapshot['threshold'] ?? 10));
     $hfishUpdated = $hfishSnapshot['updated_at'] ?? '从未同步';
     $hfishError = $hfishSnapshot['error'] ?? '';
     $hfishBannedCount = count(array_filter($hfishAttacks, fn($a) => !empty($a['banned'])));
+    // v4.1.8：蜜罐攻击 IP 列表分页
+    $hfishPerPage = (int)($_GET['hfish_per_page'] ?? 10);
+    if (!in_array($hfishPerPage, [10, 20, 50, 100], true)) $hfishPerPage = 10;
+    $hfishData = paginateList($hfishAttacks, ['ip', 'date'], '', (int)($_GET['hfish_page'] ?? 1), $hfishPerPage);
     ?>
     <div class="card">
         <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>蜜罐状态</div>
@@ -2506,13 +2521,13 @@ $banMsg = $_GET['bmsg'] ?? '';
     </div>
 
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>攻击 IP 列表（<?= count($hfishAttacks) ?>）</div>
-        <?php if (empty($hfishAttacks)): ?>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>攻击 IP 列表（共 <?= $hfishData['total'] ?>）</div>
+        <?php if (empty($hfishData['items'])): ?>
         <div class="empty-state"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg><p>暂无攻击记录（或蜜罐尚未同步）</p></div>
         <?php else: ?>
         <div class="table-wrap"><table>
             <tr><th>IP</th><th>攻击次数</th><th>攻击行为</th><th>命中蜜罐</th><th>UA</th><th>最近时间</th><th>状态</th></tr>
-            <?php foreach ($hfishAttacks as $a): ?>
+            <?php foreach ($hfishData['items'] as $a): ?>
             <tr>
                 <td><code><?= htmlspecialchars($a['ip'] ?? '') ?></code></td>
                 <td><strong><?= intval($a['attack_cnt'] ?? 0) ?></strong><?= intval($a['attack_cnt'] ?? 0) >= $hfishThreshold ? ' <span class="chain-badge chain-invalid">已达阈值</span>' : '' ?></td>
@@ -2525,6 +2540,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <?php endforeach; ?>
         </table></div>
         <?php endif; ?>
+        <?= renderPager($hfishData, 'hfish_page', ['tab' => 'hfish'], 'hfish_per_page') ?>
     </div>
     <script>
     function hfishSync() {

@@ -1704,7 +1704,7 @@ function getUpdateHistory($limit = 30) {
  * @param int $perPage    每页条数
  * @return array{items:array,total:int,page:int,pages:int,per_page:int}
  */
-function paginateList(array $rows, array $fields, string $q = '', int $page = 1, int $perPage = 50) {
+function paginateList(array $rows, array $fields, string $q = '', int $page = 1, int $perPage = 10) {
     $perPage = max(1, min(200, (int)$perPage));
     if ($q !== '') {
         $qLower = mb_strtolower($q);
@@ -1722,6 +1722,72 @@ function paginateList(array $rows, array $fields, string $q = '', int $page = 1,
     $page = max(1, min($pages, (int)$page));
     $items = array_slice($rows, ($page - 1) * $perPage, $perPage);
     return ['items' => $items, 'total' => $total, 'page' => $page, 'pages' => $pages, 'per_page' => $perPage];
+}
+
+// v3.3.9：日志/列表分页控件渲染（原定义于超管后台，抽为公用函数供超管/站长后台复用；GET 无副作用，无需 CSRF）
+// $p: paginateList() 结果；$pageParam: 页码参数名；$extra: 需保持的额外查询参数（如 tab/q，不含分页参数）
+// $perPageParam: 每页条数参数名；$baseUrl: 页面 URL（默认取当前脚本路径，超管/站长后台自动适配）
+function renderPager(array $p, string $pageParam, array $extra = [], string $perPageParam = 'per_page', string $baseUrl = ''): string {
+    if ($baseUrl === '') {
+        $baseUrl = (($_SERVER['SCRIPT_NAME'] ?? '') !== '') ? basename($_SERVER['SCRIPT_NAME']) : 'dashboard.php';
+    }
+    $page = (int)$p['page'];
+    $pages = (int)$p['pages'];
+    $perPage = (int)($p['per_page'] ?? 10);
+    $enc = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+    // 页码按钮 URL 模板：固定 per_page，page 用 __PAGE__ 占位
+    $urlTpl = $baseUrl . '?' . http_build_query(array_merge($extra, [$perPageParam => $perPage, $pageParam => '__PAGE__']));
+    $link = fn($pg) => $enc(str_replace('__PAGE__', (string)$pg, $urlTpl));
+    // 每页条数切换 URL 模板：per_page 用 __PP__ 占位，页码回第 1 页
+    $ppTpl = $baseUrl . '?' . http_build_query(array_merge($extra, [$perPageParam => '__PP__', $pageParam => 1]));
+    // 页码跳转 URL 模板：page 用 __PG__ 占位
+    $pgTpl = $baseUrl . '?' . http_build_query(array_merge($extra, [$perPageParam => $perPage, $pageParam => '__PG__']));
+    // 单页时仅保留「总数 + 每页条数选择器」，隐藏页码按钮与跳转区（避免分页栏整体消失）
+    $showNav = $pages > 1;
+    // 页码序列：页数少全显示，多则首末+当前±1+省略号
+    $seq = [];
+    if ($pages <= 7) {
+        $seq = range(1, $pages);
+    } else {
+        $seq = [1];
+        for ($i = max(2, $page - 1); $i <= min($pages - 1, $page + 1); $i++) $seq[] = $i;
+        $seq[] = $pages;
+        $seq = array_values(array_unique($seq));
+    }
+    $html = '<nav class="pagination">';
+    // 左：总数 + 每页条数（始终显示）
+    $html .= '<div class="pagination-info"><span class="page-info">共 <strong>' . (int)$p['total'] . '</strong> 条</span>'
+           . '<label class="per-page">每页 <select data-pp-url="' . $enc($ppTpl) . '" onchange="if(this.dataset.ppUrl)location.href=this.dataset.ppUrl.replace(\'__PP__\',this.value)">';
+    foreach ([10, 20, 50, 100] as $opt) {
+        $html .= '<option value="' . $opt . '"' . ($opt === $perPage ? ' selected' : '') . '>' . $opt . '</option>';
+    }
+    $html .= '</select> 条</label></div>';
+    // 中：页码按钮（仅多页时显示）
+    if ($showNav) {
+        $html .= '<div class="pagination-btns">';
+        $html .= '<a class="page-btn" href="' . $link(1) . '" title="首页">« 首页</a>';
+        $html .= '<a class="page-btn" href="' . $link(max(1, $page - 1)) . '" title="上一页">‹ 上一页</a>';
+        $prev = 0;
+        foreach ($seq as $pg) {
+            if ($pg - $prev > 1) $html .= '<span class="page-btn page-ellipsis">…</span>';
+            $html .= ($pg === $page)
+                ? '<span class="page-btn current">' . $pg . '</span>'
+                : '<a class="page-btn" href="' . $link($pg) . '">' . $pg . '</a>';
+            $prev = $pg;
+        }
+        $html .= '<a class="page-btn" href="' . $link(min($pages, $page + 1)) . '" title="下一页">下一页 ›</a>';
+        $html .= '<a class="page-btn" href="' . $link($pages) . '" title="末页">末页 »</a>';
+        $html .= '</div>';
+    }
+    // 右：页码信息 + 跳转（仅多页时显示）
+    if ($showNav) {
+        $html .= '<div class="pagination-jump"><span class="page-info">第 ' . $page . ' / ' . $pages . ' 页</span>'
+               . '<input type="number" class="page-jump" min="1" max="' . $pages . '" placeholder="页码" data-pg-url="' . $enc($pgTpl) . '" '
+               . 'onchange="if(this.value&&this.dataset.pgUrl)location.href=this.dataset.pgUrl.replace(\'__PG__\',this.value)" '
+               . 'onkeydown="if(event.key===\'Enter\')this.onchange()">'
+               . '<button type="button" class="page-btn" onclick="var i=this.previousElementSibling;if(i&&i.value&&i.dataset.pgUrl)location.href=i.dataset.pgUrl.replace(\'__PG__\',i.value)">跳转</button></div>';
+    }
+    return $html . '</nav>';
 }
 
 function getBackupList() {

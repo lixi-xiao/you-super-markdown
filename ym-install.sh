@@ -182,6 +182,19 @@ configure_php_timezone() {
     if [ -n "${PHP_VER:-}" ]; then fpm_svc="php${PHP_VER}-fpm"; fi
     systemctl restart "$fpm_svc" > /dev/null 2>&1 || systemctl restart php-fpm > /dev/null 2>&1 || true
     log "PHP 时区已配置: $tz（CLI/FPM，邮件与日志时间戳）"
+
+    # v3.3.1：PHP 上传上限（富媒体压缩包批量上传 ≤80MB / 视频 ≤20MB / 背景图等）
+    for ini in /etc/php/*/cli/php.ini /etc/php/*/fpm/php.ini; do
+        [ -f "$ini" ] || continue
+        sed -i "s|^upload_max_filesize.*|upload_max_filesize = 100M|" "$ini"
+        sed -i "s|^;upload_max_filesize.*|upload_max_filesize = 100M|" "$ini"
+        sed -i "s|^post_max_size.*|post_max_size = 105M|" "$ini"
+        sed -i "s|^;post_max_size.*|post_max_size = 105M|" "$ini"
+        if ! grep -q '^upload_max_filesize' "$ini"; then echo "upload_max_filesize = 100M" >> "$ini"; fi
+        if ! grep -q '^post_max_size' "$ini"; then echo "post_max_size = 105M" >> "$ini"; fi
+    done
+    systemctl restart "$fpm_svc" > /dev/null 2>&1 || systemctl restart php-fpm > /dev/null 2>&1 || true
+    log "PHP 上传上限已配置: upload_max_filesize=100M / post_max_size=105M"
 }
 configure_php_timezone
 
@@ -474,6 +487,9 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
+    # v3.3.1：上传体积上限 100MB（富媒体压缩包批量上传 ≤80MB / 视频 ≤20MB / 背景图等）
+    client_max_body_size 100m;
+
     # 禁止访问数据目录
     location ~ ^/data/.*\.json\$ {
         deny all;
@@ -484,6 +500,17 @@ server {
     location ~ ^/data/ym\.db(-wal|-shm)?\$ {
         deny all;
         return 403;
+    }
+
+    # v3.1.6：放行文章图片目录（data/ 其余内容仍禁止；仅图片可公开访问）
+    location ^~ /data/images/ {
+        allow all;
+    }
+
+    # v3.3.0：放行文章视频目录（data/videos/ 仅视频可公开访问；静态服务默认支持 Range 拖拽播放）
+    location ^~ /data/videos/ {
+        allow all;
+        add_header Accept-Ranges bytes always;
     }
 
     # 禁止访问脚本/配置/备份等敏感文件（安装脚本、守护进程、蜜罐同步等源码不得外泄）

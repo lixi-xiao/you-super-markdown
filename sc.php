@@ -52,7 +52,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_file'])) {
         $realDelPath = realpath($delPath);
         if ($realDelPath !== false && strpos($realDelPath, $realDataPath) === 0) {
             if (canManageArticle(getArticleMeta($delPath))) {
-                unlink($delPath);
+                // v3.3.1：系统文章（更新历史）与隐藏文章受保护——文档管理不可删除（仅在公告侧展示）
+                $delMeta = getArticleMeta($delPath);
+                if (in_array($delFile, ['更新历史.md'], true) || !empty($delMeta['hidden'])) {
+                    logUnauthorized('越权尝试删除系统/隐藏文章: ' . $delFile);
+                } else {
+                    unlink($delPath);
+                }
             } else {
                 logUnauthorized('越权尝试删除文章: ' . $delFile);
             }
@@ -97,6 +103,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['rich_zip']) && ($_FI
         $stat = $zip->statIndex($i);
         $totalZipSize += (int)($stat['size'] ?? 0);
         if ($totalZipSize > 80 * 1024 * 1024) { $zipSafe = false; $errKey = 'too_large'; break; }
+        // v3.3.1：先按中央目录预检单文件解压大小，超限直接拒绝（避免先解压进内存再检查的内存型 DoS）
+        if ((int)($stat['size'] ?? 0) > 40 * 1024 * 1024) { $zipSafe = false; $errKey = 'file_too_large'; break; }
         $entryName = $zip->getNameIndex($i);
         if (substr($entryName, -1) === '/' || strpos(basename($entryName), '.') === 0) continue; // 目录/隐藏文件跳过
         $entryExt = strtolower(pathinfo($entryName, PATHINFO_EXTENSION));
@@ -375,8 +383,11 @@ if ($files) {
     foreach ($files as $file) {
         $filename = basename($file);
         if (strpos($filename, '.') === 0) continue;
+        $listMeta = getArticleMeta($file);
+        // v3.3.1：系统文章（更新历史）与隐藏文章不在文档管理列表显示（仅在公告侧展示，防误删）
+        if (in_array($filename, ['更新历史.md'], true) || !empty($listMeta['hidden'])) continue;
         // 写作者仅显示自己的文章（最小权限）
-        if (!$isStationAdmin && !canManageArticle(getArticleMeta($file))) continue;
+        if (!$isStationAdmin && !canManageArticle($listMeta)) continue;
         $content = file_get_contents($file);
         $displayName = preg_replace('/\.md$/i', '', $filename);
         if (preg_match('/^#\s+(.+)/m', $content, $m)) { $displayName = $m[1]; }
@@ -478,6 +489,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                 <button type="button" class="method-tab active" data-method="file">文件上传</button>
                 <button type="button" class="method-tab" data-method="url">链接抓取</button>
                 <button type="button" class="method-tab" data-method="paste">粘贴内容</button>
+                <button type="button" class="method-tab" data-method="rich">富媒体压缩包</button>
             </div>
             <div class="method-panel active" data-panel="file">
                 <div class="form-group">
@@ -505,6 +517,59 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                     <textarea class="form-input" name="content" id="contentArea" style="min-height:160px;font-family:monospace" placeholder="在此粘贴 Markdown 内容..."></textarea>
                     <p class="form-hint" id="charCount"></p>
                 </div>
+            </div>
+            <div class="method-panel" data-panel="rich">
+                <div class="form-group">
+                    <p class="form-hint" style="margin-top:0">一个 zip 内可同时含 <strong>Markdown 文档 + 图片（jpg/png/gif/webp）+ 视频（mp4/webm）</strong>：文档存为文章、图片/视频解压到站内媒体目录，md 里的引用路径自动改写，主页即可正常显示图片与播放视频；压缩包解析完自动删除。上限：包 ≤80MB、单文件 ≤40MB、≤200 个文件。</p>
+                    <div class="upload-zone" id="richZipZone">
+                        <div class="upload-zone-icon"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+                        <div class="upload-zone-text">拖拽压缩包到此处，或点击选择</div>
+                        <div class="upload-zone-hint">支持 .zip（内含 .md + 图片 + 视频）</div>
+                        <input type="file" id="richZipInput" accept=".zip" class="upload-zone-input">
+                    </div>
+                    <div class="file-info" id="richZipInfo" style="display:none">
+                        <span class="file-info-name" id="richZipInfoName"></span>
+                        <button type="button" class="file-info-remove" id="richZipRemoveBtn">&times;</button>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">作者</label>
+                        <input class="form-input" id="richAuthor" placeholder="作者名称">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">许可证书</label>
+                        <select class="form-select" id="richLicense">
+                            <option value="CC BY-NC-SA 4.0" selected>CC BY-NC-SA 4.0</option>
+                            <option value="CC BY 4.0">CC BY 4.0</option>
+                            <option value="CC BY-SA 4.0">CC BY-SA 4.0</option>
+                            <option value="CC BY-NC 4.0">CC BY-NC 4.0</option>
+                            <option value="CC BY-ND 4.0">CC BY-ND 4.0</option>
+                            <option value="CC BY-NC-ND 4.0">CC BY-NC-ND 4.0</option>
+                            <option value="CC0 1.0">CC0 1.0</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">分类</label>
+                        <input class="form-input" id="richCategory" placeholder="例如：技术、随笔">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">标签（逗号分隔）</label>
+                        <input class="form-input" id="richTags" placeholder="PHP, Markdown">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">预览摘要（留空自动生成）</label>
+                    <textarea class="form-input" id="richExcerpt" style="min-height:56px" placeholder="可选"></textarea>
+                </div>
+                <div class="form-group" id="richProgressWrap" style="display:none">
+                    <div style="display:flex;justify-content:space-between;font-size:0.85em;color:var(--text-muted);margin-bottom:6px"><span id="richProgressText">上传中 0%</span><span id="richProgressSize"></span></div>
+                    <div style="height:8px;background:#eef1f6;border-radius:999px;overflow:hidden"><div id="richProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2563eb,#06b6d4);border-radius:999px;transition:width .2s"></div></div>
+                </div>
+                <button type="button" class="btn btn-primary" id="richSubmitBtn">导入富媒体压缩包</button>
+                <span class="form-hint" id="richStatusHint" style="margin-left:10px"></span>
             </div>
             <div class="form-group">
                 <label class="form-label">标题（留空则自动提取）</label>
@@ -543,62 +608,6 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                 <textarea class="form-input" name="excerpt" style="min-height:56px" placeholder="可选"></textarea>
             </div>
             <button type="submit" class="btn btn-primary">上传文档</button>
-        </form>
-    </div>
-
-    <div class="card">
-        <div class="card-title">
-            <svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="1"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-            富媒体压缩包批量上传
-        </div>
-        <p style="color:var(--text-muted);font-size:0.85em;margin-top:0">一个 zip 包内可同时包含 <strong>Markdown 文档 + 图片（jpg/png/gif/webp）+ 视频（mp4/webm）</strong>，导入时自动：文档存为文章、图片与视频解压到站内媒体目录、md 里的图片/视频引用路径自动改写，主页即可正常显示图片与播放视频。解析完自动删除 zip，不占服务器空间。上限：包 ≤80MB、单文件 ≤40MB、≤200 个文件。</p>
-        <form method="post" enctype="multipart/form-data" onsubmit="return confirm('确认导入该富媒体压缩包？')">
-            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
-            <div class="form-group">
-                <div class="upload-zone" id="richZipZone">
-                    <div class="upload-zone-icon"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
-                    <div class="upload-zone-text">拖拽压缩包到此处，或点击选择</div>
-                    <div class="upload-zone-hint">支持 .zip（内含 .md + 图片 + 视频）</div>
-                    <input type="file" name="rich_zip" accept=".zip" id="richZipInput" class="upload-zone-input">
-                </div>
-                <div class="file-info" id="richZipInfo" style="display:none">
-                    <span class="file-info-name" id="richZipInfoName"></span>
-                    <button type="button" class="file-info-remove" id="richZipRemoveBtn">&times;</button>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label class="form-label">作者</label>
-                    <input class="form-input" name="author" placeholder="作者名称">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">许可证书</label>
-                    <select class="form-select" name="license">
-                        <option value="CC BY-NC-SA 4.0" selected>CC BY-NC-SA 4.0</option>
-                        <option value="CC BY 4.0">CC BY 4.0</option>
-                        <option value="CC BY-SA 4.0">CC BY-SA 4.0</option>
-                        <option value="CC BY-NC 4.0">CC BY-NC 4.0</option>
-                        <option value="CC BY-ND 4.0">CC BY-ND 4.0</option>
-                        <option value="CC BY-NC-ND 4.0">CC BY-NC-ND 4.0</option>
-                        <option value="CC0 1.0">CC0 1.0</option>
-                    </select>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label class="form-label">分类</label>
-                    <input class="form-input" name="category" placeholder="例如：技术、随笔">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">标签（逗号分隔）</label>
-                    <input class="form-input" name="tags" placeholder="PHP, Markdown">
-                </div>
-            </div>
-            <div class="form-group">
-                <label class="form-label">预览摘要（留空自动生成）</label>
-                <textarea class="form-input" name="excerpt" style="min-height:56px" placeholder="可选"></textarea>
-            </div>
-            <button type="submit" class="btn btn-primary">导入富媒体压缩包</button>
         </form>
     </div>
 
@@ -787,6 +796,67 @@ document.querySelectorAll('.method-tab').forEach(function(b) {
     dz.addEventListener('drop', function(e) {
         var f = e.dataTransfer.files;
         if (f.length && f[0].name.match(/\.zip$/i)) { fi.files = f; show(f[0]); }
+    });
+})();
+
+// v3.3.1：富媒体压缩包 XHR 异步上传（真实进度条，避免大包干等）
+(function() {
+    var btn = document.getElementById('richSubmitBtn');
+    var input = document.getElementById('richZipInput');
+    var pbar = document.getElementById('richProgressBar');
+    var ptext = document.getElementById('richProgressText');
+    var psize = document.getElementById('richProgressSize');
+    var pwrap = document.getElementById('richProgressWrap');
+    var hint = document.getElementById('richStatusHint');
+    if (!btn || !input) return;
+    var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content
+        || (document.querySelector('input[name="csrf_token"]') || {}).value || '';
+    btn.addEventListener('click', function() {
+        if (!input.files.length) { hint.textContent = '请先选择 zip 压缩包'; return; }
+        var file = input.files[0];
+        if (!/\.zip$/i.test(file.name)) { hint.textContent = '仅支持 .zip 文件'; return; }
+        if (file.size > 80 * 1024 * 1024) { hint.textContent = '压缩包超过 80MB 上限'; return; }
+        if (!window.confirm('确认导入该富媒体压缩包？')) return;
+        var fd = new FormData();
+        fd.append('rich_zip', file);
+        fd.append('csrf_token', csrf);
+        fd.append('author', (document.getElementById('richAuthor') || {}).value || '');
+        fd.append('license', (document.getElementById('richLicense') || {}).value || 'CC BY-NC-SA 4.0');
+        fd.append('category', (document.getElementById('richCategory') || {}).value || '');
+        fd.append('tags', (document.getElementById('richTags') || {}).value || '');
+        fd.append('excerpt', (document.getElementById('richExcerpt') || {}).value || '');
+        btn.disabled = true;
+        hint.textContent = '';
+        pwrap.style.display = 'block';
+        ptext.textContent = '上传中 0%';
+        psize.textContent = (file.size / 1048576).toFixed(2) + ' MB';
+        pbar.style.width = '0%';
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', 'sc.php', true);
+        xhr.upload.onprogress = function(e) {
+            if (e.lengthComputable) {
+                var pct = Math.round(e.loaded / e.total * 100);
+                pbar.style.width = pct + '%';
+                ptext.textContent = '上传中 ' + pct + '%';
+                psize.textContent = (e.loaded / 1048576).toFixed(2) + ' / ' + (e.total / 1048576).toFixed(2) + ' MB';
+            }
+        };
+        xhr.onload = function() {
+            if (xhr.status >= 200 && xhr.status < 400) {
+                // 服务端 302 已由 XHR 跟随，最终 URL 带 rich_zip 结果参数 → 刷新显示结果
+                location.href = xhr.responseURL || 'sc.php';
+            } else {
+                ptext.textContent = '上传失败（HTTP ' + xhr.status + '）';
+                pbar.style.width = '0%';
+                btn.disabled = false;
+                hint.textContent = '请重试或检查服务器上传限制';
+            }
+        };
+        xhr.onerror = function() {
+            ptext.textContent = '网络错误，上传失败';
+            btn.disabled = false;
+        };
+        xhr.send(fd);
     });
 })();
 

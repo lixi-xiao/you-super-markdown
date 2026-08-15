@@ -806,10 +806,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     if (!in_array($unauthPerPage, [10, 20, 50, 100], true)) $unauthPerPage = 10;
     $unauthData = paginateList($allUnauth, ['time', 'ip', 'action', 'user'], $unauthQ, (int)($_GET['unauth_page'] ?? 1), $unauthPerPage);
     $unauthLogs = $unauthData['items'];
-    // 每页条数/搜索词跨区域互相保留
-    $banExtra = ['tab' => 'banlog', 'login_per_page' => $loginPerPage, 'unauth_per_page' => $unauthPerPage];
-    $loginExtra = ['tab' => 'banlog', 'ban_per_page' => $banPerPage, 'unauth_per_page' => $unauthPerPage];
-    $unauthExtra = ['tab' => 'banlog', 'ban_per_page' => $banPerPage, 'login_per_page' => $loginPerPage];
+    // v4.1.10：每页条数/搜索词跨区域互相保留（补搜索词，修复搜索后翻页/切每页条数时搜索词丢失导致分页错乱）
+    $banExtra = ['tab' => 'banlog', 'ban_q' => $banQ, 'login_q' => $loginQ, 'unauth_q' => $unauthQ,
+                 'login_per_page' => $loginPerPage, 'unauth_per_page' => $unauthPerPage];
+    $loginExtra = ['tab' => 'banlog', 'ban_q' => $banQ, 'login_q' => $loginQ, 'unauth_q' => $unauthQ,
+                   'ban_per_page' => $banPerPage, 'unauth_per_page' => $unauthPerPage];
+    $unauthExtra = ['tab' => 'banlog', 'ban_q' => $banQ, 'login_q' => $loginQ, 'unauth_q' => $unauthQ,
+                    'ban_per_page' => $banPerPage, 'login_per_page' => $loginPerPage];
     ?>
     <div class="page-header">
         <div class="page-title">

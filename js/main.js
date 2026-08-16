@@ -1,4 +1,16 @@
 (function() {
+    // v4.4.1：标题锚点 slug 归一化——去除中文顿号/括号/全角标点与英文标点、空白转连字符、小写，
+    //         使渲染标题 id 与正文手写锚点（[目录](#一项目概述)）一致；模糊匹配时也用它比对。
+    function ymSlug(s) {
+        return String(s || '')
+            .toLowerCase()
+            .trim()
+            .replace(/<[^>]*>/g, '')
+            .replace(/[\u3000-\u303f\u2000-\u206f\u2e00-\u2e7f\\'"!@#$%^&*()+,./:;<=>?[\]{}`~|·「」『』〈〉《》【】（）]/g, '')
+            .replace(/\s+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+    }
     (function applyBg() {
         var body = document.body;
         var bgType = body.dataset.bgType || 'none';
@@ -1093,7 +1105,17 @@
                         e.preventDefault();
                         const href = this.getAttribute('href');
                         const id = decodeURIComponent(href.substring(1));
-                        const target = document.getElementById(id);
+                        let target = document.getElementById(id);
+                        // v4.4.1：精确 id 未命中时按 ymSlug 归一化模糊匹配标题——
+                        //         兼容手写锚点（#一项目概述）与 marked slug 生成 id 的标点差异
+                        if (!target) {
+                            const want = ymSlug(id);
+                            if (want) {
+                                markdownBody.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(h => {
+                                    if (!target && h.id && ymSlug(h.id) === want) target = h;
+                                });
+                            }
+                        }
                         if (target) {
                             target.scrollIntoView({ behavior: 'smooth', block: 'start' });
                             history.replaceState(null, '', '#' + id);
@@ -1150,8 +1172,13 @@
         renderer.list = (body) => body;
         renderer.listitem = (text) => `<p>${text}</p>`;
         renderer.hr = () => '';
+        // v4.4.1：标题 id 生成改用 ymSlug——去除中文顿号/括号/全角标点等，与文章正文手写锚点
+        //         （如 [目录](#一项目概述)）保持一致；否则 marked 默认 slugger 保留「、」导致
+        //         id=“一、项目概述”≠链接“#一项目概述”，点击目录无法跳转。
+        //         slugger 参数仅用于同级重复标题去重（同 slug 追加 -2/-3…）。
         renderer.heading = function(text, level, raw, slugger) {
-            const id = slugger ? slugger.slug(raw) : 'heading-' + text;
+            const base = ymSlug(raw);
+            const id = slugger ? slugger.slug(base) : base;
             return `<h${level} id="${id}">${text}</h${level}>`;
         };
         marked.setOptions({ gfm: true, breaks: false, smartLists: true, renderer });

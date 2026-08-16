@@ -631,6 +631,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <label class="form-label">QQ 音乐 Cookies（可选）</label>
             <input class="form-input" type="text" id="musicQQCookieInput" value="<?= htmlspecialchars($config['music_cookies_qq'] ?? '') ?>" placeholder="uin=xxx; p_skey=xxx; skey=xxx; ...">
             <p class="form-hint">配置后可播放 QQ 音乐付费/VIP 歌曲（v2.6.0）</p>
+            <!-- v4.4.1：QQ Cookie 状态检测提示（扫码登录授权约 2 小时过期，需定期更换） -->
+            <?php [$qqSt, $qqMsg] = qqCookieCheck($config['music_cookies_qq'] ?? ''); ?>
+            <?php if ($qqSt !== 'empty'): ?>
+            <p class="qq-cookie-status qq-cookie-<?= htmlspecialchars($qqSt) ?>"><?= htmlspecialchars($qqMsg) ?></p>
+            <?php endif; ?>
         </div>
     </div>
     <div class="card">

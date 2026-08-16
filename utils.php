@@ -272,6 +272,34 @@ function saveSiteConfig($config) {
         throw $e;
     }
 }
+
+// ===== v4.4.1：QQ 音乐 Cookie 状态检测（后台展示，不打印 cookie 值） =====
+// 返回 [status, message]：status ∈ ok(可播放) / warn(扫码登录缺skey) / expired(已过期) / empty(未配置)
+function qqCookieCheck($cookie) {
+    $cookie = (string)$cookie;
+    if (trim($cookie) === '') return ['empty', '未配置 QQ 音乐 Cookie——仅能显示歌单，无法获取播放地址'];
+    $hasSkey = preg_match('/(?:^|;\s*)skey=[^;]+/i', $cookie) === 1;
+    $hasPskey = preg_match('/(?:^|;\s*)p_skey=[^;]+/i', $cookie) === 1;
+    // 扫码登录凭据：psrf_musickey_createtime 为音乐授权创建时间戳（旧版秒/新版毫秒），
+    // 有效期为创建后约 2 小时（QQ 音乐扫码登录的 musickey 授权窗口）
+    $musicKeyTs = null;
+    if (preg_match('/(?:^|;\s*)psrf_musickey_createtime=(\d{8,13})/', $cookie, $m)) {
+        $musicKeyTs = (int)$m[1];
+        if ($musicKeyTs > 100000000000) $musicKeyTs = (int)($musicKeyTs / 1000); // ms → s
+    }
+    $now = time();
+    // 扫码登录凭据已存在但 music key 过期（>2h）→ 需重新登录复制新 cookie
+    if ($musicKeyTs !== null && ($now - $musicKeyTs) > 7200) {
+        $mins = (int)(($now - $musicKeyTs) / 60);
+        return ['expired', 'QQ 音乐登录授权已过期约 ' . $mins . ' 分钟（扫码登录的播放授权约 2 小时有效）——请重新打开 y.qq.com 登录后复制最新 Cookie 到本框保存'];
+    }
+    // 账号密码登录凭据（skey/p_skey）齐备 → 正常
+    if ($hasSkey && $hasPskey) return ['ok', 'Cookie 完整（含 skey/p_skey），可正常获取播放地址'];
+    // 无 skey/p_skey：扫码登录类型，若授权未过期仍可尝试播放
+    if ($hasSkey || $hasPskey) return ['warn', 'Cookie 缺少 ' . ($hasSkey ? 'p_skey' : 'skey') . '，播放可能受限——建议补全完整 Cookie'];
+    if ($musicKeyTs !== null) return ['warn', '检测到扫码登录凭据（无 skey/p_skey）。若播放失败，请改用账号密码登录 y.qq.com 复制含 skey/p_skey 的完整 Cookie'];
+    return ['warn', 'Cookie 中未找到有效登录字段（skey/p_skey 或 psrf_musickey_createtime）——请重新登录 y.qq.com 复制完整 Cookie'];
+}
 function getStationPath() {
     $config = loadSiteConfig();
     return ($config['station_path'] ?? 'station') ?: 'station';

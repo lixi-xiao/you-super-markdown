@@ -6,9 +6,9 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/utils.php';
 $config = loadSiteConfig();
 
-// 获取参数（v4.4.2：移除 QQ 平台，仅保留网易云）
+// 获取参数（v4.4.2：移除 QQ 平台，仅保留网易云；v4.7.4：恢复多平台——网易云/QQ音乐/酷狗）
 $platform = $_GET['platform'] ?? 'netease';
-if ($platform !== 'netease') {
+if (!in_array($platform, ['netease', 'qq', 'kugou'], true)) {
     http_response_code(400);
     echo json_encode(['error' => '不支持的音乐平台'], JSON_UNESCAPED_UNICODE);
     exit;
@@ -17,6 +17,16 @@ $sortAll = $_GET['sortAll'] ?? '';
 $playlistId = $_GET['playlistId'] ?? '';
 $lyricId = $_GET['lyric'] ?? '';
 $songId = $_GET['songId'] ?? '';
+
+// v4.7.4：出站限速——每 IP 60 秒最多 40 次（榜单刷新 + 播放地址懒解析），
+// 防第三方音乐 API 聚合接口被刷屏导致服务器外呼放大 / 出站 IP 被第三方限流
+$clientIP = getClientIP();
+db_rate_add('music_rates', $clientIP, '');
+if (db_rate_count('music_rates', $clientIP, 60) > 40) {
+    http_response_code(429);
+    echo json_encode(['error' => '请求过于频繁，请稍后再试'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
 // v2.6.0：按平台取 Cookies（v4.4.2 起仅网易云 music_cookies）
 $musicCookies = $config['music_cookies'] ?? '';
@@ -27,6 +37,11 @@ $musicCookies = $config['music_cookies'] ?? '';
 //          非白名单域名一律不跟随（返回 null，调用方按失败处理）。
 define('MUSIC_REDIRECT_ALLOW', [
     '163.com', 'music.163.com', 'api.xfyun.club',
+    // v4.7.4：QQ音乐 + 酷狗——官方接口与播放 CDN（128k/320k 无需 Cookie）
+    'qq.com', 'y.qq.com', 'c.y.qq.com', 'u.y.qq.com', 'gtimg.cn', 'y.gtimg.cn',
+    'zddyr.top', 'dpdns.org',
+    'kugou.com', 'mobilecdn.kugou.com', 'm.kugou.com', 'wwwapi.kugou.com',
+    'haitangw.cc', 'musicserver.haitangw.cc', 'music.haitangw.cc',
 ]);
 function musicSafeRequest($url, $timeout = 15, $cookies = '', $postData = null, $referer = 'https://music.163.com/') {
     $cur = $url;

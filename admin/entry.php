@@ -28,7 +28,22 @@ foreach ($entries as $e) {
     }
 }
 
-if (!$found) {
+// v4.7.3：超管设备验证进行中——OTP 通过后 token 已原子消费，此时页面被移动端浏览器重载、
+// 或提交设备验证码时若按「token 已使用」直接 404，会表现为验证码已发但弹不出输入框、登录被拒绝。
+// 会话里带「验证码已发送」标记的 pending（10 分钟内）时，允许跳过 404 继续完成验证。
+$pending = $_SESSION['cmt_pending_dev'] ?? null;
+$pendingSuper = is_array($pending)
+    && !empty($pending['uid']) && !empty($pending['email']) && !empty($pending['sent'])
+    && ($pending['role'] ?? '') === ROLE_SUPER_ADMIN;
+if ($pendingSuper) {
+    $pTs = (int)($pending['ts'] ?? 0);
+    if ($pTs > 0 && (time() - $pTs) > 600) {
+        unset($_SESSION['cmt_pending_dev'], $_SESSION['dev_verify_fails']);
+        $pendingSuper = false;
+    }
+}
+
+if (!$found && !$pendingSuper) {
     http_response_code(404);
     exit('Not Found');
 }
@@ -85,9 +100,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $error = $devErr;
                 auditLog('login_otp_failed', '', '设备验证码错误');
+                // v4.7.4：与 api.php 对齐——失败计数 + 威胁计分，连续 5 次错误销毁 pending 防暴力枚举
+                logThreat('device_code_fail', getClientIP(), $pending['fp'] ?? '', 30);
+                $devFails = (int)($_SESSION['dev_verify_fails'] ?? 0) + 1;
+                $_SESSION['dev_verify_fails'] = $devFails;
+                if ($devFails >= 5) unset($_SESSION['cmt_pending_dev'], $_SESSION['dev_verify_fails']);
             }
         }
-    } else {
+    } elseif ($found) {
         $otp = $_POST['otp'] ?? '';
         // OTP 尝试限次：连续 3 次失败即销毁入口（防暴力枚举）
         $otpFails = (int)($_SESSION['otp_fails'] ?? 0);
@@ -119,9 +139,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['cmt_pending_dev'] = [
                         'uid' => $superAdmin['id'], 'fp_hash' => $fpHash, 'fp' => $reqFp,
                         'email' => $devEmail, 'role' => ROLE_SUPER_ADMIN,
+                        'ts' => time(),   // v4.7.3：与 api.php 的 check 清理逻辑对齐
                     ];
                     [$devOk, $devErr] = email_code_send($devEmail, 'device_login', '陌生设备登录验证', ROLE_SUPER_ADMIN);
                     if ($devOk) {
+                        $_SESSION['cmt_pending_dev']['sent'] = 1;   // v4.7.3：标记验证码已发送，重载后据此恢复验证表单
                         $needDeviceVerify = true;
                         $deviceEmail = maskEmailAddr($devEmail);
                     } else {
@@ -157,6 +179,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             auditLog('login_otp_failed', '', 'OTP 验证失败');
         }
     }
+}
+
+// v4.7.3：恢复/保持设备验证表单——token 已消费后页面重载（GET）、验证码提交失败重试、
+// 或异常重放 POST 时，只要会话里还有「验证码已发送」的 pending（10 分钟内）就回到验证表单
+$pendingNow = $_SESSION['cmt_pending_dev'] ?? null;
+if (!$needDeviceVerify && is_array($pendingNow)
+    && !empty($pendingNow['uid']) && !empty($pendingNow['email']) && !empty($pendingNow['sent'])
+    && ($pendingNow['role'] ?? '') === ROLE_SUPER_ADMIN) {
+    $needDeviceVerify = true;
+    $deviceEmail = maskEmailAddr($pendingNow['email']);
 }
 ?>
 <!DOCTYPE html>

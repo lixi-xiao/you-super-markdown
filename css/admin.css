@@ -1011,6 +1011,13 @@ td code {
     border-radius: 999px;
     white-space: nowrap;
 }
+/* 表格空态行（搜索无匹配 / 列表为空） */
+.table-empty {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 22px 0;
+    font-size: 0.88em;
+}
 /* 分页栏：无嵌套边框（避免卡片内双边框穿模），顶部细分隔线与卡片内容自然分区 */
 .pagination {
     display: flex;

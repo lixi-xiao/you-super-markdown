@@ -280,7 +280,7 @@ code, pre, .markdown-body code, .markdown-body pre {
     .top-bar { left: 0; width: 100%; }
     .reading-progress { left: 280px; }
     .main-container { max-width: 860px; padding: 24px 40px 60px; }
-    .floating-buttons .float-btn:not(#scrollToTopBtn):not(#floatHomeBtn) { display: none; }
+    .floating-buttons .float-btn:not(#scrollToTopBtn):not(#floatHomeBtn):not(#bgmFloatBtn) { display: none; }
     .floating-buttons { right: 24px; bottom: 24px; }
     .toc-popup { display: none !important; }
     /* v4.1.0：移除宽屏隐藏 btnSearch（全文搜索升级后顶部搜索按钮含正文检索，统一保留）；
@@ -767,7 +767,10 @@ code, pre, .markdown-body code, .markdown-body pre {
 }
 .info-card-meta-item { display: flex; flex-direction: column; gap: 2px; }
 .info-card-meta-label { font-size: 0.78em; color: var(--text-muted); }
-.floating-buttons { position: fixed; right: 20px; bottom: 56px; z-index: 150; display: flex; flex-direction: column; gap: 8px; }
+/* v4.7.4：浮动按钮组常驻（主页仅 BGM 按钮；阅读视图追加 目录/返回主页/回到顶部）——BGM 并入组内统一 UI，整组下移 */
+.floating-buttons { position: fixed; right: 20px; bottom: 24px; z-index: 150; display: flex; flex-direction: column; gap: 8px; }
+.floating-buttons .read-float-btn { display: none; }
+.floating-buttons.reading .read-float-btn { display: flex; }
 .float-btn {
     width: 35px; height: 35px; border-radius: 10px;
     background: var(--surface); border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -778,7 +781,7 @@ code, pre, .markdown-body code, .markdown-body pre {
 .float-btn:active { transform: scale(0.94); }
 .float-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; }
 .toc-popup {
-    position: fixed; right: 20px; bottom: 90px; width: 320px; max-height: 55vh;
+    position: fixed; right: 20px; bottom: 200px; width: 320px; max-height: 55vh;
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
     box-shadow: 0 8px 30px rgba(0,0,0,0.08); z-index: 155; display: flex; flex-direction: column;
     opacity: 0; pointer-events: none; transform: translateY(10px) scale(0.97); transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -922,8 +925,20 @@ code, pre, .markdown-body code, .markdown-body pre {
 .music-mode-btn.active { color: var(--accent); }
 .music-list-btn { color: var(--text-muted); }
 .music-list-btn.active { color: var(--accent); }
-.music-list { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; border-top: 1px solid transparent; }
-.music-list.open { max-height: 168px; overflow-y: auto; border-top-color: var(--border); }
+.music-list { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; border-top: 1px solid transparent; display: flex; flex-direction: column; }
+.music-list.open { max-height: 330px; border-top-color: var(--border); }
+/* v4.7.4：歌曲列表独立滚动容器（平台/榜单 chips 固定不被覆盖） */
+.music-song-list { overflow-y: auto; max-height: 215px; padding-bottom: 6px; }
+/* v4.7.4：音乐平台/榜单选择 chips */
+.music-src-row { display: flex; gap: 6px; padding: 8px 12px 0; flex-wrap: wrap; }
+.music-chart-row { display: flex; gap: 6px; padding: 6px 12px 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.music-src-chip {
+    border: 1px solid var(--border); background: transparent; color: var(--text-muted);
+    font-size: 11px; padding: 3px 10px; border-radius: 999px; cursor: pointer; line-height: 1.4;
+    transition: all 0.2s; white-space: nowrap;
+}
+.music-src-chip:hover { border-color: var(--accent); color: var(--accent); }
+.music-src-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .music-loading { text-align: center; padding: 20px; color: var(--text-muted); font-size: 13px; }
 .music-loading a { color: var(--accent); text-decoration: none; }
 .music-loading a:hover { text-decoration: underline; }
@@ -940,9 +955,14 @@ code, pre, .markdown-body code, .markdown-body pre {
 }
 .bgm-row .bgm-label { display: inline-flex; align-items: center; font-weight: 600; }
 .bgm-switch { position: relative; display: inline-block; width: 36px; height: 19px; flex-shrink: 0; }
-.bgm-switch input { opacity: 0; width: 0; height: 0; }
+/* v4.7.4：checkbox 全尺寸透明覆盖滑块——原生接收点击；此前零尺寸 checkbox 在移动端浏览器
+   点滑块不触发（label 转发对零尺寸控件失效），表现为「歌词/背景音乐滑块没作用」。滑块纯视觉。 */
+.bgm-switch input {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; margin: 0; cursor: pointer; z-index: 1;
+}
 .bgm-switch .slider {
-    position: absolute; inset: 0; cursor: pointer;
+    position: absolute; inset: 0; cursor: pointer; pointer-events: none;
     background: rgba(0,0,0,0.15);
     border-radius: 19px; transition: 0.25s;
 }
@@ -966,57 +986,55 @@ code, pre, .markdown-body code, .markdown-body pre {
 }
 .music-opt-item { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .music-opt-label { display: inline-flex; align-items: center; font-weight: 600; white-space: nowrap; }
-/* v4.6.2：本地背景音常驻浮动控制按钮（右下角；进站即可暂停/恢复，播放时高亮+呼吸动画） */
+/* v4.7.4：背景音乐浮动按钮——并入 #floatingButtons 按钮组统一 UI（35px 方钮、surface 底、主题色图标，
+   与 目录/返回主页/回到顶部 同款；播放态实心主题色+白图标+光晕+均衡条呼吸；主页常显，阅读视图位于按钮组最下方） */
 .bgm-float-btn {
-    position: fixed;
-    right: 20px; bottom: 84px;
-    z-index: 90;
-    width: 44px; height: 44px;
-    border-radius: 50%;
-    display: none;
+    position: relative;
+    width: 35px; height: 35px;
+    border-radius: 10px;
+    display: flex;
     align-items: center; justify-content: center;
-    background: var(--bg-card);
+    background: var(--surface);
     border: 1px solid var(--border);
-    color: var(--text-secondary);
+    color: var(--accent);
     cursor: pointer;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-    transition: all 0.2s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .bgm-float-btn svg {
-    width: 20px; height: 20px;
-    fill: none; stroke: currentColor; stroke-width: 1.8;
+    width: 18px; height: 18px;
+    fill: none; stroke: currentColor; stroke-width: 2;
     stroke-linecap: round; stroke-linejoin: round;
 }
 .bgm-float-btn .bgm-float-bar {
-    position: absolute; bottom: 7px;
+    position: absolute; bottom: 5px;
     display: flex; align-items: flex-end; gap: 2px;
-    height: 8px;
+    height: 7px;
 }
 .bgm-float-btn .bgm-float-bar::before,
 .bgm-float-btn .bgm-float-bar::after {
-    content: ''; width: 2.5px; border-radius: 2px;
+    content: ''; width: 2px; border-radius: 2px;
     background: var(--accent);
-    height: 4px; opacity: 0;
+    height: 3px; opacity: 0;
 }
-.bgm-float-btn:hover { border-color: var(--accent); color: var(--accent); }
+.bgm-float-btn:hover { background: var(--accent-light); box-shadow: 0 4px 12px rgba(0,0,0,0.1); transform: scale(1.08); }
+.bgm-float-btn:active { transform: scale(0.94); }
 .bgm-float-btn.playing {
-    color: var(--accent);
+    color: #fff;
+    background: var(--accent);
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-glass), 0 4px 16px rgba(0,0,0,0.12);
+    box-shadow: 0 0 0 3px var(--accent-glass), 0 2px 8px rgba(0,0,0,0.1);
 }
 .bgm-float-btn.playing .bgm-float-bar::before,
 .bgm-float-btn.playing .bgm-float-bar::after {
     opacity: 1;
+    background: #fff;
     animation: bgmBarBounce 1s ease-in-out infinite;
 }
 .bgm-float-btn.playing .bgm-float-bar::after { animation-delay: 0.35s; }
 @keyframes bgmBarBounce {
-    0%, 100% { height: 4px; }
-    50% { height: 8px; }
-}
-/* 手机端浮动按钮避让底部工具栏 */
-@media (max-width: 640px) {
-    .bgm-float-btn { right: 14px; bottom: 76px; width: 40px; height: 40px; }
+    0%, 100% { height: 3px; }
+    50% { height: 7px; }
 }
 
 .music-item {
@@ -1117,8 +1135,8 @@ code, pre, .markdown-body code, .markdown-body pre {
     .markdown-body pre code.hljs { padding: 12px 10px; }
     .collapse-btn { width: 26px; height: 26px; right: 34px; }
     .collapse-btn svg { width: 13px; height: 13px; }
-    .floating-buttons { right: 12px; bottom: 48px; }
-    .toc-popup { right: 12px; bottom: 70px; width: 280px; }
+    .floating-buttons { right: 12px; bottom: 24px; }
+    .toc-popup { right: 12px; bottom: 200px; width: 280px; }
     /* v4.3.0：音乐入口在顶部快捷栏，弹窗从顶栏下方弹出 */
     .music-popup { top: calc(var(--header-height) + 4px); right: 8px; width: 280px; }
     .prev-next-nav { flex-direction: column; }

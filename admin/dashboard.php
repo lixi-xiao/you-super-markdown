@@ -949,7 +949,9 @@ $banMsg = $_GET['bmsg'] ?? '';
     </div>
     <?php
     // v4.6.0：用户管理搜索与分页参数（需在搜索框渲染前解析）
+    // v4.7.5：超管表同样纳入搜索与分页（此前仅三个角色组过滤，超管表恒全量显示，搜索观感"不起作用"）
     $usersQ = trim((string)($_GET['users_q'] ?? ''));
+    $saPerPage = (int)($_GET['sa_per_page'] ?? 10); if (!in_array($saPerPage, [10, 20, 50, 100], true)) $saPerPage = 10;
     $stPerPage = (int)($_GET['st_per_page'] ?? 10); if (!in_array($stPerPage, [10, 20, 50, 100], true)) $stPerPage = 10;
     $auPerPage = (int)($_GET['au_per_page'] ?? 10); if (!in_array($auPerPage, [10, 20, 50, 100], true)) $auPerPage = 10;
     $usPerPage = (int)($_GET['us_per_page'] ?? 10); if (!in_array($usPerPage, [10, 20, 50, 100], true)) $usPerPage = 10;
@@ -957,7 +959,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     <form method="get" style="margin-bottom:14px" id="userSearchForm">
         <input type="hidden" name="tab" value="users">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input class="form-input" type="text" name="users_q" value="<?= htmlspecialchars($usersQ) ?>" placeholder="搜索昵称 / UID / QQ / 邮箱…" style="max-width:320px">
+            <input class="form-input" type="text" name="users_q" value="<?= htmlspecialchars($usersQ) ?>" placeholder="搜索昵称 / UID / QQ / 邮箱 / 归属站长…" style="max-width:340px">
             <button type="submit" class="btn">搜索</button>
             <?php if ($usersQ !== ''): ?><a class="btn btn-ghost" href="dashboard.php?tab=users">清除</a><?php endif; ?>
         </div>
@@ -1023,15 +1025,28 @@ $banMsg = $_GET['bmsg'] ?? '';
     $superAdmins = []; $groupStations = []; $groupAuthors = []; $groupUsers = [];
     foreach ($users as $uu) {
         $r = $uu['role'] ?? 'user';
-        if ($r === ROLE_SUPER_ADMIN) $superAdmins[] = $uu;
-        elseif ($r === ROLE_STATION_ADMIN) $groupStations[] = $uu;
-        elseif ($r === ROLE_AUTHOR) $groupAuthors[] = $uu;
-        else $groupUsers[] = $uu;
+        // v4.7.5：为站长/写作者行附加 _station（归属站长名，超管为顶级归属）作为可搜索字段
+        if ($r === ROLE_SUPER_ADMIN) {
+            $superAdmins[] = $uu;
+        } elseif ($r === ROLE_STATION_ADMIN) {
+            $uu['_station'] = '超管'; $groupStations[] = $uu;
+        } elseif ($r === ROLE_AUTHOR) {
+            $uu['_station'] = $stationNames[$uu['station_id'] ?? ''] ?? '超管'; $groupAuthors[] = $uu;
+        } else {
+            $groupUsers[] = $uu;
+        }
     }
-    // v4.6.0：用户管理分页（搜索/每页条数参数已在页头解析）——站长/写作者/普通用户三列表各自分页（默认每页 10 条）
-    $stPaged = paginateList($groupStations, ['nickname', 'qq', 'id', 'email'], $usersQ, (int)($_GET['st_page'] ?? 1), $stPerPage);
-    $auPaged = paginateList($groupAuthors, ['nickname', 'qq', 'id', 'email'], $usersQ, (int)($_GET['au_page'] ?? 1), $auPerPage);
-    $usPaged = paginateList($groupUsers, ['nickname', 'qq', 'id', 'email'], $usersQ, (int)($_GET['us_page'] ?? 1), $usPerPage);
+    // v4.7.5：用户管理分页——四张表（超管/站长/写作者/普通用户）各自分页，均参与搜索；默认每页 10 条
+    // 搜索字段统一为昵称/UID/QQ/邮箱/归属站长（_station）；页码与每页条数互相独立、互不干扰
+    $saPaged = paginateList($superAdmins, ['nickname', 'qq', 'id', 'email', '_station'], $usersQ, (int)($_GET['sa_page'] ?? 1), $saPerPage);
+    $stPaged = paginateList($groupStations, ['nickname', 'qq', 'id', 'email', '_station'], $usersQ, (int)($_GET['st_page'] ?? 1), $stPerPage);
+    $auPaged = paginateList($groupAuthors, ['nickname', 'qq', 'id', 'email', '_station'], $usersQ, (int)($_GET['au_page'] ?? 1), $auPerPage);
+    $usPaged = paginateList($groupUsers, ['nickname', 'qq', 'id', 'email', '_station'], $usersQ, (int)($_GET['us_page'] ?? 1), $usPerPage);
+    // v4.7.5：分页链接需保留其他三张表的页码/每页条数，切换任一表页码不重置其余表
+    $saPgExtra = ['tab' => 'users', 'users_q' => $usersQ, 'st_page' => (int)($_GET['st_page'] ?? 1), 'au_page' => (int)($_GET['au_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'st_per_page' => $stPerPage, 'au_per_page' => $auPerPage, 'us_per_page' => $usPerPage];
+    $stPgExtra = ['tab' => 'users', 'users_q' => $usersQ, 'sa_page' => (int)($_GET['sa_page'] ?? 1), 'au_page' => (int)($_GET['au_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'sa_per_page' => $saPerPage, 'au_per_page' => $auPerPage, 'us_per_page' => $usPerPage];
+    $auPgExtra = ['tab' => 'users', 'users_q' => $usersQ, 'sa_page' => (int)($_GET['sa_page'] ?? 1), 'st_page' => (int)($_GET['st_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'sa_per_page' => $saPerPage, 'st_per_page' => $stPerPage, 'us_per_page' => $usPerPage];
+    $usPgExtra = ['tab' => 'users', 'users_q' => $usersQ, 'sa_page' => (int)($_GET['sa_page'] ?? 1), 'st_page' => (int)($_GET['st_page'] ?? 1), 'au_page' => (int)($_GET['au_page'] ?? 1), 'sa_per_page' => $saPerPage, 'st_per_page' => $stPerPage, 'au_per_page' => $auPerPage];
     function ymUserDetail($u, $stationNames, $statComments, $statArticles) {
         // v3.0.5：归属统一以超管为顶级——站长归属=超管；写作者未指定站长时归属=超管
         $role = $u['role'] ?? 'user';
@@ -1116,15 +1131,15 @@ $banMsg = $_GET['bmsg'] ?? '';
     }
     ?>
 
-    <!-- v2.11.5：系统管理员（只读，不可操作） -->
+    <!-- v2.11.5：系统管理员（只读，不可操作；v4.7.5 起同样参与搜索与分页） -->
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            系统管理员<span class="card-badge"><?= count($superAdmins) ?></span>
+            系统管理员<span class="card-badge"><?= $saPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th>昵称</th><th>UID（QQ）</th><th>角色</th><th>状态</th><th>创建时间</th></tr>
-            <?php foreach ($superAdmins as $u): ?>
+            <?php foreach ($saPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
                 <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
@@ -1133,14 +1148,16 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
             </tr>
             <?php endforeach; ?>
+            <?php if (!$saPaged['items']): ?><tr><td colspan="5" class="table-empty"><?= $usersQ !== '' ? '无匹配用户' : '暂无数据' ?></td></tr><?php endif; ?>
         </table></div>
+        <?= renderPager($saPaged, 'sa_page', $saPgExtra, 'sa_per_page') ?>
     </div>
 
     <!-- 站长 -->
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-            站长<span class="card-badge"><?= count($groupStations) ?></span>
+            站长<span class="card-badge"><?= $stPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th>昵称</th><th>UID（QQ）</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
@@ -1153,15 +1170,16 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
             </tr>
             <?php endforeach; ?>
+            <?php if (!$stPaged['items']): ?><tr><td colspan="5" class="table-empty"><?= $usersQ !== '' ? '无匹配用户' : '暂无数据' ?></td></tr><?php endif; ?>
         </table></div>
-        <?php if ($stPaged['pages'] > 1 || $usersQ !== ''): ?><?= renderPager($stPaged, 'st_page', ['tab' => 'users', 'users_q' => $usersQ, 'au_page' => (int)($_GET['au_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'au_per_page' => $auPerPage, 'us_per_page' => $usPerPage], 'st_per_page') ?><?php endif; ?>
+        <?= renderPager($stPaged, 'st_page', $stPgExtra, 'st_per_page') ?>
     </div>
 
     <!-- 写作者（含归属站长列与归属管理） -->
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
-            写作者<span class="card-badge"><?= count($groupAuthors) ?></span>
+            写作者<span class="card-badge"><?= $auPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th>昵称</th><th>UID（QQ）</th><th>归属站长</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
@@ -1175,15 +1193,16 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
             </tr>
             <?php endforeach; ?>
+            <?php if (!$auPaged['items']): ?><tr><td colspan="6" class="table-empty"><?= $usersQ !== '' ? '无匹配用户' : '暂无数据' ?></td></tr><?php endif; ?>
         </table></div>
-        <?php if ($auPaged['pages'] > 1 || $usersQ !== ''): ?><?= renderPager($auPaged, 'au_page', ['tab' => 'users', 'users_q' => $usersQ, 'st_page' => (int)($_GET['st_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'st_per_page' => $stPerPage, 'us_per_page' => $usPerPage], 'au_per_page') ?><?php endif; ?>
+        <?= renderPager($auPaged, 'au_page', $auPgExtra, 'au_per_page') ?>
     </div>
 
     <!-- 普通用户 -->
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-            普通用户<span class="card-badge"><?= count($groupUsers) ?></span>
+            普通用户<span class="card-badge"><?= $usPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th>昵称</th><th>UID（QQ）</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
@@ -1196,8 +1215,9 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
             </tr>
             <?php endforeach; ?>
+            <?php if (!$usPaged['items']): ?><tr><td colspan="5" class="table-empty"><?= $usersQ !== '' ? '无匹配用户' : '暂无数据' ?></td></tr><?php endif; ?>
         </table></div>
-        <?php if ($usPaged['pages'] > 1 || $usersQ !== ''): ?><?= renderPager($usPaged, 'us_page', ['tab' => 'users', 'users_q' => $usersQ, 'st_page' => (int)($_GET['st_page'] ?? 1), 'au_page' => (int)($_GET['au_page'] ?? 1), 'st_per_page' => $stPerPage, 'au_per_page' => $auPerPage], 'us_per_page') ?><?php endif; ?>
+        <?= renderPager($usPaged, 'us_page', $usPgExtra, 'us_per_page') ?>
     </div>
 
     <?php elseif ($tab === 'logs'): ?>

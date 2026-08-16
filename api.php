@@ -72,6 +72,39 @@ function flattenComments($comments, $article, $parentId, &$out) {
     }
 }
 
+/**
+ * v4.7.0：完成登录会话（login 与 device_verify 共用）。
+ * 设置 session + tv+1 并发踢旧 + 环境指纹绑定 + 签发 refresh + 记录日志/通知。
+ */
+function completeLogin($u, $reqFp) {
+    session_regenerate_id(true);
+    $avatar = $u['avatar'] ?? getAvatarUrl($u['qq'] ?? '');
+    $_SESSION['cmt_user'] = [
+        'id' => $u['id'], 'qq' => $u['qq'],
+        'nickname' => $u['nickname'] ?? '',
+        'avatar' => $avatar,
+        'signature' => $u['signature'] ?? '',
+        'role' => $u['role'] ?? 'user',
+        'email' => $u['email'] ?? '',
+        'pw_hash' => $u['password'],
+    ];
+    $newTV = bumpUserTV($u['id']);
+    $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
+    $_SESSION['cmt_tv'] = $newTV;
+    $_SESSION['cmt_login_ts'] = time();
+    if (($u['role'] ?? '') !== ROLE_SUPER_ADMIN) {
+        issueRefreshToken($u['id'], $_SESSION['cmt_fp'], $newTV);
+    }
+    $clientIP = getClientIP();
+    loginFailClear($clientIP, $u['qq'] ?? '');
+    db_exec('UPDATE users SET last_login = ?, login_count = login_count + 1 WHERE id = ?', [date('Y-m-d H:i:s'), $u['id']]);
+    notifyLoginEvent($u, $clientIP);
+    $safeUser = sanitizeUserForClient($_SESSION['cmt_user']);
+    return ['success' => true, 'user' => $safeUser,
+        'isAdminFirstLogin' => in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN]),
+        'env_bound' => true];
+}
+
 function loadComments($article, $sanitize = false) {
     $rows = db_all('SELECT * FROM comments WHERE article = ? ORDER BY rowid', [$article]);
     return buildCommentTree($rows, $sanitize);
@@ -215,7 +248,10 @@ if ($action === 'send_register_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // v4.5.0：指纹+IP 双维发码限速（60 秒 ≥5 次，防换 IP/换邮箱轰炸）；无指纹请求按 no-fp 维度计
     $ipNow = getClientIP();
     $reqFp = getRequestFp();
-    if (db_rate_count('reg_rates', $ipNow, 60, $reqFp) >= 5) jsonOut(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429);
+    if (db_rate_count('reg_rates', $ipNow, 60, $reqFp) >= 5) {
+        logThreat('reg_flood', $ipNow, $reqFp, 300);
+        jsonOut(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429);
+    }
     if (email_exists($email)) jsonOut(['success' => false, 'error' => '该邮箱已被注册'], 409);
     [$ok, $err] = email_code_send($email, 'register', $email);
     if (!$ok) jsonOut(['success' => false, 'error' => $err], 400);
@@ -394,6 +430,7 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $ipRegs = db_rate_count('reg_rates', $clientIP, 2592000); // 30 天累计
     if ($ipRegs >= $regLimit) {
         logAbnormal($clientIP, '频繁注册（累计' . $ipRegs . '次，限制' . $regLimit . '次）');
+        logThreat('reg_flood', $clientIP, getRequestFp(), 300);
         if ($siteCfg['auto_ban'] ?? false) addBan($clientIP, ['register'], '自动封禁：频繁注册');
         jsonOut(['success' => false, 'error' => '注册次数已达上限'], 429);
     }
@@ -404,6 +441,7 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         auditLog('register_honeypot', substr((string)$input['website'], 0, 64), '注册蜜罐命中，静默拒绝（IP ' . $clientIP . '）');
         // v4.4.0/v4.5.0：短时间（10 分钟窗口）连续命中达阈值 → 自动封禁 IP（指纹+IP 双维计数）
         db_rate_add('honeypot_rates', $clientIP, $reqFp);
+        logThreat('honeypot', $clientIP, $reqFp, 300);
         $hpCount = db_rate_count('honeypot_rates', $clientIP, 600, $reqFp);
         $hpThreshold = max(1, (int)($siteCfg['honeypot_ban_count'] ?? 3));
         if ($hpCount >= $hpThreshold && !isIPBanned($clientIP, 'register')) {
@@ -464,6 +502,9 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $clientIP = getClientIP();
     if (isIPBanned($clientIP, 'login')) jsonOut(['success' => false, 'error' => '你的 IP 已被封禁，无法登录'], 403);
+    // v4.7.0：联动威胁评分拦截（IP/指纹任一维度累计超阈值 → 联动封锁）
+    $linkLeft = checkLinkedBlock();
+    if ($linkLeft > 0) jsonOut(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试', 'locked_seconds' => $linkLeft], 429);
     $input = json_decode(file_get_contents('php://input'), true);
     $qq = trim($input['qq'] ?? '');
     $pw = $input['password'] ?? '';
@@ -474,58 +515,182 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $lockLeft = loginLocked('ip:' . $clientIP);
     if ($lockLeft <= 0) $lockLeft = loginLocked('qq:' . $qq);
     if ($lockLeft > 0) {
+        // v4.7.0：锁定期仍尝试 → 威胁计分（逐步升级联动封锁）
+        logThreat('login_locked_try', $clientIP, $reqFp, 60);
         jsonOut(['success' => false, 'error' => '登录失败次数过多，请 ' . $lockLeft . ' 秒后重试', 'locked_seconds' => $lockLeft], 429);
     }
     $users = loadUsers();
-    $isAdminFirst = false;
     foreach ($users as $u) {
         if (($u['qq'] ?? '') === $qq && password_verify($pw, $u['password'])) {
             // v2.11.4：被禁用账号拒绝登录
             if (!empty($u['disabled'])) jsonOut(['success' => false, 'error' => '该账号已被禁用，请联系管理员'], 403);
-            session_regenerate_id(true);
-            $avatar = $u['avatar'] ?? getAvatarUrl($qq);
-            $_SESSION['cmt_user'] = [
-                'id' => $u['id'], 'qq' => $u['qq'],
-                'nickname' => $u['nickname'] ?? '',
-                'avatar' => $avatar,
-                'signature' => $u['signature'] ?? '',
-                'role' => $u['role'] ?? 'user',
-                'email' => $u['email'] ?? '',   // v2.10.0：登录写入邮箱，供个人设置展示/更换
-                'pw_hash' => $u['password']
-            ];
-            // v4.5.0：并发踢旧——tv+1 使旧会话/旧 refresh 立即失效；绑定环境指纹；签发 refresh token
-            $newTV = bumpUserTV($u['id']);
-            $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
-            $_SESSION['cmt_tv'] = $newTV;
-            // v4.6.0：记录登录时间（后台 24h 过期按登录时间算）；超管不走此接口（OTP 入口登录且不签发 refresh）
-            $_SESSION['cmt_login_ts'] = time();
-            if (($u['role'] ?? '') !== ROLE_SUPER_ADMIN) {
-                issueRefreshToken($u['id'], $_SESSION['cmt_fp'], $newTV);
+            // v4.7.0：管理角色陌生设备 → 邮件二次验证（密码通过后仍需验证码才完成登录）
+            $isMgmt = in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true);
+            $fpHash = computeSessionFp($reqFp);
+            if ($isMgmt && !isKnownDevice($u['id'], $fpHash)) {
+                // 该设备正被陌生设备风控锁定 → 拒绝
+                $fpLockLeft = loginLocked('fp:' . $fpHash);
+                if ($fpLockLeft > 0) jsonOut(['success' => false, 'error' => '该设备触发风控，请 ' . $fpLockLeft . ' 秒后重试'], 429);
+                $_SESSION['cmt_pending_dev'] = [
+                    'uid' => $u['id'], 'fp_hash' => $fpHash, 'fp' => $reqFp,
+                    'email' => $u['email'] ?? '', 'role' => $u['role'] ?? '',
+                ];
+                $_SESSION['dev_verify_fails'] = 0;
+                [$devOk, $devErr] = email_code_send($u['email'] ?? '', 'device_login', '陌生设备登录验证', $u['role'] ?? '');
+                if (!$devOk) jsonOut(['success' => false, 'error' => $devErr], 400);
+                auditLog('login_device_pending', $u['id'], '陌生设备登录待二次验证（' . maskEmailAddr($u['email'] ?? '') . '）');
+                jsonOut(['success' => false, 'need_device_verify' => true,
+                    'masked_email' => maskEmailAddr($u['email'] ?? ''),
+                    'ttl' => is_array($devErr) ? ($devErr['ttl'] ?? 300) : 300,
+                    'error' => '新设备登录，验证码已发送至 ' . maskEmailAddr($u['email'] ?? '')], 200);
             }
-            if (in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN])) $isAdminFirst = true;
-            // v2.11.0：登录成功清除失败计数（IP 级 + 该账号级）
-            loginFailClear($clientIP, $qq);
-            // v2.11.5：记录最后登录时间与登录次数（超管用户详情统计）
-            db_exec('UPDATE users SET last_login = ?, login_count = login_count + 1 WHERE id = ?', [date('Y-m-d H:i:s'), $u['id']]);
-            // v2.11.1：站长/写作者登录通知管理员（SMTP 通道）
-            notifyLoginEvent($u, $clientIP);
-            $safeUser = sanitizeUserForClient($_SESSION['cmt_user']);
-            jsonOut(['success' => true, 'user' => $safeUser, 'isAdminFirstLogin' => $isAdminFirst, 'env_bound' => true]);
+            jsonOut(completeLogin($u, $reqFp));
         }
     }
     // v2.11.0/v4.5.0：失败计数（IP+账号+指纹三维，60 秒窗口 ≥3 → 锁 15 分钟）
     loginFailAdd($clientIP, $qq, $reqFp);
+    // v4.7.0：失败威胁计分——管理角色账号按「陌生设备失败」高权重（3 次即触发 15min 设备风控，逐次升级）
+    $failUser = null;
+    foreach ($users as $u) { if (($u['qq'] ?? '') === $qq) { $failUser = $u; break; } }
+    $isMgmtTarget = $failUser !== null && in_array($failUser['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true);
+    if ($isMgmtTarget) {
+        logThreat('device_login_fail', $clientIP, $reqFp, 30);
+        if ($reqFp !== '') fpRiskLock(computeSessionFp($reqFp));
+    } else {
+        logThreat('login_fail', $clientIP, $reqFp, 30);
+    }
     $ipFails = loginFailCount($clientIP, $qq, 60, $reqFp);
     $loginCfg = loadSiteConfig();
     if ($ipFails >= 3) {
         lockLogin('ip:' . $clientIP, 900);
         lockLogin('qq:' . $qq, 900);
+        logThreat('login_lock', $clientIP, $reqFp, 60);
         logAbnormal($clientIP, '频繁错误登录（60秒内' . $ipFails . '次，已锁定15分钟）');
         if ($loginCfg['auto_ban'] ?? false) addBan($clientIP, ['login'], '自动封禁：频繁错误登录');
         loginFailClear($clientIP, $qq);
         jsonOut(['success' => false, 'error' => '登录失败次数过多，请 900 秒后重试', 'locked_seconds' => 900], 429);
     }
     jsonOut(['success' => false, 'error' => 'QQ号或密码错误'], 401);
+}
+
+// ===== v4.7.0：陌生设备登录邮件二次验证（验证码原子消费 → 记录设备 → 完成登录） =====
+if ($action === 'device_verify' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $linkLeft = checkLinkedBlock();
+    if ($linkLeft > 0) jsonOut(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试'], 429);
+    $input = json_decode(file_get_contents('php://input'), true);
+    $code = trim($input['code'] ?? '');
+    $pending = $_SESSION['cmt_pending_dev'] ?? null;
+    if (!is_array($pending) || empty($pending['uid']) || empty($pending['email'])) jsonOut(['success' => false, 'error' => '验证会话已失效，请重新登录'], 400);
+    // 重新加载用户（防等待验证码期间被禁用/删除）
+    $users = loadUsers();
+    $u = null;
+    foreach ($users as $uu) { if ($uu['id'] === $pending['uid']) { $u = $uu; break; } }
+    if (!$u) { unset($_SESSION['cmt_pending_dev']); jsonOut(['success' => false, 'error' => '账号不存在或已删除'], 400); }
+    if (!empty($u['disabled'])) { unset($_SESSION['cmt_pending_dev']); jsonOut(['success' => false, 'error' => '该账号已被禁用'], 403); }
+    [$ok, $verr] = email_code_verify($pending['email'], $code, 'device_login');
+    if (!$ok) {
+        // 验证码输错 → 威胁计分；连续错过多直接清 pending 防爆破
+        logThreat('device_code_fail', getClientIP(), $pending['fp'] ?? '', 30);
+        $fails = (int)($_SESSION['dev_verify_fails'] ?? 0) + 1;
+        $_SESSION['dev_verify_fails'] = $fails;
+        if ($fails >= 5) unset($_SESSION['cmt_pending_dev'], $_SESSION['dev_verify_fails']);
+        jsonOut(['success' => false, 'error' => $verr, 'fails' => $fails], 400);
+    }
+    unset($_SESSION['dev_verify_fails']);
+    // 验证通过：记录设备为已信任 → 完成登录
+    recordDevice($u['id'], $pending['fp_hash'], $_SERVER['HTTP_USER_AGENT'] ?? '');
+    unset($_SESSION['cmt_pending_dev']);
+    auditLog('login_device_verified', $u['id'], '陌生设备验证通过，已加入信任设备');
+    jsonOut(completeLogin($u, $pending['fp'] ?? ''));
+}
+
+// ===== v4.7.0：找回密码（首页弹窗；管理角色仅限常用设备自助找回，陌生设备联系超管；超管协助走 admin_reset 一次性重置码） =====
+if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $mode = $input['mode'] ?? '';
+    $qq = trim($input['qq'] ?? '');
+    $email = trim($input['email'] ?? '');
+    $code = trim($input['code'] ?? '');
+    $newPw = $input['new_password'] ?? '';
+    $reqFp = getRequestFp();
+    $clientIP = getClientIP();
+
+    if ($mode === 'send_code') {
+        $linkLeft = checkLinkedBlock();
+        if ($linkLeft > 0) jsonOut(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试'], 429);
+        if (empty($qq) || empty($email)) jsonOut(['success' => false, 'error' => '请填写账号与绑定邮箱'], 400);
+        // 发码限速（IP 60 秒 ≥5 次 → 计分）
+        $recent = db_one('SELECT COUNT(*) AS c FROM email_codes WHERE ip = ? AND created > ?', [$clientIP, time() - 60])['c'] ?? 0;
+        if ($recent >= 5) { logThreat('reset_flood', $clientIP, $reqFp, 300); jsonOut(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429); }
+        // 账号+邮箱双重匹配（不暴露账号是否存在，统一提示）
+        $users = loadUsers();
+        $target = null;
+        foreach ($users as $u) {
+            if (($u['qq'] ?? '') === $qq && strcasecmp((string)($u['email'] ?? ''), $email) === 0) { $target = $u; break; }
+        }
+        if (!$target) jsonOut(['success' => false, 'error' => '账号与邮箱不匹配'], 400);
+        // 管理角色：仅常用设备可自助找回；陌生设备 → 联系超管（不发送验证码）
+        $isMgmt = in_array($target['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true);
+        if ($isMgmt) {
+            $fpHash = computeSessionFp($reqFp);
+            if (!isKnownDevice($target['id'], $fpHash)) {
+                jsonOut(['success' => false, 'error' => '当前设备非常用设备，请使用常用设备找回，或联系站点管理员协助'], 403);
+            }
+        }
+        [$ok, $err] = email_code_send($email, 'password_reset', '找回密码', $target['role'] ?? '');
+        if (!$ok) jsonOut(['success' => false, 'error' => $err], 400);
+        auditLog('password_reset_send', $target['id'], '找回密码验证码已发送');
+        jsonOut(['success' => true, 'masked_email' => maskEmailAddr($email), 'ttl' => is_array($err) ? ($err['ttl'] ?? 300) : 300]);
+    }
+
+    if ($mode === 'do_reset') {
+        $linkLeft = checkLinkedBlock();
+        if ($linkLeft > 0) jsonOut(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试'], 429);
+        if (empty($qq) || empty($code) || empty($newPw)) jsonOut(['success' => false, 'error' => '请完整填写账号、验证码与新密码'], 400);
+        // v4.7.0：同账号验证码失败锁定——3 次失败锁 15 分钟（防 6 位验证码暴力枚举）
+        $rstKey = 'rst:' . hash('sha256', 'qq|' . strtolower($qq));
+        $rstLock = loginLocked($rstKey);
+        if ($rstLock > 0) {
+            logThreat('login_locked_try', $clientIP, $reqFp, 60);
+            jsonOut(['success' => false, 'error' => '验证失败次数过多，请 ' . $rstLock . ' 秒后重试', 'locked_seconds' => $rstLock], 429);
+        }
+        $users = loadUsers();
+        $target = null;
+        foreach ($users as $u) { if (($u['qq'] ?? '') === $qq) { $target = $u; break; } }
+        // 两种凭证：邮箱验证码（自助找回）或超管一次性重置码（协助找回）；
+        // 账号不存在也走同一失败路径（统一提示，防存在性探测）
+        [$ok1, $v1] = $target ? email_code_verify($target['email'] ?? '', $code, 'password_reset') : [false, ''];
+        [$ok2, $v2] = $target ? email_code_verify($target['email'] ?? '', $code, 'admin_reset') : [false, ''];
+        if (!$ok1 && !$ok2) {
+            logThreat('code_fail', $clientIP, $reqFp, 30);
+            db_exec('INSERT INTO login_fails (ip, t, acc, fp) VALUES (?,?,?,?)', [$clientIP, time(), 'rst:' . strtolower($qq), '']);
+            $rstFails = (int)(db_one('SELECT COUNT(*) AS c FROM login_fails WHERE acc = ? AND t > ?', ['rst:' . strtolower($qq), time() - 900])['c'] ?? 0);
+            if ($rstFails >= 3) {
+                lockLogin($rstKey, 900);
+                logThreat('login_lock', $clientIP, $reqFp, 60);
+                jsonOut(['success' => false, 'error' => '验证失败次数过多，请 900 秒后重试', 'locked_seconds' => 900], 429);
+            }
+            jsonOut(['success' => false, 'error' => '验证码不正确或已过期'], 400);
+        }
+        $vp = validatePassword($newPw);
+        if ($vp !== true) jsonOut(['success' => false, 'error' => $vp], 400);
+        $newHash = password_hash($newPw, PASSWORD_DEFAULT);
+        $updated = false;
+        foreach ($users as &$uu) { if ($uu['id'] === $target['id']) { $uu['password'] = $newHash; $updated = true; break; } }
+        unset($uu);
+        if (!$updated) jsonOut(['success' => false, 'error' => '账号状态异常，请联系管理员'], 400);
+        saveUsers($users);
+        db_exec('DELETE FROM login_fails WHERE acc = ?', ['rst:' . strtolower($qq)]); // 重置成功清除失败计数
+        // 密码已变：tv+1 踢全部旧会话 + 吊销 refresh token
+        bumpUserTV($target['id']);
+        revokeUserRefreshTokens($target['id']);
+        // 若重置的是当前登录会话 → 强制退出
+        if (($_SESSION['cmt_user']['id'] ?? '') === $target['id']) unset($_SESSION['cmt_user']);
+        auditLog('password_reset', $target['id'], '通过验证码找回重置密码');
+        notifyLoginEvent($target, $clientIP);
+        jsonOut(['success' => true]);
+    }
+    jsonOut(['success' => false, 'error' => '未知操作'], 400);
 }
 
 
@@ -757,6 +922,7 @@ if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $maxCommentsPerMin = max(1, intval($siteCfg['max_comments_per_minute'] ?? 5));
     if ($ipRates > $maxCommentsPerMin) {
         logAbnormal($clientIP, '频繁评论（' . $ipRates . '条/分钟）');
+        logThreat('comment_flood', $clientIP, $reqFp, 300);
         if ($siteCfg['auto_ban'] ?? false) addBan($clientIP, ['comment'], '自动封禁：频繁评论');
         jsonOut(['success' => false, 'error' => '评论太频繁，请稍后再试'], 429);
     }
@@ -821,6 +987,7 @@ if ($action === 'reply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $maxRepliesPerMin = max(1, intval($replyCfg['max_comments_per_minute'] ?? 5));
     if ($replyRates > $maxRepliesPerMin) {
         logAbnormal($clientIP, '频繁回复（' . $replyRates . '条/分钟）');
+        logThreat('comment_flood', $clientIP, $replyFp, 300);
         if ($replyCfg['auto_ban'] ?? false) addBan($clientIP, ['comment'], '自动封禁：频繁回复');
         jsonOut(['success' => false, 'error' => '回复太频繁，请稍后再试'], 429);
     }

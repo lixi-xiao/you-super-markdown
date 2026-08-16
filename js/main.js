@@ -1515,7 +1515,7 @@
     (function bindPwToggles() {
         const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
         const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="3" y1="3" x2="21" y2="21"/></svg>';
-        ['cmtLoginPwToggle', 'cmtRegPwToggle'].forEach(id => {
+        ['cmtLoginPwToggle', 'cmtRegPwToggle', 'cmtResetPwToggle'].forEach(id => {
             const btn = document.getElementById(id);
             const input = btn ? btn.closest('.cmt-pw-row').querySelector('input') : null;
             if (!btn || !input) return;
@@ -1549,6 +1549,23 @@
     const csrfToken = document.body.getAttribute('data-csrf') || '';
     const cmtSwitchText = document.getElementById('cmtSwitchText');
     const cmtSwitchBtn = document.getElementById('cmtSwitchBtn');
+    // v4.7.0：陌生设备登录邮件二次验证 + 找回密码
+    const cmtDevForm = document.getElementById('cmtDevForm');
+    const cmtDevTip = document.getElementById('cmtDevTip');
+    const cmtDevCode = document.getElementById('cmtDevCode');
+    const cmtDevErr = document.getElementById('cmtDevErr');
+    const cmtDevBtn = document.getElementById('cmtDevBtn');
+    const cmtDevBack = document.getElementById('cmtDevBack');
+    const cmtResetForm = document.getElementById('cmtResetForm');
+    const cmtResetQQ = document.getElementById('cmtResetQQ');
+    const cmtResetEmail = document.getElementById('cmtResetEmail');
+    const cmtResetSendCode = document.getElementById('cmtResetSendCode');
+    const cmtResetCode = document.getElementById('cmtResetCode');
+    const cmtResetPw = document.getElementById('cmtResetPw');
+    const cmtResetErr = document.getElementById('cmtResetErr');
+    const cmtResetBtn = document.getElementById('cmtResetBtn');
+    const cmtResetBack = document.getElementById('cmtResetBack');
+    const cmtForgotLink = document.getElementById('cmtForgotLink');
     const cmtProfileModal = document.getElementById('cmtProfileModal');
     const cmtEditNick = document.getElementById('cmtEditNick');
     const cmtEditSign = document.getElementById('cmtEditSign');
@@ -1688,6 +1705,9 @@
         if (cmtSwitchBtn) cmtSwitchBtn.textContent = isLogin ? '立即注册' : '去登录';
         if (cmtLoginErr) cmtLoginErr.textContent = '';
         if (cmtRegErr) cmtRegErr.textContent = '';
+        // v4.7.0：登录/注册切换时隐藏设备验证与找回视图
+        if (cmtDevForm) cmtDevForm.style.display = 'none';
+        if (cmtResetForm) cmtResetForm.style.display = 'none';
     }
     if (cmtLoginBtn) cmtLoginBtn.addEventListener('click', async () => {
         const qq = cmtLoginQQ.value.trim(), pw = cmtLoginPw.value;
@@ -1698,6 +1718,19 @@
         cmtLoginBtn.disabled = true; cmtLoginBtn.textContent = '登录中...';
         fetch('api.php?action=login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, password: pw }) })
             .then(r => r.json()).then(d => {
+                // v4.7.0：管理角色陌生设备 → 切到设备验证视图（邮件验证码确认后完成登录）
+                if (d.need_device_verify) {
+                    if (cmtDevTip) cmtDevTip.textContent = d.masked_email ? ('验证码已发送至 ' + d.masked_email + '，请查收邮箱') : '验证码已发送，请查收邮箱';
+                    if (cmtDevErr) cmtDevErr.textContent = '';
+                    if (cmtDevCode) cmtDevCode.value = '';
+                    cmtLoginForm.style.display = 'none';
+                    if (cmtRegForm) cmtRegForm.style.display = 'none';
+                    if (cmtResetForm) cmtResetForm.style.display = 'none';
+                    cmtDevForm.style.display = 'flex';
+                    cmtAuthTitle.textContent = '设备验证';
+                    setTimeout(() => { if (cmtDevCode) cmtDevCode.focus(); }, 60);
+                    return;
+                }
                 if (d.success) { cmtUser = d.user; if (d.isAdminFirstLogin) cmtAdminFirstLogin = true; cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); }
                 else {
                     // v2.10.2：CSRF 校验失败多为会话 cookie 未生效（浏览器 cookie 策略/瞬态），自动刷新页面一次重取 token+cookie
@@ -1723,6 +1756,94 @@
                 }
             }).catch(() => { cmtLoginErr.textContent = '网络错误'; })
             .finally(() => { cmtLoginBtn.disabled = false; cmtLoginBtn.textContent = '登录'; });
+    });
+    // ---- v4.7.0：陌生设备登录邮件二次验证 + 找回密码 ----
+    function cmtBackToLogin() {
+        cmtLoginForm.style.display = 'flex';
+        if (cmtDevForm) cmtDevForm.style.display = 'none';
+        if (cmtResetForm) cmtResetForm.style.display = 'none';
+        if (cmtRegForm) cmtRegForm.style.display = 'none';
+        cmtAuthTitle.textContent = '登录';
+        if (cmtSwitchText) cmtSwitchText.textContent = '还没有账号？';
+        if (cmtSwitchBtn) cmtSwitchBtn.textContent = '立即注册';
+    }
+    // 设备验证码提交
+    if (cmtDevBtn) cmtDevBtn.addEventListener('click', async () => {
+        const code = cmtDevCode.value.trim();
+        cmtDevErr.textContent = '';
+        if (!/^\d{6}$/.test(code)) { cmtDevErr.textContent = '请输入6位数字验证码'; return; }
+        await ensureFreshCsrf();
+        cmtDevBtn.disabled = true; cmtDevBtn.textContent = '验证中...';
+        fetch('api.php?action=device_verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) })
+            .then(r => r.json()).then(d => {
+                if (d.success) {
+                    cmtUser = d.user;
+                    if (d.isAdminFirstLogin) cmtAdminFirstLogin = true;
+                    cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad();
+                } else {
+                    cmtDevErr.textContent = d.error || '验证失败';
+                    // 连续输错过多 → 自动返回登录（后端已清 pending）
+                    if (d.fails >= 5) setTimeout(() => { cmtBackToLogin(); cmtDevErr.textContent = '验证次数过多，请重新登录'; }, 600);
+                }
+            }).catch(() => { cmtDevErr.textContent = '网络错误'; })
+            .finally(() => { cmtDevBtn.disabled = false; cmtDevBtn.textContent = '确认设备'; });
+    });
+    if (cmtDevBack) cmtDevBack.addEventListener('click', () => {
+        cmtBackToLogin();
+        cmtLoginErr.textContent = '';
+    });
+    // 忘记密码 → 找回视图
+    if (cmtForgotLink) cmtForgotLink.addEventListener('click', () => {
+        cmtLoginForm.style.display = 'none';
+        if (cmtDevForm) cmtDevForm.style.display = 'none';
+        if (cmtRegForm) cmtRegForm.style.display = 'none';
+        cmtResetForm.style.display = 'flex';
+        cmtAuthTitle.textContent = '找回密码';
+        cmtResetErr.textContent = '';
+        setTimeout(() => { if (cmtResetQQ) cmtResetQQ.focus(); }, 60);
+    });
+    if (cmtResetBack) cmtResetBack.addEventListener('click', () => {
+        cmtBackToLogin();
+        cmtLoginErr.textContent = '';
+    });
+    // 发送找回验证码
+    if (cmtResetSendCode) cmtResetSendCode.addEventListener('click', async () => {
+        const qq = cmtResetQQ.value.trim(), email = cmtResetEmail.value.trim();
+        cmtResetErr.textContent = '';
+        if (!qq || !email) { cmtResetErr.textContent = '请填写账号与绑定邮箱'; return; }
+        await ensureFreshCsrf();
+        cmtResetSendCode.disabled = true; cmtResetSendCode.textContent = '发送中...';
+        fetch('api.php?action=password_reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'send_code', qq, email }) })
+            .then(r => r.json()).then(d => {
+                if (d.success) {
+                    cmtResetErr.textContent = '验证码已发送至 ' + (d.masked_email || '绑定邮箱') + '，请在5分钟内完成重置';
+                    cmtResetErr.style.color = '';
+                } else {
+                    cmtResetErr.textContent = d.error || '发送失败';
+                    cmtResetErr.style.color = '#e5484d';
+                }
+            }).catch(() => { cmtResetErr.textContent = '网络错误'; cmtResetErr.style.color = '#e5484d'; })
+            .finally(() => { cmtResetSendCode.disabled = false; cmtResetSendCode.textContent = '发送验证码'; });
+    });
+    // 重置密码
+    if (cmtResetBtn) cmtResetBtn.addEventListener('click', async () => {
+        const qq = cmtResetQQ.value.trim(), code = cmtResetCode.value.trim(), pw = cmtResetPw.value;
+        cmtResetErr.textContent = '';
+        cmtResetErr.style.color = '';
+        if (!qq || !code || !pw) { cmtResetErr.textContent = '请完整填写账号、验证码与新密码'; return; }
+        await ensureFreshCsrf();
+        cmtResetBtn.disabled = true; cmtResetBtn.textContent = '重置中...';
+        fetch('api.php?action=password_reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'do_reset', qq, code, new_password: pw }) })
+            .then(r => r.json()).then(d => {
+                if (d.success) {
+                    cmtResetErr.textContent = '密码已重置，请使用新密码登录';
+                    cmtResetPw.value = ''; cmtResetCode.value = '';
+                    setTimeout(() => { cmtBackToLogin(); }, 1200);
+                } else {
+                    cmtResetErr.textContent = d.error || '重置失败';
+                }
+            }).catch(() => { cmtResetErr.textContent = '网络错误'; })
+            .finally(() => { cmtResetBtn.disabled = false; cmtResetBtn.textContent = '重置密码'; });
     });
     // ---- v2.11.0：滑块人机验证组件已彻底移除 ----
     function cmtRegShowVerify() {
@@ -2982,6 +3103,9 @@
                 cmtAuthTitle.textContent = '登录';
                 cmtLoginForm.style.display = 'flex';
                 cmtRegForm.style.display = 'none';
+                // v4.7.0：打开时隐藏设备验证与找回视图（上次会话残留清理）
+                var dv = document.getElementById('cmtDevForm'); if (dv) dv.style.display = 'none';
+                var rf = document.getElementById('cmtResetForm'); if (rf) rf.style.display = 'none';
                 if (cmtSwitchText) cmtSwitchText.textContent = '还没有账号？';
                 if (cmtSwitchBtn) cmtSwitchBtn.textContent = '立即注册';
                 // v2.11.4：清理残留的切换动画状态（防止打开弹窗时表单仍处于 slide-out/in 中间态）

@@ -274,6 +274,14 @@ function loadSiteConfig() {
         // v4.4.0：注册蜜罐自动封禁——短时间（10 分钟）内连续命中蜜罐达阈值即自动封禁 IP
         'honeypot_ban_count' => 3,          // 触发次数（超管可调）
         'honeypot_ban_duration' => 3600,    // 封禁秒数（超管可调，默认 1 小时；0=永久）
+        // v4.7.0：联动威胁评分（IP+浏览器双维聚合，超阈值自动联动封锁；权重见 threatWeight，可用 threat_w_<reason> 覆盖）
+        'threat_enable' => true,            // 总开关
+        'threat_window' => 86400,           // 评分滑动窗口（秒，默认 24h，过期自动衰减）
+        'threat_l1' => 50,                  // 一级阈值 → 联动封锁 15 分钟
+        'threat_l1_dur' => 900,
+        'threat_l2' => 100,                 // 二级阈值 → 联动封锁 24 小时
+        'threat_l2_dur' => 86400,
+        'threat_l3' => 200,                 // 三级阈值 → 自动永久封禁（超管面板可解除）
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;
@@ -416,6 +424,7 @@ function security_check() {
     $ip = getClientIP();
     logUnauthorized('扫描器UA检测: ' . $tool);
     addBan($ip, ['login', 'register', 'comment'], '扫描器UA: ' . $tool);
+    logThreat('scanner_ua', $ip, '', 300);
     logAbnormal($ip, '扫描器UA封禁: ' . $tool);
     http_response_code(403);
     header('Content-Type: text/plain; charset=utf-8');
@@ -469,6 +478,8 @@ function logUnauthorized($action, $ban = false) {
             logAbnormal($ip, '自动封禁越权用户: ' . $action);
         }
     }
+    // v4.7.0：越权事件计入联动威胁评分（独立于 auto_ban_unauthorized 开关，自动升级联动封锁）
+    logThreat('unauthorized', $ip, '', 300);
 }
 // ============================================================
 // v2.2 五层角色体系
@@ -1543,6 +1554,8 @@ function email_code_send($email, $purpose, $target = '', $operatorRole = '', $li
         'register' => '注册邮箱验证',
         'author_verify' => '写作者邮箱验证',
         'email_change' => '更换绑定邮箱验证',
+        'device_login' => '新设备登录验证',
+        'password_reset' => '找回密码验证',
     ];
     $purposeLabel = $purposeLabels[$purpose] ?? '邮箱验证';
     $html = renderMailCode($site, $purposeLabel, $code, intdiv($ttl, 60), [
@@ -1569,6 +1582,199 @@ function email_code_verify($email, $code, $purpose) {
     if ((int)$row['expires'] < time()) return [false, '验证码已过期'];
     db_exec('UPDATE email_codes SET used = 1 WHERE id = ?', [$row['id']]);
     return [true, $row];
+}
+
+// ===== v4.7.0：管理角色陌生设备登录邮件二次验证（OTP/密码通过后，陌生设备需邮箱验证码确认才完成登录） =====
+/** 设备是否已知（device_fps 表存在该账号+指纹哈希） */
+function isKnownDevice($uid, $fpHash) {
+    if ($uid === '' || $fpHash === '') return false;
+    return db_one('SELECT 1 AS x FROM device_fps WHERE user_id = ? AND fp_hash = ?', [$uid, $fpHash]) !== null;
+}
+/** 记录设备指纹为已知（登录/验证通过后调用；同指纹只记一次，刷新 last_seen） */
+function recordDevice($uid, $fpHash, $ua = '') {
+    if ($uid === '' || $fpHash === '') return;
+    db_exec('INSERT INTO device_fps (id, user_id, fp_hash, ua, first_seen, last_seen) VALUES (?,?,?,?,?,?)
+             ON CONFLICT(user_id, fp_hash) DO UPDATE SET last_seen = excluded.last_seen, ua = excluded.ua',
+        [bin2hex(random_bytes(8)), $uid, $fpHash, mb_substr((string)$ua, 0, 256, 'UTF-8'), time(), time()]);
+}
+/** 账号已信任设备列表（超管后台设备管理用） */
+function getKnownDevices($uid) {
+    return db_all('SELECT id, fp_hash, ua, first_seen, last_seen FROM device_fps WHERE user_id = ? ORDER BY last_seen DESC', [$uid]);
+}
+/** 移除单个已信任设备（超管后台管理；返回是否影响行数） */
+function removeKnownDevice($uid, $devId) {
+    $st = db()->prepare('DELETE FROM device_fps WHERE id = ? AND user_id = ?');
+    $st->execute([$devId, $uid]);
+    return $st->rowCount() > 0;
+}
+/** 邮箱打码（如 a***@example.com），用于登录页提示验证码发往哪个邮箱 */
+function maskEmailAddr($email) {
+    if (!email_valid((string)$email)) return '';
+    [$name, $domain] = explode('@', $email, 2);
+    $len = mb_strlen($name, 'UTF-8');
+    if ($len <= 2) return $name[0] . '***@' . $domain;
+    return mb_substr($name, 0, 2, 'UTF-8') . '***@' . $domain;
+}
+
+// ===== v4.7.0：联动威胁评分（IP+浏览器双维聚合，超阈值自动联动封锁） =====
+/** 读取威胁评分配置（可被 config 覆盖） */
+function threatCfg($key, $def) {
+    static $c = null;
+    if ($c === null) $c = loadSiteConfig();
+    return ($c[$key] ?? '') !== '' ? $c[$key] : $def;
+}
+/** 事件权重表；支持 config 键 threat_w_<reason> 覆盖单个权重 */
+function threatWeight($reason) {
+    $map = [
+        'login_fail'        => 3,   // 登录密码错误（普通账号）
+        'device_login_fail' => 20,  // 陌生设备登录失败（管理角色账号，3 次=60 分即触发 15min 风控，逐次升级）
+        'login_lock'        => 10,  // 触发登录锁定
+        'login_locked_try'  => 5,   // 锁定期内仍尝试
+        'scanner_ua'        => 30,  // 扫描器 UA 命中
+        'unauthorized'      => 15,  // 越权操作
+        'honeypot'          => 20,  // 蜜罐命中
+        'reg_flood'         => 5,   // 注册验证码超频
+        'comment_flood'     => 5,   // 评论超频
+        'otp_fail'          => 10,  // OTP 连续失败
+        'code_fail'         => 3,   // 邮箱验证码校验失败
+        'device_code_fail'  => 5,   // 陌生设备登录验证码输错
+        'reset_flood'       => 5,   // 找回密码验证码超频
+    ];
+    $w = threatCfg('threat_w_' . $reason, $map[$reason] ?? 0);
+    return max(0, (int)$w);
+}
+/** 写入威胁事件（双维度：请求 IP + 请求指纹），并触发联动封锁升级 */
+function logThreat($reason, $ip = '', $fp = '', $dedupeWindow = 0) {
+    if (!threatCfg('threat_enable', 1)) return;
+    if ($ip === '') $ip = getClientIP();
+    if ($fp === '') $fp = getRequestFp();
+    $weight = threatWeight($reason);
+    if ($weight <= 0) return;
+    $now = time();
+    $entries = [];
+    if ($ip !== '') $entries[] = ['ip', $ip];
+    if ($fp !== '') $entries[] = ['fp', $fp];
+    foreach ($entries as [$dt, $dk]) {
+        if ($dedupeWindow > 0) {
+            $dup = db_one('SELECT 1 AS x FROM threat_events WHERE dim_type = ? AND dim_key = ? AND reason = ? AND created > ? LIMIT 1',
+                [$dt, $dk, $reason, $now - $dedupeWindow]);
+            if ($dup) continue;
+        }
+        db_exec('INSERT INTO threat_events (id, dim_type, dim_key, weight, reason, created) VALUES (?,?,?,?,?,?)',
+            [bin2hex(random_bytes(8)), $dt, $dk, $weight, $reason, $now]);
+    }
+    foreach ($entries as [$dt, $dk]) maybeLinkedBlock($dt, $dk);
+    // 概率清理 3 天前事件（1/64），窗口查询按 created>cutoff 过滤，不影响计分
+    if (random_int(0, 63) === 0) db_exec('DELETE FROM threat_events WHERE created < ?', [$now - 259200]);
+}
+/** 计算某维度窗口内威胁总分 */
+function threatScore($dimType, $dimKey, $window = null) {
+    if ($window === null) $window = (int)threatCfg('threat_window', 86400);
+    $r = db_one('SELECT COALESCE(SUM(weight),0) AS s FROM threat_events WHERE dim_type = ? AND dim_key = ? AND created > ?',
+        [$dimType, $dimKey, time() - $window]);
+    return (int)($r['s'] ?? 0);
+}
+/** 升级式锁定：只延长不缩短（防低等级覆盖高等级） */
+function linkedLock($key, $seconds, $reason) {
+    $until = time() + $seconds;
+    $row = db_one('SELECT locked_until FROM login_locks WHERE key = ?', [$key]);
+    if ($row && (int)$row['locked_until'] > $until) $until = (int)$row['locked_until'];
+    db_exec('INSERT INTO login_locks (key, locked_until) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET locked_until = excluded.locked_until', [$key, $until]);
+    if ($seconds >= 10 * 365 * 86400) logAbnormal(getClientIP(), $reason . '（' . $key . '）');
+}
+/** 按总分自动升级联动封锁（三级：L1 15min / L2 24h / L3 永久） */
+function maybeLinkedBlock($dimType, $dimKey) {
+    if (!threatCfg('threat_enable', 1)) return;
+    $score = threatScore($dimType, $dimKey);
+    $l3 = (int)threatCfg('threat_l3', 200);
+    $l2 = (int)threatCfg('threat_l2', 100);
+    $l1 = (int)threatCfg('threat_l1', 50);
+    if ($score >= $l3) {
+        // 永久：IP 进 bans（可超管解封）；指纹维度用远期登录锁（近十年）
+        if ($dimType === 'ip') addBan($dimKey, ['link'], '联动封锁：威胁评分达永久阈值(' . $score . ')');
+        else linkedLock('link:' . $dimType . ':' . $dimKey, 10 * 365 * 86400, '联动封锁永久');
+    } elseif ($score >= $l2) {
+        linkedLock('link:' . $dimType . ':' . $dimKey, (int)threatCfg('threat_l2_dur', 86400), '联动封锁24小时');
+    } elseif ($score >= $l1) {
+        linkedLock('link:' . $dimType . ':' . $dimKey, (int)threatCfg('threat_l1_dur', 900), '联动封锁15分钟');
+    }
+}
+/** 检查单维度联动封锁：返回剩余秒数（0=未封锁） */
+function linkedBlockLeft($dimType, $dimKey) {
+    if (!threatCfg('threat_enable', 1)) return 0;
+    $left = loginLocked('link:' . $dimType . ':' . $dimKey);
+    if ($left > 0) return $left;
+    if ($dimType === 'ip' && isIPBanned($dimKey, 'link')) return 10 * 365 * 86400;
+    return 0;
+}
+/** 统一联动封锁拦截（各敏感入口调用）：命中返回剩余秒数，否则 0 */
+function checkLinkedBlock() {
+    if (!threatCfg('threat_enable', 1)) return 0;
+    $left = 0;
+    $ip = getClientIP();
+    if (isIPBanned($ip, 'link')) $left = 10 * 365 * 86400;
+    $l = loginLocked('link:ip:' . $ip);
+    if ($l > 0 && $l > $left) $left = $l;
+    $fp = getRequestFp();
+    if ($fp !== '') {
+        $l = loginLocked('link:fp:' . $fp);
+        if ($l > 0 && $l > $left) $left = $l;
+    }
+    return $left;
+}
+/** 面板手动解除联动封锁（删除登录锁+评分事件+联动封禁记录） */
+function clearLinkedBlock($dimType, $dimKey) {
+    db_exec('DELETE FROM login_locks WHERE key = ?', ['link:' . $dimType . ':' . $dimKey]);
+    db_exec('DELETE FROM threat_events WHERE dim_type = ? AND dim_key = ?', [$dimType, $dimKey]);
+    if ($dimType === 'ip') {
+        $row = db_one('SELECT types_json FROM bans WHERE ip = ?', [$dimKey]);
+        if ($row) {
+            $types = json_decode($row['types_json'] ?? '[]', true) ?: [];
+            $types = array_values(array_filter($types, fn($t) => $t !== 'link'));
+            if (empty($types)) db_exec('DELETE FROM bans WHERE ip = ?', [$dimKey]);
+            else db_exec('UPDATE bans SET types_json = ? WHERE ip = ?', [json_encode($types, JSON_UNESCAPED_UNICODE), $dimKey]);
+        }
+    }
+}
+/** 面板明细：某维度窗口内事件列表 */
+function threatEventsFor($dimType, $dimKey, $window = null) {
+    if ($window === null) $window = (int)threatCfg('threat_window', 86400);
+    return db_all('SELECT reason, weight, created FROM threat_events WHERE dim_type = ? AND dim_key = ? AND created > ? ORDER BY created DESC LIMIT 100',
+        [$dimType, $dimKey, time() - $window]);
+}
+/** 威胁维度聚合列表（面板用，分页）：返回 [rows, total]；rows 含 score/cnt/last_ts/locked_left */
+function threatDims($page = 1, $per = 20) {
+    $window = (int)threatCfg('threat_window', 86400);
+    $cutoff = time() - $window;
+    $page = max(1, (int)$page); $per = min(100, max(5, (int)$per));
+    $total = (int)(db_one('SELECT COUNT(DISTINCT dim_type || "|" || dim_key) AS c FROM threat_events WHERE created > ?', [$cutoff])['c'] ?? 0);
+    $rows = db_all('SELECT dim_type, dim_key, SUM(weight) AS score, COUNT(*) AS cnt, MAX(created) AS last_ts
+        FROM threat_events WHERE created > ? GROUP BY dim_type, dim_key ORDER BY score DESC, last_ts DESC LIMIT ? OFFSET ?',
+        [$cutoff, $per, ($page - 1) * $per]);
+    foreach ($rows as &$r) {
+        $r['score'] = (int)$r['score'];
+        $r['cnt'] = (int)$r['cnt'];
+        $r['locked_left'] = linkedBlockLeft($r['dim_type'], $r['dim_key']);
+    }
+    unset($r);
+    return [$rows, $total];
+}
+/** 超管生成一次性重置码（协助找回）：写入 email_codes（purpose=admin_reset，30 分钟过期，一次性），返回 6 位码 */
+function genAdminResetCode($userId, $email) {
+    if (!email_valid((string)$email)) return [false, '该用户未绑定有效邮箱'];
+    $code = str_pad((string)random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+    db_exec('INSERT INTO email_codes (id,email,code,purpose,expires,used,created,ip,operator_role) VALUES (?,?,?,?,?,0,?,?,?)', [
+        bin2hex(random_bytes(8)), $email, $code, 'admin_reset', time() + 1800, time(), getClientIP(), ROLE_SUPER_ADMIN,
+    ]);
+    return [true, $code];
+}
+/** 陌生设备登录失败快速风控：连续失败 ≥3 → 直接锁设备指纹 15 分钟（不锁账号；升级交给威胁评分） */
+function fpRiskLock($fp) {
+    if ($fp === '') return 0;
+    $fails = db_rate_count('login_fails', getClientIP(), 1800, $fp);
+    if ($fails < 3) return 0;
+    linkedLock('fp:' . $fp, (int)threatCfg('threat_l1_dur', 900), '陌生设备登录失败风控');
+    return (int)threatCfg('threat_l1_dur', 900);
 }
 
 // ===== v4.4.0：注册算术人机验证（随机加减乘除，SESSION 存答案，60s 过期，一次性消费） =====

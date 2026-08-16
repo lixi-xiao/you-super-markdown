@@ -1635,6 +1635,23 @@ body.bg-blur .sidebar {
     background: var(--accent-light);
     color: var(--accent-hover);
 }
+/* v4.7.0：登录弹窗——忘记密码 / 返回链接行 / 设备验证提示 */
+.cmt-forgot-row {
+    display: flex;
+    justify-content: center;
+    margin-top: -4px;
+}
+.cmt-back-row {
+    display: flex;
+    justify-content: center;
+    margin-top: 4px;
+}
+.cmt-reset-tip {
+    font-size: 13px;
+    color: var(--text-2, #888);
+    line-height: 1.5;
+    text-align: center;
+}
 .cmt-modal-form {
     display: flex;
     flex-direction: column;

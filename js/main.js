@@ -2149,10 +2149,8 @@
         if (cmtListSection) cmtListSection.style.display = 'none';
     }
     var musicPlaylistId = document.body.dataset.musicPlaylist || '3778678';
-    var musicPlaylistIdQQ = document.body.dataset.musicPlaylistQq || '';
-    // v4.3.0：默认平台由后端按配置决定（已配置 QQ cookie + 歌单 → QQ，否则网易云），
-    //         解决后台放了 QQ 歌单/ Cookie 却加载到网易云热歌榜的问题
-    var musicPlatform = document.body.dataset.musicPlatform === 'qq' ? 'qq' : 'netease';
+    // v4.4.2：移除 QQ 音乐通道（cookie 检测过严、服务器端申请违反用户协议），仅保留网易云
+    var musicPlatform = 'netease';
     var musicSongs = [];
     var musicIndex = -1;
     var musicPlaying = false;
@@ -2200,45 +2198,13 @@
         musicListToggle.classList.toggle('open', musicListOpen);
         musicSaveState();
     });
-    // 平台切换
-    if (document.getElementById('musicPlatformTabs')) {
-        document.getElementById('musicPlatformTabs').addEventListener('click', function(e) {
-            var tab = e.target.closest('.music-platform-tab');
-            if (!tab) return;
-            var newPlatform = tab.dataset.platform;
-            if (newPlatform === musicPlatform) return;
-            musicPlatform = newPlatform;
-            // 更新tab样式
-            this.querySelectorAll('.music-platform-tab').forEach(function(t) {
-                t.classList.toggle('active', t.dataset.platform === newPlatform);
-            });
-            // 重新加载歌单
-            musicLoaded = false;
-            musicSongs = [];
-            musicIndex = -1;
-            musicAudio.pause();
-            musicAudio.src = '';
-            musicSetPlaying(false);
-            musicName.textContent = '未播放';
-            musicArtist.textContent = '点击下方歌曲开始';
-            musicCover.src = '';
-            musicTotalTime.textContent = '0:00';
-            musicCurTime.textContent = '0:00';
-            musicProgressFill.style.width = '0%';
-            musicProgressDot.style.left = '0%';
-            musicLyrScroll.innerHTML = '<div class="music-lyric-hint">暂无歌词</div>';
-            musicLyrLoadedId = -1;
-            musicLyrLines = [];
-            loadMusicHotSongs();
-        });
-    }
     function loadMusicHotSongs() {
         musicLoading.textContent = '加载中...';
-        // v2.5.6：按平台选择歌单 ID（QQ 平台使用 music_playlist_id_qq 配置，留空则热歌榜）
-        var pid = musicPlatform === 'qq' ? musicPlaylistIdQQ : musicPlaylistId;
+        // v4.4.2：仅保留网易云通道，直接使用网易云歌单 ID（留空则热歌榜）
+        var pid = musicPlaylistId;
         var musicApiUrl = pid && pid !== '3778678'
-            ? 'music.php?platform=' + musicPlatform + '&playlistId=' + encodeURIComponent(pid)
-            : 'music.php?platform=' + musicPlatform + '&sortAll=热歌榜';
+            ? 'music.php?platform=netease&playlistId=' + encodeURIComponent(pid)
+            : 'music.php?platform=netease&sortAll=热歌榜';
         fetch(musicApiUrl)
             .then(function(res) {
                 if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -2256,7 +2222,7 @@
                             duration: (t.duration || 0) * 1000
                         };
                     });
-                    if (musicPopupCount) musicPopupCount.textContent = (musicPlatform === 'qq' ? 'QQ 歌单' : '热歌榜') + ' · ' + musicSongs.length + ' 首';
+                    if (musicPopupCount) musicPopupCount.textContent = '热歌榜 · ' + musicSongs.length + ' 首';
                     renderMusicList();
                     var saved = musicLoadState();
                     if (saved && saved.index >= 0 && saved.index < musicSongs.length) {
@@ -2331,11 +2297,7 @@
         });
         var playUrl = s.url;
         if (!playUrl) {
-            if (musicPlatform === 'netease') {
-                playUrl = 'https://music.163.com/song/media/outer/url?id=' + s.id;
-            } else {
-                playUrl = 'music.php?platform=' + musicPlatform + '&songId=' + encodeURIComponent(s.id) + '&t=' + Date.now();
-            }
+            playUrl = 'https://music.163.com/song/media/outer/url?id=' + s.id;
         }
         musicAudio.src = playUrl;
         musicAudio.play().then(function() {
@@ -2350,23 +2312,20 @@
         if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
     function musicTryFallbackUrl(song, seekTime) {
-        if (musicPlatform === 'netease') {
-            var fallbackUrl = 'https://api.xfyun.club/musicAll/?songId=' + song.id + '&mp3Url=mp3';
-            fetch(fallbackUrl).then(function(res) {
-                if (!res.ok) throw new Error('fallback failed');
-                return res.blob();
-            }).then(function(blob) {
-                var blobUrl = URL.createObjectURL(blob);
-                musicAudio.src = blobUrl;
-                return musicAudio.play();
-            }).then(function() {
-                musicSetPlaying(true);
-                musicConsecutiveFails = 0;
-                if (seekTime > 0) musicAudio.currentTime = seekTime;
-            }).catch(function() { musicHandlePlayFail(); });
-        } else {
-            musicHandlePlayFail();
-        }
+        // v4.4.2：仅保留网易云 fallback（QQ 通道已移除）
+        var fallbackUrl = 'https://api.xfyun.club/musicAll/?songId=' + song.id + '&mp3Url=mp3';
+        fetch(fallbackUrl).then(function(res) {
+            if (!res.ok) throw new Error('fallback failed');
+            return res.blob();
+        }).then(function(blob) {
+            var blobUrl = URL.createObjectURL(blob);
+            musicAudio.src = blobUrl;
+            return musicAudio.play();
+        }).then(function() {
+            musicSetPlaying(true);
+            musicConsecutiveFails = 0;
+            if (seekTime > 0) musicAudio.currentTime = seekTime;
+        }).catch(function() { musicHandlePlayFail(); });
     }
     function musicHandlePlayFail() {
         musicConsecutiveFails++;

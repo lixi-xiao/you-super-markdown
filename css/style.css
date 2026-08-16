@@ -768,9 +768,13 @@ code, pre, .markdown-body code, .markdown-body pre {
 .info-card-meta-item { display: flex; flex-direction: column; gap: 2px; }
 .info-card-meta-label { font-size: 0.78em; color: var(--text-muted); }
 /* v4.7.4：浮动按钮组常驻（主页仅 BGM 按钮；阅读视图追加 目录/返回主页/回到顶部）——BGM 并入组内统一 UI，整组下移 */
-.floating-buttons { position: fixed; right: 20px; bottom: 24px; z-index: 150; display: flex; flex-direction: column; gap: 8px; }
+.floating-buttons { position: fixed; right: 20px; bottom: 24px; z-index: 150; display: flex; flex-direction: column; gap: 8px; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s; }
 .floating-buttons .read-float-btn { display: none; }
 .floating-buttons.reading .read-float-btn { display: flex; }
+/* v4.7.7：移动端滑动隐藏——向右平移出屏幕 + 透明度归零 */
+@media (max-width: 768px) {
+    .floating-buttons.buttons-hidden { transform: translateX(72px); opacity: 0; pointer-events: none; }
+}
 .float-btn {
     width: 35px; height: 35px; border-radius: 10px;
     background: var(--surface); border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0,0,0,0.06);

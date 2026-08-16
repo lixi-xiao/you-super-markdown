@@ -358,10 +358,21 @@
     document.addEventListener('click', (e) => { if (!tocPopup.contains(e.target) && !floatTocBtn.contains(e.target)) tocPopup.classList.remove('active'); });
     shareModalClose.addEventListener('click', () => { shareModalOverlay.classList.remove('active'); shareQrcode.innerHTML = ''; });
     shareModalOverlay.addEventListener('click', (e) => { if (e.target === shareModalOverlay) { shareModalOverlay.classList.remove('active'); shareQrcode.innerHTML = ''; } });
+    // v4.7.7：移动端浮动按钮组滑动隐藏——滚动时向右滑出，停止 5 秒后显示
+    var _floatHideTimer = null;
+    function _floatShow() {
+        if (window.innerWidth <= 768) floatingButtons.classList.remove('buttons-hidden');
+    }
     window.addEventListener('scroll', () => {
         const scrollY = window.pageYOffset || document.documentElement.scrollTop;
         scrollToTopBtn.style.opacity = scrollY > 300 ? '1' : '0';
         scrollToTopBtn.style.pointerEvents = scrollY > 300 ? 'auto' : 'none';
+        // v4.7.7：移动端滑动时隐藏浮动按钮组，停止 5 秒后恢复
+        if (window.innerWidth <= 768) {
+            floatingButtons.classList.add('buttons-hidden');
+            if (_floatHideTimer) clearTimeout(_floatHideTimer);
+            _floatHideTimer = setTimeout(_floatShow, 5000);
+        }
         if (isReadingView) {
             if (scrollY <= 0) topBar.classList.remove('hidden');
             else if (scrollY > lastScrollY && scrollY > 80) topBar.classList.add('hidden');

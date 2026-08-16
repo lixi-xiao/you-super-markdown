@@ -251,17 +251,16 @@ if ($action === 'list') {
             }
             // v4.1.12：无图文章卡片封面回退到网站背景图
             // v4.1.13：卡片封面 API 优先（后台「网站背景 → 卡片封面 API」配置）
-            // v4.1.15：API 封面改走服务端图片池代理 cover.php（桌面 UA 拉横屏 + 缩略图 + 6h 缓存），
-            //          每卡取池中随机一张（不同卡不同图）；上传背景图仍直连
+            // v4.1.15：API 封面改走服务端图片池代理 cover.php（桌面 UA 拉横屏 + 缩略图 + 6h 缓存）
+            // v4.2.0：取消服务器本地缩略图池，无图卡片封面直接使用固定 16:9 图片 API（原图直连，清晰不模糊）；
+            //         每卡追加唯一参数 `_c`，防止浏览器同 URL 缓存成同一张图（每卡独立随机图）
             if ($cover === '') {
                 $bgType = $_siteConfig['bg_type'] ?? 'none';
-                $coverApi = trim((string)($_siteConfig['card_cover_api_url'] ?? ''));
-                if ($coverApi === '') $coverApi = trim((string)($_siteConfig['bg_api_url'] ?? ''));
-                if ($coverApi !== '') {
-                    $cover = 'cover.php?i=' . random_int(0, 23);
-                } elseif ($bgType === 'image' && !empty($_siteConfig['bg_image'])) {
+                if ($bgType === 'image' && !empty($_siteConfig['bg_image'])) {
                     $cover = $_siteConfig['bg_image'];
                     if (strpos($cover, 'data/') === 0) $cover = '/' . $cover;
+                } else {
+                    $cover = FIXED_IMG_API . (strpos(FIXED_IMG_API, '?') !== false ? '&' : '?') . '_c=' . random_int(1, 99999999);
                 }
             }
             $fileList[] = [
@@ -678,7 +677,13 @@ if ($action === 'rss_guide') {
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="css/style.css?v=<?= filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
-<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_siteConfig['bg_api_url'] ?? '') ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-bg-card-glass="<?= htmlspecialchars($_siteConfig['card_glass_style'] ?? 'frosted') ?>" data-user-glass-toggle="<?= !empty($_siteConfig['user_glass_toggle']) ? '1' : '0' ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
+<?php
+// v4.2.0：API 背景——空值回退固定 16:9 图片源；追加 `_t` 时间参数防浏览器缓存，每次进站换一张随机背景
+$_bgApiUrl = trim((string)($_siteConfig['bg_api_url'] ?? ''));
+if (($_siteConfig['bg_type'] ?? 'none') === 'api' && $_bgApiUrl === '') $_bgApiUrl = FIXED_IMG_API;
+if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : '?') . '_t=' . time();
+?>
+<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_bgApiUrl) ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($_siteTitle) ?></a></div>
     <div class="header-right">
@@ -722,12 +727,6 @@ if ($action === 'rss_guide') {
     <div class="user-dropdown-item" id="userDropdownProfile" data-action="profile" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span>编辑资料</span>
-    </div>
-    <!-- v4.1.16：液态玻璃个人开关（后台开启「用户液态玻璃开关」时显示；关闭后本设备记忆不再加载） -->
-    <div class="user-dropdown-item user-dropdown-glass" id="userDropdownGlass" style="display:none">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 2v20"/></svg>
-        <span>液态玻璃</span>
-        <span class="user-dropdown-glass-state" id="userDropdownGlassState">开</span>
     </div>
     <div class="user-dropdown-item user-dropdown-item-danger" id="userDropdownLogout" data-action="logout" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>

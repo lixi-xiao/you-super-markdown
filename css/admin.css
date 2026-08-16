@@ -2152,16 +2152,6 @@ td code {
     .toggle .slider::after { width: 25px; height: 25px; top: 3px; left: 3px; }
     .toggle input[type="checkbox"]:checked + .slider::after { transform: translateX(23px); }
 
-    /* v4.1.18-fix：毛玻璃/液态玻璃切换卡手机端紧凑横排（与 toggle 协调，不再 2 列大卡） */
-    .glass-vis-grid { grid-template-columns: 1fr; gap: 8px; max-width: 100% !important; }
-    .glass-vis-grid .bg-type-card {
-        display: flex; align-items: center; gap: 8px;
-        text-align: left; padding: 8px 12px;
-    }
-    .glass-vis-grid .bg-type-card .type-icon { margin: 0; flex: 0 0 28px; width: 28px; height: 28px; border-radius: 8px; }
-    .glass-vis-grid .bg-type-card .type-icon svg { width: 16px; height: 16px; }
-    .glass-vis-grid .bg-type-card .type-name { font-size: 0.82em; }
-
     /* 行内操作按钮组不折行挤压 */
     .ban-item-actions, .modal-actions { gap: 8px; }
 }

@@ -16,6 +16,8 @@ function appConfig($key, $default = '') {
 }
 // 版本唯一事实来源：app-config.json 的 version；代码禁止硬编码版本号
 define('APP_VERSION', appConfig('version', '0.0.0'));
+// v4.2.0：卡片封面 / API 背景固定图片源（16:9 横屏随机图，服务器不落地存储、不存缩略图）
+define('FIXED_IMG_API', 'https://uapis.cn/api/v1/random/image?category=acg');
 function generateCsrfToken() {
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -233,13 +235,12 @@ function loadSiteConfig() {
         'comment_notify_email' => '',
         // v4.0.0：站内全文搜索开关（关闭则前端仅按标题/摘要/标签过滤）
         'fulltext_search_enabled' => true,
-        // v4.1.16：卡片玻璃效果（毛玻璃/液态玻璃）+ 用户液态玻璃个人开关显示
-        'card_glass_style' => 'frosted',   // frosted 毛玻璃 / liquid 液态玻璃（苹果 Liquid Glass 风格）
-        'user_glass_toggle' => false,      // 是否在用户界面显示「液态玻璃」个人开关（低配设备可自行关闭）
         // v4.1.17：毛玻璃默认更透（50%），后台「卡片透明度」滑杆仍可 20-100% 自由调节
         'bg_card_opacity' => 50,
         'bg_blur_enabled' => false,
         'bg_blur_level' => 0,
+        // v4.2.0：API 背景固定默认源（后台可改，留空保存时自动回退该固定源）
+        'bg_api_url' => FIXED_IMG_API,
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;

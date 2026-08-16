@@ -824,7 +824,9 @@ if ($action === 'bg_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $bgImage = trim($input['bg_image'] ?? '');
     if ($bgImage !== '' && strpos($bgImage, 'data/bg/') !== 0 && !preg_match('#^https?://#i', $bgImage)) $bgImage = '';
     $config['bg_image'] = $bgImage;
+    // v4.2.0：API 背景固定默认源（留空保存自动回退固定 16:9 图片 API）
     $config['bg_api_url'] = trim($input['bg_api_url'] ?? '');
+    if ($config['bg_api_url'] === '') $config['bg_api_url'] = FIXED_IMG_API;
     $config['bg_blur_enabled'] = !empty($input['bg_blur_enabled']);
     $config['bg_blur_level'] = max(0, min(50, intval($input['bg_blur_level'] ?? 0)));
     $config['bg_card_opacity'] = max(50, min(100, intval($input['bg_card_opacity'] ?? 100)));

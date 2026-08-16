@@ -14,8 +14,19 @@ security_check();
 set_time_limit(0);
 ignore_user_abort(true);
 
-// v4.2.1：抓取源固定为代码常量（不受后台配置影响，任何更新后默认不变）
-$apiUrl = FIXED_IMG_API;
+// v4.2.1：抓取源默认固定为代码常量 FIXED_IMG_API（任何更新后默认不变）
+// v4.2.4：站长/超管后台可自定义封面图源（card_cover_api）——用户自定义则优先用自定义源，
+//         同样走本池化缓存策略（增量构建 + 节流 + SSRF 加固），留空回退 FIXED_IMG_API。
+$_coverCfg = loadSiteConfig();
+$apiUrl = trim((string)($_coverCfg['card_cover_api'] ?? ''));
+if ($apiUrl === '' || !preg_match('#^https?://#i', $apiUrl)) $apiUrl = FIXED_IMG_API;
+// 白名单校验：仅允许 http(s) 且非内网（复用 fetchHttpContent 的 SSRF 判定，抓取时再实际拦截）
+if (preg_match('#^https?://#i', $apiUrl)) {
+    $_parts = @parse_url($apiUrl);
+    if (!$_parts || empty($_parts['host']) || isPrivateHost(strtolower(trim($_parts['host'], '[]')))) {
+        $apiUrl = FIXED_IMG_API;
+    }
+}
 
 $poolDir  = __DIR__ . '/data/cache/covers';
 $poolN    = 24;           // 池大小（张）

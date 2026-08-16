@@ -133,58 +133,11 @@ function netease_getSongUrl($id) {
 }
 
 function netease_apiRequest($url, $timeout = 15, $cookies = '') {
-    $headers = [
-        'Referer: https://music.163.com/',
-        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    ];
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL => $url,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => $timeout,
-        CURLOPT_CONNECTTIMEOUT => 8,
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_HTTPHEADER => $headers,
-    ]);
-    if (!empty($cookies)) {
-        curl_setopt($ch, CURLOPT_COOKIE, $cookies);
-    }
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $error = curl_error($ch);
-    curl_close($ch);
-    if ($error || $httpCode !== 200 || empty($response)) return null;
-    $decoded = json_decode($response, true);
-    return is_array($decoded) ? $decoded : null;
+    // v4.2.4：改走 musicSafeRequest（受限重定向 + 白名单域名校验，Cookie 不外泄）
+    return musicSafeRequest($url, $timeout, $cookies, null, 'https://music.163.com/');
 }
 
 function netease_apiRequestPost($url, $songIds, $cookies = '') {
-    $headers = [
-        'Referer: https://music.163.com/',
-        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Content-Type: application/x-www-form-urlencoded',
-    ];
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL => $url,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 15,
-        CURLOPT_CONNECTTIMEOUT => 8,
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_HTTPHEADER => $headers,
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => 'ids=' . urlencode(json_encode($songIds)) . '&level=exhigh&encodeType=flac',
-    ]);
-    if (!empty($cookies)) {
-        curl_setopt($ch, CURLOPT_COOKIE, $cookies);
-    }
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $error = curl_error($ch);
-    curl_close($ch);
-    if ($error || $httpCode !== 200 || empty($response)) return null;
-    $decoded = json_decode($response, true);
-    return is_array($decoded) ? $decoded : null;
+    // v4.2.4：改走 musicSafeRequest（受限重定向 + 白名单域名校验，Cookie 不外泄）
+    return musicSafeRequest($url, 15, $cookies, 'ids=' . urlencode(json_encode($songIds)) . '&level=exhigh&encodeType=flac', 'https://music.163.com/');
 }

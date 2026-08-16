@@ -87,7 +87,8 @@
             var sw = w / s, sh = h / s;
             ctx.drawImage(img, (iw - sw) / 2, (ih - sh) / 2, sw, sh, 0, 0, w, h);
         }
-        // 对卡片区域做边缘折射位移：距边缘越近位移越大，中心不动；相位正弦保证平滑
+        // 对卡片区域做边缘折射位移：变形集中在边缘内侧 25% 带（曲面折射），
+        // 卡片边界处位移收敛为 0（与外部背景无缝融合，不生硬断层）；中心趋零
         function distortRect(x, y, w, h, kx, ky) {
             var cw = Math.max(4, Math.round(w * kx));
             var ch = Math.max(4, Math.round(h * ky));
@@ -103,8 +104,11 @@
             for (var by = 0; by < ch; by += BLOCK) {
                 for (var bx = 0; bx < cw; bx += BLOCK) {
                     var cx = (bx + BLOCK / 2) / cw, cy = (by + BLOCK / 2) / ch;
-                    var d = Math.min(cx, 1 - cx, cy, 1 - cy);      // 0=边缘 0.5=中心
-                    var amp = EDGE_AMP * Math.max(0, 1 - d * 2);   // 边缘最大、中心趋零
+                    var d = Math.min(cx, 1 - cx, cy, 1 - cy);        // 0=边界 0.5=中心
+                    if (d < 0.001 || d > 0.5) continue;
+                    var t = Math.min(d / 0.25, 1);                   // 边缘带 0→1
+                    // 边界收敛0、边缘内侧最强、中心保留轻微基线位移（整卡折射感）
+                    var amp = EDGE_AMP * (Math.sin(t * Math.PI) * (1 - d * 2) + 0.15);
                     if (amp < 0.5) continue;
                     var ph = (bx + by) * 0.13;
                     var dx = Math.round(Math.sin(ph) * amp);

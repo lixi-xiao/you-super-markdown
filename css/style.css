@@ -1226,7 +1226,20 @@ body.bg-blur .sidebar {
    v4.1.18：去掉 scrim 白遮罩（透光度最大化），改用文字白影保证可读；边缘反光强化（苹果风格亮边 + 内高光 + 高光斜斑）
    v4.1.18-fix：透明度再提（0.05→0.03 极淡玻璃，肉眼≈透明），blur 32px；边缘曲面反光（亮白边框+顶部内高光+高光斜斑+边缘暗角）；文字纯黑+白描边；封面图微模糊
    v4.1.18 配合 js/main.js Canvas 折射扭曲增强（跟随液态玻璃开关自动启用，边缘位移变形模拟曲面折射） */
-body.glass-liquid.bg-active .doc-card,
+/* doc-card（文章卡片）：左半 1/2 完全透明（封面图遮罩不显示、背景清晰透出），右半淡玻璃渐变正常显示玻璃效果 */
+body.glass-liquid.bg-active .doc-card {
+    background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0) 50%, rgba(255, 255, 255, 0.05) 60%, rgba(255, 255, 255, 0.09) 100%);
+    backdrop-filter: blur(10px) saturate(160%);
+    -webkit-backdrop-filter: blur(10px) saturate(160%);
+    border-color: rgba(255, 255, 255, 0.30);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.10),
+        0 2px 10px rgba(0, 0, 0, 0.04),
+        inset 0 1px 0 rgba(255, 255, 255, 0.35),
+        inset 0 0 24px rgba(255, 255, 255, 0.06);
+}
+/* 其他玻璃家族（正文/评论/分享等）：整体极淡玻璃（无封面，左右对称） */
 body.glass-liquid.bg-active .markdown-body,
 body.glass-liquid.bg-active .comment-section,
 body.glass-liquid.bg-active .cmt-input-box,
@@ -1236,15 +1249,25 @@ body.glass-liquid.bg-active .article-info-card,
 body.glass-liquid.bg-active .cmt-capsule-btn,
 body.glass-liquid.bg-active .cmt-user-inner {
     background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(32px) saturate(160%);
-    -webkit-backdrop-filter: blur(32px) saturate(160%);
-    border-color: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(10px) saturate(160%);
+    -webkit-backdrop-filter: blur(10px) saturate(160%);
+    border-color: rgba(255, 255, 255, 0.30);
     box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.12),
-        inset 0 1px 0 rgba(255, 255, 255, 0.65),
-        inset 0 0 18px rgba(255, 255, 255, 0.10);
+        0 12px 40px rgba(0, 0, 0, 0.10),
+        0 2px 10px rgba(0, 0, 0, 0.04),
+        inset 0 1px 0 rgba(255, 255, 255, 0.35),
+        inset 0 0 24px rgba(255, 255, 255, 0.06);
 }
-[data-theme="dark"] body.glass-liquid.bg-active .doc-card,
+[data-theme="dark"] body.glass-liquid.bg-active .doc-card {
+    background:
+        linear-gradient(90deg, rgba(22, 27, 34, 0) 0%, rgba(22, 27, 34, 0) 50%, rgba(22, 27, 34, 0.08) 60%, rgba(22, 27, 34, 0.14) 100%);
+    border-color: rgba(255, 255, 255, 0.10);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.38),
+        0 2px 10px rgba(0, 0, 0, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 0 24px rgba(0, 0, 0, 0.10);
+}
 [data-theme="dark"] body.glass-liquid.bg-active .markdown-body,
 [data-theme="dark"] body.glass-liquid.bg-active .comment-section,
 [data-theme="dark"] body.glass-liquid.bg-active .cmt-input-box,
@@ -1254,23 +1277,26 @@ body.glass-liquid.bg-active .cmt-user-inner {
 [data-theme="dark"] body.glass-liquid.bg-active .cmt-capsule-btn,
 [data-theme="dark"] body.glass-liquid.bg-active .cmt-user-inner {
     background: rgba(22, 27, 34, 0.12);
-    border-color: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.10);
     box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.14),
-        inset 0 0 18px rgba(0, 0, 0, 0.18);
+        0 12px 40px rgba(0, 0, 0, 0.38),
+        0 2px 10px rgba(0, 0, 0, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 0 24px rgba(0, 0, 0, 0.10);
 }
-/* 液态玻璃表面高光（玻璃反光斜斑）——主要卡片表面，模拟曲面环境光反射 */
+/* 液态玻璃表面高光：透明曲线边缘反光（顶部弧光 + 斜向环境光反射斑），模拟 iPhone 玻璃弧面 */
 body.glass-liquid.bg-active .doc-card::after {
     content: '';
     position: absolute; inset: 0; pointer-events: none;
     border-radius: inherit;
     background:
-        linear-gradient(135deg, rgba(255, 255, 255, 0.16) 0%, transparent 30%);
+        linear-gradient(135deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.05) 22%, transparent 34%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent 20%);
 }
 [data-theme="dark"] body.glass-liquid.bg-active .doc-card::after {
     background:
-        linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, transparent 30%);
+        linear-gradient(135deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.03) 22%, transparent 34%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 20%);
 }
 /* v4.1.18-fix：文字纯黑 + 四周白色描边，玻璃近全透背景下依然可读（暗色主题保持浅色字深描边） */
 body.glass-liquid.bg-active .doc-card .card-title,
@@ -1297,7 +1323,7 @@ body.glass-liquid.bg-active .doc-card .card-author {
         0 1px 2px rgba(0, 0, 0, 0.8),
         0 -1px 2px rgba(0, 0, 0, 0.8);
 }
-/* v4.1.18-fix：Canvas 折射增强启用（body.glass-refract）时降低背景模糊，保留边缘扭曲变形可见 */
+/* v4.1.18-fix：Canvas 折射增强启用（body.glass-refract）时进一步降低背景模糊（6px），保留边缘扭曲变形清晰可见 */
 body.glass-liquid.glass-refract.bg-active .doc-card,
 body.glass-liquid.glass-refract.bg-active .markdown-body,
 body.glass-liquid.glass-refract.bg-active .comment-section,
@@ -1307,8 +1333,8 @@ body.glass-liquid.glass-refract.bg-active .share-card,
 body.glass-liquid.glass-refract.bg-active .article-info-card,
 body.glass-liquid.glass-refract.bg-active .cmt-capsule-btn,
 body.glass-liquid.glass-refract.bg-active .cmt-user-inner {
-    backdrop-filter: blur(14px) saturate(160%);
-    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    backdrop-filter: blur(1px) saturate(150%);
+    -webkit-backdrop-filter: blur(1px) saturate(150%);
 }
 .comment-section {
     margin-top: 16px;

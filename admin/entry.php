@@ -61,6 +61,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$superAdmin) {
             $error = '系统错误：未找到高级管理员账号';
         } else {
+            // v4.5.0：OTP 登录同样绑定环境指纹 + token_version（并发踢旧）+ 签发 refresh token
+            $reqFp = trim((string)($_POST['fingerprint'] ?? ''));
+            if ($reqFp !== '' && preg_match('/^[a-f0-9]{16,64}$/i', $reqFp)) $reqFp = strtolower($reqFp);
+            else $reqFp = '';
+            $newTV = bumpUserTV($superAdmin['id']);
+            $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
+            $_SESSION['cmt_tv'] = $newTV;
+            issueRefreshToken($superAdmin['id'], $_SESSION['cmt_fp'], $newTV);
             $_SESSION['cmt_user'] = [
                 'id' => $superAdmin['id'],
                 'qq' => $superAdmin['qq'] ?? '',
@@ -117,6 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <form method="post">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+                <input type="hidden" name="fingerprint" id="fpInput">
                 <div class="entry-input-wrap">
                     <input class="entry-input" type="text" name="otp" placeholder="• • • • • •" maxlength="12" autocomplete="off" autofocus>
                     <div class="entry-input-label">一次性密码</div>
@@ -135,5 +144,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         </div>
     </div>
+    <script>
+    // v4.5.0：OTP 登录环境指纹——提交前计算并写入隐藏字段（与服务端绑定比对，换环境即失效）
+    (function() {
+        function fpFnv(s) { var h = 0x811c9dc5; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return ('00000000' + (h >>> 0).toString(16)).slice(-8); }
+        function fpCanvas() { try { var c = document.createElement('canvas'); c.width = 200; c.height = 40; var x = c.getContext('2d'); x.textBaseline = 'top'; x.font = '14px Arial'; x.fillStyle = '#f60'; x.fillRect(0, 0, 200, 40); x.fillStyle = '#069'; x.fillText('YouSuperMarkdown\u2620' + navigator.userAgent.length, 5, 12); var d = c.toDataURL(); return d.length + ':' + d.slice(-64); } catch (e) { return ''; } }
+        var parts = [navigator.language || '', new Date().getTimezoneOffset(), (screen.width || 0) + 'x' + (screen.height || 0), fpCanvas(), navigator.userAgent];
+        document.getElementById('fpInput').value = fpFnv(parts.join('|')) + fpFnv(parts.join('~')) + fpFnv(navigator.userAgent);
+    })();
+    </script>
 </body>
 </html>

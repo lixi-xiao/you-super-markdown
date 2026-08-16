@@ -1,16 +1,60 @@
 (function() {
-    // v4.4.1：标题锚点 slug 归一化——去除中文顿号/括号/全角标点与英文标点、空白转连字符、小写，
-    //         使渲染标题 id 与正文手写锚点（[目录](#一项目概述)）一致；模糊匹配时也用它比对。
-    function ymSlug(s) {
-        return String(s || '')
-            .toLowerCase()
-            .trim()
-            .replace(/<[^>]*>/g, '')
-            .replace(/[\u3000-\u303f\u2000-\u206f\u2e00-\u2e7f\\'"!@#$%^&*()+,./:;<=>?[\]{}`~|·「」『』〈〉《》【】（）]/g, '')
-            .replace(/\s+/g, '-')
-            .replace(/-+/g, '-')
-            .replace(/^-|-$/g, '');
+    // v4.5.0：环境指纹——hash(lang|时区|分辨率|canvas 像素|UA)，登录/评论/后台等登录态接口经 X-Fp 头携带；
+    //         服务端与会话绑定指纹比对，换浏览器/设备/隐私模式即判定环境变化。访客浏览不受影响。
+    //         注意：指纹必须在同一会话内稳定（同步生成，不引入异步哈希，避免首请求与后续请求指纹不一致）。
+    var ymFpCache = '';
+    function ymFnvHash(str) {
+        var h = 0x811c9dc5;
+        for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+        return ('00000000' + (h >>> 0).toString(16)).slice(-8);
     }
+    function ymCanvasHash() {
+        try {
+            var c = document.createElement('canvas');
+            c.width = 200; c.height = 40;
+            var ctx = c.getContext('2d');
+            ctx.textBaseline = 'top';
+            ctx.font = '14px Arial';
+            ctx.fillStyle = '#f60';
+            ctx.fillRect(0, 0, 200, 40);
+            ctx.fillStyle = '#069';
+            ctx.fillText('YouSuperMarkdown\u2620' + navigator.userAgent.length, 5, 12);
+            var d = c.toDataURL();
+            return d.length + ':' + d.slice(-64);
+        } catch (e) { return ''; }
+    }
+    function ymGetFp() {
+        if (ymFpCache) return ymFpCache;
+        try {
+            var parts = [
+                navigator.language || '',
+                new Date().getTimezoneOffset(),
+                (screen.width || 0) + 'x' + (screen.height || 0),
+                ymCanvasHash(),
+                navigator.userAgent
+            ];
+            ymFpCache = ymFnvHash(parts.join('|')) + ymFnvHash(parts.join('~')) + ymFnvHash(navigator.userAgent);
+            return ymFpCache;
+        } catch (e) {
+            ymFpCache = ymFnvHash('no-fp');
+            return ymFpCache;
+        }
+    }
+    // 暴露给后台/OTP 入口页面使用（后台原生表单无自定义头，用上报校验模式）
+    window.ymGetFp = ymGetFp;
+    // v4.5.0：所有 api.php 请求统一携带 X-Fp（登录态接口服务端校验环境）
+    (function ymPatchFetch() {
+        var origFetch = window.fetch;
+        if (!origFetch) return;
+        window.fetch = function(url, opts) {
+            opts = opts || {};
+            var u = String(url);
+            if (u.indexOf('api.php') !== -1) {
+                opts.headers = Object.assign({}, opts.headers || {}, { 'X-Fp': ymGetFp() });
+            }
+            return origFetch.call(this, url, opts);
+        };
+    })();
     (function applyBg() {
         var body = document.body;
         var bgType = body.dataset.bgType || 'none';
@@ -2117,11 +2161,31 @@
     }
     if (cmtConfirmOk) cmtConfirmOk.addEventListener('click', () => { if (cmtConfirmCb) cmtConfirmCb(); cmtConfirmOverlay.classList.remove('show'); cmtConfirmCb = null; });
     if (cmtConfirmCancel) cmtConfirmCancel.addEventListener('click', () => { cmtConfirmOverlay.classList.remove('show'); cmtConfirmCb = null; });
+    // v4.5.0：登录态过期/环境变化时尝试用 refresh token 自动续期（换环境则失败，需重新登录）
+    function ymTryRefresh() {
+        return fetch('api.php?action=refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+            .then(r => r.json())
+            .then(d => { if (d.success && d.user) { cmtUser = d.user; return true; } return false; })
+            .catch(() => false);
+    }
     function cmtCheckAuth() {
         return fetch('api.php?action=check').then(r => r.json()).then(d => {
             if (d.success && d.loggedIn) {
                 cmtUser = d.user;
                 if (d.isAdminFirstLogin) cmtAdminFirstLogin = true;
+            } else if (d.success && d.env_invalid) {
+                // v4.5.0：环境/会话异常——先尝试 refresh 自动续期，失败则提示重新登录
+                return ymTryRefresh().then(ok => {
+                    if (ok) {
+                        return fetch('api.php?action=check').then(r => r.json()).then(d2 => {
+                            if (d2.success && d2.loggedIn) { cmtUser = d2.user; cmtUpdateUI(); return; }
+                            cmtUpdateUI();
+                        });
+                    }
+                    cmtUser = null;
+                    showToast('登录环境已变化，请重新登录');
+                    cmtUpdateUI();
+                });
             }
             cmtUpdateUI();
         }).catch(() => cmtUpdateUI());
@@ -2147,6 +2211,60 @@
         if (cmtSection) cmtSection.style.display = 'none';
         if (cmtArea) cmtArea.style.display = 'none';
         if (cmtListSection) cmtListSection.style.display = 'none';
+    }
+    // ============================================================
+    // v4.5.0：本地背景音——独立于网易云播放器的第二路音频（互不干扰），单曲循环。
+    // 曲目由站长/超管后台上传（<100MB 自动转码），前端只能开/关不能选曲。
+    // 首次播放从服务器取并存 Cache Storage，之后一律从浏览器缓存播放，不重复消耗服务器流量。
+    // ============================================================
+    var bgmToggle = document.getElementById('bgmToggle');
+    var bgmAudio = document.getElementById('bgmAudio');
+    var bgmRow = document.getElementById('bgmRow');
+    var bgmStorageKey = 'ymd-bgm-on';
+    var BGM_URL = 'data/bgm/background.mp3';
+    var BGM_CACHE = 'ymd-bgm-v1';
+    function bgmLoadSource() {
+        if ('caches' in window) {
+            return caches.open(BGM_CACHE).then(function(c) {
+                return c.match(BGM_URL).then(function(hit) {
+                    if (hit) return hit.blob(); // 命中浏览器缓存 → 不再请求服务器
+                    return fetch(BGM_URL, { cache: 'force-cache' }).then(function(r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        var clone = r.clone();
+                        c.put(BGM_URL, clone).catch(function() {});
+                        return r.blob();
+                    });
+                });
+            });
+        }
+        return Promise.resolve(null); // 无 Cache API（非 https 环境）→ 直接走浏览器 HTTP 缓存
+    }
+    function bgmStart() {
+        bgmLoadSource().then(function(blob) {
+            if (blob) bgmAudio.src = URL.createObjectURL(blob);
+            else bgmAudio.src = BGM_URL;
+            return bgmAudio.play();
+        }).catch(function() {
+            // 自动播放策略拦截或加载失败：静默处理，用户点开关重试即可
+        });
+    }
+    function bgmStop() {
+        bgmAudio.pause();
+        bgmAudio.src = '';
+    }
+    function bgmSetOn(on) {
+        if (bgmToggle) bgmToggle.checked = !!on;
+        try { localStorage.setItem(bgmStorageKey, on ? '1' : '0'); } catch (e) {}
+        if (on) bgmStart(); else bgmStop();
+    }
+    if (bgmRow && document.body.dataset.bgMusic === '1') {
+        bgmRow.style.display = 'flex';
+        if (bgmToggle && bgmAudio) {
+            var bgmSaved = false;
+            try { bgmSaved = localStorage.getItem(bgmStorageKey) === '1'; } catch (e) {}
+            bgmToggle.addEventListener('change', function() { bgmSetOn(bgmToggle.checked); });
+            if (bgmSaved) { bgmToggle.checked = true; bgmStart(); }
+        }
     }
     var musicPlaylistId = document.body.dataset.musicPlaylist || '3778678';
     // v4.4.2：移除 QQ 音乐通道（cookie 检测过严、服务器端申请违反用户协议），仅保留网易云

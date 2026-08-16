@@ -683,7 +683,7 @@ $_bgApiUrl = trim((string)($_siteConfig['bg_api_url'] ?? ''));
 if (($_siteConfig['bg_type'] ?? 'none') === 'api' && $_bgApiUrl === '') $_bgApiUrl = FIXED_IMG_API;
 if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : '?') . '_t=' . time();
 ?>
-<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_bgApiUrl) ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($_siteConfig['music_auto_play'] ?? '') ?>">
+<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_bgApiUrl) ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($_siteConfig['music_auto_play'] ?? '') ?>" data-bg-music="<?= (!empty($_siteConfig['bg_music_enabled']) && is_file(__DIR__ . '/data/bgm/background.mp3')) ? '1' : '0' ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($_siteTitle) ?></a></div>
     <div class="header-right">
@@ -857,6 +857,11 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
 <div class="toc-popup" id="tocPopup"><div class="toc-popup-header"><div class="toc-popup-title">目录</div></div><div class="toc-popup-list" id="tocPopupList"></div></div>
 <div class="music-popup" id="musicPopup">
     <button class="music-lyric-toggle" id="musicLyrToggle" title="歌词">词</button>
+    <!-- v4.5.0：本地背景音开关（弹窗内；曲目由站长/超管后台上传，前端只能开/关，单曲循环；浏览器缓存播放不重复消耗服务器流量） -->
+    <div class="bgm-row" id="bgmRow" style="display:none">
+        <span class="bgm-label"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>&nbsp;本地背景音</span>
+        <label class="bgm-switch"><input type="checkbox" id="bgmToggle"><span class="slider"></span></label>
+    </div>
     <div class="music-player-main" id="musicPlayerMain">
         <div class="music-disc">
             <div class="disc-ring">
@@ -902,6 +907,8 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
     </div>
 </div>
 <audio id="musicAudio" preload="auto"></audio>
+<!-- v4.5.0：本地背景音独立播放器（与网易云播放器互不干扰，单曲循环） -->
+<audio id="bgmAudio" loop preload="none"></audio>
 <div class="reading-progress" id="readingProgress"></div>
 <div class="reading-progress-text" id="readingProgressText"></div>
 <div class="toast" id="toast"></div>

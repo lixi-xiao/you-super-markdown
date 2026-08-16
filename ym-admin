@@ -60,49 +60,122 @@ $CL_TEXT"
     /usr/local/bin/ym-admin notify "$NOTIFY_MSG" 2>/dev/null || true
 }
 
-# v3.3.13：环境自检与依赖补装——apply-update 完成后自动检测 php-gd（缩略图依赖）与缓存目录，
-# 缺失时自动安装（apt/yum）并重启 php-fpm；失败不阻断更新（img.php 降级透传原图），仅给出提示。
+# ============================================================
+# v4.5.0：声明式依赖清单——以后更新包新增功能要装依赖，只需在包的 version.json
+# 声明 "deps": ["<包名>", ...]，走正常更新通道（apply-update [4.9/6]）即自动安装，
+# 无需再改更新路径 / ym-admin 代码。内置兜底清单兼容旧包（无 deps 字段）。
+# 依赖安装失败 → 中断更新并自动回滚（保证功能完整）。
+# ============================================================
+REQUIRED_DEPS_FALLBACK="php-gd"
+
+# 读取更新包 version.json 声明的依赖（无 deps 字段 / 旧包返回空）
+pkg_declared_deps() {
+    local vj="$1"
+    [ -f "$vj" ] || { echo ""; return 0; }
+    php -r '
+        $d = json_decode(@file_get_contents($argv[1]), true);
+        $deps = is_array($d) ? ($d["deps"] ?? []) : [];
+        $out = [];
+        foreach ((array)$deps as $x) { if (is_string($x) && trim($x) !== "") $out[] = $x; }
+        echo implode(" ", $out);
+    ' "$vj" 2>/dev/null
+}
+
+# 检测单个依赖是否就绪（0=已就绪）
+dep_ready() {
+    case "$1" in
+        php-gd)  php -m 2>/dev/null | grep -qi '^gd$' ;;
+        ffmpeg)  command -v ffmpeg >/dev/null 2>&1 ;;
+        *)       command -v "$1" >/dev/null 2>&1 ;;
+    esac
+    return $?
+}
+
+# 安装单个依赖（0=成功；非 0=失败）
+install_one_dep() {
+    local name="$1" os_id=""
+    [ -r /etc/os-release ] && os_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
+    echo "  [环境] 缺少 $name，自动补装..."
+    case "$name" in
+        php-gd)
+            case "$os_id" in
+                ubuntu|debian)
+                    apt-get install -y "php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-gd" >/dev/null 2>&1 \
+                        || apt-get install -y php-gd >/dev/null 2>&1 \
+                        || { echo "  [环境] 警告：php-gd 安装失败"; return 1; }
+                    ;;
+                centos|rhel|fedora|almalinux|rocky|ol)
+                    yum install -y php-gd >/dev/null 2>&1 || dnf install -y php-gd >/dev/null 2>&1 \
+                        || { echo "  [环境] 警告：php-gd 安装失败"; return 1; }
+                    ;;
+                *)
+                    echo "  [环境] 未知发行版，无法自动安装 php-gd"
+                    return 1
+                    ;;
+            esac
+            # 重启 php-fpm 使扩展生效
+            for f in php-fpm "php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm"; do
+                if systemctl list-unit-files "$f.service" 2>/dev/null | grep -q "$f"; then
+                    systemctl restart "$f" 2>/dev/null || true; break
+                fi
+            done
+            ;;
+        ffmpeg)
+            case "$os_id" in
+                ubuntu|debian)
+                    apt-get install -y ffmpeg >/dev/null 2>&1 \
+                        || { echo "  [环境] 警告：ffmpeg 安装失败"; return 1; }
+                    ;;
+                centos|rhel|fedora|almalinux|rocky|ol)
+                    yum install -y ffmpeg >/dev/null 2>&1 || dnf install -y ffmpeg >/dev/null 2>&1 \
+                        || { echo "  [环境] 警告：ffmpeg 安装失败"; return 1; }
+                    ;;
+                *)
+                    echo "  [环境] 未知发行版，无法自动安装 ffmpeg"
+                    return 1
+                    ;;
+            esac
+            ;;
+        *)
+            echo "  [环境] 未知依赖 $name，跳过"
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+# v3.3.13/v4.5.0：环境自检与依赖补装——参数为空格分隔的依赖清单（缺省用内置兜底清单），
+# 自动检测缺失项并 apt/yum 安装；任一失败返回非 0（apply-update 据此中断并回滚）。
 ensure_env_deps() {
-    local cache_dir="$WEB_ROOT/data/cache/thumbs" fpm="" os_id=""
+    local cache_dir="$WEB_ROOT/data/cache/thumbs" deps_all deps_uniq d ok=0
     # ① 缩略图缓存目录（img.php 写缓存需 www-data 可写）
     if [ ! -d "$cache_dir" ]; then
         mkdir -p "$cache_dir" 2>/dev/null
         chown -R www-data:www-data "$WEB_ROOT/data/cache" 2>/dev/null
         echo "  [环境] 已创建缩略图缓存目录 $cache_dir"
     fi
-    # ② php-gd 扩展检测
-    if php -m 2>/dev/null | grep -qi '^gd$'; then
-        echo "  [环境] php-gd 已就绪（缩略图功能可用）"
-        return 0
-    fi
-    echo "  [环境] 缺少 php-gd 扩展（缩略图依赖），自动补装..."
-    [ -r /etc/os-release ] && os_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
-    case "$os_id" in
-        ubuntu|debian)
-            apt-get install -y "php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-gd" >/dev/null 2>&1 \
-                || apt-get install -y php-gd >/dev/null 2>&1 \
-                || { echo "  [环境] 警告：php-gd 安装失败（无网络/软件源问题），缩略图将降级为原图（可稍后运行 sudo apt-get install php-gd）"; return 1; }
-            ;;
-        centos|rhel|fedora|almalinux|rocky|ol)
-            yum install -y php-gd >/dev/null 2>&1 || dnf install -y php-gd >/dev/null 2>&1 \
-                || { echo "  [环境] 警告：php-gd 安装失败，缩略图将降级为原图（可稍后运行 sudo yum install php-gd）"; return 1; }
-            ;;
-        *)
-            echo "  [环境] 未知发行版，跳过自动补装（缩略图将降级为原图，可手动安装 php-gd 扩展）"
-            return 1
-            ;;
-    esac
-    # ③ 重启 php-fpm 使扩展生效
-    for f in php-fpm "php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm"; do
-        if systemctl list-unit-files "$f.service" 2>/dev/null | grep -q "$f"; then fpm="$f"; break; fi
+    # ② 汇总依赖清单（参数 + 内置兜底，去重）
+    deps_all="$REQUIRED_DEPS_FALLBACK $1"
+    deps_uniq=""
+    for d in $deps_all; do
+        case " $deps_uniq " in
+            *" $d "*) ;;
+            *) deps_uniq="$deps_uniq $d" ;;
+        esac
     done
-    [ -n "$fpm" ] && systemctl restart "$fpm" 2>/dev/null || true
-    if php -m 2>/dev/null | grep -qi '^gd$'; then
-        echo "  [环境] php-gd 安装成功，缩略图功能已生效"
-    else
-        echo "  [环境] php-gd 已安装，但 php-fpm 重启后仍未检测到（请手动重启 php-fpm 后确认）"
-    fi
-    return 0
+    for d in $deps_uniq; do
+        [ -z "$d" ] && continue
+        if dep_ready "$d"; then
+            echo "  [环境] $d 已就绪"
+        else
+            install_one_dep "$d" || ok=1
+            if ! dep_ready "$d"; then
+                echo "  [环境] $d 仍未就绪"
+                ok=1
+            fi
+        fi
+    done
+    [ "$ok" -eq 0 ]
 }
 
 # v3.2.0：更新包签名验证（RSA 非对称）——服务器内置公钥 /opt/you-markdown/update_signing_public.pem，
@@ -403,9 +476,10 @@ case "${1:-}" in
         ;;
 
     deps)
-        # v3.3.14：一键补装功能依赖（php-gd + 缩略图缓存目录）；与 apply-update [4.9/6] 共用 ensure_env_deps
+        # v3.3.14/v4.5.0：一键补装功能依赖（内置兜底清单 php-gd + 缩略图缓存目录）；
+        # 与 apply-update [4.9/6] 共用 ensure_env_deps（更新时按包内 deps 声明自动装）
         [ "$(id -u)" -ne 0 ] && { echo "错误：deps 需 root 权限（sudo ym-admin deps）"; exit 1; }
-        echo "=== 环境依赖检查与补装 ==="
+        echo "=== 环境依赖检查与补装（内置兜底清单：$REQUIRED_DEPS_FALLBACK） ==="
         ensure_env_deps
         ;;
 
@@ -708,9 +782,17 @@ case "${1:-}" in
         fi
         echo "  健康检查通过：主页 HTTP $HC_CODE，web↔母本核心文件 MD5 一致"
 
-        # 4.9 环境自检与依赖补装（v3.3.13）：php-gd + 缩略图缓存目录；失败不阻断更新
+        # 4.9 环境自检与依赖补装（v3.3.13/v4.5.0）：读取更新包 version.json 声明的 deps 清单
+        # + 内置兜底清单自动安装（ffmpeg/php-gd 等）；失败即回滚（保证功能完整）
         echo "[4.9/6] 环境自检与依赖补装..."
-        ensure_env_deps || true
+        PKG_DEPS=$(pkg_declared_deps "$STAGE_DIR/version.json")
+        if ensure_env_deps "$PKG_DEPS"; then
+            echo "  [环境] 依赖全部就绪"
+        else
+            echo "错误：依赖安装失败（内置兜底 + 包内声明：$REQUIRED_DEPS_FALLBACK $PKG_DEPS），触发自动回滚"
+            mark_failed "依赖安装失败（$REQUIRED_DEPS_FALLBACK $PKG_DEPS）"
+            exit 1
+        fi
 
         # 4.7 更新历史注入（v3.1.9）：changelog 已在 4.7a 提前读取（TMP_DIR 已清理）。
         # 不再逐版本生成独立公告——把本次更新内容追加到「更新历史.md」文章（首页公告只保留
@@ -888,7 +970,7 @@ case "${1:-}" in
         echo "  notify <消息>              发送通知邮件到管理员（测试/更新/运维消息）"
         echo "  set-smtp-pass [--pass=授权码] 修改 SMTP 授权码（需 sudo；密钥文件 + php-fpm 环境变量双写，自动发测试邮件）"
         echo "  apply-update              执行系统更新（完成后自动发通知邮件）"
-        echo "  deps                      检查并一键补装功能依赖（php-gd + 缩略图缓存目录，需 sudo）"
+        echo "  deps                      检查并一键补装功能依赖（内置兜底清单，需 sudo；更新时自动按包内 deps 声明安装）"
         echo "  rollback                  回滚到备份版本"
         echo "  hfish-panel               建立 SSH 隧道访问 Hfish 管理面板"
         echo "  hfish-status              查看 Hfish 蜜罐状态"

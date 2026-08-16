@@ -68,6 +68,28 @@ function db_init_schema($pdo) {
     } catch (Exception $e) {
         // 列已存在（幂等），忽略
     }
+    // v4.5.0：users 表新增 tv 字段（token_version，同账号并发踢旧——每次登录 +1，
+    // 旧会话/token 携带的 tv 与新值不符即失效）
+    try {
+        $pdo->exec('ALTER TABLE users ADD COLUMN tv INTEGER DEFAULT 0');
+    } catch (Exception $e) {
+        // 列已存在（幂等），忽略
+    }
+    // v4.5.0：refresh token 表（双 token 短时效：登录态过期后用 refresh 自动续期，
+    // 绑定环境指纹 + token_version，换环境/踢旧后失效）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        token_hash TEXT UNIQUE,
+        fp TEXT,
+        tv INTEGER DEFAULT 0,
+        expires INTEGER,
+        created INTEGER,
+        revoked INTEGER DEFAULT 0,
+        last_used INTEGER
+    )');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires)');
     // v2.9.0：邮箱验证码表（注册 / 写作者验证 / 超管确认链路）
     $pdo->exec('CREATE TABLE IF NOT EXISTS email_codes (
         id TEXT PRIMARY KEY,
@@ -177,6 +199,10 @@ function db_init_schema($pdo) {
     $pdo->exec('CREATE TABLE IF NOT EXISTS login_fails (ip TEXT, t INTEGER, acc TEXT)');
     // v2.11.0：老库 login_fails 无 acc 列（登录失败按账号维度计数），幂等补齐
     try { $pdo->exec('ALTER TABLE login_fails ADD COLUMN acc TEXT'); } catch (Exception $e) { /* 列已存在 */ }
+    // v4.5.0：限速表补 fp 列（环境指纹维度——指纹+IP 双维限速；旧记录 fp 为空按 IP 维度兼容）
+    foreach (['login_fails', 'reg_rates', 'comment_rates', 'honeypot_rates'] as $rt) {
+        try { $pdo->exec("ALTER TABLE {$rt} ADD COLUMN fp TEXT"); } catch (Exception $e) { /* 列已存在 */ }
+    }
     $pdo->exec('CREATE TABLE IF NOT EXISTS reg_rates (ip TEXT, t INTEGER)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS comment_rates (ip TEXT, t INTEGER)');
     // v4.4.0：注册蜜罐触发计数表（短时间连续命中蜜罐 → 自动封禁 IP）

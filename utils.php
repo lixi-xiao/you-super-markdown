@@ -173,11 +173,12 @@ function saveUsers($users) {
     // 全量替换（保持原函数语义：写入完整用户列表）
     // v2.5.4：INSERT OR REPLACE 防止列表内重复 id 触发唯一约束冲突导致事务回滚
     // v2.9.0：列清单加入 email（注册验证引入，漏列会导致全量替换时邮箱丢失）
+    // v4.5.0：列清单加入 tv（token_version 并发踢旧，漏列会导致全量替换时所有会话被误踢）
     $pdo = db();
     $pdo->beginTransaction();
     try {
         $pdo->exec('DELETE FROM users');
-        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, qq, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled, last_login, login_count) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, qq, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled, last_login, login_count, tv) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
         foreach ($users as $u) {
             $st->execute([
                 $u['id'] ?? '', $u['qq'] ?? '', $u['nickname'] ?? '', $u['password'] ?? '',
@@ -185,6 +186,7 @@ function saveUsers($users) {
                 $u['station_id'] ?? '', $u['created'] ?? '', $u['created_by'] ?? '',
                 $u['email'] ?? '', (int)($u['disabled'] ?? 0),
                 $u['last_login'] ?? '', (int)($u['login_count'] ?? 0),
+                (int)($u['tv'] ?? 0),
             ]);
         }
         $pdo->commit();
@@ -245,6 +247,8 @@ function loadSiteConfig() {
         'card_cover_api' => '',
         // v4.4.0：音乐默认自动播放歌曲名关键词（站长/超管后台可配；留空则打开歌单不自动播放）
         'music_auto_play' => '',
+        // v4.4.3：本地背景音乐开关（站长/超管后台上传单曲，前台播放器弹窗内仅可开/关，单曲循环）
+        'bg_music_enabled' => false,
         // v4.4.0：注册蜜罐自动封禁——短时间（10 分钟）内连续命中蜜罐达阈值即自动封禁 IP
         'honeypot_ban_count' => 3,          // 触发次数（超管可调）
         'honeypot_ban_duration' => 3600,    // 封禁秒数（超管可调，默认 1 小时；0=永久）
@@ -275,6 +279,9 @@ function saveSiteConfig($config) {
 
 // ===== v4.4.2：QQ 音乐通道已移除（cookie 检测过严、服务器端申请违反用户协议），
 // qqCookieCheck() 随之删除 =====
+// v4.5.0：背景音乐上传转码见下方 v4.5.0 分区（<100MB 多格式 → ffmpeg 转 96kbps mp3）
+
+
 function getStationPath() {
     $config = loadSiteConfig();
     return ($config['station_path'] ?? 'station') ?: 'station';
@@ -521,7 +528,9 @@ function generateJWT($userId, $role, $ttl = 1800) {
         'role' => $role,
         'iat' => time(),
         'exp' => time() + $ttl,
-        'jti' => bin2hex(random_bytes(8))
+        'jti' => bin2hex(random_bytes(8)),
+        // v4.5.0：携带 token_version——同账号新登录使 tv+1，旧 JWT 立即失效（并发踢旧）
+        'tv' => getUserTV($userId)
     ])), '+/', '-_'), '=');
     $signature = rtrim(strtr(base64_encode(hash_hmac('sha256', "{$header}.{$payload}", getJWTSecret(), true)), '+/', '-_'), '=');
     return "{$header}.{$payload}.{$signature}";
@@ -545,6 +554,8 @@ function validateJWT($token) {
             if ($u['id'] === $uid) { $found = true; break; }
         }
         if (!$found) return false;
+        // v4.5.0：token_version 比对——同账号新登录（tv+1）后旧 JWT 立即失效
+        if (!jwtTVMatches($data)) return false;
     }
     return $data;
 }
@@ -1265,14 +1276,19 @@ function get_public_user($id) {
 
 /**
  * v2.11.0：登录失败计数（IP+账号双级写入 login_fails）
+ * v4.5.0：$fp 非空时额外按环境指纹计数（防换 IP 绕过）
  */
-function loginFailAdd($ip, $qq) {
-    db_exec('INSERT INTO login_fails (ip, t, acc) VALUES (?,?,?)', [$ip, time(), $qq]);
+function loginFailAdd($ip, $qq, $fp = '') {
+    db_exec('INSERT INTO login_fails (ip, t, acc, fp) VALUES (?,?,?,?)', [$ip, time(), $qq, (string)$fp]);
 }
-/** 60 秒窗口内，同 IP 或同账号失败次数（二者任一命中即计数） */
-function loginFailCount($ip, $qq, $window = 60) {
+/** 60 秒窗口内，同 IP / 同账号 / 同指纹跨 IP 失败次数（任一命中即计数） */
+function loginFailCount($ip, $qq, $window = 60, $fp = null) {
     $cutoff = time() - $window;
-    $r = db_one('SELECT COUNT(*) AS c FROM login_fails WHERE t > ? AND (ip = ? OR acc = ?)', [$cutoff, $ip, $qq]);
+    if ($fp !== null && $fp !== '') {
+        $r = db_one('SELECT COUNT(*) AS c FROM login_fails WHERE t > ? AND (ip = ? OR acc = ? OR (fp = ? AND fp != ""))', [$cutoff, $ip, $qq, $fp]);
+    } else {
+        $r = db_one('SELECT COUNT(*) AS c FROM login_fails WHERE t > ? AND (ip = ? OR acc = ?)', [$cutoff, $ip, $qq]);
+    }
     return (int)($r['c'] ?? 0);
 }
 function loginFailClear($ip, $qq) {
@@ -1291,6 +1307,146 @@ function lockLogin($key, $seconds) {
         'INSERT INTO login_locks (key, locked_until) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET locked_until = ?',
         [$key, time() + $seconds, time() + $seconds]
     );
+}
+
+// ============================================================
+// v4.5.0：Cookie 加固与风控——环境指纹绑定 / 双 token(access+refresh) /
+// token_version 并发踢旧 / 敏感操作环境校验 / 指纹+IP 双维限速
+// ============================================================
+
+// ---- 环境指纹 ----
+// 指纹 = hash(前端上报 fp(lang|tz|screen|canvas) | UA)。前端统一经 X-Fp 请求头携带，
+// 仅登录态（登录/注册/评论/后台）校验；访客浏览不受影响。
+function fp_hmac_key() {
+    $f = __DIR__ . '/data/.fp_hmac';
+    if (!file_exists($f)) {
+        file_put_contents($f, bin2hex(random_bytes(32)), LOCK_EX);
+        @chmod($f, 0600);
+    }
+    return file_get_contents($f);
+}
+/** 从请求头 X-Fp 取前端上报指纹（校验格式，防注入） */
+function getRequestFp() {
+    $fp = trim((string)($_SERVER['HTTP_X_FP'] ?? ''));
+    return ($fp !== '' && preg_match('/^[a-f0-9]{16,64}$/i', $fp)) ? strtolower($fp) : '';
+}
+/** 登录/签发时计算服务端绑定指纹（前端指纹 + UA，防仅改 UA/仅改 canvas 单独绕过） */
+function computeSessionFp($clientFp) {
+    $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 256);
+    return hash('sha256', ($clientFp !== '' ? (string)$clientFp : 'no-fp') . '|' . $ua);
+}
+/** 比对请求环境与会话绑定环境是否一致 */
+function fpMatches($boundFp, $requestFp) {
+    if ($boundFp === '' || $requestFp === '') return false;
+    return hash_equals((string)$boundFp, computeSessionFp($requestFp));
+}
+/**
+ * 校验当前登录态会话的环境与版本：
+ * - 未登录 → false
+ * - 旧会话（升级 v4.5.0 前签发、无 cmt_fp）→ false（升级即全量重登）
+ * - token_version 与 users 表不一致（被新登录踢旧）→ false
+ * - 请求指纹与会话绑定指纹不一致（换浏览器/设备/隐私模式）→ false
+ */
+function requireSessionEnv() {
+    if (empty($_SESSION['cmt_user'])) return false;
+    if (empty($_SESSION['cmt_fp'])) return false;
+    if (!isset($_SESSION['cmt_tv'])) return false;
+    $uid = $_SESSION['cmt_user']['id'] ?? '';
+    if ($uid === '' || (int)$_SESSION['cmt_tv'] !== getUserTV($uid)) return false;
+    return fpMatches($_SESSION['cmt_fp'], getRequestFp());
+}
+
+// ---- token_version（同账号并发踢旧）----
+function getUserTV($uid) {
+    $r = db_one('SELECT tv FROM users WHERE id = ?', [$uid]);
+    return (int)($r['tv'] ?? 0);
+}
+/** 登录成功时调用：tv+1 使旧会话/旧 refresh 全部失效 */
+function bumpUserTV($uid) {
+    db_exec('UPDATE users SET tv = tv + 1 WHERE id = ?', [$uid]);
+    return getUserTV($uid);
+}
+
+// ---- 双 token：refresh（httpOnly Cookie，7 天，绑定指纹 + tv）----
+const REFRESH_TTL = 604800; // 7 天
+/** 签发 refresh token（写库 + 写 httpOnly Cookie），返回明文 token */
+function issueRefreshToken($uid, $sessionFp, $tv) {
+    $token = bin2hex(random_bytes(32));
+    db_exec('INSERT INTO refresh_tokens (id, user_id, token_hash, fp, tv, expires, created) VALUES (?,?,?,?,?,?,?)',
+        [bin2hex(random_bytes(8)), $uid, hash('sha256', $token), (string)$sessionFp, (int)$tv, time() + REFRESH_TTL, time()]);
+    setcookie('ym_rt', $token, [
+        'expires' => time() + REFRESH_TTL,
+        'path' => '/',
+        'secure' => !empty($_SERVER['HTTPS']) || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https'),
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
+    return $token;
+}
+/**
+ * 消费 refresh token：校验存在/未吊销/未过期/指纹匹配/tv 匹配，成功返回记录数组，失败返回 null。
+ * 换环境（指纹不匹配）/被踢（tv 落后）→ 无效，触发重新登录。
+ */
+function consumeRefreshToken($token, $requestFp, $userTV) {
+    if (!is_string($token) || strlen($token) !== 64 || !ctype_xdigit($token)) return null;
+    $row = db_one('SELECT * FROM refresh_tokens WHERE token_hash = ?', [hash('sha256', $token)]);
+    if (!$row || !empty($row['revoked'])) return null;
+    if ((int)$row['expires'] < time()) { db_exec('DELETE FROM refresh_tokens WHERE id = ?', [$row['id']]); return null; }
+    if (!hash_equals((string)$row['fp'], computeSessionFp($requestFp))) return null;
+    if ((int)$row['tv'] !== (int)$userTV) return null;
+    db_exec('UPDATE refresh_tokens SET last_used = ? WHERE id = ?', [time(), $row['id']]);
+    return $row;
+}
+/** 吊销用户全部 refresh token（登出/封禁/重置密码时调用） */
+function revokeUserRefreshTokens($uid) {
+    db_exec('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', [$uid]);
+}
+function clearRefreshCookie() {
+    if (isset($_COOKIE['ym_rt'])) {
+        setcookie('ym_rt', '', ['expires' => time() - 42000, 'path' => '/', 'httponly' => true, 'samesite' => 'Strict']);
+    }
+}
+/** v4.5.0：JWT payload 携带 token_version，校验时比对（超管 OTP 会话同样被踢旧） */
+function jwtTVMatches($data) {
+    $uid = $data['sub'] ?? '';
+    return $uid !== '' && (int)($data['tv'] ?? 0) === getUserTV($uid);
+}
+
+// ---- 背景音乐上传转码（v4.5.0：<100MB 常见音频格式 → ffmpeg 转 96kbps mp3）----
+function ffmpegAvailable() {
+    @exec('ffmpeg -version 2>&1', $o, $rc);
+    return $rc === 0;
+}
+function saveBgMusicFile($tmpPath, $origName) {
+    if (!is_uploaded_file($tmpPath)) return [false, '上传失败，请重试'];
+    $ext = strtolower(pathinfo((string)$origName, PATHINFO_EXTENSION));
+    $allow = ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg', 'opus', 'wma', 'ape'];
+    if (!in_array($ext, $allow, true)) return [false, '不支持的音频格式（支持：' . implode('/', $allow) . '）'];
+    $size = @filesize($tmpPath);
+    if ($size === false || $size <= 0) return [false, '文件读取失败'];
+    if ($size > 100 * 1024 * 1024) return [false, '文件过大（上限 100MB）'];
+    if (!ffmpegAvailable()) return [false, '服务器缺少 ffmpeg 转码组件，无法自动压缩（请改用 mp3 直传或联系管理员）'];
+    $dir = __DIR__ . '/data/bgm';
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    $tmpOut = $dir . '/.bgm_tmp_' . bin2hex(random_bytes(4)) . '.mp3';
+    $dst = $dir . '/background.mp3';
+    // 96kbps 立体声 mp3：背景音乐在保证听感的同时最大限度节省流量
+    $cmd = 'ffmpeg -y -loglevel error -i ' . escapeshellarg($tmpPath) . ' -codec:a libmp3lame -b:a 96k -ac 2 ' . escapeshellarg($tmpOut) . ' 2>&1';
+    @exec($cmd, $out, $rc);
+    if ($rc !== 0 || !is_file($tmpOut)) {
+        @unlink($tmpOut);
+        $err = trim(implode("\n", (array)$out));
+        $err = $err === '' ? '音频无法解码' : (mb_strlen($err, 'UTF-8') > 120 ? mb_substr($err, 0, 120, 'UTF-8') . '…' : $err);
+        return [false, '音频转码失败：' . $err];
+    }
+    if (!@rename($tmpOut, $dst)) { @unlink($tmpOut); return [false, '保存失败，请检查目录权限']; }
+    @chmod($dst, 0644);
+    return [true, '背景音乐已更新并自动压缩为 ' . round(@filesize($dst) / 1024 / 1024, 1) . ' MB（96kbps mp3）'];
+}
+/** v4.4.3/v4.5.0：本地背景音乐当前文件大小（字节），无文件返回 0 */
+function bgMusicSize() {
+    $f = __DIR__ . '/data/bgm/background.mp3';
+    return is_file($f) ? (int)@filesize($f) : 0;
 }
 
 /**
@@ -1702,16 +1858,22 @@ function reorderAnnouncements($ids) {
 function updateAnnouncementExists($version) {
     return (bool)db_one('SELECT 1 FROM announcement WHERE type = ? AND title LIKE ? LIMIT 1', ['update', '%' . $version . '%']);
 }
-// 频率计数（滑动窗口）：table 为 login_fails / reg_rates / comment_rates
-function db_rate_count($table, $ip, $window) {
+// 频率计数（滑动窗口）：table 为 login_fails / reg_rates / comment_rates / honeypot_rates
+// v4.5.0：$fp 非空时按「指纹+IP」双维计数——命中同 IP 或同指纹跨 IP 都计数（防换 IP 绕过限速）
+function db_rate_count($table, $ip, $window, $fp = null) {
     $now = time();
     $cutoff = $now - $window;
+    if ($fp !== null && $fp !== '') {
+        $st = db()->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE t > ? AND (ip = ? OR (fp = ? AND fp != ''))");
+        $st->execute([$cutoff, $ip, $fp]);
+        return (int)($st->fetch()['c'] ?? 0);
+    }
     $st = db()->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE ip = ? AND t > ?");
     $st->execute([$ip, $cutoff]);
     return (int)($st->fetch()['c'] ?? 0);
 }
-function db_rate_add($table, $ip) {
-    db_exec("INSERT INTO {$table} (ip, t) VALUES (?,?)", [$ip, time()]);
+function db_rate_add($table, $ip, $fp = '') {
+    db_exec("INSERT INTO {$table} (ip, fp, t) VALUES (?,?,?)", [$ip, (string)$fp, time()]);
     // v2.5.4：改为概率清理（1/64 触发），降低每次写入的写放大；
     // 过期记录由 db_rate_count() 的 t>cutoff 条件过滤，不影响计数判定
     if (random_int(0, 63) === 0) {

@@ -17,6 +17,28 @@ if (!validateJWT($jwt)) {
     exit;
 }
 
+// v4.5.0：升级即全量重登 + 并发踢旧——旧会话（无 cmt_fp/cmt_tv）或 token_version 不匹配（被新登录踢出）→ 强制重登
+if (empty($_SESSION['cmt_fp']) || !isset($_SESSION['cmt_tv']) || (int)$_SESSION['cmt_tv'] !== getUserTV($_SESSION['cmt_user']['id'] ?? '')) {
+    session_unset();
+    session_destroy();
+    header('Location: /?admin_login=1&env=1');
+    exit;
+}
+
+// v4.5.0：后台写操作环境校验——登录环境变化（换浏览器/设备/隐私模式/被踢）时拒绝所有后台写操作。
+// 后台页面为原生表单 POST（无法带自定义头），采用「JS 上报校验」：页面加载后前端把环境指纹上报
+// api.php?action=fp_report，服务端比对会话绑定指纹，一致才置 $_SESSION['cmt_fp_ok']=1。
+function requireAdminEnv() {
+    if (!empty($_SESSION['cmt_fp_ok'])) return true;
+    if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    header('Location: /?admin_login=1&env=1');
+    exit;
+}
+
 // v2.10.0-fix：登出处理前置（HTML 输出前，避免 header 失效导致退不出去）。
 // 消费型 CSRF token 被页面内其他表单消耗后，同源请求走 Referer/Origin 兜底强制销毁；
 // 同时吊销 JWT jti（入黑名单）+ 清除 PHPSESSID cookie，杜绝 session 残留导致超管会话复活。
@@ -36,6 +58,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])) {
     }
     header('Location: /?logged_out=1');
     exit;
+}
+
+// v4.5.0：除登出外的所有后台 POST 均需环境校验（登录环境变化/被踢 → 拒绝写操作）
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireAdminEnv();
 }
 
 $users = loadUsers();
@@ -667,6 +694,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['bg_image']) || isse
         $config['music_cookies'] = trim($_POST['music_cookies'] ?? '');
         // v4.4.0：默认播放歌曲关键词（留空则不自动播放）
         $config['music_auto_play'] = mb_substr(trim($_POST['music_auto_play'] ?? ''), 0, 60, 'UTF-8');
+        // v4.5.0：本地背景音乐开关 + 上传替换（<100MB 常见音频 → 服务器 ffmpeg 自动转码 96kbps mp3）
+        $config['bg_music_enabled'] = !empty($_POST['bg_music_enabled']);
+        if (!empty($_FILES['bg_music_file']['name'])) {
+            $upR = saveBgMusicFile($_FILES['bg_music_file']['tmp_name'], $_FILES['bg_music_file']['name']);
+            if ($upR[0]) auditLog('bg_music_upload', 'bg_music', $upR[1]);
+            else auditLog('bg_music_upload_fail', 'bg_music', $upR[1]);
+        }
         saveSiteConfig($config);
         auditLog('ui_config', 'site_config', '修改主界面及功能设置');
         header('Location: dashboard.php?tab=ui&msg=saved');
@@ -1666,6 +1700,16 @@ $banMsg = $_GET['bmsg'] ?? '';
             <input class="form-input" type="text" id="musicNetCookieInput" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
             <p class="form-hint">配置后可播放网易云 VIP 歌曲</p>
         </div>
+        <!-- v4.5.0：本地背景音乐——超管/站长后台上传单曲作默认背景音，前台只能开/关不能选曲；单曲循环，浏览器缓存不重复消耗服务器流量；<100MB 常见音频自动转码压缩 -->
+        <div class="form-group">
+            <div class="toggle-row">
+                <label class="toggle-label">本地背景音乐</label>
+                <label class="switch"><input type="checkbox" id="bgMusicToggle" <?= !empty($config['bg_music_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
+                <div class="toggle-desc">开启后前台播放器弹窗内出现「本地背景音」开关（单曲循环，播放器与网易云互不干扰）</div>
+            </div>
+            <input class="form-input" type="file" id="bgMusicFileInput" name="bg_music_file" accept=".mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.wma,audio/*" style="margin-top:8px">
+            <p class="form-hint" id="bgMusicStatus"><?php $bmSize = bgMusicSize(); echo $bmSize > 0 ? ('当前背景音：' . round($bmSize / 1024 / 1024, 1) . ' MB（上传新文件可替换）') : '尚未上传背景音乐（mp3/wav/flac/m4a 等 ≤100MB，服务器自动转码压缩为 96kbps mp3）'; ?></p>
+        </div>
     </div>
     <div class="card">
         <div class="card-title">
@@ -1743,7 +1787,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <div class="preview-overlay"><span id="previewBgLabel">无背景</span><span id="previewBlurLabel"></span></div>
         </div>
     </div>
-    <form method="post" id="bgForm">
+    <form method="post" id="bgForm" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
         <input type="hidden" name="_ui_save" value="1">
         <input type="hidden" name="bg_type" id="formBgType" value="<?= htmlspecialchars($bgType) ?>">
@@ -1762,6 +1806,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         <input type="hidden" name="music_playlist_id" id="formMusicNetease" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>">
         <input type="hidden" name="music_auto_play" id="formMusicAutoPlay" value="<?= htmlspecialchars($config['music_auto_play'] ?? '') ?>">
         <input type="hidden" name="music_cookies" id="formMusicNetCookie" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>">
+        <input type="hidden" name="bg_music_enabled" id="formBgMusicEnabled" value="<?= !empty($config['bg_music_enabled']) ? '1' : '' ?>">
         <div style="display:flex;justify-content:flex-end;gap:10px">
             <button type="button" class="btn btn-outline" onclick="resetBg()">重置</button>
             <button type="submit" class="btn btn-primary">保存配置</button>
@@ -1822,7 +1867,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         }
         window.removeBgImage = function() { if (confirm('确定移除背景图片？')) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
-        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formSiteTitle').value = document.getElementById('siteTitleInput').value.trim(); document.getElementById('formRegEnabled').value = document.getElementById('regToggle').checked ? '1' : ''; document.getElementById('formGuestComments').value = document.getElementById('guestToggle').checked ? '1' : ''; document.getElementById('formSuperComment').value = document.getElementById('superCommentToggle').checked ? '1' : ''; document.getElementById('formNotifyEnabled').value = document.getElementById('notifyToggle').checked ? '1' : ''; document.getElementById('formNotifyEmail').value = document.getElementById('notifyEmailInput').value.trim(); document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicAutoPlay').value = document.getElementById('musicAutoPlayInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); });
+        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formSiteTitle').value = document.getElementById('siteTitleInput').value.trim(); document.getElementById('formRegEnabled').value = document.getElementById('regToggle').checked ? '1' : ''; document.getElementById('formGuestComments').value = document.getElementById('guestToggle').checked ? '1' : ''; document.getElementById('formSuperComment').value = document.getElementById('superCommentToggle').checked ? '1' : ''; document.getElementById('formNotifyEnabled').value = document.getElementById('notifyToggle').checked ? '1' : ''; document.getElementById('formNotifyEmail').value = document.getElementById('notifyEmailInput').value.trim(); document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicAutoPlay').value = document.getElementById('musicAutoPlayInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formBgMusicEnabled').value = document.getElementById('bgMusicToggle').checked ? '1' : ''; });
         <?php if ($bgType === 'api' && $bgApiUrl): ?>
         (function() { var u=<?= json_encode($bgApiUrl) ?>; var img=new Image(); img.onload=function(){previewApiSrc=u;updatePreview();}; img.src=u; })();
         <?php endif; ?>
@@ -2985,6 +3030,16 @@ function ymOpenUserDetail(btn) {
     document.getElementById('udBody').innerHTML = h;
     document.getElementById('userDetailModal').style.display = 'flex';
 }
+</script>
+<script>
+// v4.5.0：环境指纹上报校验——页面加载后上报当前环境指纹（与登录时一致的算法），服务端比对会话绑定指纹
+(function() {
+    function fpFnv(s) { var h = 0x811c9dc5; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return ('00000000' + (h >>> 0).toString(16)).slice(-8); }
+    function fpCanvas() { try { var c = document.createElement('canvas'); c.width = 200; c.height = 40; var x = c.getContext('2d'); x.textBaseline = 'top'; x.font = '14px Arial'; x.fillStyle = '#f60'; x.fillRect(0, 0, 200, 40); x.fillStyle = '#069'; x.fillText('YouSuperMarkdown\u2620' + navigator.userAgent.length, 5, 12); var d = c.toDataURL(); return d.length + ':' + d.slice(-64); } catch (e) { return ''; } }
+    var parts = [navigator.language || '', new Date().getTimezoneOffset(), (screen.width || 0) + 'x' + (screen.height || 0), fpCanvas(), navigator.userAgent];
+    var fp = fpFnv(parts.join('|')) + fpFnv(parts.join('~')) + fpFnv(navigator.userAgent);
+    fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp } }).catch(function() {});
+})();
 </script>
 </body>
 </html>

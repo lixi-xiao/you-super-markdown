@@ -1239,6 +1239,10 @@ body[data-text-contrast="light"] {
     color: #89b4fa; border-color: #45475a; background: #1e1e2e;
 }
 [data-theme="dark"] .doc-card:hover { border-color: hsl(var(--accent-hue), var(--accent-sat), 40%); }
+/* v4.7.9：黑色模式首页卡片简介可读性改善——加轻微描边使其在封面图上清晰可辨 */
+[data-theme="dark"] .card-excerpt {
+    text-shadow: 0 0 3px rgba(0,0,0,0.6), 0 0 1px rgba(0,0,0,0.8);
+}
 [data-theme="dark"] .float-btn:hover { background: #161b22; }
 [data-theme="dark"] .share-card,
 [data-theme="dark"] .article-info-card { background: #0d1117; }

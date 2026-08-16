@@ -220,6 +220,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         // v4.2.0：API 背景固定默认源（留空保存自动回退固定 16:9 图片 API）
         $config['bg_api_url'] = trim($_POST['bg_api_url']??'');
         if ($config['bg_api_url'] === '') $config['bg_api_url'] = FIXED_IMG_API;
+        // v4.2.4：首页卡片封面图片源（用户自定义则优先，留空回退 FIXED_IMG_API，走同一池化缓存策略）
+        $config['card_cover_api'] = trim($_POST['card_cover_api']??'');
         $config['bg_blur_enabled'] = !empty($_POST['bg_blur_enabled']);
         $config['bg_blur_level'] = max(0, min(50, intval($_POST['bg_blur_level']??0)));
         $config['bg_card_opacity'] = max(20, min(100, intval($_POST['bg_card_opacity']??100)));
@@ -584,6 +586,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     $bgType = $config['bg_type'] ?? 'none';
     $bgImage = $config['bg_image'] ?? '';
     $bgApiUrl = $config['bg_api_url'] ?? '';
+    $cardCoverApi = $config['card_cover_api'] ?? '';
     $bgBlurEnabled = !empty($config['bg_blur_enabled']);
     $bgBlurLevel = $config['bg_blur_level'] ?? 0;
     $bgCardOpacity = $config['bg_card_opacity'] ?? 100;
@@ -660,6 +663,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         </div>
         <div id="apiTestResult" style="margin-top:8px"></div>
     </div>
+    <!-- v4.2.4：首页卡片封面图片源（用户自定义则优先，留空回退固定源，走同一池化缓存策略） -->
+    <div class="card">
+        <div class="card-title"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>首页卡片封面</div>
+        <div class="form-group">
+            <label class="form-label">卡片封面图片 API URL（可选）</label>
+            <div class="api-url-group">
+                <input class="form-input" type="url" id="cardCoverApiInput" value="<?= htmlspecialchars($cardCoverApi) ?>" placeholder="<?= htmlspecialchars(FIXED_IMG_API) ?>">
+                <button class="btn btn-sm btn-outline" type="button" onclick="testCardCoverApi()">测试</button>
+            </div>
+            <p class="form-hint">无图文章卡片的封面图源（16:9 横屏）。留空使用默认固定源；自定义后走服务端缩略图池缓存，加载快且省流量</p>
+        </div>
+        <div id="cardCoverApiTestResult" style="margin-top:8px"></div>
+    </div>
     <div class="card">
         <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>模糊与透明度</div>
         <div class="toggle-row" id="bgBlurRow" style="display:<?= $bgType!=='none'?'flex':'none' ?>">
@@ -691,6 +707,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <input type="hidden" name="bg_type" id="formBgType" value="<?= htmlspecialchars($bgType) ?>">
         <input type="hidden" name="bg_image" id="formBgImage" value="<?= htmlspecialchars($bgImage) ?>">
         <input type="hidden" name="bg_api_url" id="formBgApiUrl" value="<?= htmlspecialchars($bgApiUrl) ?>">
+        <input type="hidden" name="card_cover_api" id="formCardCoverApi" value="<?= htmlspecialchars($cardCoverApi) ?>">
         <input type="hidden" name="bg_blur_enabled" id="formBlurEnabled" value="<?= $bgBlurEnabled?'1':'' ?>">
         <input type="hidden" name="bg_blur_level" id="formBlurLevel" value="<?= $bgBlurLevel ?>">
         <input type="hidden" name="bg_card_opacity" id="formCardOpacity" value="<?= $bgCardOpacity ?>">
@@ -738,6 +755,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             });
         });
         window.testApiUrl = function() { var url = bgApiUrl.value.trim(); if (!url) return; var result = document.getElementById('apiTestResult'); result.innerHTML = '<span style="color:var(--text-muted);font-size:13px">测试中...</span>'; var img = new Image(); img.onload = function() { previewApiSrc = url; result.innerHTML = '<div class="img-preview-thumb"><img src="'+url+'" style="max-width:200px;max-height:120px"></div><div style="font-size:12px;color:#16a34a;margin-top:4px">✓ API 可用</div>'; updatePreview(); }; img.onerror = function() { result.innerHTML = '<div style="font-size:12px;color:#dc2626">✗ 无法加载图片</div>'; }; img.src = url + (url.indexOf('?')>=0?'&':'?') + '_t=' + Date.now(); };
+        // v4.2.4：卡片封面 API 测试（仅探测可加载性，实际抓取走服务端池化代理）
+        window.testCardCoverApi = function() { var input = document.getElementById('cardCoverApiInput'); var url = input.value.trim(); if (!url) return; var result = document.getElementById('cardCoverApiTestResult'); result.innerHTML = '<span style="color:var(--text-muted);font-size:13px">测试中...</span>'; var img = new Image(); img.onload = function() { result.innerHTML = '<div class="img-preview-thumb"><img src="'+url+'" style="max-width:200px;max-height:120px"></div><div style="font-size:12px;color:#16a34a;margin-top:4px">✓ 图片可访问</div>'; }; img.onerror = function() { result.innerHTML = '<div style="font-size:12px;color:#dc2626">✗ 无法加载图片</div>'; }; img.src = url + (url.indexOf('?')>=0?'&':'?') + '_t=' + Date.now(); };
         bgApiUrl.addEventListener('input', function() { previewApiSrc = ''; updatePreview(); });
         blurToggle.addEventListener('change', function() { blurLevelWrap.style.display = blurToggle.checked ? 'block' : 'none'; updatePreview(); });
         blurSlider.addEventListener('input', function() { blurVal.textContent = blurSlider.value + 'px'; updatePreview(); });
@@ -756,7 +775,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         }
         window.removeBgImage = function() { if (confirm('确定移除背景图片？')) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
-        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicQQ').value = document.getElementById('musicQQInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formMusicQQCookie').value = document.getElementById('musicQQCookieInput').value.trim(); });
+        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicQQ').value = document.getElementById('musicQQInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formMusicQQCookie').value = document.getElementById('musicQQCookieInput').value.trim(); });
         <?php if ($bgType === 'api' && $bgApiUrl): ?>
         (function() { var u=<?= json_encode($bgApiUrl) ?>; var img=new Image(); img.onload=function(){previewApiSrc=u;updatePreview();}; img.src=u; })();
         <?php endif; ?>

@@ -241,6 +241,8 @@ function loadSiteConfig() {
         'bg_blur_level' => 0,
         // v4.2.0：API 背景固定默认源（后台可改，留空保存时自动回退该固定源）
         'bg_api_url' => FIXED_IMG_API,
+        // v4.2.4：首页卡片封面图片源（后台可自定义；留空回退 FIXED_IMG_API，走同一池化缓存策略）
+        'card_cover_api' => '',
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;

@@ -1154,10 +1154,10 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <label class="form-label">管理员邮箱（告警通知）</label>
                 <input class="form-input" name="admin_email" value="<?= htmlspecialchars($config['admin_email'] ?? '') ?>" placeholder="admin@example.com">
             </div>
-            <div class="form-row" style="margin-bottom:16px">
-                <label class="form-check"><input type="checkbox" name="registration_enabled" <?= empty($config['registration_enabled']) ? '' : 'checked' ?>> 允许注册</label>
-                <label class="form-check"><input type="checkbox" name="guest_comments_enabled" <?= empty($config['guest_comments_enabled']) ? '' : 'checked' ?>> 允许访客评论</label>
-                <label class="form-check"><input type="checkbox" name="super_admin_comment" <?= empty($config['super_admin_comment']) ? '' : 'checked' ?>> 允许超管主页评论（默认关闭，超管以访客身份浏览不参与前台评论）</label>
+            <div class="form-row" style="margin-bottom:16px;align-items:center">
+                <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许注册</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="registration_enabled" <?= empty($config['registration_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
+                <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许访客评论</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="guest_comments_enabled" <?= empty($config['guest_comments_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
+                <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许超管主页评论</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="super_admin_comment" <?= empty($config['super_admin_comment']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
             </div>
             <!-- v4.0.0：评论邮件订阅通知 -->
             <div style="padding:12px 16px;border:1px solid var(--border);border-radius:12px;margin-bottom:16px;background:var(--surface)">
@@ -1256,10 +1256,10 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <p class="form-hint">不能与站长路径相同，不能使用系统保留关键字</p>
             </div>
             <div class="form-group">
-                <label class="form-check">
-                    <input type="checkbox" name="hide_default_paths" <?= empty($config['hide_default_paths']) ? '' : 'checked' ?>>
-                    隐藏默认路径（自定义路径生效后，/station/ 和 /author/ 返回 404）
-                </label>
+                <div style="display:flex;align-items:center;gap:10px">
+                    <span style="font-size:13px">隐藏默认路径（自定义路径生效后，/station/ 和 /author/ 返回 404）</span>
+                    <label class="toggle" style="flex-shrink:0;margin-left:auto"><input type="checkbox" name="hide_default_paths" <?= empty($config['hide_default_paths']) ? '' : 'checked' ?>><span class="slider"></span></label>
+                </div>
             </div>
             <!-- 频率限制弹窗 -->
     <div class="modal-overlay" id="rateLimitModal">
@@ -1343,10 +1343,10 @@ $banMsg = $_GET['bmsg'] ?? '';
             </div>
             <div class="form-group">
                 <label class="form-label">封禁功能</label>
-                <div style="display:flex;gap:14px;flex-wrap:wrap">
-                    <label class="form-check"><input type="checkbox" name="types[]" value="register"> 注册</label>
-                    <label class="form-check"><input type="checkbox" name="types[]" value="comment"> 评论</label>
-                    <label class="form-check"><input type="checkbox" name="types[]" value="login"> 登录</label>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+                    <span style="font-size:13px">注册</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="types[]" value="register"><span class="slider"></span></label>
+                    <span style="font-size:13px">评论</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="types[]" value="comment"><span class="slider"></span></label>
+                    <span style="font-size:13px">登录</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="types[]" value="login"><span class="slider"></span></label>
                 </div>
             </div>
             <div class="form-group">
@@ -2477,11 +2477,11 @@ $banMsg = $_GET['bmsg'] ?? '';
                 </tr>
                 <tr>
                     <td style="color:var(--text-muted)">上传触发立即备份（v3.3.5）</td>
-                    <td><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="trigger_backup" value="1" <?= !empty($bCfg['trigger_backup']) ? 'checked' : '' ?> style="width:auto"> 上传新文章后立即备份（10 秒内）</label></td>
+                    <td><div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">上传新文章后立即备份（10 秒内）</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="trigger_backup" value="1" <?= !empty($bCfg['trigger_backup']) ? 'checked' : '' ?>><span class="slider"></span></label></div></td>
                 </tr>
                 <tr>
                     <td style="color:var(--text-muted)">单篇篡改还原（v3.3.5）</td>
-                    <td><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="single_restore" value="1" <?= !empty($bCfg['single_restore']) ? 'checked' : '' ?> style="width:auto"> 仅还原「系统隐藏文章 META 异常」的单篇，正常编辑不受影响</label></td>
+                    <td><div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">仅还原「系统隐藏文章 META 异常」的单篇，正常编辑不受影响</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="single_restore" value="1" <?= !empty($bCfg['single_restore']) ? 'checked' : '' ?>><span class="slider"></span></label></div></td>
                 </tr>
             </table>
             <div style="margin-top:12px">
@@ -2757,17 +2757,17 @@ $banMsg = $_GET['bmsg'] ?? '';
             <div class="form-row">
                 <div class="form-group">
                     <label class="form-label">注册邮箱验证码（总开关）</label>
-                    <div class="form-check">
-                        <input type="checkbox" name="email_verify_enabled" id="ev_email" value="1" <?= !empty($config['email_verify_enabled']) ? 'checked' : '' ?>>
-                        <label for="ev_email">启用注册邮箱验证码（一个邮箱只能注册一个账户）</label>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <span style="font-size:13px">启用注册邮箱验证码（一个邮箱只能注册一个账户）</span>
+                        <label class="toggle" style="flex-shrink:0;margin-left:auto"><input type="checkbox" name="email_verify_enabled" id="ev_email" value="1" <?= !empty($config['email_verify_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
                     </div>
                 </div>
                 <div class="form-group">
                     <!-- v2.11.0：滑块人机验证已彻底移除（原 captcha_enabled 开关删除） -->
                     <label class="form-label">写作者双重确认</label>
-                    <div class="form-check">
-                        <input type="checkbox" name="author_dual_verify_enabled" id="ev_dual" value="1" <?= !empty($config['author_dual_verify_enabled']) ? 'checked' : '' ?>>
-                        <label for="ev_dual">站长创建写作者需邮箱验证 + 超管邮件确认</label>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <span style="font-size:13px">站长创建写作者需邮箱验证 + 超管邮件确认</span>
+                        <label class="toggle" style="flex-shrink:0;margin-left:auto"><input type="checkbox" name="author_dual_verify_enabled" id="ev_dual" value="1" <?= !empty($config['author_dual_verify_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
                     </div>
                 </div>
             </div>

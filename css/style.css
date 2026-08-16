@@ -344,7 +344,7 @@ code, pre, .markdown-body code, .markdown-body pre {
 .meta-icon svg { width: 14px; height: 14px; stroke: var(--accent); fill: none; }
 .card-excerpt {
     font-size: 0.9em; color: var(--text-secondary);
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
 }
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
 .card-author { font-size: 0.82em; color: var(--text-muted); display: flex; align-items: center; gap: 4px; margin-top: 2px; }
@@ -1220,7 +1220,8 @@ body.bg-blur .sidebar {
     background: rgba(13, 17, 23, 0.92);
 }
 /* v4.1.16：液态玻璃（苹果 Liquid Glass 风格）——仅玻璃家族、有背景时生效；
-   封面图显示规范不变（左半 1/2 不显示、右半水墨渐隐）；用户可在下拉菜单关闭（低配设备） */
+   封面图显示规范不变（左半 1/2 不显示、右半水墨渐隐）；用户可在下拉菜单关闭（低配设备）
+   v4.1.17：透明度 0.38→0.12（背景透出），blur 28→20px，左半加 scrim 保证黑字可读，顶部内高光 */
 body.glass-liquid.bg-active .doc-card,
 body.glass-liquid.bg-active .markdown-body,
 body.glass-liquid.bg-active .comment-section,
@@ -1230,11 +1231,13 @@ body.glass-liquid.bg-active .share-card,
 body.glass-liquid.bg-active .article-info-card,
 body.glass-liquid.bg-active .cmt-capsule-btn,
 body.glass-liquid.bg-active .cmt-user-inner {
-    background: rgba(255, 255, 255, 0.38);
-    backdrop-filter: blur(28px) saturate(180%);
-    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.30) 45%, transparent 62%),
+        rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
     border-color: rgba(255, 255, 255, 0.35);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 [data-theme="dark"] body.glass-liquid.bg-active .doc-card,
 [data-theme="dark"] body.glass-liquid.bg-active .markdown-body,
@@ -1245,15 +1248,19 @@ body.glass-liquid.bg-active .cmt-user-inner {
 [data-theme="dark"] body.glass-liquid.bg-active .article-info-card,
 [data-theme="dark"] body.glass-liquid.bg-active .cmt-capsule-btn,
 [data-theme="dark"] body.glass-liquid.bg-active .cmt-user-inner {
-    background: rgba(22, 27, 34, 0.45);
-    border-color: rgba(255, 255, 255, 0.14);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    background:
+        linear-gradient(90deg, rgba(13, 17, 23, 0.62) 0%, rgba(13, 17, 23, 0.34) 45%, transparent 62%),
+        rgba(22, 27, 34, 0.18);
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
-/* 液态玻璃高光斜斑（玻璃反光）——主要卡片表面 */
+/* 液态玻璃表面高光（玻璃反光 + 顶部渐亮）——主要卡片表面 */
 body.glass-liquid.bg-active .doc-card::after {
     content: '';
     position: absolute; inset: 0; pointer-events: none;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.05) 40%, transparent 55%);
+    background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.30) 0%, rgba(255, 255, 255, 0.05) 30%, transparent 46%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.10), transparent 32%);
 }
 .comment-section {
     margin-top: 16px;

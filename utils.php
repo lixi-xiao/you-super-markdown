@@ -128,7 +128,7 @@ function resolvePublicIp($host) {
     return null;
 }
 // SSRF 安全抓取：一次解析 + 固定解析后的 IP 直连（Host/SNI 保留原域名），消除 DNS rebinding TOCTOU
-function fetchHttpContent($url) {
+function fetchHttpContent($url, $ua = null) {
     $parts = parse_url($url);
     $scheme = strtolower($parts['scheme'] ?? '');
     $host = strtolower(trim($parts['host'] ?? ''));
@@ -140,8 +140,10 @@ function fetchHttpContent($url) {
     $port = $parts['port'] ?? ($scheme === 'https' ? 443 : 80);
     $path = ($parts['path'] ?? '/') . (isset($parts['query']) ? '?' . $parts['query'] : '');
     $targetUrl = $scheme . '://' . $ip . ':' . $port . $path;
+    // v4.1.15：支持自定义 UA（封面图片池用桌面 UA 拉取横屏壁纸）
+    $ua = $ua !== null ? $ua : (appConfig('app_name', 'You Super Markdown') . "/" . APP_VERSION);
     $header = "Host: " . $host . "\r\n"
-        . "User-Agent: " . appConfig('app_name', 'You Super Markdown') . "/" . APP_VERSION . "\r\n"
+        . "User-Agent: " . $ua . "\r\n"
         . "Connection: close\r\n";
     $opts = [
         'http' => [

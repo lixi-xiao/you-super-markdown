@@ -187,6 +187,18 @@ if ($action === 'csrf') {
     jsonOut(['success' => true, 'csrf_token' => generateCsrfToken()]);
 }
 
+// v4.5.0：后台环境指纹上报校验——后台页面加载后 JS 调用（fetch 带 X-Fp），
+// 服务端比对会话绑定指纹：一致置 cmt_fp_ok（后台原生表单 POST 据此放行写操作），不一致清除（换环境拦截）
+if ($action === 'fp_report') {
+    $fpOk = requireSessionEnv();
+    if ($fpOk) {
+        $_SESSION['cmt_fp_ok'] = 1;
+    } else {
+        unset($_SESSION['cmt_fp_ok']);
+    }
+    jsonOut(['success' => $fpOk]);
+}
+
 // ===== v2.9.0：注册邮箱验证码发送（60s 冷却，按邮箱；注册为匿名，不走超管豁免） =====
 // v4.4.0：发送前必须先通过随机算术人机验证（点击「获取验证码」→ 弹窗答题 → 答对才真正发码）
 if ($action === 'arith_challenge') {
@@ -200,13 +212,14 @@ if ($action === 'send_register_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // v4.4.0：算术人机验证——答错/未答一律拒绝发码（一次性消费，重放无效）
     [$arithOk, $arithErr] = verifyArithChallenge($input['arith_answer'] ?? '');
     if (!$arithOk) jsonOut(['success' => false, 'error' => $arithErr], 400);
-    // v2.9.0：IP 级发码限速（60 秒最多 5 次，防换邮箱轰炸）
+    // v4.5.0：指纹+IP 双维发码限速（60 秒 ≥5 次，防换 IP/换邮箱轰炸）；无指纹请求按 no-fp 维度计
     $ipNow = getClientIP();
-    $recent = db_one('SELECT COUNT(*) AS c FROM email_codes WHERE ip = ? AND created > ?', [$ipNow, time() - 60])['c'] ?? 0;
-    if ($recent >= 5) jsonOut(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429);
+    $reqFp = getRequestFp();
+    if (db_rate_count('reg_rates', $ipNow, 60, $reqFp) >= 5) jsonOut(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429);
     if (email_exists($email)) jsonOut(['success' => false, 'error' => '该邮箱已被注册'], 409);
     [$ok, $err] = email_code_send($email, 'register', $email);
     if (!$ok) jsonOut(['success' => false, 'error' => $err], 400);
+    db_rate_add('reg_rates', $ipNow, $reqFp);
     jsonOut(['success' => true, 'ttl' => is_array($err) ? ($err['ttl'] ?? 300) : 300]);
 }
 
@@ -251,6 +264,8 @@ if ($action === 'send_email_change_code' && $_SERVER['REQUEST_METHOD'] === 'POST
     $u = validateHomeUser();
     if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
     if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    // v4.5.0：环境校验（换环境/被踢 → 拒绝敏感操作）
+    if (!requireSessionEnv()) jsonOut(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
     $siteCfg = loadSiteConfig();
     if (empty($siteCfg['email_verify_enabled'])) jsonOut(['success' => false, 'error' => '邮箱验证已关闭'], 403);
     $input = json_decode(file_get_contents('php://input'), true);
@@ -270,6 +285,8 @@ if ($action === 'update_email' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $u = validateHomeUser();
     if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
     if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    // v4.5.0：环境校验（换环境/被踢 → 拒绝敏感操作）
+    if (!requireSessionEnv()) jsonOut(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
     $siteCfg = loadSiteConfig();
     if (empty($siteCfg['email_verify_enabled'])) jsonOut(['success' => false, 'error' => '邮箱验证已关闭'], 403);
     $input = json_decode(file_get_contents('php://input'), true);
@@ -295,6 +312,8 @@ if ($action === 'avatar_upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $u = validateHomeUser();
     if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
     if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    // v4.5.0：环境校验（换环境/被踢 → 拒绝敏感操作）
+    if (!requireSessionEnv()) jsonOut(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
     [$ok, $res] = avatar_upload($u['id'], $_FILES['avatar'] ?? null);
     if (!$ok) jsonOut(['success' => false, 'error' => $res], 400);
     auditLog('avatar_update', $u['id'], '更新头像');
@@ -379,12 +398,13 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         jsonOut(['success' => false, 'error' => '注册次数已达上限'], 429);
     }
     $input = json_decode(file_get_contents('php://input'), true);
+    $reqFp = getRequestFp();
     // v4.4.0：蜜罐字段——隐藏输入框仅机器人会填；命中即判定机器人，静默拒绝（返回成功但不注册，浪费其时间）
     if (!empty($input['website'])) {
         auditLog('register_honeypot', substr((string)$input['website'], 0, 64), '注册蜜罐命中，静默拒绝（IP ' . $clientIP . '）');
-        // v4.4.0：短时间（10 分钟窗口）连续命中达阈值 → 自动封禁 IP（次数/时长超管可调，0=永久）
-        db_rate_add('honeypot_rates', $clientIP);
-        $hpCount = db_rate_count('honeypot_rates', $clientIP, 600);
+        // v4.4.0/v4.5.0：短时间（10 分钟窗口）连续命中达阈值 → 自动封禁 IP（指纹+IP 双维计数）
+        db_rate_add('honeypot_rates', $clientIP, $reqFp);
+        $hpCount = db_rate_count('honeypot_rates', $clientIP, 600, $reqFp);
         $hpThreshold = max(1, (int)($siteCfg['honeypot_ban_count'] ?? 3));
         if ($hpCount >= $hpThreshold && !isIPBanned($clientIP, 'register')) {
             $hpDuration = max(0, (int)($siteCfg['honeypot_ban_duration'] ?? 3600));
@@ -423,8 +443,13 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     ];
     $users[] = $new;
     saveUsers($users);
-    db_rate_add('reg_rates', $clientIP);
+    db_rate_add('reg_rates', $clientIP, $reqFp);
     session_regenerate_id(true);
+    // v4.5.0：注册即绑定环境指纹 + token_version（并发踢旧）+ 签发 refresh token
+    $newTV = bumpUserTV($new['id']);
+    $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
+    $_SESSION['cmt_tv'] = $newTV;
+    issueRefreshToken($new['id'], $_SESSION['cmt_fp'], $newTV);
     $_SESSION['cmt_user'] = [
         'id' => $new['id'], 'qq' => $qq, 'nickname' => $nick,
         'avatar' => $avatarUrl, 'signature' => '', 'role' => 'user',
@@ -432,7 +457,7 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         'pw_hash' => $new['password']
     ];
     $safeUser = sanitizeUserForClient($_SESSION['cmt_user']);
-    jsonOut(['success' => true, 'user' => $safeUser]);
+    jsonOut(['success' => true, 'user' => $safeUser, 'env_bound' => true]);
 }
 if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $clientIP = getClientIP();
@@ -440,6 +465,8 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
     $qq = trim($input['qq'] ?? '');
     $pw = $input['password'] ?? '';
+    // v4.5.0：登录环境指纹（前端上报，服务端与 UA 一起绑定签名）
+    $reqFp = getRequestFp();
     if (empty($qq) || empty($pw)) jsonOut(['success' => false, 'error' => 'QQ号和密码不能为空'], 400);
     // v2.11.0：登录锁定检查（IP+账号双级；60 秒内失败 ≥3 次 → 锁 15 分钟）
     $lockLeft = loginLocked('ip:' . $clientIP);
@@ -464,6 +491,11 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 'email' => $u['email'] ?? '',   // v2.10.0：登录写入邮箱，供个人设置展示/更换
                 'pw_hash' => $u['password']
             ];
+            // v4.5.0：并发踢旧——tv+1 使旧会话/旧 refresh 立即失效；绑定环境指纹；签发 refresh token
+            $newTV = bumpUserTV($u['id']);
+            $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
+            $_SESSION['cmt_tv'] = $newTV;
+            issueRefreshToken($u['id'], $_SESSION['cmt_fp'], $newTV);
             if (in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN])) $isAdminFirst = true;
             // v2.11.0：登录成功清除失败计数（IP 级 + 该账号级）
             loginFailClear($clientIP, $qq);
@@ -472,12 +504,12 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             // v2.11.1：站长/写作者登录通知管理员（SMTP 通道）
             notifyLoginEvent($u, $clientIP);
             $safeUser = sanitizeUserForClient($_SESSION['cmt_user']);
-            jsonOut(['success' => true, 'user' => $safeUser, 'isAdminFirstLogin' => $isAdminFirst]);
+            jsonOut(['success' => true, 'user' => $safeUser, 'isAdminFirstLogin' => $isAdminFirst, 'env_bound' => true]);
         }
     }
-    // v2.11.0：失败计数（IP+账号双级，60 秒窗口 ≥3 → 锁 15 分钟）
-    loginFailAdd($clientIP, $qq);
-    $ipFails = loginFailCount($clientIP, $qq, 60);
+    // v2.11.0/v4.5.0：失败计数（IP+账号+指纹三维，60 秒窗口 ≥3 → 锁 15 分钟）
+    loginFailAdd($clientIP, $qq, $reqFp);
+    $ipFails = loginFailCount($clientIP, $qq, 60, $reqFp);
     $loginCfg = loadSiteConfig();
     if ($ipFails >= 3) {
         lockLogin('ip:' . $clientIP, 900);
@@ -492,8 +524,11 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
 if ($action === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    // v2.10.2：超管也可在主页退出——与超管后台 logout 一致：吊销 JWT（jti 黑名单）+ 销毁会话 + 清 cookie
+    // v2.10.2/v4.5.0：超管也可在主页退出——吊销 JWT（jti 黑名单）+ 吊销 refresh token + 销毁会话 + 清 cookie
+    $uid = $_SESSION['cmt_user']['id'] ?? '';
+    if ($uid !== '') revokeUserRefreshTokens($uid);
     revokeCurrentJWT();
+    clearRefreshCookie();
     unset($_SESSION['cmt_user']);
     session_unset();
     session_destroy();
@@ -503,9 +538,49 @@ if ($action === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     jsonOut(['success' => true]);
 }
+// v4.5.0：refresh 接口——登录态过期后，用 httpOnly ym_rt + 当前环境指纹自动续期（换环境则失败，需重新登录）
+if ($action === 'refresh' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $rt = $_COOKIE['ym_rt'] ?? '';
+    $reqFp = getRequestFp();
+    $row = consumeRefreshToken($rt, $reqFp, -1); // 先按记录自身 tv 校验，再取用户当前 tv
+    if (!$row) {
+        clearRefreshCookie();
+        jsonOut(['success' => false, 'error' => '登录已过期或登录环境已变化，请重新登录'], 401);
+    }
+    $curTV = getUserTV($row['user_id']);
+    if ((int)$row['tv'] !== $curTV) {
+        revokeUserRefreshTokens($row['user_id']);
+        clearRefreshCookie();
+        jsonOut(['success' => false, 'error' => '账号已在其他设备登录，当前会话已失效'], 401);
+    }
+    // 校验通过：重建登录态（保持同一 tv，不踢旧）
+    session_regenerate_id(true);
+    $found = null;
+    foreach (loadUsers() as $uu) {
+        if ($uu['id'] === $row['user_id']) { $found = $uu; break; }
+    }
+    if (!$found) { clearRefreshCookie(); jsonOut(['success' => false, 'error' => '账号不存在'], 401); }
+    $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
+    $_SESSION['cmt_tv'] = (int)$curTV;
+    $_SESSION['cmt_user'] = [
+        'id' => $found['id'], 'qq' => $found['qq'],
+        'nickname' => $found['nickname'] ?? '',
+        'avatar' => $found['avatar'] ?? getAvatarUrl($found['qq'] ?? ''),
+        'signature' => $found['signature'] ?? '',
+        'role' => $found['role'] ?? 'user',
+        'email' => $found['email'] ?? '',
+        'pw_hash' => $found['password']
+    ];
+    $safeUser = sanitizeUserForClient($_SESSION['cmt_user']);
+    jsonOut(['success' => true, 'user' => $safeUser, 'env_bound' => true]);
+}
 if ($action === 'check') {
     $u = validateHomeUser();
     if ($u) {
+        // v4.5.0：登录态会话但环境校验失败（换浏览器/设备/隐私模式/被踢）→ 提示重新登录
+        if (!requireSessionEnv()) {
+            jsonOut(['success' => true, 'loggedIn' => false, 'env_invalid' => true, 'error' => '登录环境已变化，请重新登录']);
+        }
         $safeUser = sanitizeUserForClient($u);
         jsonOut(['success' => true, 'loggedIn' => true, 'user' => $safeUser]);
     } else {
@@ -570,6 +645,8 @@ if ($action === 'user-status') {
 if ($action === 'update_profile' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $u = validateHomeUser();
     if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
+    // v4.5.0：环境校验（改昵称/签名/密码等敏感操作）
+    if (!requireSessionEnv()) jsonOut(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
     $input = json_decode(file_get_contents('php://input'), true);
     $nick = trim($input['nickname'] ?? '');
     $sign = trim($input['signature'] ?? '');
@@ -658,8 +735,13 @@ if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$u && !empty($siteCfg['guest_comments_enabled'])) {
         $u = ['id' => 'guest', 'nickname' => '访客', 'avatar' => '', 'qq' => '', 'role' => 'guest'];
     }
-    db_rate_add('comment_rates', $clientIP);
-    $ipRates = db_rate_count('comment_rates', $clientIP, 60); // 1 分钟窗口
+    // v4.5.0：登录态用户评论前校验环境（换浏览器/设备/被踢 → 拒绝，提示重新登录）；访客不受影响
+    if (($u['id'] ?? '') !== 'guest' && !requireSessionEnv()) {
+        jsonOut(['success' => false, 'error' => '登录环境已变化，请重新登录后再评论', 'env_invalid' => true], 401);
+    }
+    $reqFp = getRequestFp();
+    db_rate_add('comment_rates', $clientIP, $reqFp);
+    $ipRates = db_rate_count('comment_rates', $clientIP, 60, $reqFp); // 1 分钟窗口（指纹+IP 双维）
     $maxCommentsPerMin = max(1, intval($siteCfg['max_comments_per_minute'] ?? 5));
     if ($ipRates > $maxCommentsPerMin) {
         logAbnormal($clientIP, '频繁评论（' . $ipRates . '条/分钟）');
@@ -716,6 +798,19 @@ if ($action === 'reply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$u && empty($replyCfg['guest_comments_enabled'])) jsonOut(['success' => false, 'error' => '请先登录'], 401);
     if (!$u && !empty($replyCfg['guest_comments_enabled'])) {
         $u = ['id' => 'guest', 'nickname' => '访客', 'avatar' => '', 'qq' => '', 'role' => 'guest'];
+    }
+    // v4.5.0：登录态用户回复前校验环境（换浏览器/设备/被踢 → 拒绝）；访客不受影响
+    if (($u['id'] ?? '') !== 'guest' && !requireSessionEnv()) {
+        jsonOut(['success' => false, 'error' => '登录环境已变化，请重新登录后再回复', 'env_invalid' => true], 401);
+    }
+    $replyFp = getRequestFp();
+    db_rate_add('comment_rates', $clientIP, $replyFp);
+    $replyRates = db_rate_count('comment_rates', $clientIP, 60, $replyFp);
+    $maxRepliesPerMin = max(1, intval($replyCfg['max_comments_per_minute'] ?? 5));
+    if ($replyRates > $maxRepliesPerMin) {
+        logAbnormal($clientIP, '频繁回复（' . $replyRates . '条/分钟）');
+        if ($replyCfg['auto_ban'] ?? false) addBan($clientIP, ['comment'], '自动封禁：频繁回复');
+        jsonOut(['success' => false, 'error' => '回复太频繁，请稍后再试'], 429);
     }
     $input = json_decode(file_get_contents('php://input'), true);
     $article = trim($input['article'] ?? '');
@@ -777,6 +872,10 @@ if ($action === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $u = validateSession();
     }
     if (!$u) jsonOut(['success' => false, 'error' => '请先登录'], 401);
+    // v4.5.0：登录态用户删除评论前校验环境（换浏览器/设备/被踢 → 拒绝）
+    if (($u['id'] ?? '') !== 'guest' && !requireSessionEnv()) {
+        jsonOut(['success' => false, 'error' => '登录环境已变化，请重新登录后再操作', 'env_invalid' => true], 401);
+    }
     $input = json_decode(file_get_contents('php://input'), true);
     $article = trim($input['article'] ?? '');
     $delId = trim($input['id'] ?? '');

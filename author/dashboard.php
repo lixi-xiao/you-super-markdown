@@ -16,6 +16,26 @@ if (!validateBackendUser()) {
     exit;
 }
 
+// v4.5.0：升级即全量重登 + 并发踢旧——旧会话（无 cmt_fp/cmt_tv）或 token_version 不匹配（被新登录踢出）→ 强制重登
+if (empty($_SESSION['cmt_fp']) || !isset($_SESSION['cmt_tv']) || (int)$_SESSION['cmt_tv'] !== getUserTV($_SESSION['cmt_user']['id'] ?? '')) {
+    session_unset();
+    session_destroy();
+    header('Location: /?admin_login=1&env=1');
+    exit;
+}
+
+// v4.5.0：后台写操作环境校验（JS 上报校验模式，见 fp_report 接口）
+function requireAdminEnv() {
+    if (!empty($_SESSION['cmt_fp_ok'])) return true;
+    if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    header('Location: /?admin_login=1&env=1');
+    exit;
+}
+
 // 自定义入口路径验证：hide_default_paths 开启时，拒绝通过默认路径访问
 $config = loadSiteConfig();
 if (!empty($config['hide_default_paths'])) {
@@ -41,6 +61,8 @@ $msg = $_GET['msg'] ?? '';
 
 // v2.6.3：写作者修改个人信息（昵称/签名/新密码）；v2.10.0：扩展头像上传 + 邮箱更换
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
+    // v4.5.0：后台写操作环境校验（登录环境变化/被踢 → 拒绝并强制重登）
+    requireAdminEnv();
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         $msg = 'csrf_error';
     } elseif (isset($_POST['profile_save'])) {
@@ -421,5 +443,15 @@ header('Location: /');
 exit;
 ?>
 <?php endif; ?>
+<script>
+// v4.5.0：环境指纹上报校验——页面加载后上报当前环境指纹（与登录时一致的算法），服务端比对会话绑定指纹
+(function() {
+    function fpFnv(s) { var h = 0x811c9dc5; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return ('00000000' + (h >>> 0).toString(16)).slice(-8); }
+    function fpCanvas() { try { var c = document.createElement('canvas'); c.width = 200; c.height = 40; var x = c.getContext('2d'); x.textBaseline = 'top'; x.font = '14px Arial'; x.fillStyle = '#f60'; x.fillRect(0, 0, 200, 40); x.fillStyle = '#069'; x.fillText('YouSuperMarkdown\u2620' + navigator.userAgent.length, 5, 12); var d = c.toDataURL(); return d.length + ':' + d.slice(-64); } catch (e) { return ''; } }
+    var parts = [navigator.language || '', new Date().getTimezoneOffset(), (screen.width || 0) + 'x' + (screen.height || 0), fpCanvas(), navigator.userAgent];
+    var fp = fpFnv(parts.join('|')) + fpFnv(parts.join('~')) + fpFnv(navigator.userAgent);
+    fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp } }).catch(function() {});
+})();
+</script>
 </body>
 </html>

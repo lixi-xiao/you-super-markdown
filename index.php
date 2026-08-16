@@ -678,7 +678,7 @@ if ($action === 'rss_guide') {
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="css/style.css?v=<?= filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
-<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_siteConfig['bg_api_url'] ?? '') ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
+<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_siteConfig['bg_api_url'] ?? '') ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-bg-card-glass="<?= htmlspecialchars($_siteConfig['card_glass_style'] ?? 'frosted') ?>" data-user-glass-toggle="<?= !empty($_siteConfig['user_glass_toggle']) ? '1' : '0' ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($_siteTitle) ?></a></div>
     <div class="header-right">
@@ -722,6 +722,12 @@ if ($action === 'rss_guide') {
     <div class="user-dropdown-item" id="userDropdownProfile" data-action="profile" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span>编辑资料</span>
+    </div>
+    <!-- v4.1.16：液态玻璃个人开关（后台开启「用户液态玻璃开关」时显示；关闭后本设备记忆不再加载） -->
+    <div class="user-dropdown-item user-dropdown-glass" id="userDropdownGlass" style="display:none">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 2v20"/></svg>
+        <span>液态玻璃</span>
+        <span class="user-dropdown-glass-state" id="userDropdownGlassState">开</span>
     </div>
     <div class="user-dropdown-item user-dropdown-item-danger" id="userDropdownLogout" data-action="logout" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>

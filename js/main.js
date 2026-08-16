@@ -24,6 +24,37 @@
             body.style.setProperty('--bg-url', 'url(' + apiUrl + ')');
         }
     })();
+    // v4.1.16：液态玻璃（苹果 Liquid Glass 风格）——后台「卡片玻璃效果」=liquid 且有背景时生效；
+    // 后台开启「用户液态玻璃开关」→ 用户下拉菜单出现开关，默认开启，用户关闭后本设备记忆（localStorage）不再加载
+    (function applyGlass() {
+        var body = document.body;
+        var cardGlass = body.dataset.bgCardGlass || 'frosted';
+        var userGlassToggle = body.dataset.userGlassToggle === '1';
+        var bgActive = body.classList.contains('bg-active');
+        var off = false;
+        try { off = localStorage.getItem('ym_liquid_glass_off') === '1'; } catch (e) {}
+        var on = cardGlass === 'liquid' && bgActive && (!userGlassToggle || !off);
+        if (on) body.classList.add('glass-liquid');
+        var item = document.getElementById('userDropdownGlass');
+        var stateEl = document.getElementById('userDropdownGlassState');
+        if (cardGlass === 'liquid' && userGlassToggle && item) {
+            item.style.display = '';
+            if (stateEl) stateEl.textContent = off ? '关' : '开';
+            item.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var isOn = body.classList.contains('glass-liquid');
+                if (isOn) {
+                    body.classList.remove('glass-liquid');
+                    try { localStorage.setItem('ym_liquid_glass_off', '1'); } catch (err) {}
+                    if (stateEl) stateEl.textContent = '关';
+                } else {
+                    body.classList.add('glass-liquid');
+                    try { localStorage.removeItem('ym_liquid_glass_off'); } catch (err) {}
+                    if (stateEl) stateEl.textContent = '开';
+                }
+            });
+        }
+    })();
     const topBar = document.getElementById('topBar');
     const btnSearch = document.getElementById('btnSearch');
     const btnToc = document.getElementById('btnToc');

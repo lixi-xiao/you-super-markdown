@@ -233,6 +233,9 @@ function loadSiteConfig() {
         'comment_notify_email' => '',
         // v4.0.0：站内全文搜索开关（关闭则前端仅按标题/摘要/标签过滤）
         'fulltext_search_enabled' => true,
+        // v4.1.16：卡片玻璃效果（毛玻璃/液态玻璃）+ 用户液态玻璃个人开关显示
+        'card_glass_style' => 'frosted',   // frosted 毛玻璃 / liquid 液态玻璃（苹果 Liquid Glass 风格）
+        'user_glass_toggle' => false,      // 是否在用户界面显示「液态玻璃」个人开关（低配设备可自行关闭）
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;

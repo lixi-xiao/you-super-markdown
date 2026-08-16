@@ -903,9 +903,21 @@ code, pre, .markdown-body code, .markdown-body pre {
 }
 .music-ctrl-btn:hover { color: var(--accent); }
 .music-ctrl-btn svg { width: 16px; height: 16px; }
-.music-play-btn { width: 36px; height: 36px; background: var(--accent); color: #fff; }
+.music-play-btn { width: 36px; height: 36px; background: var(--accent); color: #fff; position: relative; }
 .music-play-btn:hover { background: var(--accent-hover); color: #fff; }
 .music-play-btn svg { width: 18px; height: 18px; }
+/* v4.6.2：播放中状态——主色圆钮 + 外圈脉冲光环（醒目提示「正在播放」） */
+.music-play-btn.playing::after {
+    content: '';
+    position: absolute; inset: -5px; border-radius: 50%;
+    border: 2px solid var(--accent); opacity: 0;
+    animation: musicPlayPulse 1.6s ease-out infinite;
+    pointer-events: none;
+}
+@keyframes musicPlayPulse {
+    0% { transform: scale(0.85); opacity: 0.7; }
+    100% { transform: scale(1.35); opacity: 0; }
+}
 .music-mode-btn { color: var(--text-muted); }
 .music-mode-btn.active { color: var(--accent); }
 .music-list-btn { color: var(--text-muted); }
@@ -943,6 +955,69 @@ code, pre, .markdown-body code, .markdown-body pre {
 .bgm-switch input:checked + .slider { background: var(--accent); }
 .bgm-switch input:checked + .slider::before { transform: translateX(17px); }
 [data-theme="dark"] .bgm-switch .slider { background: rgba(255,255,255,0.18); }
+/* v4.6.2：音乐弹窗顶部操作行——歌词滑块 + 背景音乐滑块一行并排（统一滑块样式） */
+.music-opt-row {
+    display: flex; align-items: center;
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--border);
+    gap: 18px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.music-opt-item { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.music-opt-label { display: inline-flex; align-items: center; font-weight: 600; white-space: nowrap; }
+/* v4.6.2：本地背景音常驻浮动控制按钮（右下角；进站即可暂停/恢复，播放时高亮+呼吸动画） */
+.bgm-float-btn {
+    position: fixed;
+    right: 20px; bottom: 84px;
+    z-index: 90;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    display: none;
+    align-items: center; justify-content: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    transition: all 0.2s;
+}
+.bgm-float-btn svg {
+    width: 20px; height: 20px;
+    fill: none; stroke: currentColor; stroke-width: 1.8;
+    stroke-linecap: round; stroke-linejoin: round;
+}
+.bgm-float-btn .bgm-float-bar {
+    position: absolute; bottom: 7px;
+    display: flex; align-items: flex-end; gap: 2px;
+    height: 8px;
+}
+.bgm-float-btn .bgm-float-bar::before,
+.bgm-float-btn .bgm-float-bar::after {
+    content: ''; width: 2.5px; border-radius: 2px;
+    background: var(--accent);
+    height: 4px; opacity: 0;
+}
+.bgm-float-btn:hover { border-color: var(--accent); color: var(--accent); }
+.bgm-float-btn.playing {
+    color: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glass), 0 4px 16px rgba(0,0,0,0.12);
+}
+.bgm-float-btn.playing .bgm-float-bar::before,
+.bgm-float-btn.playing .bgm-float-bar::after {
+    opacity: 1;
+    animation: bgmBarBounce 1s ease-in-out infinite;
+}
+.bgm-float-btn.playing .bgm-float-bar::after { animation-delay: 0.35s; }
+@keyframes bgmBarBounce {
+    0%, 100% { height: 4px; }
+    50% { height: 8px; }
+}
+/* 手机端浮动按钮避让底部工具栏 */
+@media (max-width: 640px) {
+    .bgm-float-btn { right: 14px; bottom: 76px; width: 40px; height: 40px; }
+}
 
 .music-item {
     display: flex; align-items: center; gap: 10px;
@@ -1168,11 +1243,17 @@ body.bg-active::before {
     background-position: center;
     background-repeat: no-repeat;
 }
-body.bg-blur::before {
+/* v4.6.2：blur 特异性提升为 .bg-blur.bg-active——否则被 [data-theme="dark"] body.bg-active::before 的
+   brightness/saturate 压暗规则覆盖（深色主题下背景图清晰但完全不模糊，用户「有图但不糊」）；深色模式合并压暗+模糊 */
+body.bg-blur.bg-active::before {
     /* 模糊模式边缘外扩 10px，避免模糊后露出 body 底色留白（模糊会掩盖放大感） */
     top: -10px; left: -10px; right: -10px; bottom: -10px;
     filter: blur(var(--bg-blur-level, 0px));
     -webkit-filter: blur(var(--bg-blur-level, 0px));
+}
+[data-theme="dark"] body.bg-blur.bg-active::before {
+    filter: brightness(0.55) saturate(0.8) blur(var(--bg-blur-level, 0px));
+    -webkit-filter: brightness(0.55) saturate(0.8) blur(var(--bg-blur-level, 0px));
 }
 body:not(.bg-blur) .doc-card,
 body:not(.bg-blur) .markdown-body,

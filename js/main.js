@@ -68,17 +68,29 @@
             body.classList.add('bg-blur');
             body.style.setProperty('--bg-blur-level', bgBlurLevel + 'px');
         }
+        // v4.6.2：背景图预加载——加载成功才启用背景（bg-active），失败则不加并输出控制台警告，
+        //          避免「背景图 404/加载失败却仍加模糊类」导致视觉无变化且无任何提示
+        function applyBgImage(url) {
+            var probe = new Image();
+            probe.onload = function() {
+                body.classList.add('bg-active');
+                body.style.setProperty('--bg-url', 'url(' + url + ')');
+            };
+            probe.onerror = function() {
+                console.warn('[applyBg] 背景图加载失败（已停用背景显示）:', url);
+            };
+            probe.src = url;
+        }
         if (bgType === 'image' && bgImage) {
-            body.classList.add('bg-active');
             // v3.3.3：背景图相对路径补前导斜杠——CSS 变量里相对路径按 CSS 文件(css/)解析，
             // 导致 /css/data/bg/.. 404；统一转成根相对路径 /data/bg/..
             var bgUrl = (bgImage.indexOf('/') === 0 || /^https?:/i.test(bgImage)) ? bgImage : '/' + bgImage;
-            body.style.setProperty('--bg-url', 'url(' + bgUrl + ')');
+            applyBgImage(bgUrl);
         } else if (bgType === 'api' && bgApiUrl) {
-            body.classList.add('bg-active');
             var apiUrl = (bgApiUrl.indexOf('/') === 0 || /^https?:/i.test(bgApiUrl)) ? bgApiUrl : '/' + bgApiUrl;
-            body.style.setProperty('--bg-url', 'url(' + apiUrl + ')');
+            applyBgImage(apiUrl);
         }
+        if (window.console && console.info) console.info('[applyBg] type=' + bgType + ' blur=' + bgBlurLevel + 'px cardOpacity=' + bgCardOpacity + '%');
     })();
     // v4.2.2：mermaid 按需加载——mermaid.min.js 达 3.3MB，页面默认不再放 <head> 阻塞首屏；
     // 仅当公告/文章正文出现 ```mermaid 代码块时才动态注入，加载完成后渲染。
@@ -119,6 +131,8 @@
     const btnToc = document.getElementById('btnToc');
     const btnFont = document.getElementById('btnFont');
     const btnThemeToggle = document.getElementById('btnThemeToggle');
+    // v4.6.2：主题跟随系统状态——手动切换后停止跟随（否则系统深色模式下 matchMedia 监听会把刚切走的主题立刻改回）
+    let mdThemeMedia = null, mdThemeManual = false, mdThemeHandler = null;
     const btnColor = document.getElementById('btnColor');
     const searchPanel = document.getElementById('searchPanel');
     const tocPanel = document.getElementById('tocPanel');
@@ -351,29 +365,38 @@
     btnThemeToggle.addEventListener('click', () => {
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
         document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
-        localStorage.setItem('md-theme', isDark ? 'light' : 'dark');
+        try { localStorage.setItem('md-theme', isDark ? 'light' : 'dark'); } catch (e) {}
+        // v4.6.2：手动切换后停止跟随系统——移除 change 监听，系统深色模式不再把刚切走的主题立刻改回
+        mdThemeManual = true;
+        if (mdThemeMedia && mdThemeHandler && typeof mdThemeMedia.removeEventListener === 'function') {
+            mdThemeMedia.removeEventListener('change', mdThemeHandler);
+        }
         btnThemeToggle.innerHTML = isDark
             ? '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'
             : '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
     });
     // v4.0.0：深色模式跟随系统——首次访问未手动设置时，按系统偏好（prefers-color-scheme）决定；
-    //         手动切换后写入 localStorage 记住用户选择
+    //         手动切换后写入 localStorage 记住用户选择（v4.6.2：并停止跟随系统，见点击 handler）
     (function() {
-        const saved = localStorage.getItem('md-theme');
-        const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        let saved = '';
+        try { saved = localStorage.getItem('md-theme') || ''; } catch (e) {}
+        mdThemeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+        const systemDark = mdThemeMedia ? mdThemeMedia.matches : false;
         const theme = saved || (systemDark ? 'dark' : 'light');
         document.documentElement.setAttribute('data-theme', theme);
         if (theme === 'dark') {
             btnThemeToggle.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
         }
-        // 用户未手动设置过时，跟随系统主题变化实时切换
-        if (!saved && window.matchMedia) {
-            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+        // 用户从未手动设置过时，跟随系统主题变化实时切换（手动切换后移除监听）
+        if (!saved && mdThemeMedia && !mdThemeManual) {
+            mdThemeHandler = function(e) {
+                if (mdThemeManual) return;
                 document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
                 btnThemeToggle.innerHTML = e.matches
                     ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
                     : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
-            });
+            };
+            mdThemeMedia.addEventListener('change', mdThemeHandler);
         }
     })();
     async function loadFileList() {
@@ -2303,17 +2326,31 @@
         bgmAudio.src = '';
     }
     function bgmSetOn(on) {
-        if (bgmToggle) bgmToggle.checked = !!on;
+        bgmSyncUi(on);
         try { localStorage.setItem(bgmStorageKey, on ? '1' : '0'); } catch (e) {}
         if (on) bgmStart(); else bgmStop();
     }
-    if (bgmRow && document.body.dataset.bgMusic === '1') {
-        bgmRow.style.display = 'flex';
+    // v4.6.2：背景音 UI 同步（弹窗内开关 + 首页浮动按钮双向一致）
+    function bgmSyncUi(on) {
+        if (bgmToggle) bgmToggle.checked = !!on;
+        if (bgmFloatBtn) bgmFloatBtn.classList.toggle('playing', !!on);
+    }
+    var bgmFloatBtn = document.getElementById('bgmFloatBtn');
+    if (document.body.dataset.bgMusic === '1') {
+        if (bgmRow) bgmRow.style.display = 'flex';
+        if (bgmFloatBtn) {
+            bgmFloatBtn.style.display = 'flex';
+            bgmFloatBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                bgmSetOn(!(bgmToggle ? bgmToggle.checked : false));
+            });
+        }
         if (bgmToggle && bgmAudio) {
             var bgmSaved = false;
             try { bgmSaved = localStorage.getItem(bgmStorageKey) === '1'; } catch (e) {}
             bgmToggle.addEventListener('change', function() { bgmSetOn(bgmToggle.checked); });
-            if (bgmSaved) { bgmToggle.checked = true; bgmStart(); }
+            // 记忆上次开启状态：进站尝试自动播放（浏览器自动播放策略拦截则静默，点浮动钮重试）
+            if (bgmSaved) { bgmSyncUi(true); bgmStart(); }
         }
     }
     var musicPlaylistId = document.body.dataset.musicPlaylist || '3778678';
@@ -2513,6 +2550,8 @@
             : '<path d="M8 5v14l11-7z"/>';
         if (discRing) discRing.classList.toggle('spinning', playing);
         discNotes.forEach(function(n) { n.classList.toggle('paused', !playing); });
+        // v4.6.2：播放中脉冲光环（统一播放状态视觉语言）
+        if (musicPlay) musicPlay.classList.toggle('playing', playing);
     }
     musicPlay.addEventListener('click', function() {
         if (musicIndex === -1) { musicPlaySong(0); return; }
@@ -2564,9 +2603,9 @@
     var musicLyrUserScroll = false; 
     var musicLyrScrollTimer = null; 
     var musicLyrWordMode = false; 
-    if (musicLyrToggle) musicLyrToggle.addEventListener('click', function() {
-        musicLyrMode = !musicLyrMode;
-        musicLyrToggle.textContent = musicLyrMode ? '歌' : '词';
+    // v4.6.2：歌词显示开关由「词」文字按钮改为滑块（checkbox change；滑过来=显示歌词、滑过去=隐藏）
+    if (musicLyrToggle) musicLyrToggle.addEventListener('change', function() {
+        musicLyrMode = !!musicLyrToggle.checked;
         if (musicLyrMode) {
             musicPlayerMain.style.display = 'none';
             musicLyrPanel.classList.add('active');

@@ -857,11 +857,17 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
 </div>
 <div class="toc-popup" id="tocPopup"><div class="toc-popup-header"><div class="toc-popup-title">目录</div></div><div class="toc-popup-list" id="tocPopupList"></div></div>
 <div class="music-popup" id="musicPopup">
-    <button class="music-lyric-toggle" id="musicLyrToggle" title="歌词">词</button>
-    <!-- v4.5.0：本地背景音开关（弹窗内；曲目由站长/超管后台上传，前端只能开/关，单曲循环；浏览器缓存播放不重复消耗服务器流量） -->
-    <div class="bgm-row" id="bgmRow" style="display:none">
-        <span class="bgm-label"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>&nbsp;本地背景音</span>
-        <label class="bgm-switch"><input type="checkbox" id="bgmToggle"><span class="slider"></span></label>
+    <!-- v4.6.2：弹窗顶部一行两个滑块——歌词显示开关 + 本地背景音乐开关（统一滑块样式，双向同步首页浮动音符按钮） -->
+    <div class="music-opt-row">
+        <label class="music-opt-item" title="显示/隐藏歌词">
+            <span class="music-opt-label"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>&nbsp;歌词</span>
+            <span class="bgm-switch"><input type="checkbox" id="musicLyrToggle"><span class="slider"></span></span>
+        </label>
+        <!-- v4.5.0：本地背景音开关（弹窗内；曲目由站长/超管后台上传，前端只能开/关，单曲循环；浏览器缓存播放不重复消耗服务器流量） -->
+        <div class="music-opt-item" id="bgmRow" style="display:none" title="本地背景音乐开关">
+            <span class="music-opt-label"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>&nbsp;背景音乐</span>
+            <span class="bgm-switch"><input type="checkbox" id="bgmToggle"><span class="slider"></span></span>
+        </div>
     </div>
     <div class="music-player-main" id="musicPlayerMain">
         <div class="music-disc">
@@ -910,6 +916,11 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
 <audio id="musicAudio" preload="auto"></audio>
 <!-- v4.5.0：本地背景音独立播放器（与网易云播放器互不干扰，单曲循环） -->
 <audio id="bgmAudio" loop preload="none"></audio>
+<!-- v4.6.2：本地背景音常驻浮动控制——进站即可暂停/恢复，不必打开音乐弹窗；与弹窗内开关双向同步，与网易云播放器互不干扰 -->
+<button class="bgm-float-btn" id="bgmFloatBtn" title="背景音乐" style="display:none" aria-label="背景音乐开关">
+    <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+    <span class="bgm-float-bar"></span>
+</button>
 <div class="reading-progress" id="readingProgress"></div>
 <div class="reading-progress-text" id="readingProgressText"></div>
 <div class="toast" id="toast"></div>

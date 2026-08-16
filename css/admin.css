@@ -1156,6 +1156,7 @@ td code {
 }
 /* v4.1.1：分页栏移动端适配——手机/平板下三段纵向堆叠，页码横向滚动，避免挤压错乱 */
 /* v4.6.0：手机分页简化为「两钮制」——只保留上一页/下一页 + 页码信息，隐藏中间页码/首页/末页/跳转输入 */
+/* v4.6.1：两钮间补紧凑页码——保留上一页/下一页，同时显示当前附近页码（可横向滚动直达），隐藏首页/末页/省略号/跳转输入 */
 @media (max-width: 768px) {
     .pagination {
         flex-direction: column;
@@ -1168,20 +1169,25 @@ td code {
     }
     .pagination-btns {
         flex-wrap: nowrap;
-        gap: 8px;
-        overflow: visible;
+        gap: 6px;
+        overflow-x: auto;
         width: 100%;
-        justify-content: space-between;
+        justify-content: flex-start;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
     }
-    .pagination-btns .page-btn:not([title="上一页"]):not([title="下一页"]) {
-        display: none;
-    }
+    .pagination-btns::-webkit-scrollbar { display: none; }
     .pagination-btns .page-btn {
         flex-shrink: 0;
-        min-width: 88px;
+        min-width: 36px;
         height: 36px;
-        padding: 0 14px;
-        text-align: center;
+        padding: 0 8px;
+    }
+    /* 首页/末页大按钮与省略号手机端隐藏，页码数字保留（seq 中的 1/末页 仍可点直达） */
+    .pagination-btns .page-ellipsis,
+    .pagination-btns .page-btn[title="首页"],
+    .pagination-btns .page-btn[title="末页"] {
+        display: none;
     }
     .pagination-jump {
         justify-content: space-between;
@@ -1196,9 +1202,11 @@ td code {
     }
 }
 @media (max-width: 480px) {
+    /* v4.6.1：480px 内页码按钮更紧凑（与 768px 断点一致，覆盖 36px 基础值） */
     .pagination-btns .page-btn {
-        min-width: 76px;
-        padding: 0 10px;
+        min-width: 32px;
+        height: 34px;
+        padding: 0 6px;
     }
     .per-page select {
         height: 32px;

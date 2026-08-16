@@ -81,13 +81,12 @@
         }
     })();
     // v4.2.2：mermaid 按需加载——mermaid.min.js 达 3.3MB，页面默认不再放 <head> 阻塞首屏；
-    // 仅当公告/文章正文出现 ```mermaid 代码块时才动态注入（带 SRI 校验），加载完成后渲染。
+    // 仅当公告/文章正文出现 ```mermaid 代码块时才动态注入，加载完成后渲染。
+    // v4.6.1：源由 jsdelivr CDN 改为本地 vendor/mermaid.min.js（大陆网络 CDN 不可达时流程图彻底失效）。
     function ensureMermaid(cb) {
         if (window.mermaid) { cb(); return; }
         var s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js';
-        s.integrity = 'sha384-R63zfMfSwJF4xCR11wXii+QUsbiBIdiDzDbtxia72oGWfkT7WHJfmD/I/eeHPJyT';
-        s.crossOrigin = 'anonymous';
+        s.src = 'vendor/mermaid.min.js';
         s.onload = cb;
         s.onerror = function() { /* mermaid 加载失败不阻断页面 */ };
         document.head.appendChild(s);
@@ -203,6 +202,20 @@
     let currentFileIndex = -1;
     let currentFileName = '';
     function escapeHTML(str) { const div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
+    // v4.4.1：标题锚点 slug 归一化——去除中文顿号/括号/全角标点与英文标点、空白转连字符、小写，
+    //         使渲染标题 id 与正文手写锚点（[目录](#一项目概述)）一致；模糊匹配时也用它比对。
+    // v4.6.1：v4.5.0 误删本函数定义（调用处保留），导致 marked 渲染/锚点处理全部 ReferenceError，
+    //         所有文章点击后报「文档不存在」——补回 v4.4.1 原始定义。
+    function ymSlug(s) {
+        return String(s || '')
+            .toLowerCase()
+            .trim()
+            .replace(/<[^>]*>/g, '')
+            .replace(/[\u3000-\u303f\u2000-\u206f\u2e00-\u2e7f\\'"!@#$%^&*()+,./:;<=>?[\]{}`~|·「」『』〈〉《》【】（）]/g, '')
+            .replace(/\s+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+    }
     let CSRF_TOKEN = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
     // v2.11.1：动态获取 CSRF token（修复「会话失败」根因——登录/注册等匿名 POST 前调用，
     // 同一请求链内 cookie 与 token 必然同 session；浏览器未携带 PHPSESSID/session 过期也能自愈）
@@ -1077,17 +1090,54 @@
             '</div>';
         document.title = '404 - 文档不存在 | ' + (window.YM_SITE_TITLE || 'You Markdown');
     }
+    // v4.6.1：加载失败（网络错误/响应非 JSON）——与「文件不存在」区分，避免误报"文档不存在"
+    function showLoadError(filename) {
+        showReading();
+        markdownBody.innerHTML = '<div style="text-align:center;padding:60px 20px;">' +
+            '<div style="font-size:4em;font-weight:800;color:var(--accent);line-height:1;margin-bottom:12px;">⚠</div>' +
+            '<div style="font-size:1.2em;font-weight:600;margin-bottom:8px;">加载失败</div>' +
+            '<div style="color:var(--text-secondary);margin-bottom:24px;">' + (filename ? '文件 ' + escapeHTML(filename) + ' 暂时无法加载，请检查网络后重试。' : '网络异常，请稍后重试。') + '</div>' +
+            '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">返回首页</a>' +
+            '</div>';
+        document.title = '加载失败 | ' + (window.YM_SITE_TITLE || 'You Markdown');
+    }
+    // v4.6.1：内容已获取但渲染过程出错（marked/highlight 等）——独立提示并输出控制台错误，便于定位
+    function showRenderError(filename) {
+        showReading();
+        markdownBody.innerHTML = '<div style="text-align:center;padding:60px 20px;">' +
+            '<div style="font-size:4em;font-weight:800;color:var(--accent);line-height:1;margin-bottom:12px;">!</div>' +
+            '<div style="font-size:1.2em;font-weight:600;margin-bottom:8px;">内容渲染失败</div>' +
+            '<div style="color:var(--text-secondary);margin-bottom:24px;">文件内容已获取，但页面渲染时发生错误。请查看浏览器控制台或联系管理员。</div>' +
+            '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">返回首页</a>' +
+            '</div>';
+        document.title = '渲染失败 | ' + (window.YM_SITE_TITLE || 'You Markdown');
+    }
     async function loadFile(filename, pushState = true) {
         showReading();
         markdownBody.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:40px;">⏳ 加载中...</p>';
         currentFileIndex = allFiles.findIndex(f => f.name === filename);
         updatePrevNext();
         if (pushState) updateUrl(filename);
+        let data = null;
+        // v4.6.1：网络/解析阶段独立 try——失败提示「加载失败」，不再误报「文档不存在」
         try {
             const resp = await fetch(`?action=read&file=${encodeURIComponent(filename)}`);
-            const data = await resp.json();
-            if (data.success) {
-                // v3.3.15：公告关联文章（如「更新历史」META hidden）不在 allFiles 列表，
+            const text = await resp.text();
+            try { data = JSON.parse(text); } catch (e) { data = null; }
+        } catch (err) {
+            console.error('[loadFile network error]', err);
+            showLoadError(filename);
+            cmtOnArticleHide();
+            return;
+        }
+        if (!data || !data.success) {
+            showNotFound(filename);
+            cmtOnArticleHide();
+            return;
+        }
+        // v4.6.1：渲染阶段独立 try——渲染错误提示「内容渲染失败」并输出控制台，便于定位
+        try {
+            // v3.3.15：公告关联文章（如「更新历史」META hidden）不在 allFiles 列表，
                 //          findIndex 为 -1 时旧逻辑回退 wordCount:0 → 文章详情显示"0 字"。
                 //          改用 read 接口返回的字数（服务端统一算法）修正。
                 const listMeta = allFiles[currentFileIndex];
@@ -1193,11 +1243,11 @@
                 var _annFileMap = {};
                 (window.YM_ANNOUNCEMENTS || []).forEach(function(_a) { if (_a.article) _annFileMap[_a.article] = 1; });
                 if (_annFileMap[filename]) { cmtOnArticleHide(); } else { cmtOnArticleLoad(); }
-            } else {
-                showNotFound(filename);
-                cmtOnArticleHide();
-            }
-        } catch (err) { showNotFound(filename); }
+        } catch (err) {
+            console.error('[loadFile render error]', err);
+            showRenderError(filename);
+            cmtOnArticleHide();
+        }
     }
     window.addEventListener('popstate', () => {
         const fileParam = getUrlParam('file');

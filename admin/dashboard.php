@@ -3061,9 +3061,21 @@ function ymOpenUserDetail(btn) {
     var parts = [navigator.language || '', new Date().getTimezoneOffset(), (screen.width || 0) + 'x' + (screen.height || 0), fpCanvas(), navigator.userAgent];
     var fp = fpFnv(parts.join('|')) + fpFnv(parts.join('~')) + fpFnv(navigator.userAgent);
     fetch('/api.php?action=csrf').then(r => r.json()).then(function(d) {
-        if (!d.success || !d.csrf_token) return;
-        fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp, 'X-CSRF-Token': d.csrf_token } }).catch(function() {});
-    }).catch(function() {});
+            if (!d.success || !d.csrf_token) return;
+            // v4.6.1：fp_report 结果回显——环境不匹配时立即明确提示（否则保存等写操作被静默拦截，用户误以为"保存不生效"）
+            fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp, 'X-CSRF-Token': d.csrf_token } })
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    if (res && res.success === false) {
+                        var _b = document.createElement('div');
+                        _b.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99999;background:#dc2626;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:92vw';
+                        _b.textContent = '登录环境已变化（换设备/浏览器/隐私模式），保存等操作将被拦截，请重新登录';
+                        document.body.appendChild(_b);
+                        setTimeout(function() { if (_b.parentNode) _b.parentNode.removeChild(_b); }, 7000);
+                    }
+                })
+                .catch(function() {});
+        }).catch(function() {});
 })();
 </script>
 </body>

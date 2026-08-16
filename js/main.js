@@ -2620,6 +2620,9 @@
     if (musicSrcRow) musicSrcRow.addEventListener('click', function(e) {
         var b = e.target.closest('.music-src-chip');
         if (!b) return;
+        // v4.7.6：阻止冒泡——切换平台后 musicRenderChartChips() 重建榜单行，被点按钮脱离 DOM，
+        // 冒泡到 document 时 musicPopup.contains(target) 返回 false，会被「点击外部关闭」误关弹窗
+        e.stopPropagation();
         var p = b.getAttribute('data-platform');
         if (!p || p === musicPlatform) return;
         musicPlatform = p;
@@ -2633,6 +2636,8 @@
     if (musicChartRow) musicChartRow.addEventListener('click', function(e) {
         var b = e.target.closest('.music-src-chip');
         if (!b) return;
+        // v4.7.6：同上——切换榜单时本行 innerHTML 重建，必须阻止冒泡防误关弹窗
+        e.stopPropagation();
         var c = b.getAttribute('data-chart');
         if (!c || c === musicChart) return;
         musicChart = c;

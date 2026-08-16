@@ -93,9 +93,10 @@ function qq_batchGetSongUrls($songmids, $cookies = '') {
                 $vkey = $info['vkey'] ?? '';
                 $purl = $info['purl'] ?? '';
                 if ($vkey && $purl) {
-                    $urlMap[$mid] = 'http://ws.stream.qqmusic.qq.com/' . $purl . '?vkey=' . $vkey . '&fromtag=66';
+                    // v4.3.0：https（原 http 在 https 页面属混合内容会被浏览器拦截，导致无法播放）
+                    $urlMap[$mid] = 'https://ws.stream.qqmusic.qq.com/' . $purl . '?vkey=' . $vkey . '&fromtag=66';
                 } elseif ($purl) {
-                    $urlMap[$mid] = 'http://ws.stream.qqmusic.qq.com/' . $purl;
+                    $urlMap[$mid] = 'https://ws.stream.qqmusic.qq.com/' . $purl;
                 }
             }
         }

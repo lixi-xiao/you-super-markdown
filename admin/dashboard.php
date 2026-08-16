@@ -518,6 +518,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
     $config['hide_default_paths'] = !empty($_POST['hide_default_paths']);
     // v4.1.7：蜜罐攻击封禁阈值（1-100，ym-hfish-sync.py 读取；写入 config 表供后台可配）
     $config['hfish_ban_threshold'] = min(100, max(1, intval($_POST['hfish_ban_threshold'] ?? 10)));
+    // v4.4.0：注册蜜罐自动封禁（与上方 HFish 蜜罐独立，仅针对注册表单隐藏字段）——触发次数 + 封禁时长（15 分钟~永久）
+    $config['honeypot_ban_count'] = min(50, max(1, intval($_POST['honeypot_ban_count'] ?? 3)));
+    $hpDurOpts = [900, 1800, 3600, 7200, 21600, 43200, 86400, 604800, 0];
+    $hpDur = intval($_POST['honeypot_ban_duration'] ?? 3600);
+    $config['honeypot_ban_duration'] = in_array($hpDur, $hpDurOpts, true) ? $hpDur : 3600;
     saveSiteConfig($config);
     auditLog('config_update', 'site_config', '修改安全设置');
     // v4.1.8：安全配置（含蜜罐阈值）变更后立即刷新蜜罐快照——界面阈值/封禁状态即时生效，无需等 5 分钟轮询
@@ -662,6 +667,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['bg_image']) || isse
         $config['music_playlist_id_qq'] = trim($_POST['music_playlist_id_qq'] ?? '');
         $config['music_cookies'] = trim($_POST['music_cookies'] ?? '');
         $config['music_cookies_qq'] = trim($_POST['music_cookies_qq'] ?? '');
+        // v4.4.0：默认播放歌曲关键词（留空则不自动播放）
+        $config['music_auto_play'] = mb_substr(trim($_POST['music_auto_play'] ?? ''), 0, 60, 'UTF-8');
         saveSiteConfig($config);
         auditLog('ui_config', 'site_config', '修改主界面及功能设置');
         header('Location: dashboard.php?tab=ui&msg=saved');
@@ -1182,6 +1189,21 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <div><div class="toggle-label">蜜罐攻击封禁阈值</div><div class="toggle-desc">攻击次数达到该值自动封禁 IP（当前 <span style="color:var(--accent);font-weight:600"><?= (int)($config['hfish_ban_threshold'] ?? 10) ?></span> 次；调低更敏感）</div></div>
                 <input type="number" class="form-input" name="hfish_ban_threshold" value="<?= (int)($config['hfish_ban_threshold'] ?? 10) ?>" min="1" max="100" style="width:88px;flex-shrink:0" title="蜜罐攻击封禁阈值（1-100）">
             </div>
+            <!-- v4.4.0：注册蜜罐自动封禁（独立于上方 HFish 蜜罐，仅针对注册表单隐藏蜜罐字段，静默拒绝） -->
+            <div class="toggle-row" style="align-items:center">
+                <div><div class="toggle-label">注册蜜罐自动封禁</div><div class="toggle-desc">10 分钟内连续命中注册蜜罐达阈值 → 自动封禁 IP（当前 <span style="color:var(--accent);font-weight:600"><?= (int)($config['honeypot_ban_count'] ?? 3) ?></span> 次 / <span style="color:var(--accent);font-weight:600"><?= $config['honeypot_ban_duration'] > 0 ? (int)($config['honeypot_ban_duration'] / 60) . ' 分钟' : '永久' ?></span>）</div></div>
+                <input type="number" class="form-input" name="honeypot_ban_count" value="<?= (int)($config['honeypot_ban_count'] ?? 3) ?>" min="1" max="50" style="width:70px;flex-shrink:0" title="触发次数（1-50）">
+                <select class="form-input" name="honeypot_ban_duration" style="width:120px;flex-shrink:0" title="封禁时长">
+                    <?php
+                    $hpDurNow = (int)($config['honeypot_ban_duration'] ?? 3600);
+                    $hpOpts = [['900', '15 分钟'], ['1800', '30 分钟'], ['3600', '1 小时'], ['7200', '2 小时'], ['21600', '6 小时'], ['43200', '12 小时'], ['86400', '24 小时'], ['604800', '7 天'], ['0', '永久']];
+                    foreach ($hpOpts as $ho) {
+                        $sel = $hpDurNow === (int)$ho[0] ? ' selected' : '';
+                        echo '<option value="' . $ho[0] . '"' . $sel . '>' . $ho[1] . '</option>';
+                    }
+                    ?>
+                </select>
+            </div>
             <div class="toggle-row" onclick="openRateLimitModal()" style="cursor:pointer">
                 <div><div class="toggle-label">频率限制设置</div><div class="toggle-desc">登录/评论/注册频率上限</div></div>
                 <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
@@ -1640,6 +1662,12 @@ $banMsg = $_GET['bmsg'] ?? '';
             <input class="form-input" type="text" id="musicQQInput" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>" placeholder="留空则使用 QQ 热歌榜">
             <p class="form-hint">QQ 音乐歌单 ID（前端切换到 QQ 平台时使用），留空则加载 QQ 热歌榜</p>
         </div>
+        <!-- v4.4.0：默认播放歌曲——打开歌单无历史播放时自动定位播放该歌（歌曲名关键词，跨平台适用） -->
+        <div class="form-group">
+            <label class="form-label">默认播放歌曲（可选）</label>
+            <input class="form-input" type="text" id="musicAutoPlayInput" value="<?= htmlspecialchars($config['music_auto_play'] ?? '') ?>" placeholder="例如：One Last Kiss" maxlength="60">
+            <p class="form-hint">首次打开歌单时按此关键词自动定位播放（QQ/网易云通用）；留空则不自动播放</p>
+        </div>
         <div class="form-group">
             <label class="form-label">网易云 Cookies（可选）</label>
             <input class="form-input" type="text" id="musicNetCookieInput" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
@@ -1745,6 +1773,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         <input type="hidden" name="comment_notify_email" id="formNotifyEmail" value="<?= htmlspecialchars($config['comment_notify_email'] ?? '') ?>">
         <input type="hidden" name="music_playlist_id" id="formMusicNetease" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>">
         <input type="hidden" name="music_playlist_id_qq" id="formMusicQQ" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>">
+        <input type="hidden" name="music_auto_play" id="formMusicAutoPlay" value="<?= htmlspecialchars($config['music_auto_play'] ?? '') ?>">
         <input type="hidden" name="music_cookies" id="formMusicNetCookie" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>">
         <input type="hidden" name="music_cookies_qq" id="formMusicQQCookie" value="<?= htmlspecialchars($config['music_cookies_qq'] ?? '') ?>">
         <div style="display:flex;justify-content:flex-end;gap:10px">
@@ -1807,7 +1836,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         }
         window.removeBgImage = function() { if (confirm('确定移除背景图片？')) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
-        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formSiteTitle').value = document.getElementById('siteTitleInput').value.trim(); document.getElementById('formRegEnabled').value = document.getElementById('regToggle').checked ? '1' : ''; document.getElementById('formGuestComments').value = document.getElementById('guestToggle').checked ? '1' : ''; document.getElementById('formSuperComment').value = document.getElementById('superCommentToggle').checked ? '1' : ''; document.getElementById('formNotifyEnabled').value = document.getElementById('notifyToggle').checked ? '1' : ''; document.getElementById('formNotifyEmail').value = document.getElementById('notifyEmailInput').value.trim(); document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicQQ').value = document.getElementById('musicQQInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formMusicQQCookie').value = document.getElementById('musicQQCookieInput').value.trim(); });
+        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formSiteTitle').value = document.getElementById('siteTitleInput').value.trim(); document.getElementById('formRegEnabled').value = document.getElementById('regToggle').checked ? '1' : ''; document.getElementById('formGuestComments').value = document.getElementById('guestToggle').checked ? '1' : ''; document.getElementById('formSuperComment').value = document.getElementById('superCommentToggle').checked ? '1' : ''; document.getElementById('formNotifyEnabled').value = document.getElementById('notifyToggle').checked ? '1' : ''; document.getElementById('formNotifyEmail').value = document.getElementById('notifyEmailInput').value.trim(); document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicQQ').value = document.getElementById('musicQQInput').value.trim(); document.getElementById('formMusicAutoPlay').value = document.getElementById('musicAutoPlayInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formMusicQQCookie').value = document.getElementById('musicQQCookieInput').value.trim(); });
         <?php if ($bgType === 'api' && $bgApiUrl): ?>
         (function() { var u=<?= json_encode($bgApiUrl) ?>; var img=new Image(); img.onload=function(){previewApiSrc=u;updatePreview();}; img.src=u; })();
         <?php endif; ?>

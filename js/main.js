@@ -1391,6 +1391,14 @@
     const cmtRegSendCode = document.getElementById('cmtRegSendCode');
     const cmtRegCode = document.getElementById('cmtRegCode');
     const regVerifyOn = (document.body.getAttribute('data-reg-verify') === '1');
+    // v4.4.0：注册算术人机验证弹窗 + 注册蜜罐字段
+    const cmtArithModal = document.getElementById('cmtArithModal');
+    const cmtArithQuestion = document.getElementById('cmtArithQuestion');
+    const cmtArithAnswer = document.getElementById('cmtArithAnswer');
+    const cmtArithErr = document.getElementById('cmtArithErr');
+    const cmtArithOk = document.getElementById('cmtArithOk');
+    const cmtArithCancel = document.getElementById('cmtArithCancel');
+    const cmtRegHoneypot = document.getElementById('cmtRegHoneypot');
     // v2.11.0：滑块人机验证已彻底移除（cmtRegCaptchaBox / regCaptchaOn 删除）
     // v2.10.0：邮箱验证开关（控制前台个人设置里的邮箱绑定/更换入口）与 CSRF token
     const emailChangeOn = (document.body.getAttribute('data-email-change') === '1');
@@ -1588,18 +1596,39 @@
         });
     }
 
-    // 发码按钮：60s 倒计时（后端同样限制；超管后台操作不受限）
+    // 发码按钮：v4.4.0 先弹算术人机验证，答对后才真正发码（60s 倒计时；后端同样限制）
     if (cmtRegSendCode) cmtRegSendCode.addEventListener('click', () => {
         const email = cmtRegEmail.value.trim();
         const re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
         if (!re.test(email)) { cmtRegErr.textContent = '请输入正确的邮箱'; return; }
         cmtRegErr.textContent = '';
-        cmtRegSendCode.disabled = true;
+        // 获取随机算术题并弹窗
+        fetch('api.php?action=arith_challenge')
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) { cmtRegErr.textContent = '人机验证获取失败，请重试'; return; }
+                cmtArithQuestion.textContent = d.expression;
+                cmtArithAnswer.value = '';
+                cmtArithErr.textContent = '';
+                cmtArithOk.disabled = false;
+                cmtOpenModal(cmtArithModal);
+                setTimeout(() => cmtArithAnswer.focus(), 50);
+            })
+            .catch(() => { cmtRegErr.textContent = '网络错误'; });
+    });
+    // 算术题确认：答对才置 pending，随后才真正发码
+    if (cmtArithOk) cmtArithOk.addEventListener('click', () => {
+        const ans = cmtArithAnswer.value.trim();
+        if (!ans) { cmtArithErr.textContent = '请输入计算结果'; return; }
+        cmtArithOk.disabled = true;
+        cmtArithErr.textContent = '验证中...';
+        const email = cmtRegEmail.value.trim();
         fetch('api.php?action=send_register_code', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email })
+            body: JSON.stringify({ email, arith_answer: ans })
         }).then(r => r.json()).then(d => {
             if (d.success) {
+                cmtCloseModal(cmtArithModal);
                 cmtRegErr.textContent = '';
                 let left = 60;
                 cmtRegSendCode.textContent = left + 's 后重发';
@@ -1609,10 +1638,21 @@
                     else cmtRegSendCode.textContent = left + 's 后重发';
                 }, 1000);
             } else {
-                cmtRegErr.textContent = d.error || '发送失败';
-                cmtRegSendCode.disabled = false;
+                cmtArithErr.textContent = d.error || '验证失败';
+                // 答错/过期：自动换一题重试
+                fetch('api.php?action=arith_challenge').then(r => r.json()).then(d2 => {
+                    if (d2.success) {
+                        cmtArithQuestion.textContent = d2.expression;
+                        cmtArithAnswer.value = '';
+                    }
+                }).catch(() => {});
+                cmtArithOk.disabled = false;
             }
-        }).catch(() => { cmtRegErr.textContent = '网络错误'; cmtRegSendCode.disabled = false; });
+        }).catch(() => { cmtArithErr.textContent = '网络错误'; cmtArithOk.disabled = false; });
+    });
+    if (cmtArithCancel) cmtArithCancel.addEventListener('click', () => {
+        cmtCloseModal(cmtArithModal);
+        cmtArithOk.disabled = false;
     });
 
     if (cmtRegBtn) cmtRegBtn.addEventListener('click', async () => {
@@ -1629,9 +1669,11 @@
         // v2.11.1：提交前动态刷新 token（与当前 session 绑定）
         await ensureFreshCsrf();
         cmtRegBtn.disabled = true; cmtRegBtn.textContent = '注册中...';
-        fetch('api.php?action=register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw, email, code }) })
+        // v4.4.0：注册请求携带蜜罐字段原值（机器人自动填充会被后端静默拒绝）
+        const hpVal = cmtRegHoneypot ? cmtRegHoneypot.value.trim() : '';
+        fetch('api.php?action=register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw, email, code, website: hpVal }) })
             .then(r => r.json()).then(d => {
-                if (d.success) { cmtUser = d.user; cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); }
+                if (d.success) { if (d.user) { cmtUser = d.user; } cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); }
                 else { cmtRegErr.textContent = d.error || '注册失败'; }
             }).catch(() => { cmtRegErr.textContent = '网络错误'; })
             .finally(() => { cmtRegBtn.disabled = false; cmtRegBtn.textContent = '注册'; });
@@ -2081,14 +2123,18 @@
     }
     var musicPlaylistId = document.body.dataset.musicPlaylist || '3778678';
     var musicPlaylistIdQQ = document.body.dataset.musicPlaylistQq || '';
-    var musicPlatform = 'netease';
+    // v4.3.0：默认平台由后端按配置决定（已配置 QQ cookie + 歌单 → QQ，否则网易云），
+    //         解决后台放了 QQ 歌单/ Cookie 却加载到网易云热歌榜的问题
+    var musicPlatform = document.body.dataset.musicPlatform === 'qq' ? 'qq' : 'netease';
     var musicSongs = [];
     var musicIndex = -1;
     var musicPlaying = false;
     var musicLoaded = false;
     var musicListOpen = false;
     var musicStorageKey = 'ymd-music-state';
-    var musicLoopMode = 0; 
+    var musicLoopMode = 0;
+    // v4.4.0：默认自动播放目标——后台「默认播放歌曲」关键词（留空则不自动播放）
+    var musicAutoPlayKeyword = (document.body.dataset.musicAutoPlay || '').trim();
     function musicSaveState() {
         try {
             var state = {
@@ -2183,7 +2229,7 @@
                             duration: (t.duration || 0) * 1000
                         };
                     });
-                    if (musicPopupCount) musicPopupCount.textContent = '热歌榜 · ' + musicSongs.length + ' 首';
+                    if (musicPopupCount) musicPopupCount.textContent = (musicPlatform === 'qq' ? 'QQ 歌单' : '热歌榜') + ' · ' + musicSongs.length + ' 首';
                     renderMusicList();
                     var saved = musicLoadState();
                     if (saved && saved.index >= 0 && saved.index < musicSongs.length) {
@@ -2195,6 +2241,17 @@
                         musicListOpen = true;
                         musicList.classList.add('open');
                         musicListToggle.classList.add('open');
+                        // v4.4.0：首次进入且无历史播放状态时，按后台「默认播放歌曲」关键词模糊匹配
+                        //         定位并播放（匹配不到则播放列表第一首；关键词留空则不自动播放）
+                        var autoIdx = -1;
+                        if (musicAutoPlayKeyword) {
+                            for (var _i = 0; _i < musicSongs.length; _i++) {
+                                var _n = String(musicSongs[_i].name || '').toLowerCase();
+                                if (_n.indexOf(musicAutoPlayKeyword) !== -1) { autoIdx = _i; break; }
+                            }
+                            if (autoIdx === -1 && musicSongs.length > 0) autoIdx = 0;
+                            if (autoIdx >= 0) musicPlaySong(autoIdx, 0);
+                        }
                     }
                     if (saved && typeof saved.volume === 'number') {
                         musicAudio.volume = saved.volume;

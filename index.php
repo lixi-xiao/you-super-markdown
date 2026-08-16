@@ -79,6 +79,11 @@ foreach (getAnnouncements(20) as $_an) {
 }
 // 音乐播放器：网易云（music_cookies）或 QQ（music_cookies_qq）任一配置后显示入口（v2.6.0 起支持双平台独立开关）
 $musicEnabled = !empty($_siteConfig['music_cookies']) || !empty($_siteConfig['music_cookies_qq']);
+// v4.3.0：默认音乐平台——已配置 QQ cookie + QQ 歌单时默认 QQ（否则网易云）；前端加载该平台歌单
+$_defaultMusicPlatform = 'netease';
+if (!empty($_siteConfig['music_cookies_qq']) && !empty($_siteConfig['music_playlist_id_qq'])) {
+    $_defaultMusicPlatform = 'qq';
+}
 // 置顶列表读写由 utils.php 提供（SQLite）；此处仅作全局别名
 // 自定义入口路径路由（L1 隐藏入口扩展）
 $requestUri = $_SERVER['REQUEST_URI'] ?? '';
@@ -683,7 +688,7 @@ $_bgApiUrl = trim((string)($_siteConfig['bg_api_url'] ?? ''));
 if (($_siteConfig['bg_type'] ?? 'none') === 'api' && $_bgApiUrl === '') $_bgApiUrl = FIXED_IMG_API;
 if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : '?') . '_t=' . time();
 ?>
-<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_bgApiUrl) ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>">
+<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_bgApiUrl) ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>" data-music-platform="<?= htmlspecialchars($_defaultMusicPlatform) ?>" data-music-auto-play="<?= htmlspecialchars($_siteConfig['music_auto_play'] ?? '') ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($_siteTitle) ?></a></div>
     <div class="header-right">
@@ -695,6 +700,10 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
                 <path d="M5 19a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" fill="currentColor" stroke="none"/>
             </svg>
         </a>
+        <?php if ($musicEnabled): ?>
+        <!-- v4.3.0：音乐入口由右侧浮动按钮移至顶部快捷栏（手机/电脑均常驻，切换界面不打断播放） -->
+        <button class="icon-btn" id="floatMusicBtn" title="音乐"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></button>
+        <?php endif; ?>
         <button class="icon-btn" id="btnSearch" title="搜索"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
         <button class="icon-btn" id="btnToc" title="目录"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
         <button class="icon-btn" id="btnFont" title="字体设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg></button>
@@ -826,9 +835,6 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
 </main>
 <div class="floating-buttons" id="floatingButtons" style="display:none;">
     <button class="float-btn" id="floatTocBtn" title="目录"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
-    <?php if ($musicEnabled): ?>
-    <button class="float-btn" id="floatMusicBtn" title="音乐"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></button>
-    <?php endif; ?>
     <button class="float-btn" id="floatHomeBtn" title="返回主页"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></button>
     <button class="float-btn" id="scrollToTopBtn" title="回到顶部"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
 </div>
@@ -856,6 +862,13 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
 <div class="toc-popup" id="tocPopup"><div class="toc-popup-header"><div class="toc-popup-title">目录</div></div><div class="toc-popup-list" id="tocPopupList"></div></div>
 <div class="music-popup" id="musicPopup">
     <button class="music-lyric-toggle" id="musicLyrToggle" title="歌词">词</button>
+    <!-- v4.4.0：QQ/网易云通道切换滑块（常驻播放器顶部，切换后重载对应平台歌单） -->
+    <div class="music-channel-bar">
+        <div class="music-platform-tabs" id="musicPlatformTabs">
+            <span class="music-platform-tab <?= $_defaultMusicPlatform === 'netease' ? 'active' : '' ?>" data-platform="netease">网易云</span>
+            <span class="music-platform-tab <?= $_defaultMusicPlatform === 'qq' ? 'active' : '' ?>" data-platform="qq">QQ</span>
+        </div>
+    </div>
     <div class="music-player-main" id="musicPlayerMain">
         <div class="music-disc">
             <div class="disc-ring">
@@ -896,11 +909,6 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
     <div class="music-list" id="musicList">
         <div class="music-list-header">
             <span class="music-popup-count" id="musicPopupCount">热歌榜</span>
-            <div class="music-platform-tabs" id="musicPlatformTabs">
-                <span class="music-platform-tab active" data-platform="netease">网易云</span>
-                <span class="music-platform-tab" data-platform="qq">QQ</span>
-                
-            </div>
         </div>
         <div class="music-loading" id="musicLoading">点击加载热歌榜</div>
     </div>
@@ -927,6 +935,8 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
             <div class="cmt-modal-form cmt-reg-form" id="cmtRegForm" style="display:none">
                 <!-- v2.10.2：注册表单统一设计——账号信息 / 身份验证分组分层 -->
                 <div class="cmt-sec-title"><span>账号信息</span></div>
+                <!-- v4.4.0：注册蜜罐——CSS 隐藏输入框，真人看不见不会填；机器人自动填充即被后端静默拒绝 -->
+                <input type="text" name="website" id="cmtRegHoneypot" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0">
                 <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtRegQQ">
                 <input class="cmt-modal-input" type="text" placeholder="昵称" maxlength="20" id="cmtRegNick">
                 <div class="cmt-pw-row">
@@ -947,6 +957,23 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
             </div>
         </div>
         <div class="cmt-modal-switch"><span id="cmtSwitchText">还没有账号？</span><button class="cmt-modal-switch-link" id="cmtSwitchBtn">立即注册</button></div>
+    </div>
+</div>
+<!-- v4.4.0：注册算术人机验证弹窗——点击「获取验证码」弹出随机加减乘除题，答对才发送邮箱验证码 -->
+<div class="cmt-modal-mask" id="cmtArithModal">
+    <div class="cmt-modal-box cmt-arith-box">
+        <div class="cmt-modal-head"><div class="cmt-modal-title">人机验证</div></div>
+        <div class="cmt-modal-body">
+            <div class="cmt-modal-form">
+                <div class="cmt-arith-question" id="cmtArithQuestion">…</div>
+                <input class="cmt-modal-input" type="text" placeholder="计算结果" maxlength="6" id="cmtArithAnswer" autocomplete="off" inputmode="numeric">
+                <div class="cmt-modal-err" id="cmtArithErr"></div>
+                <div class="cmt-arith-actions">
+                    <button class="cmt-modal-submit" id="cmtArithOk">验证</button>
+                    <button type="button" class="cmt-arith-cancel" id="cmtArithCancel">取消</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 <div class="cmt-modal-mask" id="cmtProfileModal">

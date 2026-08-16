@@ -230,6 +230,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         $config['music_playlist_id_qq'] = trim($_POST['music_playlist_id_qq'] ?? '');
         $config['music_cookies'] = trim($_POST['music_cookies'] ?? '');
         $config['music_cookies_qq'] = trim($_POST['music_cookies_qq'] ?? '');
+        // v4.4.0：默认播放歌曲关键词（留空则不自动播放）
+        $config['music_auto_play'] = mb_substr(trim($_POST['music_auto_play'] ?? ''), 0, 60, 'UTF-8');
         saveSiteConfig($config);
         auditLog('bg_config', 'site_config', '站长修改主界面及功能设置');
         $msg = 'saved';
@@ -614,6 +616,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <input class="form-input" type="text" id="musicQQInput" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>" placeholder="留空则使用 QQ 热歌榜">
             <p class="form-hint">QQ 音乐歌单 ID（前端切换到 QQ 平台时使用），留空则加载 QQ 热歌榜</p>
         </div>
+        <!-- v4.4.0：默认播放歌曲——打开歌单无历史播放时自动定位播放该歌（歌曲名关键词，跨平台适用） -->
+        <div class="form-group">
+            <label class="form-label">默认播放歌曲（可选）</label>
+            <input class="form-input" type="text" id="musicAutoPlayInput" value="<?= htmlspecialchars($config['music_auto_play'] ?? '') ?>" placeholder="例如：One Last Kiss" maxlength="60">
+            <p class="form-hint">首次打开歌单时按此关键词自动定位播放（QQ/网易云通用）；留空则不自动播放</p>
+        </div>
         <div class="form-group">
             <label class="form-label">网易云 Cookies（可选）</label>
             <input class="form-input" type="text" id="musicNetCookieInput" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
@@ -713,6 +721,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <input type="hidden" name="bg_card_opacity" id="formCardOpacity" value="<?= $bgCardOpacity ?>">
         <input type="hidden" name="music_playlist_id" id="formMusicNetease" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>">
         <input type="hidden" name="music_playlist_id_qq" id="formMusicQQ" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>">
+        <input type="hidden" name="music_auto_play" id="formMusicAutoPlay" value="<?= htmlspecialchars($config['music_auto_play'] ?? '') ?>">
         <input type="hidden" name="music_cookies" id="formMusicNetCookie" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>">
         <input type="hidden" name="music_cookies_qq" id="formMusicQQCookie" value="<?= htmlspecialchars($config['music_cookies_qq'] ?? '') ?>">
         <div style="display:flex;justify-content:flex-end;gap:10px">
@@ -775,7 +784,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         }
         window.removeBgImage = function() { if (confirm('确定移除背景图片？')) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
-        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicQQ').value = document.getElementById('musicQQInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formMusicQQCookie').value = document.getElementById('musicQQCookieInput').value.trim(); });
+        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicQQ').value = document.getElementById('musicQQInput').value.trim(); document.getElementById('formMusicAutoPlay').value = document.getElementById('musicAutoPlayInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formMusicQQCookie').value = document.getElementById('musicQQCookieInput').value.trim(); });
         <?php if ($bgType === 'api' && $bgApiUrl): ?>
         (function() { var u=<?= json_encode($bgApiUrl) ?>; var img=new Image(); img.onload=function(){previewApiSrc=u;updatePreview();}; img.src=u; })();
         <?php endif; ?>

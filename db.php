@@ -179,6 +179,10 @@ function db_init_schema($pdo) {
     try { $pdo->exec('ALTER TABLE login_fails ADD COLUMN acc TEXT'); } catch (Exception $e) { /* 列已存在 */ }
     $pdo->exec('CREATE TABLE IF NOT EXISTS reg_rates (ip TEXT, t INTEGER)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS comment_rates (ip TEXT, t INTEGER)');
+    // v4.4.0：注册蜜罐触发计数表（短时间连续命中蜜罐 → 自动封禁 IP）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS honeypot_rates (ip TEXT, t INTEGER)');
+    // v4.4.0：bans 表补 expires 列（0=永久封禁；>0=过期时间戳，老库幂等补齐）
+    try { $pdo->exec('ALTER TABLE bans ADD COLUMN expires INTEGER DEFAULT 0'); } catch (Exception $e) { /* 列已存在 */ }
     // v2.11.0：登录锁定表（60 秒内同 IP 或同账号失败 ≥3 次 → 锁 15 分钟，IP+账号双级）
     $pdo->exec('CREATE TABLE IF NOT EXISTS login_locks (
         key TEXT PRIMARY KEY,
@@ -191,6 +195,8 @@ function db_init_schema($pdo) {
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_login_fails_acc ON login_fails(acc)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_reg_rates_ip_t ON reg_rates(ip, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_reg_rates_t ON reg_rates(t)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_honeypot_rates_ip_t ON honeypot_rates(ip, t)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_honeypot_rates_t ON honeypot_rates(t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_comment_rates_ip_t ON comment_rates(ip, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_comment_rates_t ON comment_rates(t)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS logs (ip TEXT, action TEXT, time TEXT)');

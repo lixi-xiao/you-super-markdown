@@ -6,9 +6,9 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/utils.php';
 $config = loadSiteConfig();
 
-// 获取参数
-$platform = $_GET['platform'] ?? $config['music_platform'] ?? 'netease';
-if (!in_array($platform, ['netease', 'qq'], true)) {
+// 获取参数（v4.4.2：移除 QQ 平台，仅保留网易云）
+$platform = $_GET['platform'] ?? 'netease';
+if ($platform !== 'netease') {
     http_response_code(400);
     echo json_encode(['error' => '不支持的音乐平台'], JSON_UNESCAPED_UNICODE);
     exit;
@@ -18,20 +18,17 @@ $playlistId = $_GET['playlistId'] ?? '';
 $lyricId = $_GET['lyric'] ?? '';
 $songId = $_GET['songId'] ?? '';
 
-// v2.6.0：按平台取 Cookies（网易云 music_cookies / QQ 音乐 music_cookies_qq 独立配置）
-$musicCookies = ($platform === 'qq')
-    ? ($config['music_cookies_qq'] ?? '')
-    : ($config['music_cookies'] ?? '');
+// v2.6.0：按平台取 Cookies（v4.4.2 起仅网易云 music_cookies）
+$musicCookies = $config['music_cookies'] ?? '';
 
 // v4.2.4：带 Cookie 的外呼必须走安全跟随——禁止 CURLOPT_FOLLOWLOCATION 自动跟随
 //         （curl 会把 CURLOPT_COOKIE 原样发送给重定向目标，若 API 被劫持重定向到第三方
 //          域名将泄露音乐账号 Cookie）。这里改为手动跟随 + 目标域名白名单校验，
 //          非白名单域名一律不跟随（返回 null，调用方按失败处理）。
 define('MUSIC_REDIRECT_ALLOW', [
-    'qq.com', 'y.qq.com', 'qqmusic.qq.com', 'music.qq.com', 'i.y.qq.com', 'c.y.qq.com', 'u.y.qq.com', 'ws.stream.qqmusic.qq.com',
     '163.com', 'music.163.com', 'api.xfyun.club',
 ]);
-function musicSafeRequest($url, $timeout = 15, $cookies = '', $postData = null, $referer = 'https://y.qq.com/') {
+function musicSafeRequest($url, $timeout = 15, $cookies = '', $postData = null, $referer = 'https://music.163.com/') {
     $cur = $url;
     $maxRedirects = 3;
     for ($redirect = 0; $redirect <= $maxRedirects; $redirect++) {
@@ -108,10 +105,9 @@ function musicSafeRequest($url, $timeout = 15, $cookies = '', $postData = null, 
     return null;
 }
 
-// 平台到歌单ID的映射
+// 平台到歌单ID的映射（v4.4.2 起仅网易云）
 $platformPlaylistKeys = [
     'netease' => 'music_playlist_id',
-    'qq' => 'music_playlist_id_qq',
 ];
 
 // 如果未提供 playlistId，从配置中获取

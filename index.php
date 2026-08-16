@@ -77,13 +77,8 @@ foreach (getAnnouncements(20) as $_an) {
         'cover' => '', 'tags' => $tg, 'words' => $wc,
     ];
 }
-// 音乐播放器：网易云（music_cookies）或 QQ（music_cookies_qq）任一配置后显示入口（v2.6.0 起支持双平台独立开关）
-$musicEnabled = !empty($_siteConfig['music_cookies']) || !empty($_siteConfig['music_cookies_qq']);
-// v4.3.0：默认音乐平台——已配置 QQ cookie + QQ 歌单时默认 QQ（否则网易云）；前端加载该平台歌单
-$_defaultMusicPlatform = 'netease';
-if (!empty($_siteConfig['music_cookies_qq']) && !empty($_siteConfig['music_playlist_id_qq'])) {
-    $_defaultMusicPlatform = 'qq';
-}
+// 音乐播放器：仅网易云（music_cookies）配置后显示入口（v4.4.2 起移除 QQ 音乐通道）
+$musicEnabled = !empty($_siteConfig['music_cookies']);
 // 置顶列表读写由 utils.php 提供（SQLite）；此处仅作全局别名
 // 自定义入口路径路由（L1 隐藏入口扩展）
 $requestUri = $_SERVER['REQUEST_URI'] ?? '';
@@ -688,7 +683,7 @@ $_bgApiUrl = trim((string)($_siteConfig['bg_api_url'] ?? ''));
 if (($_siteConfig['bg_type'] ?? 'none') === 'api' && $_bgApiUrl === '') $_bgApiUrl = FIXED_IMG_API;
 if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : '?') . '_t=' . time();
 ?>
-<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_bgApiUrl) ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-playlist-qq="<?= htmlspecialchars($_siteConfig['music_playlist_id_qq'] ?? '') ?>" data-music-platform="<?= htmlspecialchars($_defaultMusicPlatform) ?>" data-music-auto-play="<?= htmlspecialchars($_siteConfig['music_auto_play'] ?? '') ?>">
+<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_bgApiUrl) ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($_siteConfig['music_auto_play'] ?? '') ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($_siteTitle) ?></a></div>
     <div class="header-right">
@@ -862,13 +857,6 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
 <div class="toc-popup" id="tocPopup"><div class="toc-popup-header"><div class="toc-popup-title">目录</div></div><div class="toc-popup-list" id="tocPopupList"></div></div>
 <div class="music-popup" id="musicPopup">
     <button class="music-lyric-toggle" id="musicLyrToggle" title="歌词">词</button>
-    <!-- v4.4.0：QQ/网易云通道切换滑块（常驻播放器顶部，切换后重载对应平台歌单） -->
-    <div class="music-channel-bar">
-        <div class="music-platform-tabs" id="musicPlatformTabs">
-            <span class="music-platform-tab <?= $_defaultMusicPlatform === 'netease' ? 'active' : '' ?>" data-platform="netease">网易云</span>
-            <span class="music-platform-tab <?= $_defaultMusicPlatform === 'qq' ? 'active' : '' ?>" data-platform="qq">QQ</span>
-        </div>
-    </div>
     <div class="music-player-main" id="musicPlayerMain">
         <div class="music-disc">
             <div class="disc-ring">

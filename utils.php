@@ -236,6 +236,10 @@ function loadSiteConfig() {
         // v4.1.16：卡片玻璃效果（毛玻璃/液态玻璃）+ 用户液态玻璃个人开关显示
         'card_glass_style' => 'frosted',   // frosted 毛玻璃 / liquid 液态玻璃（苹果 Liquid Glass 风格）
         'user_glass_toggle' => false,      // 是否在用户界面显示「液态玻璃」个人开关（低配设备可自行关闭）
+        // v4.1.17：毛玻璃默认更透（50%），后台「卡片透明度」滑杆仍可 20-100% 自由调节
+        'bg_card_opacity' => 50,
+        'bg_blur_enabled' => false,
+        'bg_blur_level' => 0,
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;

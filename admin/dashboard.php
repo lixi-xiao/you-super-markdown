@@ -2790,6 +2790,11 @@ $banMsg = $_GET['bmsg'] ?? '';
 
     <div class="card">
         <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>SMTP 配置</div>
+        <?php if ($smtpAdminEmail === ''): ?>
+        <div class="msg" style="margin:0 0 12px;background:rgba(255,80,80,0.15);color:#ff6060">未配置管理员邮箱：超管设备二次验证码与安全告警均无法发送，超管将无法在新设备登录——请先在「系统配置」填写 admin_email</div>
+        <?php else: ?>
+        <div class="form-hint" style="margin-bottom:12px">设备二次验证码发送至管理员邮箱 <b><?= htmlspecialchars($smtpAdminEmail) ?></b>（超管无独立绑定邮箱，该邮箱即超管的验证通道）；SMTP 未配置或发送失败时验证码邮件不可达</div>
+        <?php endif; ?>
         <table>
             <tr><td style="color:var(--text-muted)">管理员邮箱（收件人）</td><td><?= htmlspecialchars($smtpAdminEmail ?: '(未设置，请到「系统配置」填写 admin_email)') ?></td></tr>
             <tr><td style="color:var(--text-muted)">当前 SMTP 服务器</td><td><?= $smtpCfg['host'] ? htmlspecialchars($smtpCfg['host']) . ':' . (int)$smtpCfg['port'] . '（' . htmlspecialchars($smtpCfg['enc']) . '）' : '未配置' ?></td></tr>

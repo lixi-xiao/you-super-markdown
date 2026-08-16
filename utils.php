@@ -1083,10 +1083,12 @@ function notifyLoginEvent($u, $clientIP) {
     $adminEmail = $config['admin_email'] ?? '';
     if (!$adminEmail) return;
     $roleName = [
+        ROLE_SUPER_ADMIN => '超管',
         ROLE_STATION_ADMIN => '站长',
         ROLE_AUTHOR => '写作者',
     ][$u['role'] ?? ''] ?? ($u['role'] ?? '');
-    if (!in_array($u['role'] ?? '', [ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) return;
+    // v4.1.11：超管登录同样发邮件通知（此前仅站长/写作者）
+    if (!in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
     $subject = "[{$site} 通知] {$roleName}登录";

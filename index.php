@@ -249,14 +249,17 @@ if ($action === 'list') {
                 $cover = $im[1];
                 if (strpos($cover, 'data/') === 0) $cover = '/' . $cover;
             }
-            // v4.1.12：无图文章卡片封面回退到网站背景图（bg_type=image 用上传背景图 / bg_type=api 用背景 API URL）
+            // v4.1.12：无图文章卡片封面回退到网站背景图
+            // v4.1.13：卡片封面 API 优先（后台「网站背景 → 卡片封面 API」配置）；API 回退每张卡片独立请求（随机参数避免浏览器缓存同图）
             if ($cover === '') {
                 $bgType = $_siteConfig['bg_type'] ?? 'none';
-                if ($bgType === 'image' && !empty($_siteConfig['bg_image'])) {
+                $coverApi = trim((string)($_siteConfig['card_cover_api_url'] ?? ''));
+                if ($coverApi === '') $coverApi = trim((string)($_siteConfig['bg_api_url'] ?? ''));
+                if ($coverApi !== '') {
+                    $cover = $coverApi . (strpos($coverApi, '?') === false ? '?' : '&') . 't=' . random_int(100000, 999999);
+                } elseif ($bgType === 'image' && !empty($_siteConfig['bg_image'])) {
                     $cover = $_siteConfig['bg_image'];
                     if (strpos($cover, 'data/') === 0) $cover = '/' . $cover;
-                } elseif ($bgType === 'api' && !empty($_siteConfig['bg_api_url'])) {
-                    $cover = $_siteConfig['bg_api_url'];
                 }
             }
             $fileList[] = [

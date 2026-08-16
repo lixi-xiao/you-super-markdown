@@ -298,8 +298,8 @@ code, pre, .markdown-body code, .markdown-body pre {
 .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
 .doc-card {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 16px; box-shadow: var(--shadow); transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-    cursor: pointer; display: flex; flex-direction: column; gap: 8px;
+    padding: 14px 16px; box-shadow: var(--shadow); transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    cursor: pointer; display: flex; flex-direction: column; gap: 6px;
     animation: fadeSlideUp 0.4s ease both;
     position: relative; overflow: hidden;
     /* v4.1.15：文章卡片高度统一 16:9 横屏（公告卡片为独立组件，不受影响） */
@@ -345,7 +345,9 @@ code, pre, .markdown-body code, .markdown-body pre {
 .meta-icon svg { width: 14px; height: 14px; stroke: var(--accent); fill: none; }
 .card-excerpt {
     font-size: 0.9em; color: var(--text-secondary);
-    display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+    /* v4.2.3：简介从 2 行扩到 5 行——16:9 卡片空间充足；flex-shrink:0 防止被列方向压缩回 2 行 */
+    flex: 0 0 auto;
+    display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
 }
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
 .card-author { font-size: 0.82em; color: var(--text-muted); display: flex; align-items: center; gap: 4px; margin-top: 2px; }

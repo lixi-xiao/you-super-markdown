@@ -182,7 +182,7 @@ if ($action === 'list') {
     $nowStr = date('Y-m-d H:i');
     if ($files) {
         usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
-        foreach ($files as $file) {
+        foreach ($files as $listIdx => $file) {
             $filename = basename($file);
             if (strpos($filename, '.') === 0) continue;
             $content = file_get_contents($file);
@@ -255,13 +255,15 @@ if ($action === 'list') {
             //          每卡取池中随机一张（不同卡不同图）；上传背景图仍直连
             // v4.2.1：v4.2.0 直连外部 API 触发单张限流（429）致部分卡片无封面——回退 cover.php 池化代理
             //         （缩略图 960px，手机加载快且清晰），抓取源固定为 FIXED_IMG_API
+            // v4.2.2：封面槽位由随机改为「列表位置 % 24」稳定值——同一文章永远同一 URL → 浏览器缓存命中，
+            //         重复访问不再重下 ~978KB 封面；不同文章不同槽位，每卡仍不同图（池内每 6h 轮换内容）
             if ($cover === '') {
                 $bgType = $_siteConfig['bg_type'] ?? 'none';
                 if ($bgType === 'image' && !empty($_siteConfig['bg_image'])) {
                     $cover = $_siteConfig['bg_image'];
                     if (strpos($cover, 'data/') === 0) $cover = '/' . $cover;
                 } else {
-                    $cover = 'cover.php?i=' . random_int(0, 23);
+                    $cover = 'cover.php?i=' . ($listIdx % 24);
                 }
             }
             $fileList[] = [
@@ -666,16 +668,13 @@ if ($action === 'rss_guide') {
     <meta property="og:description" content="一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>" type="image/svg+xml">
     <meta name="description" content="一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器">
-    <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js" crossorigin="anonymous"
+    <!-- v4.2.2：mermaid 3.3MB 不再放 <head> 阻塞首屏（render-blocking），改为正文/公告出现 ```mermaid 时按需动态加载（见 js/main.js ensureMermaid）；marked/highlight/qrcode 加 defer 不阻塞首屏渲染 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js" defer crossorigin="anonymous"
     integrity="sha384-QsSpx6a0USazT7nK7w8qXDgpSAPhFsb2XtpoLFQ5+X2yFN6hvCKnwEzN8M5FWaJb"
     ></script>
-    <!-- v3.2.5：mermaid 流程图渲染（文章 markdown 中的 ```mermaid 代码块自动绘制） -->
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js" crossorigin="anonymous"
-    integrity="sha384-R63zfMfSwJF4xCR11wXii+QUsbiBIdiDzDbtxia72oGWfkT7WHJfmD/I/eeHPJyT"
-    ></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-light.min.css" id="hljsTheme">
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js" defer crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer crossorigin="anonymous"></script>
     <link rel="stylesheet" href="css/style.css?v=<?= filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
 <?php
@@ -1011,7 +1010,7 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
 <script>window.YM_SITE_TITLE = <?= json_encode($_siteTitle, JSON_UNESCAPED_UNICODE) ?>;
 // v3.1.6：公告卡片数据（服务端已转义标题/摘要，tags/cover 由文章提取）
 window.YM_ANNOUNCEMENTS = <?= json_encode($_announcements, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;</script>
-<script src="js/main.js?v=<?= filemtime(__DIR__ . '/js/main.js') ?>"></script>
+<script src="js/main.js?v=<?= filemtime(__DIR__ . '/js/main.js') ?>" defer></script>
 <script>
 // 背景图片应用
 (function() {

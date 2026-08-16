@@ -1219,6 +1219,42 @@ body.bg-blur .sidebar {
 [data-theme="dark"] body.bg-blur .sidebar {
     background: rgba(13, 17, 23, 0.92);
 }
+/* v4.1.16：液态玻璃（苹果 Liquid Glass 风格）——仅玻璃家族、有背景时生效；
+   封面图显示规范不变（左半 1/2 不显示、右半水墨渐隐）；用户可在下拉菜单关闭（低配设备） */
+body.glass-liquid.bg-active .doc-card,
+body.glass-liquid.bg-active .markdown-body,
+body.glass-liquid.bg-active .comment-section,
+body.glass-liquid.bg-active .cmt-input-box,
+body.glass-liquid.bg-active .prev-next-nav,
+body.glass-liquid.bg-active .share-card,
+body.glass-liquid.bg-active .article-info-card,
+body.glass-liquid.bg-active .cmt-capsule-btn,
+body.glass-liquid.bg-active .cmt-user-inner {
+    background: rgba(255, 255, 255, 0.38);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border-color: rgba(255, 255, 255, 0.35);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+[data-theme="dark"] body.glass-liquid.bg-active .doc-card,
+[data-theme="dark"] body.glass-liquid.bg-active .markdown-body,
+[data-theme="dark"] body.glass-liquid.bg-active .comment-section,
+[data-theme="dark"] body.glass-liquid.bg-active .cmt-input-box,
+[data-theme="dark"] body.glass-liquid.bg-active .prev-next-nav,
+[data-theme="dark"] body.glass-liquid.bg-active .share-card,
+[data-theme="dark"] body.glass-liquid.bg-active .article-info-card,
+[data-theme="dark"] body.glass-liquid.bg-active .cmt-capsule-btn,
+[data-theme="dark"] body.glass-liquid.bg-active .cmt-user-inner {
+    background: rgba(22, 27, 34, 0.45);
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+/* 液态玻璃高光斜斑（玻璃反光）——主要卡片表面 */
+body.glass-liquid.bg-active .doc-card::after {
+    content: '';
+    position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.05) 40%, transparent 55%);
+}
 .comment-section {
     margin-top: 16px;
     background: var(--surface);
@@ -1826,6 +1862,14 @@ kbd {
 }
 .user-dropdown-item:hover svg {
     opacity: 1;
+}
+/* v4.1.16：液态玻璃个人开关项（状态靠右显示 开/关） */
+.user-dropdown-glass-state {
+    margin-left: auto;
+    font-size: 0.76em;
+    font-weight: 600;
+    color: var(--accent);
+    opacity: 0.9;
 }
 .user-dropdown-item-danger {
     color: #ef4444;

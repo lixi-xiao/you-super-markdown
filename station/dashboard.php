@@ -224,6 +224,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         $config['bg_blur_enabled'] = !empty($_POST['bg_blur_enabled']);
         $config['bg_blur_level'] = max(0, min(50, intval($_POST['bg_blur_level']??0)));
         $config['bg_card_opacity'] = max(20, min(100, intval($_POST['bg_card_opacity']??100)));
+        // v4.1.16：卡片玻璃效果（毛玻璃/液态玻璃）+ 用户液态玻璃开关显示
+        $config['card_glass_style'] = in_array($_POST['card_glass_style'] ?? 'frosted', ['frosted', 'liquid'], true) ? $_POST['card_glass_style'] : 'frosted';
+        $config['user_glass_toggle'] = !empty($_POST['user_glass_toggle']);
         saveSiteConfig($config);
         auditLog('bg_config', 'site_config', '站长修改网站背景');
         $msg = 'saved';
@@ -594,6 +597,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     $bgImage = $config['bg_image'] ?? '';
     $bgApiUrl = $config['bg_api_url'] ?? '';
     $cardCoverApiUrl = $config['card_cover_api_url'] ?? '';
+    $cardGlassStyle = $config['card_glass_style'] ?? 'frosted';
+    $userGlassToggle = !empty($config['user_glass_toggle']);
     $bgBlurEnabled = !empty($config['bg_blur_enabled']);
     $bgBlurLevel = $config['bg_blur_level'] ?? 0;
     $bgCardOpacity = $config['bg_card_opacity'] ?? 100;
@@ -656,6 +661,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <div id="cardApiTestResult" style="margin-top:8px"></div>
     </div>
     <div class="card">
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>卡片玻璃效果</div>
+        <div class="bg-type-grid" style="max-width:440px">
+            <label class="bg-type-card <?= $cardGlassStyle==='frosted'?'active':'' ?>" data-glass="frosted"><input type="radio" name="glass_style" value="frosted" <?= $cardGlassStyle==='frosted'?'checked':'' ?>><div class="type-icon glass"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 12h18"/></svg></div><div class="type-name">毛玻璃</div></label>
+            <label class="bg-type-card <?= $cardGlassStyle==='liquid'?'active':'' ?>" data-glass="liquid"><input type="radio" name="glass_style" value="liquid" <?= $cardGlassStyle==='liquid'?'checked':'' ?>><div class="type-icon glass"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 2v20"/><path d="M2 12h20"/></svg></div><div class="type-name">液态玻璃</div></label>
+        </div>
+        <div class="form-hint" style="margin-top:10px">液态玻璃为苹果风格高光质感（高模糊 + 色彩增强 + 亮边框），仅配置背景时生效；封面图显示规范不变</div>
+        <div class="toggle-row" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+            <div><div class="toggle-label">用户液态玻璃开关</div><div class="toggle-desc">开启后用户下拉菜单显示「液态玻璃」个人开关，低配设备可自行关闭</div></div>
+            <label class="toggle"><input type="checkbox" id="userGlassToggle" <?= $userGlassToggle?'checked':'' ?>><span class="slider"></span></label>
+        </div>
+    </div>
+    <div class="card">
         <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>模糊与透明度</div>
         <div class="toggle-row" id="bgBlurRow" style="display:<?= $bgType!=='none'?'flex':'none' ?>">
             <div><div class="toggle-label">背景模糊</div><div class="toggle-desc">对网站背景应用高斯模糊</div></div>
@@ -697,7 +714,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     </form>
     <script>
     (function() {
-        var typeCards = document.querySelectorAll('.bg-type-card');
+        var typeCards = document.querySelectorAll('.bg-type-card[data-type]');
         var imageSection = document.getElementById('imageSection');
         var apiSection = document.getElementById('apiSection');
         var bgBlurRow = document.getElementById('bgBlurRow');
@@ -750,7 +767,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         }
         window.removeBgImage = function() { if (confirm('确定移除背景图片？')) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; cardCoverApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
-        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApiUrl').value = cardCoverApiUrl.value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; });
+        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApiUrl').value = cardCoverApiUrl.value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formGlassStyle').value = (document.querySelector('input[name="glass_style"]:checked') || { value: 'frosted' }).value; document.getElementById('formUserGlassToggle').value = document.getElementById('userGlassToggle').checked ? '1' : ''; });
+        // v4.1.16：玻璃效果选择卡交互（毛玻璃/液态玻璃）
+        var glassCards = document.querySelectorAll('.bg-type-card[data-glass]');
+        glassCards.forEach(function(g) {
+            g.addEventListener('click', function() {
+                glassCards.forEach(function(x) { x.classList.remove('active'); });
+                g.classList.add('active');
+            });
+        });
         <?php if ($bgType === 'api' && $bgApiUrl): ?>
         (function() { var u=<?= json_encode($bgApiUrl) ?>; var img=new Image(); img.onload=function(){previewApiSrc=u;updatePreview();}; img.src=u; })();
         <?php endif; ?>

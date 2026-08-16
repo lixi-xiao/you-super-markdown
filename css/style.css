@@ -15,9 +15,9 @@
     --bg: hsl(var(--accent-hue), 60%, 96%);
     --surface: #ffffff;
     --border: #dce7f5;
-    --text: #1e293b;
-    --text-secondary: #475569;
-    --text-muted: #64748b;
+    --text: #000000;
+    --text-secondary: #111827;
+    --text-muted: #333333;
     --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
     --shadow: 0 2px 8px rgba(0,0,0,0.05), 0 1px 3px rgba(0,0,0,0.04);
     --shadow-md: 0 4px 16px rgba(0,0,0,0.06), 0 2px 6px rgba(0,0,0,0.04);
@@ -529,7 +529,7 @@ code, pre, .markdown-body code, .markdown-body pre {
 .markdown-body h1 { font-size: 2em; border-bottom: 2px solid var(--border); padding-bottom: 0.4em; margin-top: 0; }
 .markdown-body h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
 .markdown-body h3 { font-size: 1.25em; }
-.markdown-body h4 { font-size: 1.1em; color: var(--text-secondary); }
+.markdown-body h4 { font-size: 1.1em; color: var(--text); }
 .markdown-body h1 .heading-anchor, .markdown-body h2 .heading-anchor,
 .markdown-body h3 .heading-anchor, .markdown-body h4 .heading-anchor {
     position: absolute; left: -1.5em; top: 50%; transform: translateY(-50%);
@@ -542,12 +542,12 @@ code, pre, .markdown-body code, .markdown-body pre {
     opacity: 0.6;
 }
 .markdown-body .heading-anchor:hover { opacity: 1 !important; color: var(--accent); }
-.markdown-body p { margin-bottom: 1.5em; color: var(--text-secondary); font-size: 1em; }
+.markdown-body p { margin-bottom: 1.5em; color: var(--text); font-size: 1em; }
 .markdown-body p.toc-link { margin-bottom: 0.35em; padding-left: 16px; position: relative; }
 .markdown-body p.toc-link::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .markdown-body p.toc-link a { font-weight: 500; }
 .markdown-body ul, .markdown-body ol { list-style: none; padding-left: 0; margin: 1em 0; }
-.markdown-body li { margin-bottom: 0.8em; color: var(--text-secondary); }
+.markdown-body li { margin-bottom: 0.8em; color: var(--text); }
 .markdown-body li::before { content: '\2022'; color: var(--accent); font-weight: 700; margin-right: 8px; }
 .markdown-body blockquote {
     margin: 1.5em 0; padding: 16px 20px;
@@ -1125,6 +1125,20 @@ code, pre, .markdown-body code, .markdown-body pre {
     .prev-divider { width: 100%; height: 1px; margin: 0; }
 }
 [data-theme="dark"] {
+    --bg: hsl(var(--accent-hue), 40%, 8%);
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-secondary: #b1bac4;
+    --text-muted: #8b949e;
+    --accent-light: hsl(var(--accent-hue), var(--accent-sat), 18%);
+    --code-bg: #0d1117;
+    --fixed-icon-bg: #1c2333;
+    --fixed-icon-color: #8b949e;
+}
+/* v4.7.2：背景图对比色自适应——背景图平均亮度暗（≤140）时整页切暗色（白字深面），
+   由前端 applyBg 计算后设置 data-text-contrast="light"；背景亮时不设属性（默认黑色系）。 */
+body[data-text-contrast="light"] {
     --bg: hsl(var(--accent-hue), 40%, 8%);
     --surface: #161b22;
     --border: #30363d;

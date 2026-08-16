@@ -70,11 +70,37 @@
         }
         // v4.6.2：背景图预加载——加载成功才启用背景（bg-active），失败则不加并输出控制台警告，
         //          避免「背景图 404/加载失败却仍加模糊类」导致视觉无变化且无任何提示
+        // v4.7.2：对比色自适应——canvas 读取背景图平均亮度（同源上传图可读；跨域 API 图无 CORS 读失败降级不设属性）
+        function computeBgLuma(url, cb) {
+            var img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = function() {
+                try {
+                    var w = Math.max(1, Math.min(img.naturalWidth || 100, 64));
+                    var h = Math.max(1, Math.min(img.naturalHeight || 100, 64));
+                    var c = document.createElement('canvas');
+                    c.width = w; c.height = h;
+                    var x = c.getContext('2d');
+                    x.drawImage(img, 0, 0, w, h);
+                    var d = x.getImageData(0, 0, w, h).data;
+                    var sum = 0, n = 0;
+                    for (var i = 0; i < d.length; i += 4) { sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; n++; }
+                    cb(n > 0 ? sum / n : -1);
+                } catch (e) { cb(-1); }
+            };
+            img.onerror = function() { cb(-1); };
+            img.src = url;
+        }
         function applyBgImage(url) {
             var probe = new Image();
             probe.onload = function() {
                 body.classList.add('bg-active');
                 body.style.setProperty('--bg-url', 'url(' + url + ')');
+                // 背景暗（≤140）→ data-text-contrast=light 整页暗色白字；背景亮 → dark 黑色系；读取失败降级不设属性（保持浅色强制黑）
+                computeBgLuma(url, function(luma) {
+                    if (luma < 0) { body.removeAttribute('data-text-contrast'); return; }
+                    body.setAttribute('data-text-contrast', luma <= 140 ? 'light' : 'dark');
+                });
             };
             probe.onerror = function() {
                 console.warn('[applyBg] 背景图加载失败（已停用背景显示）:', url);

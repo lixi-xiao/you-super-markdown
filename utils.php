@@ -243,6 +243,11 @@ function loadSiteConfig() {
         'bg_api_url' => FIXED_IMG_API,
         // v4.2.4：首页卡片封面图片源（后台可自定义；留空回退 FIXED_IMG_API，走同一池化缓存策略）
         'card_cover_api' => '',
+        // v4.4.0：音乐默认自动播放歌曲名关键词（站长/超管后台可配；留空则打开歌单不自动播放）
+        'music_auto_play' => '',
+        // v4.4.0：注册蜜罐自动封禁——短时间（10 分钟）内连续命中蜜罐达阈值即自动封禁 IP
+        'honeypot_ban_count' => 3,          // 触发次数（超管可调）
+        'honeypot_ban_duration' => 3600,    // 封禁秒数（超管可调，默认 1 小时；0=永久）
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;
@@ -291,7 +296,7 @@ function validateCustomPath($path) {
     return true;
 }
 function loadBansList() {
-    $rows = db_all('SELECT ip, types_json, reason, time FROM bans ORDER BY time DESC');
+    $rows = db_all('SELECT ip, types_json, reason, time, expires FROM bans ORDER BY time DESC');
     $bans = [];
     foreach ($rows as $r) {
         $bans[] = [
@@ -299,6 +304,7 @@ function loadBansList() {
             'types' => json_decode($r['types_json'] ?? '[]', true) ?: [],
             'reason' => $r['reason'] ?? '',
             'time' => $r['time'] ?? '',
+            'expires' => (int)($r['expires'] ?? 0),
         ];
     }
     return $bans;
@@ -309,11 +315,11 @@ function saveBansList($bans) {
     try {
         // 全量替换（解封 = 从列表移除，必须保留删除语义）；v2.5.4 用 OR REPLACE 防重复 ip 冲突
         $pdo->exec('DELETE FROM bans');
-        $st = $pdo->prepare('INSERT OR REPLACE INTO bans (ip, types_json, reason, time) VALUES (?,?,?,?)');
+        $st = $pdo->prepare('INSERT OR REPLACE INTO bans (ip, types_json, reason, time, expires) VALUES (?,?,?,?,?)');
         foreach ($bans as $b) {
             $st->execute([
                 $b['ip'] ?? '', json_encode($b['types'] ?? [], JSON_UNESCAPED_UNICODE),
-                $b['reason'] ?? '', $b['time'] ?? '',
+                $b['reason'] ?? '', $b['time'] ?? '', (int)($b['expires'] ?? 0),
             ]);
         }
         $pdo->commit();
@@ -322,21 +328,28 @@ function saveBansList($bans) {
         throw $e;
     }
 }
-function addBan($ip, $types, $reason = '') {
+function addBan($ip, $types, $reason = '', $duration = 0) {
+    // $duration：0=永久封禁；>0=封禁秒数（v4.4.0 注册蜜罐自动封禁使用）
+    $expires = $duration > 0 ? time() + $duration : 0;
     $existing = db_one('SELECT * FROM bans WHERE ip = ?', [$ip]);
     if ($existing) {
         $merged = json_decode($existing['types_json'] ?? '[]', true) ?: [];
         foreach ($types as $t) { if (!in_array($t, $merged)) $merged[] = $t; }
-        db_exec('UPDATE bans SET types_json = ?, reason = ? WHERE ip = ?',
-            [json_encode($merged, JSON_UNESCAPED_UNICODE), $reason, $ip]);
+        db_exec('UPDATE bans SET types_json = ?, reason = ?, expires = ? WHERE ip = ?',
+            [json_encode($merged, JSON_UNESCAPED_UNICODE), $reason, $expires, $ip]);
     } else {
-        db_exec('INSERT INTO bans (ip, types_json, reason, time) VALUES (?,?,?,?)',
-            [$ip, json_encode($types, JSON_UNESCAPED_UNICODE), $reason, date('Y-m-d H:i:s')]);
+        db_exec('INSERT INTO bans (ip, types_json, reason, time, expires) VALUES (?,?,?,?,?)',
+            [$ip, json_encode($types, JSON_UNESCAPED_UNICODE), $reason, date('Y-m-d H:i:s'), $expires]);
     }
 }
 function isIPBanned($ip, $type) {
-    $row = db_one('SELECT types_json FROM bans WHERE ip = ?', [$ip]);
+    $row = db_one('SELECT types_json, expires FROM bans WHERE ip = ?', [$ip]);
     if (!$row) return false;
+    // v4.4.0：临时封禁到期自动解除（expires>0 且已过期 → 清除记录视为未封禁）
+    if (!empty($row['expires']) && (int)$row['expires'] > 0 && (int)$row['expires'] < time()) {
+        db_exec('DELETE FROM bans WHERE ip = ?', [$ip]);
+        return false;
+    }
     $types = json_decode($row['types_json'] ?? '[]', true) ?: [];
     return in_array($type, $types, true);
 }
@@ -1374,6 +1387,41 @@ function email_code_verify($email, $code, $purpose) {
     if ((int)$row['expires'] < time()) return [false, '验证码已过期'];
     db_exec('UPDATE email_codes SET used = 1 WHERE id = ?', [$row['id']]);
     return [true, $row];
+}
+
+// ===== v4.4.0：注册算术人机验证（随机加减乘除，SESSION 存答案，60s 过期，一次性消费） =====
+const ARITH_TTL = 60;
+/** 生成一道简单四则运算题，答案存入 SESSION，返回题面（如 "7 + 8 = ?"）；不返回答案给客户端 */
+function genArithChallenge() {
+    $op = ['+', '-', '×', '÷'][random_int(0, 3)];
+    switch ($op) {
+        case '+':
+            $a = random_int(2, 20); $b = random_int(2, 20); $ans = $a + $b; $expr = "{$a} + {$b}";
+            break;
+        case '-':
+            $a = random_int(2, 20); $b = random_int(1, $a - 1); $ans = $a - $b; $expr = "{$a} − {$b}";
+            break;
+        case '×':
+            $a = random_int(2, 9); $b = random_int(2, 9); $ans = $a * $b; $expr = "{$a} × {$b}";
+            break;
+        case '÷':
+            $b = random_int(2, 9); $ans = random_int(2, 9); $a = $b * $ans; $expr = "{$a} ÷ {$b}";
+            break;
+    }
+    $_SESSION['arith_answer'] = (string)$ans;
+    $_SESSION['arith_expires'] = time() + ARITH_TTL;
+    return $expr . ' = ?';
+}
+/** 校验算术题答案（一次性消费：无论对错均清除 SESSION，防重放） */
+function verifyArithChallenge($answer) {
+    if (empty($_SESSION['arith_answer'])) return [false, '请先获取算术验证题'];
+    $expect = (string)$_SESSION['arith_answer'];
+    $expires = (int)($_SESSION['arith_expires'] ?? 0);
+    unset($_SESSION['arith_answer'], $_SESSION['arith_expires']);
+    if (time() > $expires) return [false, '算术验证已过期，请重新获取'];
+    $ans = (string)trim((string)$answer);
+    if (!preg_match('/^-?\d+$/', $ans) || $ans !== $expect) return [false, '计算结果不正确'];
+    return [true, ''];
 }
 
 /** 创建写作者双重确认中间态，返回 [pendingId, confirmToken]；$status: verify_pending(等写作者验证码) / pending(待超管确认) */

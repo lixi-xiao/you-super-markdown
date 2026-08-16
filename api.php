@@ -188,11 +188,18 @@ if ($action === 'csrf') {
 }
 
 // ===== v2.9.0：注册邮箱验证码发送（60s 冷却，按邮箱；注册为匿名，不走超管豁免） =====
+// v4.4.0：发送前必须先通过随机算术人机验证（点击「获取验证码」→ 弹窗答题 → 答对才真正发码）
+if ($action === 'arith_challenge') {
+    jsonOut(['success' => true, 'expression' => genArithChallenge()]);
+}
+
 if ($action === 'send_register_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $siteCfg = loadSiteConfig();
-    // v2.11.0：滑块验证已移除，发码轰炸由下方 IP 级限速兜底
     $input = json_decode(file_get_contents('php://input'), true);
     $email = trim($input['email'] ?? '');
+    // v4.4.0：算术人机验证——答错/未答一律拒绝发码（一次性消费，重放无效）
+    [$arithOk, $arithErr] = verifyArithChallenge($input['arith_answer'] ?? '');
+    if (!$arithOk) jsonOut(['success' => false, 'error' => $arithErr], 400);
     // v2.9.0：IP 级发码限速（60 秒最多 5 次，防换邮箱轰炸）
     $ipNow = getClientIP();
     $recent = db_one('SELECT COUNT(*) AS c FROM email_codes WHERE ip = ? AND created > ?', [$ipNow, time() - 60])['c'] ?? 0;
@@ -372,6 +379,20 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         jsonOut(['success' => false, 'error' => '注册次数已达上限'], 429);
     }
     $input = json_decode(file_get_contents('php://input'), true);
+    // v4.4.0：蜜罐字段——隐藏输入框仅机器人会填；命中即判定机器人，静默拒绝（返回成功但不注册，浪费其时间）
+    if (!empty($input['website'])) {
+        auditLog('register_honeypot', substr((string)$input['website'], 0, 64), '注册蜜罐命中，静默拒绝（IP ' . $clientIP . '）');
+        // v4.4.0：短时间（10 分钟窗口）连续命中达阈值 → 自动封禁 IP（次数/时长超管可调，0=永久）
+        db_rate_add('honeypot_rates', $clientIP);
+        $hpCount = db_rate_count('honeypot_rates', $clientIP, 600);
+        $hpThreshold = max(1, (int)($siteCfg['honeypot_ban_count'] ?? 3));
+        if ($hpCount >= $hpThreshold && !isIPBanned($clientIP, 'register')) {
+            $hpDuration = max(0, (int)($siteCfg['honeypot_ban_duration'] ?? 3600));
+            addBan($clientIP, ['register'], '注册蜜罐连续命中自动封禁', $hpDuration);
+            auditLog('honeypot_auto_ban', $clientIP, '注册蜜罐 ' . $hpCount . ' 次命中，自动封禁' . ($hpDuration > 0 ? ($hpDuration . ' 秒') : '（永久）'), 'banned');
+        }
+        jsonOut(['success' => true, 'user' => null]);
+    }
     $qq = trim($input['qq'] ?? '');
     $nick = trim($input['nickname'] ?? '');
     $pw = $input['password'] ?? '';

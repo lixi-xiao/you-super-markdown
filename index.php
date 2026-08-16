@@ -251,16 +251,17 @@ if ($action === 'list') {
             }
             // v4.1.12：无图文章卡片封面回退到网站背景图
             // v4.1.13：卡片封面 API 优先（后台「网站背景 → 卡片封面 API」配置）
-            // v4.1.15：API 封面改走服务端图片池代理 cover.php（桌面 UA 拉横屏 + 缩略图 + 6h 缓存）
-            // v4.2.0：取消服务器本地缩略图池，无图卡片封面直接使用固定 16:9 图片 API（原图直连，清晰不模糊）；
-            //         每卡追加唯一参数 `_c`，防止浏览器同 URL 缓存成同一张图（每卡独立随机图）
+            // v4.1.15：API 封面改走服务端图片池代理 cover.php（桌面 UA 拉横屏 + 缩略图 + 6h 缓存），
+            //          每卡取池中随机一张（不同卡不同图）；上传背景图仍直连
+            // v4.2.1：v4.2.0 直连外部 API 触发单张限流（429）致部分卡片无封面——回退 cover.php 池化代理
+            //         （缩略图 960px，手机加载快且清晰），抓取源固定为 FIXED_IMG_API
             if ($cover === '') {
                 $bgType = $_siteConfig['bg_type'] ?? 'none';
                 if ($bgType === 'image' && !empty($_siteConfig['bg_image'])) {
                     $cover = $_siteConfig['bg_image'];
                     if (strpos($cover, 'data/') === 0) $cover = '/' . $cover;
                 } else {
-                    $cover = FIXED_IMG_API . (strpos(FIXED_IMG_API, '?') !== false ? '&' : '?') . '_c=' . random_int(1, 99999999);
+                    $cover = 'cover.php?i=' . random_int(0, 23);
                 }
             }
             $fileList[] = [

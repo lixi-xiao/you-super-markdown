@@ -121,9 +121,9 @@ function qq_getSingleSongUrl($songmid, $cookies = '') {
         $vkey = $info['vkey'] ?? '';
         $purl = $info['purl'] ?? '';
         if ($vkey && $purl) {
-            return 'http://ws.stream.qqmusic.qq.com/' . $purl . '?vkey=' . $vkey . '&fromtag=66';
+            return 'https://ws.stream.qqmusic.qq.com/' . $purl . '?vkey=' . $vkey . '&fromtag=66';
         } elseif ($purl) {
-            return 'http://ws.stream.qqmusic.qq.com/' . $purl;
+            return 'https://ws.stream.qqmusic.qq.com/' . $purl;
         }
     }
     return '';

@@ -35,9 +35,9 @@ $siteTitle = $config['site_title'] ?? 'You Markdown';
 $currentUser = $_SESSION['cmt_user'] ?? [];
 $myId = $currentUser['id'] ?? '';
 $msg = $_GET['msg'] ?? '';
-// v2.6.0 起 tab 结构（authors 写作者管理 / background 网站背景 / music 音乐设置 / banlog 封禁日志只读）；v2.6.3 新增 profile 个人信息；v3.1.6 新增 announce 公告管理；v4.0.0 新增 images 图片管理
+// v2.6.0 起 tab 结构（authors 写作者管理 / background 网站背景 / music 音乐设置 / banlog 封禁日志只读）；v2.6.3 新增 profile 个人信息；v3.1.6 新增 announce 公告管理；v4.0.0 新增 images 图片管理；v4.1.18 背景+音乐合并为 ui 主界面及功能设置
 $tab = $_GET['tab'] ?? 'authors';
-if (!in_array($tab, ['authors', 'background', 'music', 'banlog', 'profile', 'announce', 'images'], true)) $tab = 'authors';
+if (!in_array($tab, ['authors', 'ui', 'banlog', 'profile', 'announce', 'images'], true)) $tab = 'authors';
 
 // v3.1.6：文章列表（公告选择关联文章用：读 META title / 一级标题 / 文件名）
 function stArticleOptions() {
@@ -227,18 +227,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         // v4.1.16：卡片玻璃效果（毛玻璃/液态玻璃）+ 用户液态玻璃开关显示
         $config['card_glass_style'] = in_array($_POST['card_glass_style'] ?? 'frosted', ['frosted', 'liquid'], true) ? $_POST['card_glass_style'] : 'frosted';
         $config['user_glass_toggle'] = !empty($_POST['user_glass_toggle']);
-        saveSiteConfig($config);
-        auditLog('bg_config', 'site_config', '站长修改网站背景');
-        $msg = 'saved';
-    } elseif (isset($_POST['music_save'])) {
-        // v2.6.0：站长保存音乐设置（与超管共享同一 config，后保存者生效）
+        // v4.1.18：音乐设置并入主界面表单（原 music_save 逻辑）
         $config['music_playlist_id'] = trim($_POST['music_playlist_id'] ?? '3778678');
         $config['music_playlist_id_qq'] = trim($_POST['music_playlist_id_qq'] ?? '');
         $config['music_cookies'] = trim($_POST['music_cookies'] ?? '');
         $config['music_cookies_qq'] = trim($_POST['music_cookies_qq'] ?? '');
         saveSiteConfig($config);
-        auditLog('music_config', 'site_config', '站长修改音乐设置');
-        $msg = 'music_saved';
+        auditLog('bg_config', 'site_config', '站长修改主界面及功能设置');
+        $msg = 'saved';
     } elseif (isset($_POST['profile_save'])) {
         // v2.6.3：站长修改个人信息（昵称/签名/新密码）
         $nick = trim($_POST['nickname'] ?? '');
@@ -449,13 +445,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
             写作者管理
         </a>
-        <a href="dashboard.php?tab=background" class="sidebar-link <?= $tab==='background'?'active':'' ?>">
+        <a href="dashboard.php?tab=ui" class="sidebar-link <?= $tab==='ui'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            网站背景
-        </a>
-        <a href="dashboard.php?tab=music" class="sidebar-link <?= $tab==='music'?'active':'' ?>">
-            <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-            音乐设置
+            主界面及功能设置
         </a>
         <a href="dashboard.php?tab=banlog" class="sidebar-link <?= $tab==='banlog'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -591,7 +583,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <?php endif; ?>
     </div>
 
-    <?php elseif ($tab === 'background'): ?>
+    <?php elseif ($tab === 'ui'): ?>
     <?php
     $bgType = $config['bg_type'] ?? 'none';
     $bgImage = $config['bg_image'] ?? '';
@@ -606,9 +598,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            网站背景
+            主界面及功能设置
         </div>
-        <div class="page-subtitle">自定义网站背景图片与效果（与超管共享配置）</div>
+        <div class="page-subtitle">网站背景与功能配置（与超管共享配置，后保存者生效）</div>
+    </div>
+    <!-- v4.1.18：音乐播放器设置（原 music tab 并入主界面） -->
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            音乐播放器设置
+        </div>
+        <div class="form-group">
+            <label class="form-label">网易云歌单 ID</label>
+            <input class="form-input" type="text" id="musicNeteaseInput" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>" placeholder="3778678">
+            <p class="form-hint">网易云音乐歌单 ID，默认 3778678 为热歌榜</p>
+        </div>
+        <div class="form-group">
+            <label class="form-label">QQ 音乐歌单 ID</label>
+            <input class="form-input" type="text" id="musicQQInput" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>" placeholder="留空则使用 QQ 热歌榜">
+            <p class="form-hint">QQ 音乐歌单 ID（前端切换到 QQ 平台时使用），留空则加载 QQ 热歌榜</p>
+        </div>
+        <div class="form-group">
+            <label class="form-label">网易云 Cookies（可选）</label>
+            <input class="form-input" type="text" id="musicNetCookieInput" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
+            <p class="form-hint">配置后可播放网易云 VIP 歌曲</p>
+        </div>
+        <div class="form-group">
+            <label class="form-label">QQ 音乐 Cookies（可选）</label>
+            <input class="form-input" type="text" id="musicQQCookieInput" value="<?= htmlspecialchars($config['music_cookies_qq'] ?? '') ?>" placeholder="uin=xxx; p_skey=xxx; skey=xxx; ...">
+            <p class="form-hint">配置后可播放 QQ 音乐付费/VIP 歌曲（v2.6.0）</p>
+        </div>
     </div>
     <div class="card">
         <div class="card-title">
@@ -662,7 +681,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     </div>
     <div class="card">
         <div class="card-title"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>卡片玻璃效果</div>
-        <div class="bg-type-grid" style="max-width:440px">
+        <div class="bg-type-grid glass-vis-grid" style="max-width:440px">
             <label class="bg-type-card <?= $cardGlassStyle==='frosted'?'active':'' ?>" data-glass="frosted"><input type="radio" name="glass_style" value="frosted" <?= $cardGlassStyle==='frosted'?'checked':'' ?>><div class="type-icon glass"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 12h18"/></svg></div><div class="type-name">毛玻璃</div></label>
             <label class="bg-type-card <?= $cardGlassStyle==='liquid'?'active':'' ?>" data-glass="liquid"><input type="radio" name="glass_style" value="liquid" <?= $cardGlassStyle==='liquid'?'checked':'' ?>><div class="type-icon glass"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 2v20"/><path d="M2 12h20"/></svg></div><div class="type-name">液态玻璃</div></label>
         </div>
@@ -704,9 +723,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <input type="hidden" name="bg_image" id="formBgImage" value="<?= htmlspecialchars($bgImage) ?>">
         <input type="hidden" name="bg_api_url" id="formBgApiUrl" value="<?= htmlspecialchars($bgApiUrl) ?>">
         <input type="hidden" name="card_cover_api_url" id="formCardCoverApiUrl" value="<?= htmlspecialchars($cardCoverApiUrl) ?>">
+        <input type="hidden" name="card_glass_style" id="formGlassStyle" value="<?= htmlspecialchars($cardGlassStyle) ?>">
+        <input type="hidden" name="user_glass_toggle" id="formUserGlassToggle" value="<?= $userGlassToggle?'1':'' ?>">
         <input type="hidden" name="bg_blur_enabled" id="formBlurEnabled" value="<?= $bgBlurEnabled?'1':'' ?>">
         <input type="hidden" name="bg_blur_level" id="formBlurLevel" value="<?= $bgBlurLevel ?>">
         <input type="hidden" name="bg_card_opacity" id="formCardOpacity" value="<?= $bgCardOpacity ?>">
+        <input type="hidden" name="music_playlist_id" id="formMusicNetease" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>">
+        <input type="hidden" name="music_playlist_id_qq" id="formMusicQQ" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>">
+        <input type="hidden" name="music_cookies" id="formMusicNetCookie" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>">
+        <input type="hidden" name="music_cookies_qq" id="formMusicQQCookie" value="<?= htmlspecialchars($config['music_cookies_qq'] ?? '') ?>">
         <div style="display:flex;justify-content:flex-end;gap:10px">
             <button type="button" class="btn btn-outline" onclick="resetBg()">重置</button>
             <button type="submit" class="btn btn-primary">保存配置</button>
@@ -767,7 +792,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         }
         window.removeBgImage = function() { if (confirm('确定移除背景图片？')) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; cardCoverApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
-        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApiUrl').value = cardCoverApiUrl.value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formGlassStyle').value = (document.querySelector('input[name="glass_style"]:checked') || { value: 'frosted' }).value; document.getElementById('formUserGlassToggle').value = document.getElementById('userGlassToggle').checked ? '1' : ''; });
+        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApiUrl').value = cardCoverApiUrl.value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formGlassStyle').value = (document.querySelector('input[name="glass_style"]:checked') || { value: 'frosted' }).value; document.getElementById('formUserGlassToggle').value = document.getElementById('userGlassToggle').checked ? '1' : ''; document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicQQ').value = document.getElementById('musicQQInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formMusicQQCookie').value = document.getElementById('musicQQCookieInput').value.trim(); });
         // v4.1.16：玻璃效果选择卡交互（毛玻璃/液态玻璃）
         var glassCards = document.querySelectorAll('.bg-type-card[data-glass]');
         glassCards.forEach(function(g) {
@@ -782,48 +807,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         updatePreview();
     })();
     </script>
-
-    <?php elseif ($tab === 'music'): ?>
-    <div class="page-header">
-        <div class="page-title">
-            <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-            音乐设置
-        </div>
-        <div class="page-subtitle">配置前台音乐播放器（与超管共享配置，后保存者生效）</div>
-    </div>
-    <div class="card">
-        <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-            音乐播放器设置
-        </div>
-        <form method="post">
-            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
-            <input type="hidden" name="music_save" value="1">
-            <div class="form-group">
-                <label class="form-label">网易云歌单 ID</label>
-                <input class="form-input" name="music_playlist_id" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>" placeholder="3778678">
-                <p class="form-hint">网易云音乐歌单 ID，默认 3778678 为热歌榜</p>
-            </div>
-            <div class="form-group">
-                <label class="form-label">QQ 音乐歌单 ID</label>
-                <input class="form-input" name="music_playlist_id_qq" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>" placeholder="留空则使用 QQ 热歌榜">
-                <p class="form-hint">QQ 音乐歌单 ID（前端切换到 QQ 平台时使用），留空则加载 QQ 热歌榜</p>
-            </div>
-            <div class="form-group">
-                <label class="form-label">网易云 Cookies（可选）</label>
-                <input class="form-input" name="music_cookies" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
-                <p class="form-hint">配置后可播放网易云 VIP 歌曲</p>
-            </div>
-            <div class="form-group">
-                <label class="form-label">QQ 音乐 Cookies（可选）</label>
-                <input class="form-input" name="music_cookies_qq" value="<?= htmlspecialchars($config['music_cookies_qq'] ?? '') ?>" placeholder="uin=xxx; p_skey=xxx; skey=xxx; ...">
-                <p class="form-hint">配置后可播放 QQ 音乐付费/VIP 歌曲（v2.6.0）</p>
-            </div>
-            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
-                <button type="submit" class="btn btn-primary">保存设置</button>
-            </div>
-        </form>
-    </div>
 
     <?php elseif ($tab === 'banlog'): ?>
     <?php

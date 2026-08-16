@@ -693,7 +693,8 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         // 若重置的是当前登录会话 → 强制退出
         if (($_SESSION['cmt_user']['id'] ?? '') === $target['id']) unset($_SESSION['cmt_user']);
         auditLog('password_reset', $target['id'], '通过验证码找回重置密码');
-        notifyLoginEvent($target, $clientIP);
+        // v4.7.2：密码重置邮件告警（区分自助找回 / 超管协助重置码）
+        notifyPasswordReset($target, $clientIP, $ok2 ? 'admin_reset' : 'self_reset');
         jsonOut(['success' => true]);
     }
     jsonOut(['success' => false, 'error' => '未知操作'], 400);

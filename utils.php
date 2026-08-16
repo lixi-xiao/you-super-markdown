@@ -1184,6 +1184,37 @@ function notifyLoginEvent($u, $clientIP) {
 }
 
 /**
+ * v4.7.2：密码已重置邮件告警（找回密码重置成功时通知管理员——用户密码被重置=可能盗号，管理员可及时排查）。
+ * $mode: self_reset=邮箱验证码自助找回 / admin_reset=超管协助重置码。
+ */
+function notifyPasswordReset($u, $clientIP, $mode) {
+    $config = loadSiteConfig();
+    $adminEmail = trim($config['admin_email'] ?? '');
+    if ($adminEmail === '' || !email_valid($adminEmail)) return;
+    $site = $config['site_title'] ?? 'You Super Markdown';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $modeLabel = $mode === 'admin_reset' ? '超管协助重置码' : '邮箱验证码自助找回';
+    $now = date('Y-m-d H:i:s');
+    $subject = "[{$site} 通知] 账号密码已重置";
+    $body = "账号：{$u['nickname']}（" . maskQQ($u['qq'] ?? '') . "）\n"
+          . "角色：{$u['role']}\n"
+          . "重置方式：{$modeLabel}\n"
+          . "IP：{$clientIP}\n"
+          . "时间：{$now}\n\n"
+          . "若非本人操作，请立即在超管后台检查该账号登录/越权日志。";
+    $html = renderMailHtml($site, $subject, $body, ['server' => $host, 'time' => $now]);
+    $smtp = getSmtpConfig();
+    if ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '') {
+        [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body, $html);
+        if ($ok) return;
+        logAlertFail("SMTP 发送失败({$subject}): {$err}");
+        return;
+    }
+    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ym-alert 不存在({$subject})"); return; }
+    $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($adminEmail) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
+    exec($cmd . ' > /dev/null 2>&1 &');
+}
+/**
  * v4.0.0：新评论/回复邮件订阅通知（向站点管理员发信）
  * 受 config comment_notify_enabled 控制；收件人优先 comment_notify_email，回退 admin_email。
  * $isReply=true 表示这是对已有评论的回复。
@@ -1698,6 +1729,53 @@ function maybeLinkedBlock($dimType, $dimKey) {
     } elseif ($score >= $l1) {
         linkedLock('link:' . $dimType . ':' . $dimKey, (int)threatCfg('threat_l1_dur', 900), '联动封锁15分钟');
     }
+    // v4.7.2：联动封锁邮件告警——同维度同等级只发一次，升级到下一等级再发（防刷屏）
+    if ($score >= $l3) maybeAlertLock($dimType, $dimKey, $score, 'L3');
+    elseif ($score >= $l2) maybeAlertLock($dimType, $dimKey, $score, 'L2');
+    elseif ($score >= $l1) maybeAlertLock($dimType, $dimKey, $score, 'L1');
+}
+/** 联动封锁告警去重+发送：用 threat_events 的 0 权重 __alert_<等级> 标记行记录已发等级 */
+function maybeAlertLock($dimType, $dimKey, $score, $level) {
+    $tag = '__alert_' . $level;
+    if (db_one('SELECT 1 AS x FROM threat_events WHERE dim_type = ? AND dim_key = ? AND reason = ?', [$dimType, $dimKey, $tag]) !== null) return;
+    db_exec('INSERT INTO threat_events (id, dim_type, dim_key, weight, reason, created) VALUES (?,?,?,0,?,?)',
+        [bin2hex(random_bytes(8)), $dimType, $dimKey, $tag, time()]);
+    // 事件摘要：窗口内 top 原因（排除告警标记行）
+    $rows = db_all('SELECT reason, COUNT(*) AS c FROM threat_events WHERE dim_type = ? AND dim_key = ? AND created > ? AND reason NOT LIKE "__alert_%" GROUP BY reason ORDER BY c DESC LIMIT 5',
+        [$dimType, $dimKey, time() - (int)threatCfg('threat_window', 86400)]);
+    $summary = '';
+    foreach ($rows as $r) $summary .= $r['reason'] . '×' . $r['c'] . '；';
+    notifyThreatAlert($dimType, $dimKey, $score, $level, rtrim($summary, '；'));
+}
+/** 联动封锁邮件告警（发往 admin_email；SMTP 未配置回退 ym-alert 脚本；统一 HTML 模板红色告警系） */
+function notifyThreatAlert($dimType, $dimKey, $score, $level, $summary) {
+    $config = loadSiteConfig();
+    $adminEmail = trim($config['admin_email'] ?? '');
+    if ($adminEmail === '' || !email_valid($adminEmail)) return;
+    $site = $config['site_title'] ?? 'You Super Markdown';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $levelNames = ['L1' => '15 分钟', 'L2' => '24 小时', 'L3' => '永久'];
+    $dimLabel = $dimType === 'ip' ? 'IP：' . $dimKey : '浏览器指纹：' . substr($dimKey, 0, 16) . '…';
+    $levelName = $levelNames[$level] ?? $level;
+    $now = date('Y-m-d H:i:s');
+    $subject = "[{$site} 告警] 联动封锁触发（{$levelName}）";
+    $body = "触发维度：{$dimLabel}\n"
+          . "当前评分：{$score}\n"
+          . "封锁等级：{$level}（{$levelName}）\n"
+          . "事件摘要：{$summary}\n"
+          . "时间：{$now}\n\n"
+          . "如为误封，请在超管后台「联动风控」页解除（需 SSH 挑战码）。";
+    $html = renderMailHtml($site, $subject, $body, ['server' => $host, 'time' => $now]);
+    $smtp = getSmtpConfig();
+    if ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '') {
+        [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body, $html);
+        if ($ok) return;
+        logAlertFail("SMTP 发送失败({$subject}): {$err}");
+        return;
+    }
+    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ym-alert 不存在({$subject})"); return; }
+    $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($adminEmail) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
+    exec($cmd . ' > /dev/null 2>&1 &');
 }
 /** 检查单维度联动封锁：返回剩余秒数（0=未封锁） */
 function linkedBlockLeft($dimType, $dimKey) {
@@ -1736,20 +1814,20 @@ function clearLinkedBlock($dimType, $dimKey) {
         }
     }
 }
-/** 面板明细：某维度窗口内事件列表 */
+/** 面板明细：某维度窗口内事件列表（排除告警标记行） */
 function threatEventsFor($dimType, $dimKey, $window = null) {
     if ($window === null) $window = (int)threatCfg('threat_window', 86400);
-    return db_all('SELECT reason, weight, created FROM threat_events WHERE dim_type = ? AND dim_key = ? AND created > ? ORDER BY created DESC LIMIT 100',
+    return db_all('SELECT reason, weight, created FROM threat_events WHERE dim_type = ? AND dim_key = ? AND created > ? AND reason NOT LIKE "__alert_%" ORDER BY created DESC LIMIT 100',
         [$dimType, $dimKey, time() - $window]);
 }
-/** 威胁维度聚合列表（面板用，分页）：返回 [rows, total]；rows 含 score/cnt/last_ts/locked_left */
+/** 威胁维度聚合列表（面板用，分页）：返回 [rows, total]；rows 含 score/cnt/last_ts/locked_left（排除告警标记行） */
 function threatDims($page = 1, $per = 20) {
     $window = (int)threatCfg('threat_window', 86400);
     $cutoff = time() - $window;
     $page = max(1, (int)$page); $per = min(100, max(5, (int)$per));
-    $total = (int)(db_one('SELECT COUNT(DISTINCT dim_type || "|" || dim_key) AS c FROM threat_events WHERE created > ?', [$cutoff])['c'] ?? 0);
+    $total = (int)(db_one('SELECT COUNT(DISTINCT dim_type || "|" || dim_key) AS c FROM threat_events WHERE created > ? AND reason NOT LIKE "__alert_%"', [$cutoff])['c'] ?? 0);
     $rows = db_all('SELECT dim_type, dim_key, SUM(weight) AS score, COUNT(*) AS cnt, MAX(created) AS last_ts
-        FROM threat_events WHERE created > ? GROUP BY dim_type, dim_key ORDER BY score DESC, last_ts DESC LIMIT ? OFFSET ?',
+        FROM threat_events WHERE created > ? AND reason NOT LIKE "__alert_%" GROUP BY dim_type, dim_key ORDER BY score DESC, last_ts DESC LIMIT ? OFFSET ?',
         [$cutoff, $per, ($page - 1) * $per]);
     foreach ($rows as &$r) {
         $r['score'] = (int)$r['score'];

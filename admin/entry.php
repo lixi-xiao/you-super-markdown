@@ -71,6 +71,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'login_time' => time(),
             ];
             auditLog('login_otp', $superAdmin['id'], 'OTP 动态入口登录成功');
+            // v4.1.11：超管登录邮件通知（与站长/写作者登录通知一致，发往管理员邮箱）
+            notifyLoginEvent($superAdmin, getClientIP());
             header('Location: /admin/dashboard.php');
             exit;
         }

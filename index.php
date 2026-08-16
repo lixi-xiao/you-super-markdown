@@ -938,6 +938,33 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
                 </div>
                 <div class="cmt-modal-err" id="cmtLoginErr"></div>
                 <button class="cmt-modal-submit" id="cmtLoginBtn">登录</button>
+                <div class="cmt-forgot-row"><button type="button" class="cmt-modal-switch-link" id="cmtForgotLink">忘记密码？</button></div>
+            </div>
+            <!-- v4.7.0：陌生设备登录邮件二次验证 -->
+            <div class="cmt-modal-form" id="cmtDevForm" style="display:none">
+                <div class="cmt-sec-title"><span>设备验证</span></div>
+                <div class="cmt-reset-tip" id="cmtDevTip">验证码已发送，请查收邮箱</div>
+                <input class="cmt-modal-input" type="text" placeholder="邮箱验证码（6位）" maxlength="6" id="cmtDevCode" autocomplete="off" inputmode="numeric">
+                <div class="cmt-modal-err" id="cmtDevErr"></div>
+                <button class="cmt-modal-submit" id="cmtDevBtn">确认设备</button>
+                <div class="cmt-back-row"><button type="button" class="cmt-modal-switch-link" id="cmtDevBack">返回登录</button></div>
+            </div>
+            <!-- v4.7.0：找回密码（管理角色仅常用设备可自助找回，陌生设备请联系超管） -->
+            <div class="cmt-modal-form" id="cmtResetForm" style="display:none">
+                <div class="cmt-sec-title"><span>找回密码</span></div>
+                <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtResetQQ" autocomplete="username">
+                <div class="cmt-reg-email-row">
+                    <input class="cmt-modal-input" type="email" placeholder="绑定邮箱" id="cmtResetEmail" autocomplete="email">
+                    <button type="button" class="cmt-code-btn" id="cmtResetSendCode">发送验证码</button>
+                </div>
+                <input class="cmt-modal-input" type="text" placeholder="邮箱验证码或管理员提供的重置码（6位）" maxlength="6" id="cmtResetCode" autocomplete="off" inputmode="numeric">
+                <div class="cmt-pw-row">
+                    <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="新密码（至少8位，含大小写与数字）" id="cmtResetPw" autocomplete="new-password">
+                    <button type="button" class="cmt-pw-toggle" id="cmtResetPwToggle" tabindex="-1" title="显示/隐藏密码" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                </div>
+                <div class="cmt-modal-err" id="cmtResetErr"></div>
+                <button class="cmt-modal-submit" id="cmtResetBtn">重置密码</button>
+                <div class="cmt-back-row"><button type="button" class="cmt-modal-switch-link" id="cmtResetBack">返回登录</button></div>
             </div>
             <div class="cmt-modal-form cmt-reg-form" id="cmtRegForm" style="display:none">
                 <!-- v2.10.2：注册表单统一设计——账号信息 / 身份验证分组分层 -->

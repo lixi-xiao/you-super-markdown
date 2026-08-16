@@ -103,6 +103,27 @@ function db_init_schema($pdo) {
         operator_role TEXT
     )');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_email_codes_email ON email_codes(email)');
+    // v4.7.0：已信任设备指纹（管理角色陌生设备登录邮件二次验证；fp_hash 为环境指纹+UA 的 SHA256，非敏感）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS device_fps (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        fp_hash TEXT,
+        ua TEXT,
+        first_seen INTEGER,
+        last_seen INTEGER,
+        UNIQUE (user_id, fp_hash)
+    )');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_device_fps_user ON device_fps(user_id)');
+    // v4.7.0：联动威胁评分事件流水（维度=ip|fp，滑动窗口求和；超阈值触发联动封锁）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS threat_events (
+        id TEXT PRIMARY KEY,
+        dim_type TEXT,
+        dim_key TEXT,
+        weight INTEGER,
+        reason TEXT,
+        created INTEGER
+    )');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_threat_dim ON threat_events(dim_type, dim_key, created)');
     // v2.10.0-fix：JWT jti 吊销黑名单（登出即吊销，防 session 残留导致超管会话复活）
     $pdo->exec('CREATE TABLE IF NOT EXISTS jwt_blacklist (
         jti TEXT PRIMARY KEY,

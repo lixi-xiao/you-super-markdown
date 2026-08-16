@@ -490,6 +490,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             封禁日志（只读）
         </a>
+        <a href="dashboard.php?tab=threat" class="sidebar-link <?= $tab==='threat'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>
+            联动风控（只读）
+        </a>
         <a href="dashboard.php?tab=announce" class="sidebar-link <?= $tab==='announce'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             公告管理
@@ -982,6 +986,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         </div>
         <?= renderPager($unauthData, 'unauth_page', $unauthExtra, 'unauth_per_page') ?>
         <?php endif; ?>
+    </div>
+
+    <?php elseif ($tab === 'threat'): ?>
+    <?php
+    // v4.7.0：联动威胁评分（站长只读视图，分页；解除/移除等敏感操作由超管处理）
+    $tp = max(1, (int)($_GET['tp'] ?? 1));
+    $tpp = 20;
+    [$threatRows, $threatTotal] = threatDims($tp, $tpp);
+    $threatPages = max(1, (int)ceil($threatTotal / $tpp));
+    if ($tp > $threatPages) { $tp = $threatPages; [$threatRows, $threatTotal] = threatDims($tp, $tpp); }
+    ?>
+    <div class="card">
+        <div class="card-title">联动威胁评分（只读 · 24h 滑动窗口，阈值 50→15分钟 / 100→24小时 / 200→永久）</div>
+        <div class="table-wrap">
+        <table>
+            <tr><th>维度</th><th>评分</th><th>事件数</th><th>最后事件</th><th>封锁状态</th></tr>
+            <?php foreach ($threatRows as $tr): $locked = (int)$tr['locked_left']; ?>
+            <tr>
+                <td><code><?= htmlspecialchars($tr['dim_type'] === 'ip' ? 'IP: ' . $tr['dim_key'] : '指纹: ' . substr($tr['dim_key'], 0, 16) . '…') ?></code></td>
+                <td><b><?= $tr['score'] ?></b></td>
+                <td><?= $tr['cnt'] ?></td>
+                <td><?= date('m-d H:i', (int)$tr['last_ts']) ?></td>
+                <td>
+                    <?php if ($locked > 0): ?><span style="color:#e5484d;font-weight:600">封锁中（剩 <?= ceil($locked / 60) ?> 分钟）</span>
+                    <?php elseif ($tr['score'] >= 200): ?><span style="color:#e5484d;font-weight:600">达永久阈值</span>
+                    <?php elseif ($tr['score'] >= 100): ?><span style="color:#f5a623;font-weight:600">达24h阈值</span>
+                    <?php elseif ($tr['score'] >= 50): ?><span style="color:#f5a623">达15min阈值</span>
+                    <?php else: ?><span style="color:var(--text-muted)">正常</span><?php endif; ?>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            <?php if (empty($threatRows)): ?><tr><td colspan="5" style="text-align:center;color:var(--text-muted)">暂无威胁事件</td></tr><?php endif; ?>
+        </table>
+        </div>
+        <?= renderPager(['page' => $tp, 'pages' => $threatPages, 'per_page' => $tpp, 'total' => $threatTotal], 'tp', ['tab' => 'threat'], 'tpp') ?>
+        <div class="form-hint">只读视图：解除封锁、移除信任设备、生成重置码等操作请由超管在超管后台完成</div>
     </div>
 
     <?php elseif ($tab === 'announce'): ?>

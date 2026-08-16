@@ -634,6 +634,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clear_unauth'])) {
     exit;
 }
 
+// v4.7.0：移除已信任设备（敏感操作：挑战码）
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_device'])) {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: dashboard.php?tab=threat&msg=csrf_error');
+        exit;
+    }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=threat&msg=challenge_failed');
+        exit;
+    }
+    $uid = trim((string)($_POST['device_uid'] ?? ''));
+    $devId = trim((string)($_POST['device_id'] ?? ''));
+    if ($uid !== '' && $devId !== '' && removeKnownDevice($uid, $devId)) {
+        auditLog('device_removed', $uid, '移除已信任设备 ' . $devId);
+        header('Location: dashboard.php?tab=threat&msg=device_removed');
+    } else {
+        header('Location: dashboard.php?tab=threat&msg=device_rm_fail');
+    }
+    exit;
+}
+
+// v4.7.0：解除联动封锁（敏感操作：挑战码）
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clear_linked'])) {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: dashboard.php?tab=threat&msg=csrf_error');
+        exit;
+    }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=threat&msg=challenge_failed');
+        exit;
+    }
+    $dt = trim((string)($_POST['link_dim_type'] ?? ''));
+    $dk = trim((string)($_POST['link_dim_key'] ?? ''));
+    if (in_array($dt, ['ip', 'fp'], true) && $dk !== '') {
+        clearLinkedBlock($dt, $dk);
+        auditLog('linked_cleared', '', '解除联动封锁（' . $dt . ':' . $dk . '）');
+        header('Location: dashboard.php?tab=threat&msg=linked_cleared');
+    } else {
+        header('Location: dashboard.php?tab=threat&msg=linked_clr_fail');
+    }
+    exit;
+}
+
+// v4.7.0：生成一次性重置码（超管协助找回，敏感操作：挑战码；30 分钟过期一次性）
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gen_reset_code'])) {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: dashboard.php?tab=threat&msg=csrf_error');
+        exit;
+    }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=threat&msg=challenge_failed');
+        exit;
+    }
+    $rqq = trim((string)($_POST['reset_qq'] ?? ''));
+    $target = null;
+    foreach ($users as $u) { if (($u['qq'] ?? '') === $rqq) { $target = $u; break; } }
+    if (!$target) {
+        header('Location: dashboard.php?tab=threat&msg=reset_user_not_found');
+        exit;
+    }
+    [$ok, $code] = genAdminResetCode($target['id'], $target['email'] ?? '');
+    if ($ok) {
+        auditLog('admin_reset_code', $target['id'], '生成一次性重置码（超管协助找回）');
+        header('Location: dashboard.php?tab=threat&msg=' . urlencode('重置码已生成：' . $code . '（30分钟内一次性有效，请转交用户）'));
+    } else {
+        header('Location: dashboard.php?tab=threat&msg=' . urlencode($code));
+    }
+    exit;
+}
+
 // 主界面及功能设置表单（v4.1.18：背景+音乐+站点外观，非敏感操作，仅 CSRF 无需挑战码）
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['bg_image']) || isset($_POST['_ui_save']))) {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -791,6 +861,10 @@ $banMsg = $_GET['bmsg'] ?? '';
         <a href="dashboard.php?tab=verify" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'verify' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/><circle cx="12" cy="13" r="1"/></svg>
             注册验证
+        </a>
+        <a href="dashboard.php?tab=threat" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'threat' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>
+            联动风控
         </a>
         <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -2927,6 +3001,115 @@ $banMsg = $_GET['bmsg'] ?? '';
         </table>
         </div>
         <?= renderPager($pendsPaged, 'pp', ['tab' => 'verify', 'pq' => $_GET['pq'] ?? ''], 'ppp') ?>
+    </div>
+    <?php elseif ($tab === 'threat'): ?>
+    <?php if ($msg === 'challenge_failed'): ?><div class="msg msg-error">挑战码无效或已过期，操作未执行</div><?php endif; ?>
+    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error">CSRF 校验失败，请重试</div><?php endif; ?>
+    <?php if ($msg === 'device_removed'): ?><div class="msg msg-success">已移除该信任设备</div><?php endif; ?>
+    <?php if ($msg === 'device_rm_fail'): ?><div class="msg msg-error">移除失败（设备不存在）</div><?php endif; ?>
+    <?php if ($msg === 'linked_cleared'): ?><div class="msg msg-success">已解除联动封锁</div><?php endif; ?>
+    <?php if ($msg === 'linked_clr_fail'): ?><div class="msg msg-error">解除失败</div><?php endif; ?>
+    <?php if ($msg === 'reset_user_not_found'): ?><div class="msg msg-error">未找到该账号</div><?php endif; ?>
+    <?php if (strpos((string)$msg, '重置码') !== false): ?><div class="msg msg-success"><?= htmlspecialchars($msg) ?></div><?php endif; ?>
+
+    <?php
+    $tp = max(1, (int)($_GET['tp'] ?? 1));
+    $tpp = 20;
+    [$threatRows, $threatTotal] = threatDims($tp, $tpp);
+    $threatPages = max(1, (int)ceil($threatTotal / $tpp));
+    if ($tp > $threatPages) { $tp = $threatPages; [$threatRows, $threatTotal] = threatDims($tp, $tpp); }
+    ?>
+    <div class="card">
+        <div class="card-title">联动威胁评分（24h 滑动窗口，阈值 50→15分钟 / 100→24小时 / 200→永久）</div>
+        <div class="table-wrap">
+        <table>
+            <tr><th>维度</th><th>评分</th><th>事件数</th><th>最后事件</th><th>封锁状态</th><th>操作</th></tr>
+            <?php foreach ($threatRows as $tr): $locked = (int)$tr['locked_left']; ?>
+            <tr>
+                <td><code><?= htmlspecialchars($tr['dim_type'] === 'ip' ? 'IP: ' . $tr['dim_key'] : '指纹: ' . substr($tr['dim_key'], 0, 16) . '…') ?></code></td>
+                <td><b><?= $tr['score'] ?></b></td>
+                <td><?= $tr['cnt'] ?></td>
+                <td><?= date('m-d H:i', (int)$tr['last_ts']) ?></td>
+                <td>
+                    <?php if ($locked > 0): ?><span style="color:#e5484d;font-weight:600">封锁中（剩 <?= ceil($locked / 60) ?> 分钟）</span>
+                    <?php elseif ($tr['score'] >= 200): ?><span style="color:#e5484d;font-weight:600">达永久阈值</span>
+                    <?php elseif ($tr['score'] >= 100): ?><span style="color:#f5a623;font-weight:600">达24h阈值</span>
+                    <?php elseif ($tr['score'] >= 50): ?><span style="color:#f5a623">达15min阈值</span>
+                    <?php else: ?><span style="color:var(--text-muted)">正常</span><?php endif; ?>
+                </td>
+                <td>
+                    <?php if ($locked > 0 || $tr['score'] >= 50): ?>
+                    <form method="post" class="need-challenge" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+                        <input type="hidden" name="clear_linked" value="1">
+                        <input type="hidden" name="link_dim_type" value="<?= htmlspecialchars($tr['dim_type']) ?>">
+                        <input type="hidden" name="link_dim_key" value="<?= htmlspecialchars($tr['dim_key']) ?>">
+                        <input type="hidden" name="challenge_code">
+                        <button class="btn btn-sm btn-outline" data-confirm="确定解除该维度的联动封锁？">解除</button>
+                    </form>
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            <?php if (empty($threatRows)): ?><tr><td colspan="6" style="text-align:center;color:var(--text-muted)">暂无威胁事件</td></tr><?php endif; ?>
+        </table>
+        </div>
+        <?= renderPager(['page' => $tp, 'pages' => $threatPages, 'per_page' => $tpp, 'total' => $threatTotal], 'tp', ['tab' => 'threat'], 'tpp') ?>
+    </div>
+
+    <div class="card">
+        <div class="card-title">已信任设备（管理角色陌生设备登录二次验证；移除后该设备需重新邮箱验证码确认）</div>
+        <div class="table-wrap">
+        <table>
+            <tr><th>账号</th><th>角色</th><th>设备指纹</th><th>UA</th><th>首次</th><th>最近</th><th>操作</th></tr>
+            <?php $devCount = 0; ?>
+            <?php foreach ($users as $u): ?>
+                <?php if (!in_array($u['role'] ?? '', [ROLE_STATION_ADMIN, ROLE_AUTHOR, ROLE_SUPER_ADMIN], true)) continue; ?>
+                <?php foreach (getKnownDevices($u['id']) as $d): $devCount++; ?>
+                <tr>
+                    <td><?= htmlspecialchars($u['qq'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($u['role'] ?? '') ?></td>
+                    <td><code><?= htmlspecialchars(substr($d['fp_hash'], 0, 16)) ?>…</code></td>
+                    <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($d['ua'] ?? '') ?>"><?= htmlspecialchars(mb_substr($d['ua'] ?? '', 0, 40, 'UTF-8')) ?></td>
+                    <td><?= date('Y-m-d', (int)$d['first_seen']) ?></td>
+                    <td><?= date('Y-m-d', (int)$d['last_seen']) ?></td>
+                    <td>
+                        <form method="post" class="need-challenge" style="display:inline">
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+                            <input type="hidden" name="remove_device" value="1">
+                            <input type="hidden" name="device_uid" value="<?= htmlspecialchars($u['id']) ?>">
+                            <input type="hidden" name="device_id" value="<?= htmlspecialchars($d['id']) ?>">
+                            <input type="hidden" name="challenge_code">
+                            <button class="btn btn-sm btn-outline" data-confirm="确定移除该设备？移除后需重新验证码验证">移除</button>
+                        </form>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            <?php endforeach; ?>
+            <?php if ($devCount === 0): ?><tr><td colspan="7" style="text-align:center;color:var(--text-muted)">暂无已信任设备</td></tr><?php endif; ?>
+        </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">协助找回密码（生成一次性重置码转交用户，用户凭码自行设置新密码）</div>
+        <form method="post" class="need-challenge">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="gen_reset_code" value="1">
+            <input type="hidden" name="challenge_code">
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">用户 QQ 号</label>
+                    <input class="form-input" type="text" name="reset_qq" placeholder="填写待找回用户的 QQ 号" maxlength="15" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group" style="flex:0">
+                    <button type="submit" class="btn btn-primary">生成重置码</button>
+                </div>
+            </div>
+            <div class="form-hint">重置码 30 分钟内一次性有效；用户可在首页「忘记密码」中直接输入该重置码与新密码完成重置</div>
+        </form>
     </div>
     <?php endif; ?>
 </div>

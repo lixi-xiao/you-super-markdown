@@ -1,6 +1,6 @@
 <?php
-session_start();
 require_once __DIR__ . '/../utils.php';
+secureSessionStart();
 
 if (!checkRole(ROLE_STATION_ADMIN)) {
     logUnauthorized('越权尝试访问站长后台');
@@ -10,6 +10,14 @@ if (!checkRole(ROLE_STATION_ADMIN)) {
 
 // v2.7.2：账号被删/吊销后会话立即失效（防已删账号凭残留 Session 继续访问后台）
 if (!validateBackendUser()) {
+    session_unset();
+    session_destroy();
+    header('Location: /?admin_login=1&expired=1');
+    exit;
+}
+
+// v4.6.0：后台会话 24 小时显式过期（按登录时间算）——超时回退首页重新登录（refresh 续期不绕过）
+if (backendSessionExpired()) {
     session_unset();
     session_destroy();
     header('Location: /?admin_login=1&expired=1');
@@ -655,7 +663,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <div class="form-group">
             <div class="toggle-row">
                 <label class="toggle-label">本地背景音乐</label>
-                <label class="switch"><input type="checkbox" id="bgMusicToggle" <?= !empty($config['bg_music_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
+                <label class="toggle" style="flex-shrink:0"><input type="checkbox" id="bgMusicToggle" <?= !empty($config['bg_music_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
                 <div class="toggle-desc">开启后前台播放器弹窗内出现「本地背景音」开关（单曲循环，播放器与网易云互不干扰）</div>
             </div>
             <input class="form-input" type="file" id="bgMusicFileInput" name="bg_music_file" accept=".mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.wma,audio/*" style="margin-top:8px">
@@ -1472,7 +1480,10 @@ exit;
     function fpCanvas() { try { var c = document.createElement('canvas'); c.width = 200; c.height = 40; var x = c.getContext('2d'); x.textBaseline = 'top'; x.font = '14px Arial'; x.fillStyle = '#f60'; x.fillRect(0, 0, 200, 40); x.fillStyle = '#069'; x.fillText('YouSuperMarkdown\u2620' + navigator.userAgent.length, 5, 12); var d = c.toDataURL(); return d.length + ':' + d.slice(-64); } catch (e) { return ''; } }
     var parts = [navigator.language || '', new Date().getTimezoneOffset(), (screen.width || 0) + 'x' + (screen.height || 0), fpCanvas(), navigator.userAgent];
     var fp = fpFnv(parts.join('|')) + fpFnv(parts.join('~')) + fpFnv(navigator.userAgent);
-    fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp } }).catch(function() {});
+    fetch('/api.php?action=csrf').then(r => r.json()).then(function(d) {
+        if (!d.success || !d.csrf_token) return;
+        fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp, 'X-CSRF-Token': d.csrf_token } }).catch(function() {});
+    }).catch(function() {});
 })();
 </script>
 </body>

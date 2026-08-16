@@ -1,6 +1,6 @@
 <?php
-session_start();
 require_once __DIR__ . '/utils.php';
+secureSessionStart();
 
 $siteCfg = loadSiteConfig();
 $title = $siteCfg['site_title'] ?? 'You Super Markdown';

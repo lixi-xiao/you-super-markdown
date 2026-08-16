@@ -1155,6 +1155,7 @@ td code {
     box-shadow: 0 0 0 3px var(--accent-glass);
 }
 /* v4.1.1：分页栏移动端适配——手机/平板下三段纵向堆叠，页码横向滚动，避免挤压错乱 */
+/* v4.6.0：手机分页简化为「两钮制」——只保留上一页/下一页 + 页码信息，隐藏中间页码/首页/末页/跳转输入 */
 @media (max-width: 768px) {
     .pagination {
         flex-direction: column;
@@ -1166,34 +1167,38 @@ td code {
         width: 100%;
     }
     .pagination-btns {
-        flex-wrap: wrap;
-        gap: 6px 8px;
+        flex-wrap: nowrap;
+        gap: 8px;
         overflow: visible;
         width: 100%;
+        justify-content: space-between;
+    }
+    .pagination-btns .page-btn:not([title="上一页"]):not([title="下一页"]) {
+        display: none;
     }
     .pagination-btns .page-btn {
         flex-shrink: 0;
-        min-width: 32px;
-        height: 32px;
-        padding: 0 10px;
+        min-width: 88px;
+        height: 36px;
+        padding: 0 14px;
+        text-align: center;
     }
     .pagination-jump {
-        justify-content: flex-start;
+        justify-content: space-between;
         width: 100%;
     }
-    .page-jump {
-        height: 32px;
-        width: 56px;
+    .pagination-jump .page-info {
+        font-size: 0.85em;
     }
+    .pagination-jump .page-jump,
     .pagination-jump .page-btn {
-        height: 32px;
-        padding: 0 10px;
+        display: none;
     }
 }
 @media (max-width: 480px) {
-    .pagination-btns .page-btn[title="首页"],
-    .pagination-btns .page-btn[title="末页"] {
-        display: none;
+    .pagination-btns .page-btn {
+        min-width: 76px;
+        padding: 0 10px;
     }
     .per-page select {
         height: 32px;

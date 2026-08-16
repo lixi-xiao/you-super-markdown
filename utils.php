@@ -18,6 +18,28 @@ function appConfig($key, $default = '') {
 define('APP_VERSION', appConfig('version', '0.0.0'));
 // v4.2.0：卡片封面 / API 背景固定图片源（16:9 横屏随机图，服务器不落地存储、不存缩略图）
 define('FIXED_IMG_API', 'https://uapis.cn/api/v1/random/image?category=acg');
+// v4.6.0：统一会话启动——PHPSESSID 加 HttpOnly + SameSite=Strict + Secure（修复「无 HttpOnly + 无 SameSite」薄弱点）。
+// 所有入口文件在 session_start() 前调用本函数（参数必须在 session 启动前设置才生效）。
+function secureSessionStart() {
+    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    if (PHP_VERSION_ID >= 70300) {
+        session_set_cookie_params([
+            'lifetime' => 0, 'path' => '/', 'domain' => '', 'secure' => $secure,
+            'httponly' => true, 'samesite' => 'Strict',
+        ]);
+    } else {
+        session_set_cookie_params(0, '/', '', $secure, true);
+    }
+    session_start();
+}
+// v4.6.0：后台会话 24 小时显式过期（站长/写作者，按登录时间算）——超时回退首页重新登录
+const BACKEND_TTL = 86400; // 24 小时
+function backendSessionExpired(): bool {
+    if (empty($_SESSION['cmt_user'])) return false;
+    $role = $_SESSION['cmt_user']['role'] ?? '';
+    if (!in_array($role, [ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) return false;
+    return (time() - (int)($_SESSION['cmt_login_ts'] ?? 0)) > BACKEND_TTL;
+}
 function generateCsrfToken() {
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -1367,8 +1389,9 @@ function bumpUserTV($uid) {
     return getUserTV($uid);
 }
 
-// ---- 双 token：refresh（httpOnly Cookie，7 天，绑定指纹 + tv）----
-const REFRESH_TTL = 604800; // 7 天
+// ---- 双 token：refresh（httpOnly Cookie，30 天，绑定指纹 + tv）----
+// v4.6.0：前台登录态长效 30 天（REFRESH_TTL 7 天 → 30 天）；超管不签发 refresh（严格 30 分钟 JWT）
+const REFRESH_TTL = 2592000; // 30 天
 /** 签发 refresh token（写库 + 写 httpOnly Cookie），返回明文 token */
 function issueRefreshToken($uid, $sessionFp, $tv) {
     $token = bin2hex(random_bytes(32));

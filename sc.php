@@ -1,6 +1,6 @@
 <?php
-session_start();
 require_once __DIR__ . '/utils.php';
+secureSessionStart();
 
 // 权限检查：站长或写作者可访问
 if (!checkRole(ROLE_STATION_ADMIN) && !checkRole(ROLE_AUTHOR)) {

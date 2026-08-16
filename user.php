@@ -4,8 +4,8 @@
  * 评论区点击头像/昵称进入；展示头像/昵称/签名/注册时间。
  * 排除超管：超管无公开详情页（404）；用户不存在同样 404。
  */
-session_start();
 require_once __DIR__ . '/utils.php';
+secureSessionStart();
 
 $id = trim($_GET['id'] ?? '');
 $u = get_public_user($id);

@@ -1,6 +1,6 @@
 <?php
-session_start();
 require_once __DIR__ . '/utils.php';
+secureSessionStart();
 header('Content-Type: application/json; charset=utf-8');
 
 // v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
@@ -449,6 +449,8 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $newTV = bumpUserTV($new['id']);
     $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
     $_SESSION['cmt_tv'] = $newTV;
+    // v4.6.0：记录登录时间（后台 24h 过期按登录时间算）
+    $_SESSION['cmt_login_ts'] = time();
     issueRefreshToken($new['id'], $_SESSION['cmt_fp'], $newTV);
     $_SESSION['cmt_user'] = [
         'id' => $new['id'], 'qq' => $qq, 'nickname' => $nick,
@@ -495,7 +497,11 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $newTV = bumpUserTV($u['id']);
             $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
             $_SESSION['cmt_tv'] = $newTV;
-            issueRefreshToken($u['id'], $_SESSION['cmt_fp'], $newTV);
+            // v4.6.0：记录登录时间（后台 24h 过期按登录时间算）；超管不走此接口（OTP 入口登录且不签发 refresh）
+            $_SESSION['cmt_login_ts'] = time();
+            if (($u['role'] ?? '') !== ROLE_SUPER_ADMIN) {
+                issueRefreshToken($u['id'], $_SESSION['cmt_fp'], $newTV);
+            }
             if (in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN])) $isAdminFirst = true;
             // v2.11.0：登录成功清除失败计数（IP 级 + 该账号级）
             loginFailClear($clientIP, $qq);
@@ -562,6 +568,8 @@ if ($action === 'refresh' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$found) { clearRefreshCookie(); jsonOut(['success' => false, 'error' => '账号不存在'], 401); }
     $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
     $_SESSION['cmt_tv'] = (int)$curTV;
+    // v4.6.0：保持原登录时间（refresh 不重置）——后台 24h 过期按登录时间算，续期不能绕过
+    $_SESSION['cmt_login_ts'] = (int)($row['created'] ?? 0) ?: time();
     $_SESSION['cmt_user'] = [
         'id' => $found['id'], 'qq' => $found['qq'],
         'nickname' => $found['nickname'] ?? '',
@@ -626,6 +634,10 @@ if ($action === 'user-status') {
             $adminUrl = '/' . getStationPath() . '/dashboard.php';
         } elseif ($roleLevel >= $authorLevel && $roleLevel < $stationAdminLevel) {
             $adminUrl = '/' . getAuthorPath() . '/dashboard.php';
+        }
+        // v4.6.0：从首页点击「快捷进入管理」→ 重新开始 24h 后台计时（登录时间刷新；回退首页再进即重新计时）
+        if ($canAccessAdmin) {
+            $_SESSION['cmt_login_ts'] = time();
         }
         jsonOut([
             'success' => true,

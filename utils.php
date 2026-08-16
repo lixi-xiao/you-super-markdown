@@ -1681,6 +1681,9 @@ function logThreat($reason, $ip = '', $fp = '', $dedupeWindow = 0) {
     if ($fp === '') $fp = getRequestFp();
     $weight = threatWeight($reason);
     if ($weight <= 0) return;
+    // v4.7.5：联动威胁评分本地/内网 IP 豁免——内网回环地址不参与自动联动封锁（与蜜罐内网豁免一致），
+    // 防内网/本机测试误封（如 127.0.0.1 直连验证）；fp 维度照常计分
+    if ($ip !== '' && isPrivateHost($ip)) $ip = '';
     $now = time();
     $entries = [];
     if ($ip !== '') $entries[] = ['ip', $ip];

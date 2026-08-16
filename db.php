@@ -221,13 +221,15 @@ function db_init_schema($pdo) {
     // v2.11.0：老库 login_fails 无 acc 列（登录失败按账号维度计数），幂等补齐
     try { $pdo->exec('ALTER TABLE login_fails ADD COLUMN acc TEXT'); } catch (Exception $e) { /* 列已存在 */ }
     // v4.5.0：限速表补 fp 列（环境指纹维度——指纹+IP 双维限速；旧记录 fp 为空按 IP 维度兼容）
-    foreach (['login_fails', 'reg_rates', 'comment_rates', 'honeypot_rates'] as $rt) {
+    foreach (['login_fails', 'reg_rates', 'comment_rates', 'honeypot_rates', 'music_rates'] as $rt) {
         try { $pdo->exec("ALTER TABLE {$rt} ADD COLUMN fp TEXT"); } catch (Exception $e) { /* 列已存在 */ }
     }
     $pdo->exec('CREATE TABLE IF NOT EXISTS reg_rates (ip TEXT, t INTEGER)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS comment_rates (ip TEXT, t INTEGER)');
     // v4.4.0：注册蜜罐触发计数表（短时间连续命中蜜罐 → 自动封禁 IP）
     $pdo->exec('CREATE TABLE IF NOT EXISTS honeypot_rates (ip TEXT, t INTEGER)');
+    // v4.7.4：音乐接口出站限速表（第三方 API 聚合接口，防滥用放大外呼；fp 列与 db_rate_add 对齐）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS music_rates (ip TEXT, fp TEXT, t INTEGER)');
     // v4.4.0：bans 表补 expires 列（0=永久封禁；>0=过期时间戳，老库幂等补齐）
     try { $pdo->exec('ALTER TABLE bans ADD COLUMN expires INTEGER DEFAULT 0'); } catch (Exception $e) { /* 列已存在 */ }
     // v2.11.0：登录锁定表（60 秒内同 IP 或同账号失败 ≥3 次 → 锁 15 分钟，IP+账号双级）

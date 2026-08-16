@@ -78,7 +78,7 @@ foreach (getAnnouncements(20) as $_an) {
     ];
 }
 // 音乐播放器：网易云通道无需 Cookie 即可播放（v4.4.2 移除 QQ 音乐通道后，热歌榜/歌单均免 Cookie），
-// v4.6.1：原逻辑按 music_cookies 判断导致未配置 Cookie 时整条音乐入口（含本地背景音开关）不可达——改为常显
+// v4.6.1：原逻辑按 music_cookies 判断导致未配置 Cookie 时整条音乐入口不可达——改为常显
 $musicEnabled = true;
 // 置顶列表读写由 utils.php 提供（SQLite）；此处仅作全局别名
 // 自定义入口路径路由（L1 隐藏入口扩展）
@@ -829,10 +829,15 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
         </div>
     </div>
 </main>
-<div class="floating-buttons" id="floatingButtons" style="display:none;">
-    <button class="float-btn" id="floatTocBtn" title="目录"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
-    <button class="float-btn" id="floatHomeBtn" title="返回主页"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></button>
-    <button class="float-btn" id="scrollToTopBtn" title="回到顶部"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
+<!-- v4.7.4：浮动按钮组常驻——主页仅显示背景音乐按钮；阅读视图追加 目录/返回主页/回到顶部；BGM 与阅读按钮统一 UI，整组下移避免遮挡 -->
+<div class="floating-buttons" id="floatingButtons">
+    <button class="float-btn read-float-btn" id="floatTocBtn" title="目录"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <button class="float-btn read-float-btn" id="floatHomeBtn" title="返回主页"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></button>
+    <button class="float-btn read-float-btn" id="scrollToTopBtn" title="回到顶部"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
+    <button class="float-btn bgm-float-btn" id="bgmFloatBtn" title="背景音乐" style="display:none" aria-label="背景音乐开关">
+        <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        <span class="bgm-float-bar"></span>
+    </button>
 </div>
 <div class="share-modal-overlay" id="shareModalOverlay">
     <div class="share-modal">
@@ -864,10 +869,10 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
             <span class="bgm-switch"><input type="checkbox" id="musicLyrToggle"><span class="slider"></span></span>
         </label>
         <!-- v4.5.0：本地背景音开关（弹窗内；曲目由站长/超管后台上传，前端只能开/关，单曲循环；浏览器缓存播放不重复消耗服务器流量） -->
-        <div class="music-opt-item" id="bgmRow" style="display:none" title="本地背景音乐开关">
+        <label class="music-opt-item" id="bgmRow" style="display:none" title="本地背景音乐开关">
             <span class="music-opt-label"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>&nbsp;背景音乐</span>
             <span class="bgm-switch"><input type="checkbox" id="bgmToggle"><span class="slider"></span></span>
-        </div>
+        </label>
     </div>
     <div class="music-player-main" id="musicPlayerMain">
         <div class="music-disc">
@@ -907,20 +912,24 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
         </div>
     </div>
     <div class="music-list" id="musicList">
+        <!-- v4.7.4：多平台音乐——平台切换 + 每平台榜单切换（网易云/QQ音乐/酷狗） -->
+        <div class="music-src-row" id="musicSrcRow">
+            <button type="button" class="music-src-chip active" data-platform="netease">网易云</button>
+            <button type="button" class="music-src-chip" data-platform="qq">QQ音乐</button>
+            <button type="button" class="music-src-chip" data-platform="kugou">酷狗</button>
+        </div>
+        <div class="music-chart-row" id="musicChartRow"></div>
         <div class="music-list-header">
             <span class="music-popup-count" id="musicPopupCount">热歌榜</span>
         </div>
+        <div class="music-song-list" id="musicSongList"></div>
         <div class="music-loading" id="musicLoading">点击加载热歌榜</div>
     </div>
 </div>
 <audio id="musicAudio" preload="auto"></audio>
 <!-- v4.5.0：本地背景音独立播放器（与网易云播放器互不干扰，单曲循环） -->
 <audio id="bgmAudio" loop preload="none"></audio>
-<!-- v4.6.2：本地背景音常驻浮动控制——进站即可暂停/恢复，不必打开音乐弹窗；与弹窗内开关双向同步，与网易云播放器互不干扰 -->
-<button class="bgm-float-btn" id="bgmFloatBtn" title="背景音乐" style="display:none" aria-label="背景音乐开关">
-    <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-    <span class="bgm-float-bar"></span>
-</button>
+<!-- v4.7.4：背景音乐浮动按钮已并入 #floatingButtons 按钮组（统一 UI，主页常显） -->
 <div class="reading-progress" id="readingProgress"></div>
 <div class="reading-progress-text" id="readingProgressText"></div>
 <div class="toast" id="toast"></div>

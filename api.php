@@ -548,6 +548,7 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['cmt_pending_dev'] = [
                     'uid' => $u['id'], 'fp_hash' => $fpHash, 'fp' => $reqFp,
                     'email' => $devEmail, 'role' => $u['role'] ?? '',
+                    'ts' => time(),   // v4.7.3：记录发起时间，check 恢复弹窗时按 10 分钟过期清理
                 ];
                 $_SESSION['dev_verify_fails'] = 0;
                 [$devOk, $devErr] = email_code_send($devEmail, 'device_login', '陌生设备登录验证', $u['role'] ?? '');
@@ -781,6 +782,24 @@ if ($action === 'check') {
                 'loggedIn' => true,
                 'isSuperAdmin' => true,
                 'user' => ['id' => $sess['id'], 'nickname' => $sess['nickname'] ?? '超管', 'role' => 'super_admin', 'avatar' => '', 'signature' => ''],
+            ]);
+        }
+        // v4.7.3：陌生设备验证进行中（前端切后台看邮箱/刷新页面导致弹窗丢失）——报告 pending 状态，
+        // 前端据此恢复设备验证弹窗；超过 10 分钟视为放弃，清理 pending 不再反复弹窗
+        $pending = $_SESSION['cmt_pending_dev'] ?? null;
+        if (is_array($pending) && !empty($pending['email'])) {
+            $pTs = (int)($pending['ts'] ?? 0);
+            if ($pTs > 0 && (time() - $pTs) > 600) {
+                unset($_SESSION['cmt_pending_dev'], $_SESSION['dev_verify_fails']);
+                $pending = null;
+            }
+        }
+        if (is_array($pending) && !empty($pending['email'])) {
+            jsonOut([
+                'success' => true,
+                'loggedIn' => false,
+                'pending_device_verify' => true,
+                'masked_email' => maskEmailAddr($pending['email']),
             ]);
         }
         jsonOut(['success' => true, 'loggedIn' => false]);

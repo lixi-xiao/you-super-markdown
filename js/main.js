@@ -1043,7 +1043,8 @@
             sessionStorage.setItem('md-list-scroll', window.scrollY);
         }
         homeView.style.display = 'block'; readingView.classList.remove('active');
-        isReadingView = false; floatingButtons.style.display = 'none'; prevNextNav.style.display = 'none';
+        isReadingView = false; prevNextNav.style.display = 'none';
+        floatingButtons.classList.remove('reading'); // v4.7.4：回首页仅保留 BGM 按钮（组常驻）
         tocPopup.classList.remove('active'); musicPopup.classList.remove('active'); shareModalOverlay.classList.remove('active'); shareQrcode.innerHTML = '';
         // v4.1.3：返回首页显式隐藏阅读进度条并清空文本——此前依赖 scrollTo 触发 scroll 事件，
         // 页面已在顶部时不触发，导致残留 "0%" 进度文本显示在主页右上角
@@ -1065,7 +1066,8 @@
     }
     function showReading() {
         homeView.style.display = 'none'; readingView.classList.add('active');
-        isReadingView = true; floatingButtons.style.display = 'flex';
+        isReadingView = true;
+        floatingButtons.classList.add('reading'); // v4.7.4：阅读视图显示 目录/返回主页/回到顶部（BGM 常驻组内）
         showSidebarToc();
         window.scrollTo(0, 0);
     }
@@ -1330,7 +1332,12 @@
         await loadFileList();
         const fileParam = getUrlParam('file');
         if (fileParam) loadFile(fileParam, false);
-        else showHome(false);
+        else {
+            showHome(false);
+            // v4.7.3：首页场景也检查登录态——设备验证进行中（切后台看邮箱后页面被移动端重载）时恢复验证弹窗
+            // v4.7.4：?admin_login=1 首页场景同样自动弹出登录弹窗
+            cmtCheckAuth().then(cmtHandleAdminLoginHint);
+        }
     }
     let toastTimer = null;
     function showToast(msg, duration = 2000) {
@@ -1746,18 +1753,10 @@
             .then(r => r.json()).then(d => {
                 // v4.7.0：管理角色陌生设备 → 切到设备验证视图（邮件验证码确认后完成登录）
                 if (d.need_device_verify) {
-                    if (cmtDevTip) cmtDevTip.textContent = d.masked_email ? ('验证码已发送至 ' + d.masked_email + '，请查收邮箱') : '验证码已发送，请查收邮箱';
-                    if (cmtDevErr) cmtDevErr.textContent = '';
-                    if (cmtDevCode) cmtDevCode.value = '';
-                    cmtLoginForm.style.display = 'none';
-                    if (cmtRegForm) cmtRegForm.style.display = 'none';
-                    if (cmtResetForm) cmtResetForm.style.display = 'none';
-                    cmtDevForm.style.display = 'flex';
-                    cmtAuthTitle.textContent = '设备验证';
-                    setTimeout(() => { if (cmtDevCode) cmtDevCode.focus(); }, 60);
+                    cmtShowDevVerify(d.masked_email || '');
                     return;
                 }
-                if (d.success) { cmtUser = d.user; if (d.isAdminFirstLogin) cmtAdminFirstLogin = true; cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); }
+                if (d.success) { cmtUser = d.user; if (d.isAdminFirstLogin) cmtAdminFirstLogin = true; cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); cmtMaybeGoAdmin(); }
                 else {
                     // v2.10.2：CSRF 校验失败多为会话 cookie 未生效（浏览器 cookie 策略/瞬态），自动刷新页面一次重取 token+cookie
                     if (d.error === 'CSRF 校验失败' && !window.__csrfRetried) {
@@ -1784,6 +1783,19 @@
             .finally(() => { cmtLoginBtn.disabled = false; cmtLoginBtn.textContent = '登录'; });
     });
     // ---- v4.7.0：陌生设备登录邮件二次验证 + 找回密码 ----
+    // v4.7.3：切换到设备验证视图（登录返回 need_device_verify 或刷新后 check 报告 pending 时共用，
+    //         解决「切后台看邮箱返回后弹窗丢失」——页面被移动端浏览器重载时通过 check 恢复弹窗）
+    function cmtShowDevVerify(maskedEmail) {
+        if (cmtDevTip) cmtDevTip.textContent = maskedEmail ? ('验证码已发送至 ' + maskedEmail + '，请查收邮箱') : '验证码已发送，请查收邮箱';
+        if (cmtDevErr) cmtDevErr.textContent = '';
+        if (cmtDevCode) cmtDevCode.value = '';
+        if (cmtLoginForm) cmtLoginForm.style.display = 'none';
+        if (cmtRegForm) cmtRegForm.style.display = 'none';
+        if (cmtResetForm) cmtResetForm.style.display = 'none';
+        if (cmtDevForm) cmtDevForm.style.display = 'flex';
+        if (cmtAuthTitle) cmtAuthTitle.textContent = '设备验证';
+        setTimeout(() => { if (cmtDevCode) cmtDevCode.focus(); }, 60);
+    }
     function cmtBackToLogin() {
         cmtLoginForm.style.display = 'flex';
         if (cmtDevForm) cmtDevForm.style.display = 'none';
@@ -2388,11 +2400,41 @@
             .then(d => { if (d.success && d.user) { cmtUser = d.user; return true; } return false; })
             .catch(() => false);
     }
+    // v4.7.3：恢复设备验证弹窗的标记（避免 adminLogin 分支把它覆盖回登录视图）
+    var cmtPendingDevShown = false;
+    // v4.7.4：URL 带 ?admin_login=1（站长/写作者后台被拦截跳回首页）时——
+    //         未登录则自动弹出登录弹窗；已登录则登录完成后自动跳回对应后台。
+    function cmtHandleAdminLoginHint() {
+        if (getUrlParam('admin_login') !== '1') return;
+        if (!cmtUser && !cmtPendingDevShown) {
+            cmtAuthMode = 'login';
+            cmtUpdateAuthUI();
+            cmtOpenModal(cmtAuthModal);
+            history.replaceState(null, '', location.pathname);
+        }
+    }
+    function cmtMaybeGoAdmin() {
+        if (getUrlParam('admin_login') !== '1') return;
+        fetch('api.php?action=user-status').then(r => r.json()).then(d => {
+            if (d.success && d.loggedIn && d.canAccessAdmin && d.adminUrl) {
+                window.location.href = d.adminUrl;
+            } else {
+                history.replaceState(null, '', location.pathname);
+            }
+        }).catch(() => {});
+    }
     function cmtCheckAuth() {
         return fetch('api.php?action=check').then(r => r.json()).then(d => {
             if (d.success && d.loggedIn) {
                 cmtUser = d.user;
                 if (d.isAdminFirstLogin) cmtAdminFirstLogin = true;
+            } else if (d.success && d.pending_device_verify) {
+                // v4.7.3：陌生设备验证进行中（切后台看邮箱/移动端页面被重载导致弹窗丢失）→ 恢复设备验证弹窗
+                cmtUser = null;
+                cmtPendingDevShown = true;
+                cmtAuthMode = 'login';
+                cmtShowDevVerify(d.masked_email || '');
+                if (cmtAuthModal) cmtOpenModal(cmtAuthModal);
             } else if (d.success && d.env_invalid) {
                 // v4.5.0：环境/会话异常——先尝试 refresh 自动续期，失败则提示重新登录
                 return ymTryRefresh().then(ok => {
@@ -2418,13 +2460,8 @@
         if (cmtListSection) cmtListSection.style.display = 'block';
         cmtCheckAuth().then(() => {
             cmtLoad();
-            if (document.body.dataset.adminLogin && !cmtUser) {
-                cmtAuthMode = 'login';
-                cmtUpdateAuthUI();
-                cmtOpenModal(cmtAuthModal);
-                delete document.body.dataset.adminLogin;
-                history.replaceState(null, '', location.pathname);
-            }
+            // v4.7.4：?admin_login=1 未登录 → 自动弹出登录弹窗（替代此前从未被设置的 data-admin-login 死代码）
+            cmtHandleAdminLoginHint();
         });
     }
     function cmtOnArticleHide() {
@@ -2460,6 +2497,8 @@
         return Promise.resolve(null); // 无 Cache API（非 https 环境）→ 直接走浏览器 HTTP 缓存
     }
     function bgmStart() {
+        // v4.7.4：背景音乐与播放器音乐互斥——BGM 开播时暂停网易云/QQ/酷狗播放器
+        if (musicAudio && typeof musicAudio.pause === 'function') { try { musicAudio.pause(); } catch (e) {} }
         bgmLoadSource().then(function(blob) {
             if (blob) bgmAudio.src = URL.createObjectURL(blob);
             else bgmAudio.src = BGM_URL;
@@ -2500,9 +2539,50 @@
             if (bgmSaved) { bgmSyncUi(true); bgmStart(); }
         }
     }
+    // v4.7.4：滑块点击兜底——修复部分移动端浏览器零尺寸 checkbox 点击无响应（滑块点了没反应）。
+    // .bgm-switch input 已改为全尺寸透明覆盖，正常点击 e.target 即 input 走原生 change，本兜底自然跳过；
+    // 若个别浏览器仍不触发，则手动翻转勾选态并派发 change。
+    document.querySelectorAll('.bgm-switch').forEach(function(sw) {
+        var inp = sw.querySelector('input[type="checkbox"]');
+        if (!inp) return;
+        sw.addEventListener('click', function(e) {
+            if (e.target === inp) return;
+            e.preventDefault();
+            inp.checked = !inp.checked;
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    });
     var musicPlaylistId = document.body.dataset.musicPlaylist || '3778678';
-    // v4.4.2：移除 QQ 音乐通道（cookie 检测过严、服务器端申请违反用户协议），仅保留网易云
+    // v4.7.4：多平台音乐——网易云/QQ音乐/酷狗，每平台独立榜单；播放地址播放时懒解析（不预取，减少外呼）
+    var musicPlatforms = { netease: '网易云', qq: 'QQ音乐', kugou: '酷狗' };
+    var musicCharts = {
+        netease: ['热歌榜', '新歌榜', '原创榜', '飙升榜'],
+        qq: ['热歌榜', '新歌榜', '飙升榜'],
+        kugou: ['热歌榜', '新歌榜', '飙升榜']
+    };
     var musicPlatform = 'netease';
+    var musicChart = '热歌榜';
+    function musicLoadSrcPref() {
+        try {
+            var raw = localStorage.getItem('ymd-music-src');
+            if (raw) {
+                var p = JSON.parse(raw);
+                if (p && musicPlatforms[p.platform] && (musicCharts[p.platform] || []).indexOf(p.chart) >= 0) {
+                    musicPlatform = p.platform; musicChart = p.chart;
+                }
+            }
+        } catch (e) {}
+    }
+    function musicSaveSrcPref() {
+        try { localStorage.setItem('ymd-music-src', JSON.stringify({ platform: musicPlatform, chart: musicChart })); } catch (e) {}
+    }
+    function musicRenderChartChips() {
+        if (!musicChartRow) return;
+        var list = musicCharts[musicPlatform] || ['热歌榜'];
+        musicChartRow.innerHTML = list.map(function(c) {
+            return '<button type="button" class="music-src-chip' + (c === musicChart ? ' active' : '') + '" data-chart="' + escHtml(c) + '">' + escHtml(c) + '</button>';
+        }).join('');
+    }
     var musicSongs = [];
     var musicIndex = -1;
     var musicPlaying = false;
@@ -2531,6 +2611,36 @@
         } catch(e) {}
         return null;
     }
+    // v4.7.4：平台/榜单切换——初始化 + 事件绑定（列表面板顶部的平台/榜单 chips）
+    var musicSrcRow = document.getElementById('musicSrcRow');
+    var musicChartRow = document.getElementById('musicChartRow');
+    var musicSongList = document.getElementById('musicSongList');
+    musicLoadSrcPref();
+    musicRenderChartChips();
+    if (musicSrcRow) musicSrcRow.addEventListener('click', function(e) {
+        var b = e.target.closest('.music-src-chip');
+        if (!b) return;
+        var p = b.getAttribute('data-platform');
+        if (!p || p === musicPlatform) return;
+        musicPlatform = p;
+        musicChart = (musicCharts[p] || ['热歌榜'])[0];
+        musicSaveSrcPref();
+        musicSrcRow.querySelectorAll('.music-src-chip').forEach(function(x) { x.classList.toggle('active', x === b); });
+        musicRenderChartChips();
+        musicLoaded = true;
+        loadMusicHotSongs();
+    });
+    if (musicChartRow) musicChartRow.addEventListener('click', function(e) {
+        var b = e.target.closest('.music-src-chip');
+        if (!b) return;
+        var c = b.getAttribute('data-chart');
+        if (!c || c === musicChart) return;
+        musicChart = c;
+        musicSaveSrcPref();
+        musicRenderChartChips();
+        musicLoaded = true;
+        loadMusicHotSongs();
+    });
     // 音乐按钮仅在后台配置 music_cookies 后渲染，未配置时跳过音乐初始化
     if (floatMusicBtn && musicPopup) {
         floatMusicBtn.addEventListener('click', function(e) {
@@ -2552,11 +2662,8 @@
     });
     function loadMusicHotSongs() {
         musicLoading.textContent = '加载中...';
-        // v4.4.2：仅保留网易云通道，直接使用网易云歌单 ID（留空则热歌榜）
-        var pid = musicPlaylistId;
-        var musicApiUrl = pid && pid !== '3778678'
-            ? 'music.php?platform=netease&playlistId=' + encodeURIComponent(pid)
-            : 'music.php?platform=netease&sortAll=热歌榜';
+        // v4.7.4：按当前平台+榜单拉取（QQ/酷狗榜单经 music.php 服务端聚合，播放地址播放时懒解析）
+        var musicApiUrl = 'music.php?platform=' + encodeURIComponent(musicPlatform) + '&sortAll=' + encodeURIComponent(musicChart);
         fetch(musicApiUrl)
             .then(function(res) {
                 if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -2574,7 +2681,7 @@
                             duration: (t.duration || 0) * 1000
                         };
                     });
-                    if (musicPopupCount) musicPopupCount.textContent = '热歌榜 · ' + musicSongs.length + ' 首';
+                    if (musicPopupCount) musicPopupCount.textContent = (musicPlatforms[musicPlatform] || musicPlatform) + ' · ' + musicChart + ' · ' + musicSongs.length + ' 首';
                     renderMusicList();
                     var saved = musicLoadState();
                     if (saved && saved.index >= 0 && saved.index < musicSongs.length) {
@@ -2632,9 +2739,20 @@
                 '<div class="mi-dur">' + fmtTime(s.duration / 1000) + '</div>' +
                 '</div>';
         });
-        musicList.innerHTML = html;
-        musicList.querySelectorAll('.music-item').forEach(function(el) {
+        // v4.7.4：只渲染歌曲容器（平台/榜单 chips 在 #musicList 里，不再被覆盖）
+        if (musicSongList) musicSongList.innerHTML = html;
+        musicSongList.querySelectorAll('.music-item').forEach(function(el) {
             el.addEventListener('click', function() { musicPlaySong(parseInt(this.dataset.index)); });
+        });
+    }
+    function musicStartPlay(playUrl, song, seekTime) {
+        musicAudio.src = playUrl;
+        musicAudio.play().then(function() {
+            musicSetPlaying(true);
+            musicConsecutiveFails = 0;
+            if (seekTime > 0) musicAudio.currentTime = seekTime;
+        }).catch(function() {
+            musicTryFallbackUrl(song, seekTime);
         });
     }
     function musicPlaySong(idx, seekTime) {
@@ -2644,27 +2762,32 @@
         musicName.textContent = s.name;
         musicArtist.textContent = s.artist;
         if (s.cover) musicCover.src = s.cover;
-        musicList.querySelectorAll('.music-item').forEach(function(el, i) {
+        musicSongList.querySelectorAll('.music-item').forEach(function(el, i) {
             el.classList.toggle('active', i === idx);
         });
         var playUrl = s.url;
-        if (!playUrl) {
-            playUrl = 'https://music.163.com/song/media/outer/url?id=' + s.id;
+        if (playUrl) {
+            musicStartPlay(playUrl, s, seekTime);
+        } else if (musicPlatform === 'netease') {
+            musicStartPlay('https://music.163.com/song/media/outer/url?id=' + s.id, s, seekTime);
+        } else {
+            // v4.7.4：QQ/酷狗歌单不预取播放地址 → 播放时懒解析直链（拿到新鲜有效的 CDN 地址）
+            musicLoading.textContent = '解析播放地址...';
+            fetch('music.php?platform=' + encodeURIComponent(musicPlatform) + '&songId=' + encodeURIComponent(s.id))
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (d && d.url) { s.url = d.url; musicStartPlay(d.url, s, seekTime); }
+                    else { musicLoading.textContent = '获取播放地址失败'; musicHandlePlayFail(); }
+                })
+                .catch(function() { musicLoading.textContent = '获取播放地址失败'; musicHandlePlayFail(); });
         }
-        musicAudio.src = playUrl;
-        musicAudio.play().then(function() {
-            musicSetPlaying(true);
-            musicConsecutiveFails = 0; 
-            if (seekTime > 0) musicAudio.currentTime = seekTime;
-        }).catch(function() {
-            musicTryFallbackUrl(s, seekTime);
-        });
         musicSaveState();
-        var activeEl = musicList.querySelector('.music-item.active');
+        var activeEl = musicSongList.querySelector('.music-item.active');
         if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
     function musicTryFallbackUrl(song, seekTime) {
-        // v4.4.2：仅保留网易云 fallback（QQ 通道已移除）
+        // v4.7.4：网易云走 xfyun blob 兜底；QQ/酷狗直链解析失败不再跨平台兜底，直接失败跳下一首
+        if (musicPlatform !== 'netease') { musicHandlePlayFail(); return; }
         var fallbackUrl = 'https://api.xfyun.club/musicAll/?songId=' + song.id + '&mp3Url=mp3';
         fetch(fallbackUrl).then(function(res) {
             if (!res.ok) throw new Error('fallback failed');
@@ -2732,7 +2855,11 @@
         musicSaveState();
     });
     musicUpdateModeIcon();
-    musicAudio.addEventListener('play', function() { musicSetPlaying(true); musicStartWordAnim(); });
+    musicAudio.addEventListener('play', function() {
+        // v4.7.4：播放器音乐与背景音乐互斥——播放器开播时关闭背景音乐
+        if (typeof bgmSetOn === 'function') bgmSetOn(false);
+        musicSetPlaying(true); musicStartWordAnim();
+    });
     musicAudio.addEventListener('pause', function() { musicSetPlaying(false); musicStopWordAnim(); musicSaveState(); });
     musicAudio.addEventListener('ended', function() {
         if (musicLoopMode === 2) {

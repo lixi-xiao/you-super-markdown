@@ -27,7 +27,9 @@ for arg in "$@"; do
             INSTALL_HFISH=false
             ;;
         --yes|-y)
-            AUTO_YES=true
+            # v4.7.3：无人值守模式已移除（安装必须交互 + SMTP 双向验证，不通过终止）
+            warn "--yes 已不再支持：安装必须交互完成（SMTP 双向验证需人工回填确认码），继续按交互模式执行"
+            AUTO_YES=false
             ;;
         --domain=*)
             DOMAIN_ARG="${arg#*=}"
@@ -51,10 +53,9 @@ for arg in "$@"; do
             echo "用法: sudo bash ym-install.sh [选项]"
             echo ""
             echo "选项（可与环境变量互换，参数优先）:"
-            echo "  --yes, -y          全自动模式（所有交互用默认值/自动生成，需提供 --domain）"
             echo "  --domain=域名       站点域名（等价环境变量 YM_DOMAIN）"
             echo "  --web-root=路径     Web 根目录（默认 /var/www/you-markdown，等价 YM_WEB_ROOT）"
-            echo "  --email=邮箱        管理员邮箱（告警通知，等价 YM_ADMIN_EMAIL）"
+            echo "  --email=邮箱        管理员邮箱（必填：告警收件人 + 超管设备验证通道，等价 YM_ADMIN_EMAIL）"
             echo "  --skip-hfish       跳过 Hfish 蜜罐安装"
             echo "  --hfish-password=密 蜜獾账户密码（留空自动生成强密码，等价 YM_HFISH_PASSWORD）"
             echo "  --hfish-port-panel=端口  蜜獾管理面板端口（默认 4433，自动检测占用，等价 YM_HFISH_PANEL_PORT）"
@@ -228,13 +229,26 @@ if [ -z "$WEB_ROOT" ]; then
     fi
 fi
 
-# 管理员邮箱：--email / YM_ADMIN_EMAIL > 交互（可留空，用于告警与 Let's Encrypt）
+# v4.7.3：管理员邮箱——必填 + 格式校验（该邮箱 = 告警收件人 + 超管设备二次验证码发送目标；超管无独立绑定邮箱）
 ADMIN_EMAIL="${EMAIL_ARG:-${YM_ADMIN_EMAIL:-}}"
+valid_email() {
+    case "$1" in
+        *@*.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 if [ -z "$ADMIN_EMAIL" ] && [ "$AUTO_YES" != true ]; then
-    read -p "  管理员邮箱 (告警通知, 可留空): " ADMIN_EMAIL
+    while :; do
+        read -r -p "  管理员邮箱 (必填: 告警收件人 + 超管设备二次验证通道): " ADMIN_EMAIL
+        ADMIN_EMAIL=$(printf '%s' "$ADMIN_EMAIL" | tr -d '[:space:]')
+        if valid_email "$ADMIN_EMAIL"; then
+            break
+        fi
+        warn "邮箱格式不正确或不能为空，请重新输入（如 admin@example.com）"
+    done
 fi
-if [ -z "$ADMIN_EMAIL" ]; then
-    warn "未提供邮箱，告警/Let's Encrypt 功能将不可用（可后续在超管后台配置）"
+if ! valid_email "$ADMIN_EMAIL"; then
+    warn "未提供合法管理员邮箱：超管将无法在新设备完成登录（设备二次验证需要该邮箱），且告警/Let's Encrypt 不可用；请安装后立即在超管后台「邮件设置」配置 admin_email"
 fi
 
 # v2.9.0：注册验证模式（正式版默认启用 / 测试版默认禁用，后台「注册验证」可随时切换）
@@ -968,24 +982,54 @@ configure_mail() {
         echo 'OK';
     " 2>/dev/null || true
     info "SMTP 配置完成（后台「邮件设置」可修改/测试）"
-    # 初次配置即测试：发一封测试邮件到管理员邮箱（CLI 注入 YM_SMTP_PASS 走 root 密钥文件）
+    # v4.7.3：SMTP 双向验证——发送带一次性确认码的邮件（套统一模板），用户查收后回填；
+    # 发送失败或 5 分钟超时未验证 → 终止安装（不通过终止；安装不再支持无人值守）
     if [ -n "$ADMIN_EMAIL" ]; then
         echo ""
-        log "发送测试邮件到 $ADMIN_EMAIL ..."
-        TEST_RESULT=$(YM_SMTP_PASS="$(cat "$SECRETS_DIR/smtp_pass" 2>/dev/null)" \
+        log "SMTP 双向验证：发送确认码邮件到 $ADMIN_EMAIL ..."
+        VERIFY_CODE=$(php -r "echo str_pad((string)random_int(0,999999),6,'0',STR_PAD_LEFT);")
+        php -r "require '$WEB_ROOT/utils.php'; db_exec('INSERT INTO email_codes (id,email,code,purpose,expires,used,created,ip,operator_role) VALUES (?,?,?,?,?,0,?,?,?)', [bin2hex(random_bytes(8)), '$ADMIN_EMAIL', '$VERIFY_CODE', 'install_verify', time()+300, time(), 'install', 'install']);" 2>/dev/null || true
+        SEND_RESULT=$(YM_SMTP_PASS="$(cat "$SECRETS_DIR/smtp_pass" 2>/dev/null)" \
         ADMIN_EMAIL_B64=$(printf '%s' "$ADMIN_EMAIL" | base64 -w0 2>/dev/null || printf '%s' "$ADMIN_EMAIL" | base64) \
+        CODE_B64=$(printf '%s' "$VERIFY_CODE" | base64 -w0 2>/dev/null || printf '%s' "$VERIFY_CODE" | base64) \
         php -r "
             require '$WEB_ROOT/utils.php';
             \$to = base64_decode(getenv('ADMIN_EMAIL_B64'));
-            [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown 安装成功] 邮件配置测试', '邮件配置测试：如果你收到此邮件，说明 SMTP 配置正确，安全告警可以正常发送。');
+            \$code = base64_decode(getenv('CODE_B64'));
+            \$body = 'SMTP 双向验证：请输入以下确认码完成安装验证。' . \"\\n\\n确认码：{\$code}\\n有效期：5 分钟。\";
+            \$html = renderMailHtml('You Super Markdown', '邮箱确认', \$body);
+            [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown 安装] 邮箱确认码', \$body, \$html);
             echo \$ok ? 'OK' : ('FAIL: ' . \$err);
         " 2>/dev/null)
-        case "$TEST_RESULT" in
-            OK*) info "✅ 测试邮件发送成功（请查收 $ADMIN_EMAIL）" ;;
-            *) warn "⚠️ 测试邮件发送失败：${TEST_RESULT#FAIL: }（可在服务器重配 YM_SMTP_PASS 后重试）" ;;
+        case "$SEND_RESULT" in
+            OK*) info "确认码邮件已发送，请在 $ADMIN_EMAIL 查收" ;;
+            *) err "确认码邮件发送失败：${SEND_RESULT#FAIL: }（SMTP 双向验证未通过，安装终止；请检查 SMTP 配置后重新安装）" ;;
         esac
+        DEADLINE=$(( $(date +%s) + 300 ))
+        while :; do
+            if [ "$(date +%s)" -gt "$DEADLINE" ]; then
+                err "确认码超时（5 分钟）未验证，SMTP 双向验证未通过，安装终止"
+            fi
+            read -r -p "  请输入邮件中的 6 位确认码: " USER_CODE
+            USER_CODE=$(printf '%s' "$USER_CODE" | tr -d '[:space:]')
+            if [ -z "$USER_CODE" ]; then continue; fi
+            R=$(ADMIN_EMAIL_B64=$(printf '%s' "$ADMIN_EMAIL" | base64 -w0 2>/dev/null || printf '%s' "$ADMIN_EMAIL" | base64) \
+            CODE_B64=$(printf '%s' "$USER_CODE" | base64 -w0 2>/dev/null || printf '%s' "$USER_CODE" | base64) \
+            php -r "
+                require '$WEB_ROOT/utils.php';
+                \$to = base64_decode(getenv('ADMIN_EMAIL_B64'));
+                \$code = base64_decode(getenv('CODE_B64'));
+                \$r = email_code_verify(\$to, \$code, 'install_verify');
+                echo \$r[0] ? 'OK' : 'NO';
+            " 2>/dev/null)
+            if [ "$R" = "OK" ]; then
+                break
+            fi
+            warn "确认码不正确或已过期，请重新输入"
+        done
+        info "✅ SMTP 双向验证通过：$ADMIN_EMAIL 可正常收信"
     else
-        warn "未设置管理员邮箱，跳过测试邮件（请在后台「系统配置」设置 admin_email）"
+        warn "未设置管理员邮箱，跳过双向验证（请安装后立即于超管后台配置 admin_email，否则超管无法在新设备登录）"
     fi
 }
 configure_mail

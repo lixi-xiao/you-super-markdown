@@ -534,21 +534,29 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $isMgmt = in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true);
             $fpHash = computeSessionFp($reqFp);
             if ($isMgmt && !isKnownDevice($u['id'], $fpHash)) {
+                // v4.7.3：验证码发送目标——账号绑定邮箱优先；管理角色未绑定时回退后台 admin_email（即超管的验证通道）
+                $devEmail = trim((string)($u['email'] ?? ''));
+                if ($devEmail === '') $devEmail = trim((string)(loadSiteConfig()['admin_email'] ?? ''));
+                if ($devEmail === '') {
+                    // 账号无邮箱且后台未配置管理员邮箱：跳过设备验证直接登录（OTP 入口+环境指纹+短会话已足够强）
+                    auditLog('login_device_skipped', $u['id'], '管理角色未绑定邮箱且未配置管理员邮箱，跳过设备二次验证');
+                    jsonOut(completeLogin($u, $reqFp));
+                }
                 // 该设备正被陌生设备风控锁定 → 拒绝
                 $fpLockLeft = loginLocked('fp:' . $fpHash);
                 if ($fpLockLeft > 0) jsonOut(['success' => false, 'error' => '该设备触发风控，请 ' . $fpLockLeft . ' 秒后重试'], 429);
                 $_SESSION['cmt_pending_dev'] = [
                     'uid' => $u['id'], 'fp_hash' => $fpHash, 'fp' => $reqFp,
-                    'email' => $u['email'] ?? '', 'role' => $u['role'] ?? '',
+                    'email' => $devEmail, 'role' => $u['role'] ?? '',
                 ];
                 $_SESSION['dev_verify_fails'] = 0;
-                [$devOk, $devErr] = email_code_send($u['email'] ?? '', 'device_login', '陌生设备登录验证', $u['role'] ?? '');
+                [$devOk, $devErr] = email_code_send($devEmail, 'device_login', '陌生设备登录验证', $u['role'] ?? '');
                 if (!$devOk) jsonOut(['success' => false, 'error' => $devErr], 400);
-                auditLog('login_device_pending', $u['id'], '陌生设备登录待二次验证（' . maskEmailAddr($u['email'] ?? '') . '）');
+                auditLog('login_device_pending', $u['id'], '陌生设备登录待二次验证（' . maskEmailAddr($devEmail) . '）');
                 jsonOut(['success' => false, 'need_device_verify' => true,
-                    'masked_email' => maskEmailAddr($u['email'] ?? ''),
+                    'masked_email' => maskEmailAddr($devEmail),
                     'ttl' => is_array($devErr) ? ($devErr['ttl'] ?? 300) : 300,
-                    'error' => '新设备登录，验证码已发送至 ' . maskEmailAddr($u['email'] ?? '')], 200);
+                    'error' => '新设备登录，验证码已发送至 ' . maskEmailAddr($devEmail)], 200);
             }
             jsonOut(completeLogin($u, $reqFp));
         }

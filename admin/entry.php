@@ -111,16 +111,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = '系统错误：未找到高级管理员账号';
             } else {
                 // v4.7.0：陌生设备 → 邮件二次验证（OTP 通过后仍需验证码确认设备才完成登录）
+                // v4.7.3：验证码发送目标——超管账号邮箱优先；未绑定则回退后台 admin_email（超管的验证通道）；双空则跳过设备验证
+                $devEmail = trim((string)($superAdmin['email'] ?? ''));
+                if ($devEmail === '') $devEmail = trim((string)(loadSiteConfig()['admin_email'] ?? ''));
                 $fpHash = computeSessionFp($reqFp);
-                if (!isKnownDevice($superAdmin['id'], $fpHash)) {
+                if ($devEmail !== '' && !isKnownDevice($superAdmin['id'], $fpHash)) {
                     $_SESSION['cmt_pending_dev'] = [
                         'uid' => $superAdmin['id'], 'fp_hash' => $fpHash, 'fp' => $reqFp,
-                        'email' => $superAdmin['email'] ?? '', 'role' => ROLE_SUPER_ADMIN,
+                        'email' => $devEmail, 'role' => ROLE_SUPER_ADMIN,
                     ];
-                    [$devOk, $devErr] = email_code_send($superAdmin['email'] ?? '', 'device_login', '陌生设备登录验证', ROLE_SUPER_ADMIN);
+                    [$devOk, $devErr] = email_code_send($devEmail, 'device_login', '陌生设备登录验证', ROLE_SUPER_ADMIN);
                     if ($devOk) {
                         $needDeviceVerify = true;
-                        $deviceEmail = maskEmailAddr($superAdmin['email'] ?? '');
+                        $deviceEmail = maskEmailAddr($devEmail);
                     } else {
                         $error = $devErr;
                     }

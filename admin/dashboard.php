@@ -491,11 +491,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
         header('Location: dashboard.php?tab=config&msg=challenge_error');
         exit;
     }
-    $config['site_title'] = trim($_POST['site_title'] ?? 'You Super Markdown');
-    $config['registration_enabled'] = !empty($_POST['registration_enabled']);
-    $config['guest_comments_enabled'] = !empty($_POST['guest_comments_enabled']);
-    // v2.6.5：超管主页评论开关（默认关=超管不参与前台评论/回复）
-    $config['super_admin_comment'] = !empty($_POST['super_admin_comment']);
+    // v4.1.18：站点外观/功能项（标题/注册/评论/音乐）已移入「主界面及功能设置」，本表单仅保留安全项
     $config['update_channel'] = ($_POST['update_channel'] ?? 'stable') === 'beta' ? 'beta' : 'stable';
     $config['admin_email'] = trim($_POST['admin_email'] ?? '');
     $newStationPath = trim($_POST['station_path'] ?? '');
@@ -519,18 +515,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
     $config['max_login_fails'] = max(3, intval($_POST['max_login_fails'] ?? 10));
     $config['max_comments_per_minute'] = max(1, intval($_POST['max_comments_per_minute'] ?? 5));
     $config['max_registrations_per_ip'] = max(1, intval($_POST['max_registrations_per_ip'] ?? 3));
-    $config['music_playlist_id'] = trim($_POST['music_playlist_id'] ?? '3778678');
-    $config['music_playlist_id_qq'] = trim($_POST['music_playlist_id_qq'] ?? '');
-    $config['music_cookies'] = trim($_POST['music_cookies'] ?? '');
-    $config['music_cookies_qq'] = trim($_POST['music_cookies_qq'] ?? '');
     $config['hide_default_paths'] = !empty($_POST['hide_default_paths']);
-    // v4.0.0：评论邮件订阅通知
-    $config['comment_notify_enabled'] = !empty($_POST['comment_notify_enabled']);
-    $config['comment_notify_email'] = trim($_POST['comment_notify_email'] ?? '');
     // v4.1.7：蜜罐攻击封禁阈值（1-100，ym-hfish-sync.py 读取；写入 config 表供后台可配）
     $config['hfish_ban_threshold'] = min(100, max(1, intval($_POST['hfish_ban_threshold'] ?? 10)));
     saveSiteConfig($config);
-    auditLog('config_update', 'site_config', '修改系统配置');
+    auditLog('config_update', 'site_config', '修改安全设置');
     // v4.1.8：安全配置（含蜜罐阈值）变更后立即刷新蜜罐快照——界面阈值/封禁状态即时生效，无需等 5 分钟轮询
     if (is_file(__DIR__ . '/../ym-hfish-sync.py')) {
         exec('python3 ' . escapeshellarg(__DIR__ . '/../ym-hfish-sync.py') . ' > /dev/null 2>&1 &');
@@ -613,10 +602,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clear_unauth'])) {
     exit;
 }
 
-// 背景设置表单
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['bg_image']) || isset($_POST['_bg_save']))) {
+// 主界面及功能设置表单（v4.1.18：背景+音乐+站点外观，非敏感操作，仅 CSRF 无需挑战码）
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['bg_image']) || isset($_POST['_ui_save']))) {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
-        header('Location: dashboard.php?tab=background&msg=csrf_error');
+        header('Location: dashboard.php?tab=ui&msg=csrf_error');
         exit;
     }
     // 上传背景图片
@@ -636,15 +625,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['bg_image']) || isse
                 $config['bg_type'] = 'image';
                 $config['bg_image'] = 'data/bg/'.$fname;
                 saveSiteConfig($config);
-                header('Location: dashboard.php?tab=background&msg=uploaded');
+                header('Location: dashboard.php?tab=ui&msg=uploaded');
                 exit;
             }
         }
-        header('Location: dashboard.php?tab=background&msg=upload_error');
+        header('Location: dashboard.php?tab=ui&msg=upload_error');
         exit;
     }
-    // 保存背景配置
-    if (isset($_POST['_bg_save'])) {
+    // 保存主界面配置
+    if (isset($_POST['_ui_save'])) {
+        // 背景
         $config['bg_type'] = in_array($_POST['bg_type']??'', ['none','image','api']) ? $_POST['bg_type'] : 'none';
         // bg_image 仅允许站内 data/bg/ 路径或 http(s) URL，防止 CSS 值注入
         $bgImage = trim($_POST['bg_image']??'');
@@ -657,8 +647,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['bg_image']) || isse
         $config['bg_blur_enabled'] = !empty($_POST['bg_blur_enabled']);
         $config['bg_blur_level'] = max(0, min(50, intval($_POST['bg_blur_level']??0)));
         $config['bg_card_opacity'] = max(20, min(100, intval($_POST['bg_card_opacity']??100)));
+        // v4.1.16：卡片玻璃效果（毛玻璃/液态玻璃）+ 用户液态玻璃开关显示
+        $config['card_glass_style'] = in_array($_POST['card_glass_style'] ?? 'frosted', ['frosted', 'liquid'], true) ? $_POST['card_glass_style'] : 'frosted';
+        $config['user_glass_toggle'] = !empty($_POST['user_glass_toggle']);
+        // 站点外观/功能（v4.1.18 从系统配置移入，非敏感项不触发挑战码）
+        $config['site_title'] = trim($_POST['site_title'] ?? 'You Super Markdown');
+        $config['registration_enabled'] = !empty($_POST['registration_enabled']);
+        $config['guest_comments_enabled'] = !empty($_POST['guest_comments_enabled']);
+        // v2.6.5：超管主页评论开关（默认关=超管不参与前台评论/回复）
+        $config['super_admin_comment'] = !empty($_POST['super_admin_comment']);
+        // v4.0.0：评论邮件订阅通知
+        $config['comment_notify_enabled'] = !empty($_POST['comment_notify_enabled']);
+        $config['comment_notify_email'] = trim($_POST['comment_notify_email'] ?? '');
+        // 音乐播放器
+        $config['music_playlist_id'] = trim($_POST['music_playlist_id'] ?? '3778678');
+        $config['music_playlist_id_qq'] = trim($_POST['music_playlist_id_qq'] ?? '');
+        $config['music_cookies'] = trim($_POST['music_cookies'] ?? '');
+        $config['music_cookies_qq'] = trim($_POST['music_cookies_qq'] ?? '');
         saveSiteConfig($config);
-        header('Location: dashboard.php?tab=background&msg=saved');
+        auditLog('ui_config', 'site_config', '修改主界面及功能设置');
+        header('Location: dashboard.php?tab=ui&msg=saved');
         exit;
     }
 }
@@ -712,16 +720,16 @@ $banMsg = $_GET['bmsg'] ?? '';
             审计日志
         </a>
         <a href="dashboard.php?tab=config" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'config' ? 'active' : '' ?>">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            系统配置
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            安全设置
         </a>
         <a href="dashboard.php?tab=security" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'security' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             安全监控
         </a>
-        <a href="dashboard.php?tab=background" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'background' ? 'active' : '' ?>">
+        <a href="dashboard.php?tab=ui" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'ui' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            网站背景
+            主界面及功能设置
         </a>
         <a href="dashboard.php?tab=update" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'update' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -1131,47 +1139,24 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php elseif ($tab === 'config'): ?>
     <div class="page-header">
         <div class="page-title">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            系统配置
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            安全设置
         </div>
-        <div class="page-subtitle">管理网站设置和安全参数</div>
+        <div class="page-subtitle">管理安全参数（修改需服务器挑战码验证）</div>
     </div>
     <?php ?>
     <div class="card">
         <div class="card-title">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-            站点设置
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            安全设置
         </div>
         <form method="post" class="need-challenge">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="_save_config" value="1">
             <input type="hidden" name="challenge_code">
             <div class="form-group">
-                <label class="form-label">网站标题</label>
-                <input class="form-input" name="site_title" value="<?= htmlspecialchars($config['site_title'] ?? '') ?>">
-            </div>
-            <div class="form-group">
                 <label class="form-label">管理员邮箱（告警通知）</label>
                 <input class="form-input" name="admin_email" value="<?= htmlspecialchars($config['admin_email'] ?? '') ?>" placeholder="admin@example.com">
-            </div>
-            <div class="form-row" style="margin-bottom:16px;align-items:center">
-                <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许注册</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="registration_enabled" <?= empty($config['registration_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
-                <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许访客评论</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="guest_comments_enabled" <?= empty($config['guest_comments_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
-                <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许超管主页评论</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="super_admin_comment" <?= empty($config['super_admin_comment']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
-            </div>
-            <!-- v4.0.0：评论邮件订阅通知 -->
-            <div style="padding:12px 16px;border:1px solid var(--border);border-radius:12px;margin-bottom:16px;background:var(--surface)">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                    <div>
-                        <div style="font-weight:600">评论邮件订阅通知</div>
-                        <div style="font-size:0.82em;color:var(--text-muted)">有新评论 / 新回复时向收件人发邮件（需已配置 SMTP 邮件）</div>
-                    </div>
-                    <label class="toggle" style="flex-shrink:0"><input type="checkbox" name="comment_notify_enabled" <?= empty($config['comment_notify_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label>
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label class="form-label">收件邮箱（留空默认用管理员邮箱）</label>
-                    <input class="form-input" name="comment_notify_email" value="<?= htmlspecialchars($config['comment_notify_email'] ?? '') ?>" placeholder="留空则使用管理员邮箱">
-                </div>
             </div>
             <div class="form-group">
                 <label class="form-label">更新通道</label>
@@ -1183,7 +1168,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <div style="padding-top:16px;border-top:1px solid var(--border);margin-bottom:16px">
                 <div class="card-title" style="margin-bottom:8px">
                     <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    安全设置
+                    自动防护
                 </div>
             </div>
             <div class="toggle-row">
@@ -1203,33 +1188,6 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <div><div class="toggle-label">频率限制设置</div><div class="toggle-desc">登录/评论/注册频率上限</div></div>
                 <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             </div>
-            <div style="padding-top:16px;border-top:1px solid var(--border);margin-bottom:16px">
-                <div class="card-title" style="margin-bottom:8px">
-                    <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-                    音乐播放器设置
-                </div>
-            </div>
-            <div class="form-group">
-                <label class="form-label">网易云歌单 ID</label>
-                <input class="form-input" name="music_playlist_id" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>" placeholder="3778678">
-                <p class="form-hint">网易云音乐歌单 ID，默认 3778678 为热歌榜</p>
-            </div>
-            <div class="form-group">
-                <label class="form-label">QQ 音乐歌单 ID</label>
-                <input class="form-input" name="music_playlist_id_qq" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>" placeholder="留空则使用 QQ 热歌榜">
-                <p class="form-hint">QQ 音乐歌单 ID（前端切换到 QQ 平台时使用），留空则加载 QQ 热歌榜</p>
-            </div>
-            <div class="form-group">
-                <label class="form-label">网易云 Cookies（可选）</label>
-                <input class="form-input" name="music_cookies" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
-                <p class="form-hint">配置后可播放网易云 VIP 歌曲</p>
-            </div>
-            <div class="form-group">
-                <label class="form-label">QQ 音乐 Cookies（可选）</label>
-                <input class="form-input" name="music_cookies_qq" value="<?= htmlspecialchars($config['music_cookies_qq'] ?? '') ?>" placeholder="uin=xxx; p_skey=xxx; skey=xxx; ...">
-                <p class="form-hint">配置后可播放 QQ 音乐付费/VIP 歌曲（v2.6.0）</p>
-            </div>
-
             <div style="padding-top:16px;border-top:1px solid var(--border);margin-bottom:16px">
                 <div class="card-title" style="margin-bottom:8px">
                     <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -1618,7 +1576,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         <?php endif; ?>
     </div>
 
-    <?php elseif ($tab === 'background'): ?>
+    <?php elseif ($tab === 'ui'): ?>
     <?php
     $bgType = $config['bg_type'] ?? 'none';
     $bgImage = $config['bg_image'] ?? '';
@@ -1634,13 +1592,69 @@ $banMsg = $_GET['bmsg'] ?? '';
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            网站背景
+            主界面及功能设置
         </div>
-        <div class="page-subtitle">自定义网站背景图片与效果</div>
+        <div class="page-subtitle">网站外观与功能配置（非安全项，无需挑战码）</div>
     </div>
     <?php if ($bgMsg === 'saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>保存成功</div><?php endif; ?>
     <?php if ($bgMsg === 'uploaded'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>上传成功</div><?php endif; ?>
     <?php if ($bgMsg === 'upload_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>上传失败，请检查 data/bg/ 目录权限</div><?php endif; ?>
+    <!-- v4.1.18：站点外观（从安全设置移入，非敏感项无需挑战码） -->
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            站点设置
+        </div>
+        <div class="form-group">
+            <label class="form-label">网站标题</label>
+            <input class="form-input" type="text" id="siteTitleInput" value="<?= htmlspecialchars($config['site_title'] ?? '') ?>" maxlength="60">
+        </div>
+        <div class="form-row" style="margin-bottom:16px;align-items:center">
+            <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许注册</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" id="regToggle" <?= empty($config['registration_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许访客评论</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" id="guestToggle" <?= empty($config['guest_comments_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许超管主页评论</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" id="superCommentToggle" <?= empty($config['super_admin_comment']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
+        </div>
+        <div style="padding:12px 16px;border:1px solid var(--border);border-radius:12px;background:var(--surface)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <div>
+                    <div style="font-weight:600">评论邮件订阅通知</div>
+                    <div style="font-size:0.82em;color:var(--text-muted)">有新评论 / 新回复时向收件人发邮件（需已配置 SMTP 邮件）</div>
+                </div>
+                <label class="toggle" style="flex-shrink:0"><input type="checkbox" id="notifyToggle" <?= empty($config['comment_notify_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label>
+            </div>
+            <div class="form-group" style="margin:0">
+                <label class="form-label">收件邮箱（留空默认用管理员邮箱）</label>
+                <input class="form-input" type="email" id="notifyEmailInput" value="<?= htmlspecialchars($config['comment_notify_email'] ?? '') ?>" placeholder="留空则使用管理员邮箱">
+            </div>
+        </div>
+    </div>
+    <!-- v4.1.18：音乐播放器（从安全设置移入，非敏感项无需挑战码） -->
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            音乐播放器设置
+        </div>
+        <div class="form-group">
+            <label class="form-label">网易云歌单 ID</label>
+            <input class="form-input" type="text" id="musicNeteaseInput" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>" placeholder="3778678">
+            <p class="form-hint">网易云音乐歌单 ID，默认 3778678 为热歌榜</p>
+        </div>
+        <div class="form-group">
+            <label class="form-label">QQ 音乐歌单 ID</label>
+            <input class="form-input" type="text" id="musicQQInput" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>" placeholder="留空则使用 QQ 热歌榜">
+            <p class="form-hint">QQ 音乐歌单 ID（前端切换到 QQ 平台时使用），留空则加载 QQ 热歌榜</p>
+        </div>
+        <div class="form-group">
+            <label class="form-label">网易云 Cookies（可选）</label>
+            <input class="form-input" type="text" id="musicNetCookieInput" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
+            <p class="form-hint">配置后可播放网易云 VIP 歌曲</p>
+        </div>
+        <div class="form-group">
+            <label class="form-label">QQ 音乐 Cookies（可选）</label>
+            <input class="form-input" type="text" id="musicQQCookieInput" value="<?= htmlspecialchars($config['music_cookies_qq'] ?? '') ?>" placeholder="uin=xxx; p_skey=xxx; skey=xxx; ...">
+            <p class="form-hint">配置后可播放 QQ 音乐付费/VIP 歌曲（v2.6.0）</p>
+        </div>
+    </div>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
@@ -1693,7 +1707,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     </div>
     <div class="card">
         <div class="card-title"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>卡片玻璃效果</div>
-        <div class="bg-type-grid" style="max-width:440px">
+        <div class="bg-type-grid glass-vis-grid" style="max-width:440px">
             <label class="bg-type-card <?= $cardGlassStyle==='frosted'?'active':'' ?>" data-glass="frosted"><input type="radio" name="glass_style" value="frosted" <?= $cardGlassStyle==='frosted'?'checked':'' ?>><div class="type-icon glass"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 12h18"/></svg></div><div class="type-name">毛玻璃</div></label>
             <label class="bg-type-card <?= $cardGlassStyle==='liquid'?'active':'' ?>" data-glass="liquid"><input type="radio" name="glass_style" value="liquid" <?= $cardGlassStyle==='liquid'?'checked':'' ?>><div class="type-icon glass"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 2v20"/><path d="M2 12h20"/></svg></div><div class="type-name">液态玻璃</div></label>
         </div>
@@ -1730,14 +1744,26 @@ $banMsg = $_GET['bmsg'] ?? '';
     </div>
     <form method="post" id="bgForm">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
-        <input type="hidden" name="_bg_save" value="1">
+        <input type="hidden" name="_ui_save" value="1">
         <input type="hidden" name="bg_type" id="formBgType" value="<?= htmlspecialchars($bgType) ?>">
         <input type="hidden" name="bg_image" id="formBgImage" value="<?= htmlspecialchars($bgImage) ?>">
         <input type="hidden" name="bg_api_url" id="formBgApiUrl" value="<?= htmlspecialchars($bgApiUrl) ?>">
         <input type="hidden" name="card_cover_api_url" id="formCardCoverApiUrl" value="<?= htmlspecialchars($cardCoverApiUrl) ?>">
+        <input type="hidden" name="card_glass_style" id="formGlassStyle" value="<?= htmlspecialchars($cardGlassStyle) ?>">
+        <input type="hidden" name="user_glass_toggle" id="formUserGlassToggle" value="<?= $userGlassToggle?'1':'' ?>">
         <input type="hidden" name="bg_blur_enabled" id="formBlurEnabled" value="<?= $bgBlurEnabled?'1':'' ?>">
         <input type="hidden" name="bg_blur_level" id="formBlurLevel" value="<?= $bgBlurLevel ?>">
         <input type="hidden" name="bg_card_opacity" id="formCardOpacity" value="<?= $bgCardOpacity ?>">
+        <input type="hidden" name="site_title" id="formSiteTitle" value="<?= htmlspecialchars($config['site_title'] ?? '') ?>">
+        <input type="hidden" name="registration_enabled" id="formRegEnabled" value="<?= !empty($config['registration_enabled'])?'1':'' ?>">
+        <input type="hidden" name="guest_comments_enabled" id="formGuestComments" value="<?= !empty($config['guest_comments_enabled'])?'1':'' ?>">
+        <input type="hidden" name="super_admin_comment" id="formSuperComment" value="<?= !empty($config['super_admin_comment'])?'1':'' ?>">
+        <input type="hidden" name="comment_notify_enabled" id="formNotifyEnabled" value="<?= !empty($config['comment_notify_enabled'])?'1':'' ?>">
+        <input type="hidden" name="comment_notify_email" id="formNotifyEmail" value="<?= htmlspecialchars($config['comment_notify_email'] ?? '') ?>">
+        <input type="hidden" name="music_playlist_id" id="formMusicNetease" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>">
+        <input type="hidden" name="music_playlist_id_qq" id="formMusicQQ" value="<?= htmlspecialchars($config['music_playlist_id_qq'] ?? '') ?>">
+        <input type="hidden" name="music_cookies" id="formMusicNetCookie" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>">
+        <input type="hidden" name="music_cookies_qq" id="formMusicQQCookie" value="<?= htmlspecialchars($config['music_cookies_qq'] ?? '') ?>">
         <div style="display:flex;justify-content:flex-end;gap:10px">
             <button type="button" class="btn btn-outline" onclick="resetBg()">重置</button>
             <button type="submit" class="btn btn-primary">保存配置</button>
@@ -1798,7 +1824,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         }
         window.removeBgImage = function() { if (confirm('确定移除背景图片？')) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; cardCoverApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
-        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApiUrl').value = cardCoverApiUrl.value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formGlassStyle').value = (document.querySelector('input[name="glass_style"]:checked') || { value: 'frosted' }).value; document.getElementById('formUserGlassToggle').value = document.getElementById('userGlassToggle').checked ? '1' : ''; });
+        document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApiUrl').value = cardCoverApiUrl.value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formGlassStyle').value = (document.querySelector('input[name="glass_style"]:checked') || { value: 'frosted' }).value; document.getElementById('formUserGlassToggle').value = document.getElementById('userGlassToggle').checked ? '1' : ''; document.getElementById('formSiteTitle').value = document.getElementById('siteTitleInput').value.trim(); document.getElementById('formRegEnabled').value = document.getElementById('regToggle').checked ? '1' : ''; document.getElementById('formGuestComments').value = document.getElementById('guestToggle').checked ? '1' : ''; document.getElementById('formSuperComment').value = document.getElementById('superCommentToggle').checked ? '1' : ''; document.getElementById('formNotifyEnabled').value = document.getElementById('notifyToggle').checked ? '1' : ''; document.getElementById('formNotifyEmail').value = document.getElementById('notifyEmailInput').value.trim(); document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicQQ').value = document.getElementById('musicQQInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formMusicQQCookie').value = document.getElementById('musicQQCookieInput').value.trim(); });
         // v4.1.16：玻璃效果选择卡交互（毛玻璃/液态玻璃）
         var glassCards = document.querySelectorAll('.bg-type-card[data-glass]');
         glassCards.forEach(function(g) {

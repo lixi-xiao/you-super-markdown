@@ -540,6 +540,61 @@ td code {
     accent-color: var(--accent);
     cursor: pointer;
 }
+/* v4.1.18-fix：后台推拉开关（.toggle 结构补全样式——此前仅有 HTML 结构、无样式导致显示原生勾选框，桌面/手机统一） */
+.toggle {
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
+    width: 46px;
+    height: 26px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.toggle input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    cursor: pointer;
+    z-index: 2;
+}
+.toggle .slider {
+    position: absolute;
+    inset: 0;
+    border-radius: 26px;
+    background: #cbd5e1;
+    transition: background 0.2s;
+}
+.toggle .slider::after {
+    content: '';
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    transition: transform 0.2s;
+}
+.toggle input[type="checkbox"]:checked + .slider {
+    background: hsl(var(--accent-hue), var(--accent-sat), 55%);
+}
+.toggle input[type="checkbox"]:checked + .slider::after {
+    transform: translateX(20px);
+}
+.toggle input[type="checkbox"]:focus-visible + .slider {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.toggle-row .toggle-label { font-weight: 600; font-size: 0.92em; }
+.toggle-row .toggle-desc { font-size: 0.78em; color: var(--text-muted); margin-top: 2px; }
 .form-hint {
     font-size: 0.75em;
     color: var(--text-muted);
@@ -2091,6 +2146,21 @@ td code {
     .ann-vis-grid .bg-type-card .type-icon, .bg-vis-grid .bg-type-card .type-icon { margin: 0; flex: 0 0 34px; width: 34px; height: 34px; }
     .ann-vis-grid .bg-type-card .type-name, .bg-vis-grid .bg-type-card .type-name { font-size: 0.88em; }
     .ann-vis-grid .bg-type-card .type-desc, .bg-vis-grid .bg-type-card .type-desc { font-size: 0.74em; color: var(--text-muted); margin-top: 2px; }
+
+    /* v4.1.18-fix：推拉开关手机端加大触控目标（44px 级） */
+    .toggle { width: 54px; height: 31px; }
+    .toggle .slider::after { width: 25px; height: 25px; top: 3px; left: 3px; }
+    .toggle input[type="checkbox"]:checked + .slider::after { transform: translateX(23px); }
+
+    /* v4.1.18-fix：毛玻璃/液态玻璃切换卡手机端紧凑横排（与 toggle 协调，不再 2 列大卡） */
+    .glass-vis-grid { grid-template-columns: 1fr; gap: 8px; max-width: 100% !important; }
+    .glass-vis-grid .bg-type-card {
+        display: flex; align-items: center; gap: 8px;
+        text-align: left; padding: 8px 12px;
+    }
+    .glass-vis-grid .bg-type-card .type-icon { margin: 0; flex: 0 0 28px; width: 28px; height: 28px; border-radius: 8px; }
+    .glass-vis-grid .bg-type-card .type-icon svg { width: 16px; height: 16px; }
+    .glass-vis-grid .bg-type-card .type-name { font-size: 0.82em; }
 
     /* 行内操作按钮组不折行挤压 */
     .ban-item-actions, .modal-actions { gap: 8px; }

@@ -35,9 +35,10 @@ post_update_finish() {
     echo "  版本: v$FROM_VER → v$TO_VER"
     echo "============================================"
     # v3.3.14：自更新场景（运行中的脚本被覆盖）下 [4.9/6] 自动补装可能未执行，给出一键命令兜底提示
-    if ! php -m 2>/dev/null | grep -qi '^gd$'; then
+    # v4.6.0：同时检测 ffmpeg（背景音乐转码依赖）
+    if ! php -m 2>/dev/null | grep -qi '^gd$' || ! command -v ffmpeg >/dev/null 2>&1; then
         echo ""
-        echo "  提示：未检测到 php-gd（缩略图功能依赖），运行 sudo ym-admin deps 一键补装"
+        echo "  提示：未检测到全部功能依赖（php-gd/ffmpeg），运行 sudo ym-admin deps 一键补装"
     fi
     # v3.1.0：更新完成自动发送通知邮件到管理员（失败不阻断）
     # v3.1.7：邮件正文附带本次更新内容（changelog），管理者无需再翻公告即可知道本次改了什么
@@ -65,8 +66,9 @@ $CL_TEXT"
 # 声明 "deps": ["<包名>", ...]，走正常更新通道（apply-update [4.9/6]）即自动安装，
 # 无需再改更新路径 / ym-admin 代码。内置兜底清单兼容旧包（无 deps 字段）。
 # 依赖安装失败 → 中断更新并自动回滚（保证功能完整）。
+# v4.6.0：兜底清单补 ffmpeg（背景音乐转码依赖，与 ym-install.sh 全新安装一致）
 # ============================================================
-REQUIRED_DEPS_FALLBACK="php-gd"
+REQUIRED_DEPS_FALLBACK="php-gd ffmpeg"
 
 # 读取更新包 version.json 声明的依赖（无 deps 字段 / 旧包返回空）
 pkg_declared_deps() {
@@ -830,18 +832,50 @@ case "${1:-}" in
             chown www-data:www-data "$WEB_ROOT/data/articles/更新历史.md" 2>/dev/null || true
         fi
 
-        # 5. 锁定母本
+        # 5. 锁定母本（更新包可能已覆盖 install-base；锁定防篡改）
         echo "[5/6] 锁定母本目录..."
         chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
 
-        # 6. 重启守护
-        echo "[6/6] 重启守护进程并记录日志..."
+        # 6. 重启全部服务 + 重启后复检（v4.6.0：更新完成 → 重启 nginx/php-fpm/守护全部服务 → 重启后验证主页可访问与功能正常 → 才标记完成并邮件）
+        echo "[6/6] 重启全部服务并复检..."
+        # 6.1 重启 PHP-FPM（动态探测版本）与 Nginx
+        PHPFPM_SVC=""
+        for f in "php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)-fpm" php-fpm php8.3-fpm php8.2-fpm php8.1-fpm; do
+            if systemctl list-unit-files "$f.service" 2>/dev/null | grep -q "$f"; then PHPFPM_SVC="$f"; break; fi
+        done
+        if [ -n "$PHPFPM_SVC" ]; then
+            systemctl restart "$PHPFPM_SVC" 2>/dev/null && echo "  已重启 PHP-FPM（$PHPFPM_SVC）" || echo "  警告：PHP-FPM 重启失败（$PHPFPM_SVC）"
+        fi
+        if systemctl list-unit-files nginx.service 2>/dev/null | grep -q nginx; then
+            systemctl restart nginx 2>/dev/null && echo "  已重启 Nginx" || echo "  警告：Nginx 重启失败"
+        fi
+        # 6.2 重启守护进程（更新包可能已更新 ym-guard.py，重启使新代码生效）
+        systemctl restart ym-guard 2>/dev/null && echo "  已重启守护进程" || echo "  警告：守护进程重启失败"
+        rm -f /tmp/ym-update.lock
+        # 6.3 重启后复检：主页 200 + api 存活 + web↔母本 MD5 一致（任一失败 → 自动回滚 + 告警邮件）
+        sleep 2
+        RC_DOMAIN=$(get_domain)
+        RC_HOME=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YM-HealthCheck/1.0' "https://$RC_DOMAIN/" 2>/dev/null || echo 000)
+        RC_API=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YM-HealthCheck/1.0' "https://$RC_DOMAIN/api.php?action=csrf" 2>/dev/null || echo 000)
+        RC_BAD=""
+        for RC_F in index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ym-admin ym-guard.py; do
+            RC_A=$(md5sum "$WEB_ROOT/$RC_F" 2>/dev/null | awk '{print $1}')
+            RC_B=$(md5sum "/opt/you-markdown/install-base/$RC_F" 2>/dev/null | awk '{print $1}')
+            if [ -z "$RC_A" ] || [ "$RC_A" != "$RC_B" ]; then
+                RC_BAD="$RC_BAD $RC_F"
+            fi
+        done
+        if [ "$RC_HOME" != "200" ] || [ "$RC_API" != "200" ] || [ -n "$RC_BAD" ]; then
+            echo "错误：重启后复检失败（主页 HTTP $RC_HOME / API HTTP $RC_API / MD5 差异:$RC_BAD），触发自动回滚"
+            mark_failed "重启后复检失败（主页 HTTP $RC_HOME / API HTTP $RC_API）"
+            exit 1
+        fi
+        echo "  重启后复检通过：主页 HTTP $RC_HOME，API HTTP $RC_API，web↔母本 MD5 一致"
+        # 6.4 写审计日志 + 标记完成 + 更新通知邮件（含本次更新内容/更新方式）
         php -r "
             require_once '$WEB_ROOT/utils.php';
             auditLog('system_update', '', '系统更新: v${FROM_VER} → v${TO_VER}');
         " 2>/dev/null
-        systemctl start ym-guard 2>/dev/null || true
-        rm -f /tmp/ym-update.lock
         # v3.1.0：收尾逻辑抽到顶部函数（自更新后 case 内联代码会混合解析失败）
         # v3.1.7：把 changelog（4.7a 已读取）传给收尾函数，更新通知邮件附带本次更新内容
         # v3.1.15：把更新方式（外部上传更新包 / 服务器命令更新）传给收尾函数，邮件展示更新通道

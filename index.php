@@ -1,6 +1,6 @@
 <?php
-session_start();
 require_once __DIR__ . '/utils.php';
+secureSessionStart();
 
 // v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
 security_check();

@@ -1,6 +1,6 @@
 <?php
-session_start();
 require_once __DIR__ . '/../utils.php';
+secureSessionStart();
 
 // v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
 security_check();
@@ -61,14 +61,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$superAdmin) {
             $error = '系统错误：未找到高级管理员账号';
         } else {
-            // v4.5.0：OTP 登录同样绑定环境指纹 + token_version（并发踢旧）+ 签发 refresh token
+            // v4.5.0：OTP 登录同样绑定环境指纹 + token_version（并发踢旧）
+            // v4.6.0：超管严格 30 分钟会话——不签发 refresh（30 分钟后必须重新 OTP 登录）
             $reqFp = trim((string)($_POST['fingerprint'] ?? ''));
             if ($reqFp !== '' && preg_match('/^[a-f0-9]{16,64}$/i', $reqFp)) $reqFp = strtolower($reqFp);
             else $reqFp = '';
             $newTV = bumpUserTV($superAdmin['id']);
             $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
             $_SESSION['cmt_tv'] = $newTV;
-            issueRefreshToken($superAdmin['id'], $_SESSION['cmt_fp'], $newTV);
+            $_SESSION['cmt_login_ts'] = time();
+            clearRefreshCookie(); // v4.6.0：超管无 refresh——清掉旧 ym_rt，杜绝续期绕过 30 分钟限制
             $_SESSION['cmt_user'] = [
                 'id' => $superAdmin['id'],
                 'qq' => $superAdmin['qq'] ?? '',

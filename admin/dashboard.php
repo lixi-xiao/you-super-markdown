@@ -1,6 +1,6 @@
 <?php
-session_start();
 require_once __DIR__ . '/../utils.php';
+secureSessionStart();
 
 // 超管检查：必须通过 OTP 登录，且 JWT 有效
 if (!checkRole(ROLE_SUPER_ADMIN)) {
@@ -874,6 +874,21 @@ $banMsg = $_GET['bmsg'] ?? '';
         <div class="page-subtitle">管理站长 / 写作者 / 普通用户：查看详情、修改权限、归属设置、禁用启用、重置密码与删除（敏感操作需 SSH 挑战码）</div>
     </div>
     <?php
+    // v4.6.0：用户管理搜索与分页参数（需在搜索框渲染前解析）
+    $usersQ = trim((string)($_GET['users_q'] ?? ''));
+    $stPerPage = (int)($_GET['st_per_page'] ?? 10); if (!in_array($stPerPage, [10, 20, 50, 100], true)) $stPerPage = 10;
+    $auPerPage = (int)($_GET['au_per_page'] ?? 10); if (!in_array($auPerPage, [10, 20, 50, 100], true)) $auPerPage = 10;
+    $usPerPage = (int)($_GET['us_per_page'] ?? 10); if (!in_array($usPerPage, [10, 20, 50, 100], true)) $usPerPage = 10;
+    ?>
+    <form method="get" style="margin-bottom:14px" id="userSearchForm">
+        <input type="hidden" name="tab" value="users">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input class="form-input" type="text" name="users_q" value="<?= htmlspecialchars($usersQ) ?>" placeholder="搜索昵称 / UID / QQ / 邮箱…" style="max-width:320px">
+            <button type="submit" class="btn">搜索</button>
+            <?php if ($usersQ !== ''): ?><a class="btn btn-ghost" href="dashboard.php?tab=users">清除</a><?php endif; ?>
+        </div>
+    </form>
+    <?php
     $users = loadUsers();
     ?>
     <div class="card">
@@ -939,6 +954,10 @@ $banMsg = $_GET['bmsg'] ?? '';
         elseif ($r === ROLE_AUTHOR) $groupAuthors[] = $uu;
         else $groupUsers[] = $uu;
     }
+    // v4.6.0：用户管理分页（搜索/每页条数参数已在页头解析）——站长/写作者/普通用户三列表各自分页（默认每页 10 条）
+    $stPaged = paginateList($groupStations, ['nickname', 'qq', 'id', 'email'], $usersQ, (int)($_GET['st_page'] ?? 1), $stPerPage);
+    $auPaged = paginateList($groupAuthors, ['nickname', 'qq', 'id', 'email'], $usersQ, (int)($_GET['au_page'] ?? 1), $auPerPage);
+    $usPaged = paginateList($groupUsers, ['nickname', 'qq', 'id', 'email'], $usersQ, (int)($_GET['us_page'] ?? 1), $usPerPage);
     function ymUserDetail($u, $stationNames, $statComments, $statArticles) {
         // v3.0.5：归属统一以超管为顶级——站长归属=超管；写作者未指定站长时归属=超管
         $role = $u['role'] ?? 'user';
@@ -1051,7 +1070,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         </div>
         <div class="table-wrap"><table>
             <tr><th>昵称</th><th>UID（QQ）</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
-            <?php foreach ($groupStations as $u): ?>
+            <?php foreach ($stPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
                 <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
@@ -1061,6 +1080,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             </tr>
             <?php endforeach; ?>
         </table></div>
+        <?php if ($stPaged['pages'] > 1 || $usersQ !== ''): ?><?= renderPager($stPaged, 'st_page', ['tab' => 'users', 'users_q' => $usersQ, 'au_page' => (int)($_GET['au_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'au_per_page' => $auPerPage, 'us_per_page' => $usPerPage], 'st_per_page') ?><?php endif; ?>
     </div>
 
     <!-- 写作者（含归属站长列与归属管理） -->
@@ -1071,7 +1091,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         </div>
         <div class="table-wrap"><table>
             <tr><th>昵称</th><th>UID（QQ）</th><th>归属站长</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
-            <?php foreach ($groupAuthors as $u): ?>
+            <?php foreach ($auPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
                 <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
@@ -1082,6 +1102,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             </tr>
             <?php endforeach; ?>
         </table></div>
+        <?php if ($auPaged['pages'] > 1 || $usersQ !== ''): ?><?= renderPager($auPaged, 'au_page', ['tab' => 'users', 'users_q' => $usersQ, 'st_page' => (int)($_GET['st_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'st_per_page' => $stPerPage, 'us_per_page' => $usPerPage], 'au_per_page') ?><?php endif; ?>
     </div>
 
     <!-- 普通用户 -->
@@ -1092,7 +1113,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         </div>
         <div class="table-wrap"><table>
             <tr><th>昵称</th><th>UID（QQ）</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
-            <?php foreach ($groupUsers as $u): ?>
+            <?php foreach ($usPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
                 <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
@@ -1102,6 +1123,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             </tr>
             <?php endforeach; ?>
         </table></div>
+        <?php if ($usPaged['pages'] > 1 || $usersQ !== ''): ?><?= renderPager($usPaged, 'us_page', ['tab' => 'users', 'users_q' => $usersQ, 'st_page' => (int)($_GET['st_page'] ?? 1), 'au_page' => (int)($_GET['au_page'] ?? 1), 'st_per_page' => $stPerPage, 'au_per_page' => $auPerPage], 'us_per_page') ?><?php endif; ?>
     </div>
 
     <?php elseif ($tab === 'logs'): ?>
@@ -1704,7 +1726,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         <div class="form-group">
             <div class="toggle-row">
                 <label class="toggle-label">本地背景音乐</label>
-                <label class="switch"><input type="checkbox" id="bgMusicToggle" <?= !empty($config['bg_music_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
+                <label class="toggle" style="flex-shrink:0"><input type="checkbox" id="bgMusicToggle" <?= !empty($config['bg_music_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
                 <div class="toggle-desc">开启后前台播放器弹窗内出现「本地背景音」开关（单曲循环，播放器与网易云互不干扰）</div>
             </div>
             <input class="form-input" type="file" id="bgMusicFileInput" name="bg_music_file" accept=".mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.wma,audio/*" style="margin-top:8px">
@@ -3038,7 +3060,10 @@ function ymOpenUserDetail(btn) {
     function fpCanvas() { try { var c = document.createElement('canvas'); c.width = 200; c.height = 40; var x = c.getContext('2d'); x.textBaseline = 'top'; x.font = '14px Arial'; x.fillStyle = '#f60'; x.fillRect(0, 0, 200, 40); x.fillStyle = '#069'; x.fillText('YouSuperMarkdown\u2620' + navigator.userAgent.length, 5, 12); var d = c.toDataURL(); return d.length + ':' + d.slice(-64); } catch (e) { return ''; } }
     var parts = [navigator.language || '', new Date().getTimezoneOffset(), (screen.width || 0) + 'x' + (screen.height || 0), fpCanvas(), navigator.userAgent];
     var fp = fpFnv(parts.join('|')) + fpFnv(parts.join('~')) + fpFnv(navigator.userAgent);
-    fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp } }).catch(function() {});
+    fetch('/api.php?action=csrf').then(r => r.json()).then(function(d) {
+        if (!d.success || !d.csrf_token) return;
+        fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp, 'X-CSRF-Token': d.csrf_token } }).catch(function() {});
+    }).catch(function() {});
 })();
 </script>
 </body>

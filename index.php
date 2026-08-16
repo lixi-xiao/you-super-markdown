@@ -77,8 +77,9 @@ foreach (getAnnouncements(20) as $_an) {
         'cover' => '', 'tags' => $tg, 'words' => $wc,
     ];
 }
-// 音乐播放器：仅网易云（music_cookies）配置后显示入口（v4.4.2 起移除 QQ 音乐通道）
-$musicEnabled = !empty($_siteConfig['music_cookies']);
+// 音乐播放器：网易云通道无需 Cookie 即可播放（v4.4.2 移除 QQ 音乐通道后，热歌榜/歌单均免 Cookie），
+// v4.6.1：原逻辑按 music_cookies 判断导致未配置 Cookie 时整条音乐入口（含本地背景音开关）不可达——改为常显
+$musicEnabled = true;
 // 置顶列表读写由 utils.php 提供（SQLite）；此处仅作全局别名
 // 自定义入口路径路由（L1 隐藏入口扩展）
 $requestUri = $_SERVER['REQUEST_URI'] ?? '';
@@ -669,12 +670,12 @@ if ($action === 'rss_guide') {
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>" type="image/svg+xml">
     <meta name="description" content="一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器">
     <!-- v4.2.2：mermaid 3.3MB 不再放 <head> 阻塞首屏（render-blocking），改为正文/公告出现 ```mermaid 时按需动态加载（见 js/main.js ensureMermaid）；marked/highlight/qrcode 加 defer 不阻塞首屏渲染 -->
-    <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js" defer crossorigin="anonymous"
-    integrity="sha384-QsSpx6a0USazT7nK7w8qXDgpSAPhFsb2XtpoLFQ5+X2yFN6hvCKnwEzN8M5FWaJb"
-    ></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-light.min.css" id="hljsTheme">
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js" defer crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer crossorigin="anonymous"></script>
+    <!-- v4.6.1：前端库本地化（marked/highlight/qrcode）——大陆网络 jsdelivr 加载失败导致 marked 缺失、
+         文章只能纯文本 fallback；改为同源本地文件稳定加载。mermaid 仍按需加载（见 js/main.js ensureMermaid） -->
+    <script src="vendor/marked.min.js" defer></script>
+    <link rel="stylesheet" href="vendor/highlight-atom-one-light.min.css" id="hljsTheme">
+    <script src="vendor/highlight.min.js" defer></script>
+    <script src="vendor/qrcode.min.js" defer></script>
     <link rel="stylesheet" href="css/style.css?v=<?= filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
 <?php
@@ -1067,6 +1068,27 @@ document.addEventListener('DOMContentLoaded', function() {
         t.textContent = '已退出登录';
         t.classList.add('show');
         setTimeout(function() { t.classList.remove('show'); }, 2500);
+    }
+});
+</script>
+<?php endif; ?>
+<?php
+// v4.6.1：后台会话/环境拦截后的明确提示——后台写操作被拒时不再静默跳转，回首页明确告知原因
+$loginHint = '';
+if (isset($_GET['admin_login']) && $_GET['admin_login'] === '1') {
+    if (isset($_GET['env']) && $_GET['env'] === '1') $loginHint = '登录环境已变化（换设备/浏览器/隐私模式），后台操作已被拦截，请重新登录';
+    elseif (isset($_GET['expired']) && $_GET['expired'] === '1') $loginHint = '登录会话已过期，请重新登录';
+    else $loginHint = '请先登录后台';
+}
+?>
+<?php if ($loginHint !== ''): ?>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var t = document.getElementById('toast');
+    if (t) {
+        t.textContent = <?= json_encode($loginHint) ?>;
+        t.classList.add('show', 'toast-warn');
+        setTimeout(function() { t.classList.remove('show'); }, 6000);
     }
 });
 </script>

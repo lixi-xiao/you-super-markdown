@@ -240,6 +240,9 @@ if ($action === 'arith_challenge') {
 
 if ($action === 'send_register_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $siteCfg = loadSiteConfig();
+    // v4.7.1：联动封锁拦截（与 login/找回一致，堵住绕过路径）
+    $linkLeft = checkLinkedBlock();
+    if ($linkLeft > 0) jsonOut(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试', 'locked_seconds' => $linkLeft], 429);
     $input = json_decode(file_get_contents('php://input'), true);
     $email = trim($input['email'] ?? '');
     // v4.4.0：算术人机验证——答错/未答一律拒绝发码（一次性消费，重放无效）
@@ -426,6 +429,9 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $clientIP = getClientIP();
     if (isIPBanned($clientIP, 'register')) jsonOut(['success' => false, 'error' => '你的 IP 已被封禁，无法注册'], 403);
+    // v4.7.1：联动封锁拦截（bans type=link + link:ip/fp 登录锁，堵住 register 绕过联动封锁路径）
+    $linkLeft = checkLinkedBlock();
+    if ($linkLeft > 0) jsonOut(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试', 'locked_seconds' => $linkLeft], 429);
     $regLimit = max(1, intval($siteCfg['max_registrations_per_ip'] ?? $siteCfg['reg_limit_per_ip'] ?? 3));
     $ipRegs = db_rate_count('reg_rates', $clientIP, 2592000); // 30 天累计
     if ($ipRegs >= $regLimit) {
@@ -897,6 +903,9 @@ if ($action === 'get') {
 if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $clientIP = getClientIP();
     if (isIPBanned($clientIP, 'comment')) jsonOut(['success' => false, 'error' => '你的 IP 已被封禁，无法评论'], 403);
+    // v4.7.1：联动封锁拦截（堵住 comment 绕过联动封锁路径）
+    $linkLeft = checkLinkedBlock();
+    if ($linkLeft > 0) jsonOut(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试', 'locked_seconds' => $linkLeft], 429);
     $siteCfg = loadSiteConfig();
     if (!($siteCfg['comments_enabled'] ?? true)) jsonOut(['success' => false, 'error' => '评论区已关闭'], 403);
     // v2.6.5：超管身份默认不参与前台评论（可在超管后台「系统配置」开启 super_admin_comment）
@@ -963,6 +972,9 @@ if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($action === 'reply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $clientIP = getClientIP();
     if (isIPBanned($clientIP, 'comment')) jsonOut(['success' => false, 'error' => '你的 IP 已被封禁，无法回复'], 403);
+    // v4.7.1：联动封锁拦截（堵住 reply 绕过联动封锁路径）
+    $linkLeft = checkLinkedBlock();
+    if ($linkLeft > 0) jsonOut(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试', 'locked_seconds' => $linkLeft], 429);
     $u = validateHomeUser();
     $replyCfg = loadSiteConfig();
     // v2.6.5：超管身份默认不参与前台回复（可在超管后台「系统配置」开启 super_admin_comment）

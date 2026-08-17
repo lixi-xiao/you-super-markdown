@@ -590,13 +590,19 @@ if ($action === 'rss_guide') {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
 <title>RSS 订阅 · <?= htmlspecialchars($_siteTitle) ?></title>
 <script>
 (function() {
     try {
         var saved = localStorage.getItem('md-theme');
-        var dark = saved ? saved === 'dark'
-            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        // v4.7.11：隐私模式下 localStorage 写入失败时，sessionStorage 仍可记住"手动切换过"的标记
+        var manual = false;
+        try { manual = sessionStorage.getItem('md-theme-manual') === '1'; } catch (e) {}
+        var dark;
+        if (saved) dark = saved === 'dark';
+        else if (manual) dark = document.documentElement.getAttribute('data-theme') === 'dark'; // 手动切换过且无 saved，尊重 DOM 默认值（由用户上一次点击确定）
+        else dark = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
         document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     } catch (e) {}
 })();
@@ -647,6 +653,7 @@ if ($action === 'rss_guide') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <meta name="csrf-token" content="<?= htmlspecialchars(generateCsrfToken()) ?>">
     <!-- v4.0.0：深色模式跟随系统——在 CSS 加载前同步设置 data-theme，避免闪白 -->
     <script>

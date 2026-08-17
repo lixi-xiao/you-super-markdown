@@ -800,14 +800,6 @@
             if (!down) return;
             down = false;
             el.style.cursor = '';
-            // 拖动后本次点击不触发子元素 click（避免误点分类/标签）
-            if (moved) {
-                var t = document.activeElement;
-                document.addEventListener('click', function h(e) {
-                    e.stopPropagation(); e.preventDefault();
-                    document.removeEventListener('click', h);
-                }, true);
-            }
         });
         // 子元素点击：若刚拖动过则忽略
         el.addEventListener('click', function(e) {

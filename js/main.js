@@ -708,6 +708,8 @@
                 renderHomeContent();
             });
         });
+        // v4.7.14：卡片标签横向滚动（鼠标拖动 + 滚轮）
+        document.querySelectorAll('.doc-card .card-tags').forEach(function(el) { enableHScroll(el); });
     }
     function renderCategoryBar() {
         var bar = document.getElementById('categoryBar');

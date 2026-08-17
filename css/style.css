@@ -333,7 +333,7 @@ code, pre, .markdown-body code, .markdown-body pre {
 }
 /* 卡片内容浮于叠底图之上 */
 .doc-card > *:not(.doc-cover) { position: relative; z-index: 1; }
-.card-title { font-size: 1.15em; font-weight: 650; color: var(--text); }
+.card-title { font-size: 1.15em; font-weight: 650; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-pin-icon { display: inline-flex; align-items: center; justify-content: center; margin-right: 4px; color: var(--accent); vertical-align: middle; position: relative; top: -1px; }
 .card-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.82em; color: var(--text-muted); }
 .card-meta span { display: inline-flex; align-items: center; }
@@ -349,7 +349,9 @@ code, pre, .markdown-body code, .markdown-body pre {
     flex: 0 0 auto;
     display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
 }
-.card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+.card-tags { display: flex; align-items: center; gap: 6px; margin-top: auto; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
+.card-tags::-webkit-scrollbar { display: none; }
+.card-tags .tag { white-space: nowrap; flex-shrink: 0; }
 .card-author { font-size: 0.82em; color: var(--text-muted); display: flex; align-items: center; gap: 4px; margin-top: 2px; }
 .card-author .meta-icon { background: var(--accent-light); margin-right: 4px; }
 .tag { background: var(--accent-light); color: var(--accent); padding: 2px 8px; border-radius: 4px; font-size: 0.75em; font-weight: 500; }

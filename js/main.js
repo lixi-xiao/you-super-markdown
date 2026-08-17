@@ -399,24 +399,40 @@
     });
     scrollToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
     floatHomeBtn.addEventListener('click', showHome);
+    // v4.7.11：主题监听兼容辅助函数（Safari <14 / 旧 Android WebView 只支持 addListener/removeListener）
+    function mdThemeAddListener(mq, handler) {
+        if (!mq || !handler) return;
+        if (typeof mq.addEventListener === 'function') { mq.addEventListener('change', handler); }
+        else if (typeof mq.addListener === 'function') { mq.addListener(handler); }
+    }
+    function mdThemeRemoveListener(mq, handler) {
+        if (!mq || !handler) return;
+        if (typeof mq.removeEventListener === 'function') { mq.removeEventListener('change', handler); }
+        else if (typeof mq.removeListener === 'function') { mq.removeListener(handler); }
+    }
     btnThemeToggle.addEventListener('click', () => {
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
-        try { localStorage.setItem('md-theme', isDark ? 'light' : 'dark'); } catch (e) {}
+        const nextTheme = isDark ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', nextTheme);
+        // v4.7.11：手动切换双持久化——localStorage 记住用户选择，sessionStorage 标记"手动切换过"
+        //          隐私模式下 localStorage 写入失败时，sessionStorage 仍可保证当前会话不跟随系统
+        try { localStorage.setItem('md-theme', nextTheme); } catch (e) {}
+        try { sessionStorage.setItem('md-theme-manual', '1'); } catch (e) {}
         // v4.6.2：手动切换后停止跟随系统——移除 change 监听，系统深色模式不再把刚切走的主题立刻改回
         mdThemeManual = true;
-        if (mdThemeMedia && mdThemeHandler && typeof mdThemeMedia.removeEventListener === 'function') {
-            mdThemeMedia.removeEventListener('change', mdThemeHandler);
-        }
+        mdThemeRemoveListener(mdThemeMedia, mdThemeHandler);
         btnThemeToggle.innerHTML = isDark
             ? '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'
             : '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
     });
     // v4.0.0：深色模式跟随系统——首次访问未手动设置时，按系统偏好（prefers-color-scheme）决定；
     //         手动切换后写入 localStorage 记住用户选择（v4.6.2：并停止跟随系统，见点击 handler）
+    // v4.7.11：初始化时读取 sessionStorage 的 md-theme-manual 标记（隐私模式下 localStorage 可能写入失败）；
+    //          兼容 addListener/removeListener；加 mdThemeManual 双重保险判断
     (function() {
         let saved = '';
         try { saved = localStorage.getItem('md-theme') || ''; } catch (e) {}
+        try { if (sessionStorage.getItem('md-theme-manual')) mdThemeManual = true; } catch (e) {}
         mdThemeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
         const systemDark = mdThemeMedia ? mdThemeMedia.matches : false;
         const theme = saved || (systemDark ? 'dark' : 'light');
@@ -425,6 +441,7 @@
             btnThemeToggle.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
         }
         // 用户从未手动设置过时，跟随系统主题变化实时切换（手动切换后移除监听）
+        // v4.7.11：saved 存在 OR mdThemeManual 标记存在 → 不跟随系统
         if (!saved && mdThemeMedia && !mdThemeManual) {
             mdThemeHandler = function(e) {
                 if (mdThemeManual) return;
@@ -433,7 +450,7 @@
                     ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
                     : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
             };
-            mdThemeMedia.addEventListener('change', mdThemeHandler);
+            mdThemeAddListener(mdThemeMedia, mdThemeHandler);
         }
     })();
     async function loadFileList() {

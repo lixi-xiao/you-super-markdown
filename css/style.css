@@ -510,6 +510,8 @@ code, pre, .markdown-body code, .markdown-body pre {
 .doc-stats .stat-item { display: flex; align-items: center; gap: 6px; }
 .doc-stats .stat-item .meta-icon { background: var(--fixed-icon-bg) !important; color: var(--fixed-icon-color) !important; }
 .doc-stats .stat-item .meta-icon svg { stroke: var(--fixed-icon-color) !important; }
+/* v4.7.10：亮色模式文章统计信息（字数/阅读时长）可读性改善——文字加黑色轻微描边 */
+.doc-stats .stat-item { text-shadow: 0 0 1px rgba(0,0,0,0.5), 0 1px 1px rgba(0,0,0,0.4); }
 .doc-header .doc-title { font-size: 2em; font-weight: 700; color: var(--text); line-height: 1.3; margin-bottom: 12px; }
 .doc-header .doc-info { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--text-muted); align-items: center; }
 .doc-info .info-item { display: flex; align-items: center; gap: 4px; }

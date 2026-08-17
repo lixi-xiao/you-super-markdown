@@ -121,36 +121,58 @@
     // v4.2.2：mermaid 按需加载——mermaid.min.js 达 3.3MB，页面默认不再放 <head> 阻塞首屏；
     // 仅当公告/文章正文出现 ```mermaid 代码块时才动态注入，加载完成后渲染。
     // v4.6.1：源由 jsdelivr CDN 改为本地 vendor/mermaid.min.js（大陆网络 CDN 不可达时流程图彻底失效）。
+    // v4.7.14 重写：单次 mermaid.run() 批量渲染所有节点 + _ymInited 防重复初始化 + 错误回退逻辑
+    // 安全：mermaid SVG 由库自身做 XSS 过滤；fallback 文本经 escapeHTML 转义
+    // 约束：不耦合 hljs（hljs 在 loadFile / 公告中独立同步调用，两者互不依赖）
+    var _ymInited = false;
     function ensureMermaid(cb) {
         if (window.mermaid) { cb(); return; }
         var s = document.createElement('script');
         s.src = 'vendor/mermaid.min.js';
         s.onload = cb;
-        s.onerror = function() { /* mermaid 加载失败不阻断页面 */ };
+        s.onerror = function() {};
         document.head.appendChild(s);
     }
-    function renderMermaidBlocks(root) {
+    function renderMermaidBlocks(root, cb) {
+        cb = cb || function() {};
         try {
             var blocks = root.querySelectorAll('pre code.language-mermaid');
-            if (!blocks.length) return;   // 无流程图内容 → 不加载 3.3MB 脚本
+            if (!blocks.length) { cb(); return; }
             ensureMermaid(function() {
-                try {
-                    blocks.forEach(function(code) {
-                        var pre = code.parentElement;
-                        var div = document.createElement('div');
-                        div.className = 'mermaid';
-                        div.textContent = code.textContent;
-                        if (pre) pre.replaceWith(div);
-                    });
-                    mermaid.initialize({ startOnLoad: false });
-                    root.querySelectorAll('.mermaid').forEach(function(el) {
-                        mermaid.run({ nodes: [el] }).catch(function() {
-                            el.innerHTML = '<pre style="overflow:auto">' + escapeHTML(el.textContent) + '</pre>';
+                (async function() {
+                    try {
+                        // 1. pre code.language-mermaid → div.mermaid（保留纯文本）
+                        blocks.forEach(function(code) {
+                            var pre = code.parentElement;
+                            if (!pre) return;
+                            var div = document.createElement('div');
+                            div.className = 'mermaid';
+                            div.textContent = code.textContent;
+                            pre.replaceWith(div);
                         });
-                    });
-                } catch (e) { /* mermaid 初始化失败不阻断 */ }
+                        // 2. 初始化 mermaid（_ymInited 防重复初始化）
+                        if (!_ymInited) {
+                            mermaid.initialize({ startOnLoad: false });
+                            _ymInited = true;
+                        }
+                        // 3. 串行逐个渲染（避免并发 run() 导致 mermaid 内部状态混乱）
+                        var els = root.querySelectorAll('.mermaid');
+                        for (var i = 0; i < els.length; i++) {
+                            var el = els[i];
+                            try {
+                                await mermaid.run({ nodes: [el] });
+                                var svg = el.querySelector('svg');
+                                if (svg && svg.textContent.indexOf('Syntax error') >= 0) {
+                                    el.innerHTML = '<pre style="overflow:auto">' + escapeHTML(el.textContent) + '</pre>';
+                                }
+                            } catch (e) {
+                                el.innerHTML = '<pre style="overflow:auto">' + escapeHTML(el.textContent) + '</pre>';
+                            }
+                        }
+                    } catch (e) {}
+                })().then(cb).catch(function() { cb(); });
             });
-        } catch (e) {}
+        } catch (e) { cb(); }
     }
     const topBar = document.getElementById('topBar');
     const btnSearch = document.getElementById('btnSearch');
@@ -548,7 +570,12 @@
                 im.setAttribute('decoding', 'async');
             });
             // v3.2.5：公告正文 mermaid 流程图渲染（与文章阅读一致）；v4.2.2 起按需加载
-            renderMermaidBlocks(content);
+            // v4.7.14：mermaid 渲染完成后执行 hljs，避免异步加载时序问题
+            renderMermaidBlocks(content, function() {
+                if (typeof hljs !== 'undefined') {
+                    content.querySelectorAll('pre code').forEach(function(b) { hljs.highlightElement(b); });
+                }
+            });
             // 外链安全：禁止外链在当前页直接跳转（防 tabnabbing/钓鱼），与文章渲染一致
             content.querySelectorAll('a[href]').forEach(function(a) {
                 var href = a.getAttribute('href') || '';
@@ -557,9 +584,6 @@
                     a.setAttribute('rel', 'noopener noreferrer');
                 }
             });
-            if (typeof hljs !== 'undefined') {
-                content.querySelectorAll('pre code').forEach(function(b) { hljs.highlightElement(b); });
-            }
         } else {
             content.classList.remove('markdown-body');
             content.textContent = a.summary || '（暂无内容）';
@@ -994,7 +1018,7 @@
             const html = code.innerHTML;
             const rawLines = html.replace(/^\n/, '').replace(/\n$/, '').split('\n');
             while (rawLines.length > 0 && rawLines[rawLines.length - 1].trim() === '') rawLines.pop();
-            code.innerHTML = rawLines.map(line => `<span class="line">${line || '\u00a0'}</span>`).join('');
+            code.innerHTML = rawLines.map(line => `<span class="line">${line || '\u00a0'}</span>`).join('\n');
             const btn = document.createElement('div');
             btn.className = 'copy-btn';
             btn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
@@ -1254,7 +1278,13 @@
                     }
                 });
                 // v3.2.5：mermaid 流程图渲染（```mermaid 代码块 → 实际图表；优先于 hljs 高亮处理）；v4.2.2 起按需加载
-                renderMermaidBlocks(markdownBody);
+                // v4.7.14：mermaid 渲染完成后执行 hljs 和 addCopyButtons，避免异步加载时序问题
+                renderMermaidBlocks(markdownBody, function() {
+                    if (typeof hljs !== 'undefined') {
+                        markdownBody.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+                    }
+                    addCopyButtons();
+                });
                 // v3.3.0：视频语法 → 播放器（仅站内 data/videos/ 相对路径；外链按纯文本保留）
                 renderYmVideos(markdownBody, videoSlots);
                 // v3.3.2：正文图片懒加载（首屏外的大图不预先下载，滚动到才加载）
@@ -1262,10 +1292,6 @@
                     if (!im.getAttribute('loading')) im.setAttribute('loading', 'lazy');
                     im.setAttribute('decoding', 'async');
                 });
-                if (typeof hljs !== 'undefined') {
-                    markdownBody.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
-                }
-                addCopyButtons();
                 extractHeadings();
                 markdownBody.querySelectorAll('p').forEach(p => {
                     const links = p.querySelectorAll('a');

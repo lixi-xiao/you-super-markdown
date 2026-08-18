@@ -3,10 +3,12 @@
 // v4.2.1：v4.2.0 改直连外部图片 API 后实测该 API 一次只能取一张图——首页多卡并行直连触发
 //         限流（429）导致部分卡片封面加载失败（无背景图）、手机端加载慢。回退本池化代理方案，
 //         抓取源固定为 FIXED_IMG_API（uapis.cn 16:9），缩略图宽度提升至 960px（960×540，清晰且省流量）。
+// v4.8.3：池大小改为动态扩张——根据 data/articles/ 目录下 .md 文章数自动计算，不再固定 24 张。
+//         每篇文章都有近似独立的封面槽位，文章增长时池自动扩容，浏览器缓存仍稳定。
 // 关键：页面请求永不阻塞、构建永远后台且节流——
 //   - 每次请求至多后台补 1 张图，且距上次构建 ≥5 秒（峰值带宽可控，天然避开外部 API 单张限流）
 //   - 池空时立即 404（卡片自动降级无图），不会同步抓图
-//   - 池满 24 张后每 6 小时按槽位轮换刷新，全程服务旧图
+//   - 池满后每 6 小时按槽位轮换刷新，全程服务旧图
 // 安全：不接收外部 URL（只读固定源 FIXED_IMG_API），
 //       复用 fetchHttpContent 的 SSRF 加固（内网拒绝 + 单次解析 pin IP + TLS 域名校验），无新攻击通道。
 require_once __DIR__ . '/utils.php';
@@ -29,7 +31,14 @@ if (preg_match('#^https?://#i', $apiUrl)) {
 }
 
 $poolDir  = __DIR__ . '/data/cache/covers';
-$poolN    = 24;           // 池大小（张）
+// v4.8.3：池大小自动扩张——根据文章数动态计算，最少 24 张，确保每篇文章都有独立封面
+$articleCount = 0;
+$articlesDir = __DIR__ . '/data/articles';
+if (is_dir($articlesDir)) {
+    $files = glob($articlesDir . '/*.md');
+    $articleCount = is_array($files) ? count($files) : 0;
+}
+$poolN    = max(24, $articleCount);
 $refreshT = 21600;        // 刷新周期（6 小时）
 $thumbW   = 960;          // 缩略图宽度（v4.2.1：640→960，16:9=960×540；卡片 ≤360px + 手机 DPR2 清晰且远小于原图 310KB）
 $throttle = 5;            // 构建节流（秒）：每次请求至多补 1 张，间隔 ≥5s → 峰值带宽可控

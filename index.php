@@ -264,7 +264,7 @@ if ($action === 'list') {
                     $cover = $_siteConfig['bg_image'];
                     if (strpos($cover, 'data/') === 0) $cover = '/' . $cover;
                 } else {
-                    $cover = 'cover.php?i=' . ($listIdx % 24);
+                    $cover = 'cover.php?i=' . $listIdx;
                 }
             }
             $fileList[] = [

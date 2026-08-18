@@ -437,7 +437,7 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($ipRegs >= $regLimit) {
         logAbnormal($clientIP, '频繁注册（累计' . $ipRegs . '次，限制' . $regLimit . '次）');
         logThreat('reg_flood', $clientIP, getRequestFp(), 300);
-        if ($siteCfg['auto_ban'] ?? false) addBan($clientIP, ['register'], '自动封禁：频繁注册');
+        // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 已在上行写入）
         jsonOut(['success' => false, 'error' => '注册次数已达上限'], 429);
     }
     $input = json_decode(file_get_contents('php://input'), true);
@@ -451,9 +451,8 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $hpCount = db_rate_count('honeypot_rates', $clientIP, 600, $reqFp);
         $hpThreshold = max(1, (int)($siteCfg['honeypot_ban_count'] ?? 3));
         if ($hpCount >= $hpThreshold && !isIPBanned($clientIP, 'register')) {
-            $hpDuration = max(0, (int)($siteCfg['honeypot_ban_duration'] ?? 3600));
-            addBan($clientIP, ['register'], '注册蜜罐连续命中自动封禁', $hpDuration);
-            auditLog('honeypot_auto_ban', $clientIP, '注册蜜罐 ' . $hpCount . ' 次命中，自动封禁' . ($hpDuration > 0 ? ($hpDuration . ' 秒') : '（永久）'), 'banned');
+            // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 已在上行写入 threat_events）
+            auditLog('honeypot_auto_ban', $clientIP, '注册蜜罐 ' . $hpCount . ' 次命中，联动封禁升级', 'banned');
         }
         jsonOut(['success' => true, 'user' => null]);
     }
@@ -581,7 +580,7 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         lockLogin('qq:' . $qq, 900);
         logThreat('login_lock', $clientIP, $reqFp, 60);
         logAbnormal($clientIP, '频繁错误登录（60秒内' . $ipFails . '次，已锁定15分钟）');
-        if ($loginCfg['auto_ban'] ?? false) addBan($clientIP, ['login'], '自动封禁：频繁错误登录');
+        // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 已在上行写入）
         loginFailClear($clientIP, $qq);
         jsonOut(['success' => false, 'error' => '登录失败次数过多，请 900 秒后重试', 'locked_seconds' => 900], 429);
     }
@@ -960,7 +959,7 @@ if ($action === 'post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($ipRates > $maxCommentsPerMin) {
         logAbnormal($clientIP, '频繁评论（' . $ipRates . '条/分钟）');
         logThreat('comment_flood', $clientIP, $reqFp, 300);
-        if ($siteCfg['auto_ban'] ?? false) addBan($clientIP, ['comment'], '自动封禁：频繁评论');
+        // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 已在上行写入）
         jsonOut(['success' => false, 'error' => '评论太频繁，请稍后再试'], 429);
     }
     $input = json_decode(file_get_contents('php://input'), true);
@@ -1028,7 +1027,7 @@ if ($action === 'reply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($replyRates > $maxRepliesPerMin) {
         logAbnormal($clientIP, '频繁回复（' . $replyRates . '条/分钟）');
         logThreat('comment_flood', $clientIP, $replyFp, 300);
-        if ($replyCfg['auto_ban'] ?? false) addBan($clientIP, ['comment'], '自动封禁：频繁回复');
+        // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 已在上行写入）
         jsonOut(['success' => false, 'error' => '回复太频繁，请稍后再试'], 429);
     }
     $input = json_decode(file_get_contents('php://input'), true);

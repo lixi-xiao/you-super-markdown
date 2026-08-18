@@ -277,11 +277,16 @@ function loadSiteConfig() {
         // v4.7.0：联动威胁评分（IP+浏览器双维聚合，超阈值自动联动封锁；权重见 threatWeight，可用 threat_w_<reason> 覆盖）
         'threat_enable' => true,            // 总开关
         'threat_window' => 86400,           // 评分滑动窗口（秒，默认 24h，过期自动衰减）
-        'threat_l1' => 50,                  // 一级阈值 → 联动封锁 15 分钟
+        'threat_l1' => 40,                  // 一级阈值 → 联动封锁 15 分钟
         'threat_l1_dur' => 900,
-        'threat_l2' => 100,                 // 二级阈值 → 联动封锁 24 小时
+        'threat_l1_5' => 80,                // v4.8.0：一级半阈值 → 联动封锁 6 小时
+        'threat_l1_5_dur' => 21600,
+        'threat_l2' => 150,                 // 二级阈值 → 联动封锁 24 小时
         'threat_l2_dur' => 86400,
-        'threat_l3' => 200,                 // 三级阈值 → 自动永久封禁（超管面板可解除）
+        'threat_l3' => 250,                 // 三级阈值 → 自动永久封禁（超管面板可解除）
+        // v4.8.1：威胁评分衰减——无新事件超过 N 天后评分自动减半，防止长期误封
+        'threat_decay_days' => 3,           // 无新事件多少天后开始衰减
+        'threat_decay_ratio' => 0.5,        // 每个衰减周期评分乘以此系数（如 0.5=每周期减半）
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;
@@ -423,7 +428,7 @@ function security_check() {
     if ($tool === false) return;
     $ip = getClientIP();
     logUnauthorized('扫描器UA检测: ' . $tool);
-    addBan($ip, ['login', 'register', 'comment'], '扫描器UA: ' . $tool);
+    // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 写入 threat_events 后自动升级）
     logThreat('scanner_ua', $ip, '', 300);
     logAbnormal($ip, '扫描器UA封禁: ' . $tool);
     http_response_code(403);
@@ -473,8 +478,8 @@ function logUnauthorized($action, $ban = false) {
     }
     if ($ban) {
         $config = loadSiteConfig();
+        // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 已在下行无条件调用）
         if (!empty($config['auto_ban_unauthorized'])) {
-            addBan($ip, ['register', 'comment', 'login'], '自动封禁：越权操作 - ' . $action);
             logAbnormal($ip, '自动封禁越权用户: ' . $action);
         }
     }
@@ -1632,6 +1637,16 @@ function recordDevice($uid, $fpHash, $ua = '') {
 function getKnownDevices($uid) {
     return db_all('SELECT id, fp_hash, ua, first_seen, last_seen FROM device_fps WHERE user_id = ? ORDER BY last_seen DESC', [$uid]);
 }
+/** v4.8.2：分页获取所有管理角色的已信任设备（含用户信息），返回 [rows, total] */
+function getDevicesPaginated($page, $per) {
+    $page = max(1, (int)$page); $per = min(100, max(5, (int)$per));
+    $roles = implode(',', array_map(function($r) { return "'" . $r . "'"; }, [ROLE_STATION_ADMIN, ROLE_AUTHOR, ROLE_SUPER_ADMIN]));
+    $total = (int)(db_one("SELECT COUNT(*) AS c FROM device_fps d JOIN users u ON d.user_id = u.id WHERE u.role IN ($roles)")['c'] ?? 0);
+    $rows = db_all("SELECT d.id, d.user_id, d.fp_hash, d.ua, d.first_seen, d.last_seen, u.qq, u.role, u.nickname
+        FROM device_fps d JOIN users u ON d.user_id = u.id WHERE u.role IN ($roles)
+        ORDER BY d.last_seen DESC LIMIT ? OFFSET ?", [$per, ($page - 1) * $per]);
+    return [$rows, $total];
+}
 /** 移除单个已信任设备（超管后台管理；返回是否影响行数） */
 function removeKnownDevice($uid, $devId) {
     $st = db()->prepare('DELETE FROM device_fps WHERE id = ? AND user_id = ?');
@@ -1657,19 +1672,21 @@ function threatCfg($key, $def) {
 /** 事件权重表；支持 config 键 threat_w_<reason> 覆盖单个权重 */
 function threatWeight($reason) {
     $map = [
-        'login_fail'        => 3,   // 登录密码错误（普通账号）
-        'device_login_fail' => 20,  // 陌生设备登录失败（管理角色账号，3 次=60 分即触发 15min 风控，逐次升级）
-        'login_lock'        => 10,  // 触发登录锁定
-        'login_locked_try'  => 5,   // 锁定期内仍尝试
-        'scanner_ua'        => 30,  // 扫描器 UA 命中
-        'unauthorized'      => 15,  // 越权操作
-        'honeypot'          => 20,  // 蜜罐命中
-        'reg_flood'         => 5,   // 注册验证码超频
-        'comment_flood'     => 5,   // 评论超频
-        'otp_fail'          => 10,  // OTP 连续失败
-        'code_fail'         => 3,   // 邮箱验证码校验失败
-        'device_code_fail'  => 5,   // 陌生设备登录验证码输错
-        'reset_flood'       => 5,   // 找回密码验证码超频
+        // v4.8.0：高危攻击低容忍——提高高危事件权重，新增 hfish_attack 事件
+        'login_fail'        => 5,   // 登录密码错误（普通账号，8 次=40 分触发 L1）
+        'device_login_fail' => 25,  // 陌生设备登录失败（管理角色账号，2 次=50 分即触发 L1）
+        'login_lock'        => 15,  // 触发登录锁定（3 次=45 分触发 L1）
+        'login_locked_try'  => 10,  // 锁定期内仍尝试（4 次=40 分触发 L1）
+        'scanner_ua'        => 40,  // 扫描器 UA 命中（1 次即触发 L1）
+        'unauthorized'      => 25,  // 越权操作（2 次=50 分触发 L1）
+        'honeypot'          => 25,  // 蜜罐命中（2 次=50 分触发 L1）
+        'hfish_attack'      => 20,  // v4.8.0：HFish 蜜罐攻击事件（2 次=40 分触发 L1）
+        'reg_flood'         => 5,   // 注册验证码超频（8 次=40 分触发 L1）
+        'comment_flood'     => 5,   // 评论超频（8 次=40 分触发 L1）
+        'otp_fail'          => 10,  // OTP 连续失败（4 次=40 分触发 L1）
+        'code_fail'         => 5,   // 邮箱验证码校验失败（8 次=40 分触发 L1）
+        'device_code_fail'  => 5,   // 陌生设备登录验证码输错（8 次=40 分触发 L1）
+        'reset_flood'       => 5,   // 找回密码验证码超频（8 次=40 分触发 L1）
     ];
     $w = threatCfg('threat_w_' . $reason, $map[$reason] ?? 0);
     return max(0, (int)$w);
@@ -1701,12 +1718,25 @@ function logThreat($reason, $ip = '', $fp = '', $dedupeWindow = 0) {
     // 概率清理 3 天前事件（1/64），窗口查询按 created>cutoff 过滤，不影响计分
     if (random_int(0, 63) === 0) db_exec('DELETE FROM threat_events WHERE created < ?', [$now - 259200]);
 }
-/** 计算某维度窗口内威胁总分 */
+/** 计算某维度窗口内威胁总分（支持衰减：无新事件超过 N 天后评分自动降低） */
 function threatScore($dimType, $dimKey, $window = null) {
     if ($window === null) $window = (int)threatCfg('threat_window', 86400);
-    $r = db_one('SELECT COALESCE(SUM(weight),0) AS s FROM threat_events WHERE dim_type = ? AND dim_key = ? AND created > ?',
+    $r = db_one('SELECT COALESCE(SUM(weight),0) AS s, COALESCE(MAX(created),0) AS last_created FROM threat_events WHERE dim_type = ? AND dim_key = ? AND created > ?',
         [$dimType, $dimKey, time() - $window]);
-    return (int)($r['s'] ?? 0);
+    $score = (int)($r['s'] ?? 0);
+    // v4.8.1：威胁评分衰减——按最后事件时间计算衰减系数
+    $lastCreated = (int)($r['last_created'] ?? 0);
+    if ($lastCreated > 0) {
+        $decayDays = (int)threatCfg('threat_decay_days', 3);
+        $decayRatio = (float)threatCfg('threat_decay_ratio', 0.5);
+        $daysSinceLast = (time() - $lastCreated) / 86400;
+        if ($daysSinceLast >= $decayDays && $decayRatio > 0 && $decayRatio < 1) {
+            $periods = floor($daysSinceLast / $decayDays);
+            $decayFactor = pow($decayRatio, $periods);
+            $score = (int)round($score * $decayFactor);
+        }
+    }
+    return $score;
 }
 /** 升级式锁定：只延长不缩短（防低等级覆盖高等级） */
 function linkedLock($key, $seconds, $reason) {
@@ -1716,25 +1746,29 @@ function linkedLock($key, $seconds, $reason) {
     db_exec('INSERT INTO login_locks (key, locked_until) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET locked_until = excluded.locked_until', [$key, $until]);
     if ($seconds >= 10 * 365 * 86400) logAbnormal(getClientIP(), $reason . '（' . $key . '）');
 }
-/** 按总分自动升级联动封锁（三级：L1 15min / L2 24h / L3 永久） */
+/** 按总分自动升级联动封锁（四级：L1 15min / L1.5 6h / L2 24h / L3 永久） */
 function maybeLinkedBlock($dimType, $dimKey) {
     if (!threatCfg('threat_enable', 1)) return;
     $score = threatScore($dimType, $dimKey);
-    $l3 = (int)threatCfg('threat_l3', 200);
-    $l2 = (int)threatCfg('threat_l2', 100);
-    $l1 = (int)threatCfg('threat_l1', 50);
+    $l3 = (int)threatCfg('threat_l3', 250);
+    $l2 = (int)threatCfg('threat_l2', 150);
+    $l1_5 = (int)threatCfg('threat_l1_5', 80);
+    $l1 = (int)threatCfg('threat_l1', 40);
     if ($score >= $l3) {
         // 永久：IP 进 bans（可超管解封）；指纹维度用远期登录锁（近十年）
         if ($dimType === 'ip') addBan($dimKey, ['link'], '联动封锁：威胁评分达永久阈值(' . $score . ')');
         else linkedLock('link:' . $dimType . ':' . $dimKey, 10 * 365 * 86400, '联动封锁永久');
     } elseif ($score >= $l2) {
         linkedLock('link:' . $dimType . ':' . $dimKey, (int)threatCfg('threat_l2_dur', 86400), '联动封锁24小时');
+    } elseif ($score >= $l1_5) {
+        linkedLock('link:' . $dimType . ':' . $dimKey, (int)threatCfg('threat_l1_5_dur', 21600), '联动封锁6小时');
     } elseif ($score >= $l1) {
         linkedLock('link:' . $dimType . ':' . $dimKey, (int)threatCfg('threat_l1_dur', 900), '联动封锁15分钟');
     }
     // v4.7.2：联动封锁邮件告警——同维度同等级只发一次，升级到下一等级再发（防刷屏）
     if ($score >= $l3) maybeAlertLock($dimType, $dimKey, $score, 'L3');
     elseif ($score >= $l2) maybeAlertLock($dimType, $dimKey, $score, 'L2');
+    elseif ($score >= $l1_5) maybeAlertLock($dimType, $dimKey, $score, 'L1.5');
     elseif ($score >= $l1) maybeAlertLock($dimType, $dimKey, $score, 'L1');
 }
 /** 联动封锁告警去重+发送：用 threat_events 的 0 权重 __alert_<等级> 标记行记录已发等级 */

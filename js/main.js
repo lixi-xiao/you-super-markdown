@@ -1082,6 +1082,14 @@
         url.searchParams.set('file', filename);
         return url.toString();
     }
+    /** v4.8.0：复制链接降级方案（clipboard API 不可用时使用） */
+    function copyFallback(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); showToast('链接已复制'); } catch(ex) { showToast('复制失败，请手动复制'); }
+        document.body.removeChild(ta);
+    }
     function showHome(pushState = true) {
         if (isReadingView) {
             sessionStorage.setItem('md-read-scroll-' + currentFileName, window.scrollY);
@@ -1239,7 +1247,7 @@
                 //          改用 read 接口返回的字数（服务端统一算法）修正。
                 const listMeta = allFiles[currentFileIndex];
                 const fileMeta = Object.assign(
-                    { displayName: filename.replace(/\.md$/i,''), wordCount: 0, modified: '', tags: [], category: '', author: '', license: 'CC BY-NC-SA 4.0', licenseUrl: '', pinned: false },
+                    { displayName: filename.replace(/\.md$/i,''), name: filename, wordCount: 0, modified: '', tags: [], category: '', author: '', license: 'CC BY-NC-SA 4.0', licenseUrl: '', pinned: false },
                     listMeta || {},
                     { displayName: data.displayName || (listMeta && listMeta.displayName) || filename.replace(/\.md$/i,''),
                       wordCount: (data.wordCount > 0) ? data.wordCount : ((listMeta && listMeta.wordCount) || 0),
@@ -1328,7 +1336,18 @@
                     inlineShareBtn.addEventListener('click', () => {
                         shareModalOverlay.classList.add('active');
                         shareQrcode.innerHTML = '';
-                        new QRCode(shareQrcode, { text: window.location.href, width: 180, height: 180 });
+                        var shareUrl = getShortUrl(filename);
+                        new QRCode(shareQrcode, { text: shareUrl, width: 180, height: 180 });
+                        var copyBtn = document.getElementById('shareCopyLinkBtn');
+                        if (copyBtn) {
+                            copyBtn.onclick = null;
+                            copyBtn.addEventListener('click', function() {
+                                var url = getShortUrl(filename);
+                                if (navigator.clipboard && navigator.clipboard.writeText) {
+                                    navigator.clipboard.writeText(url).then(function() { showToast('链接已复制'); }).catch(function() { copyFallback(url); });
+                                } else { copyFallback(url); }
+                            });
+                        }
                     });
                 }
                 updatePrevNext();

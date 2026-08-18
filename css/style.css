@@ -751,6 +751,14 @@ code, pre, .markdown-body code, .markdown-body pre {
     transition: all 0.2s;
 }
 .share-modal-close:hover { border-color: var(--accent); color: var(--accent); }
+.share-modal-actions { display: flex; gap: 8px; width: 100%; }
+.share-modal-btn {
+    flex: 1; padding: 8px 16px; border-radius: 8px;
+    background: var(--accent); border: none;
+    color: #fff; cursor: pointer; font-size: 14px;
+    transition: opacity 0.2s;
+}
+.share-modal-btn:hover { opacity: 0.9; }
 .article-info-card {
     background: var(--bg); border: 1px solid var(--border);
     border-radius: var(--radius-sm); padding: 20px 24px;

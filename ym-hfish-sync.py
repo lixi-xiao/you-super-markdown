@@ -14,6 +14,8 @@ import os
 import sqlite3
 import sys
 import datetime
+import subprocess
+import time
 
 WEB_ROOT = os.environ.get('YM_WEB_ROOT', '/var/www/you-markdown')
 APP_CONFIG = os.path.join(WEB_ROOT, 'app-config.json')
@@ -89,7 +91,7 @@ def _parse_json(s):
 
 
 def load_bans():
-    """从 SQLite bans 表读取封禁列表（保持原 [{ip,types,reason,time}] 格式）"""
+    """从 SQLite bans 表读取封禁列表（仅用于快照展示，不再用于封禁决策）"""
     try:
         con = sqlite3.connect(DB_FILE)
         con.row_factory = sqlite3.Row
@@ -108,20 +110,6 @@ def load_bans():
         return []
 
 
-def save_bans(bans):
-    try:
-        con = sqlite3.connect(DB_FILE)
-        con.execute('DELETE FROM bans')
-        con.executemany(
-            'INSERT INTO bans (ip, types_json, reason, time) VALUES (?,?,?,?)',
-            [(b.get('ip'), json.dumps(b.get('types', []), ensure_ascii=False), b.get('reason', ''), b.get('time', '')) for b in bans]
-        )
-        con.commit()
-        con.close()
-    except Exception:
-        pass
-
-
 def is_private_ip(ip):
     """判断 IP 是否为内网/私有地址（10/8、172.16/12、192.168/16、127/8、169.254/16）"""
     try:
@@ -135,22 +123,29 @@ def is_private_ip(ip):
 
 
 def apply_ban(ip, threshold):
-    """攻击次数达到阈值 → 写入封禁（登录/注册/评论），已封禁则跳过"""
+    """v4.8.0：攻击次数达到阈值 → 写入 threat_events 表走联动封禁（不再直接写 bans 表）"""
     try:
         con = sqlite3.connect(DB_FILE)
+        now = int(time.time())
+        # 写入 threat_events 表（hfish_attack 事件，权重 20，24h 去重窗口）
         cur = con.cursor()
-        cur.execute("SELECT ip FROM bans WHERE ip=?", (ip,))
+        cur.execute(
+            "SELECT 1 FROM threat_events WHERE dim_type='ip' AND dim_key=? AND reason='hfish_attack' AND created > ? LIMIT 1",
+            (ip, now - 86400))
         if cur.fetchone():
             con.close()
-            return False  # 已封禁
+            return False  # 24h 内已有 HFish 事件，不再重复写入
+        import binascii, os as _os
+        event_id = binascii.hexlify(_os.urandom(8)).decode('ascii')
         cur.execute(
-            "INSERT INTO bans (ip, types_json, reason, time) VALUES (?,?,?,?)",
-            (ip, json.dumps(['login', 'register', 'comment'], ensure_ascii=False),
-             '触发蜜罐行为达到 %d 次自动封禁' % threshold,
-             datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        )
+            "INSERT INTO threat_events (id, dim_type, dim_key, weight, reason, created) VALUES (?,?,?,?,?,?)",
+            (event_id, 'ip', ip, 20, 'hfish_attack', now))
         con.commit()
         con.close()
+        # 调用 PHP 桥接脚本触发 maybeLinkedBlock 升级检查
+        bridge = os.path.join(WEB_ROOT, '_hfish_bridge.php')
+        if os.path.exists(bridge):
+            subprocess.run(['php', bridge, ip], capture_output=True, timeout=30)
         return True
     except Exception:
         return False

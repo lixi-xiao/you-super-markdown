@@ -850,6 +850,9 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
     <div class="share-modal">
         <div class="share-modal-title">分享文章</div>
         <div id="shareQrcode"></div>
+        <div class="share-modal-actions">
+            <button class="share-modal-btn" id="shareCopyLinkBtn">复制链接</button>
+        </div>
         <button class="share-modal-close" id="shareModalClose">关闭</button>
     </div>
 </div>

@@ -3085,35 +3085,39 @@ $banMsg = $_GET['bmsg'] ?? '';
     <div class="card">
         <div class="card-title">已信任设备（管理角色陌生设备登录二次验证；移除后该设备需重新邮箱验证码确认）</div>
         <div class="table-wrap">
+        <?php
+        $dp = max(1, (int)($_GET['dp'] ?? 1));
+        $dpp = 20;
+        [$devRows, $devTotal] = getDevicesPaginated($dp, $dpp);
+        $devPages = max(1, (int)ceil($devTotal / $dpp));
+        if ($dp > $devPages) { $dp = $devPages; [$devRows, $devTotal] = getDevicesPaginated($dp, $dpp); }
+        ?>
         <table>
             <tr><th>账号</th><th>角色</th><th>设备指纹</th><th>UA</th><th>首次</th><th>最近</th><th>操作</th></tr>
-            <?php $devCount = 0; ?>
-            <?php foreach ($users as $u): ?>
-                <?php if (!in_array($u['role'] ?? '', [ROLE_STATION_ADMIN, ROLE_AUTHOR, ROLE_SUPER_ADMIN], true)) continue; ?>
-                <?php foreach (getKnownDevices($u['id']) as $d): $devCount++; ?>
-                <tr>
-                    <td><?= htmlspecialchars($u['qq'] ?? '') ?></td>
-                    <td><?= htmlspecialchars($u['role'] ?? '') ?></td>
-                    <td><code><?= htmlspecialchars(substr($d['fp_hash'], 0, 16)) ?>…</code></td>
-                    <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($d['ua'] ?? '') ?>"><?= htmlspecialchars(mb_substr($d['ua'] ?? '', 0, 40, 'UTF-8')) ?></td>
-                    <td><?= date('Y-m-d', (int)$d['first_seen']) ?></td>
-                    <td><?= date('Y-m-d', (int)$d['last_seen']) ?></td>
-                    <td>
-                        <form method="post" class="need-challenge" style="display:inline">
-                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
-                            <input type="hidden" name="remove_device" value="1">
-                            <input type="hidden" name="device_uid" value="<?= htmlspecialchars($u['id']) ?>">
-                            <input type="hidden" name="device_id" value="<?= htmlspecialchars($d['id']) ?>">
-                            <input type="hidden" name="challenge_code">
-                            <button class="btn btn-sm btn-outline" data-confirm="确定移除该设备？移除后需重新验证码验证">移除</button>
-                        </form>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
+            <?php foreach ($devRows as $d): ?>
+            <tr>
+                <td><?= htmlspecialchars($d['qq'] ?? '') ?></td>
+                <td><?= htmlspecialchars($d['role'] ?? '') ?></td>
+                <td><code><?= htmlspecialchars(substr($d['fp_hash'], 0, 16)) ?>…</code></td>
+                <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($d['ua'] ?? '') ?>"><?= htmlspecialchars(mb_substr($d['ua'] ?? '', 0, 40, 'UTF-8')) ?></td>
+                <td><?= date('Y-m-d', (int)$d['first_seen']) ?></td>
+                <td><?= date('Y-m-d', (int)$d['last_seen']) ?></td>
+                <td>
+                    <form method="post" class="need-challenge" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+                        <input type="hidden" name="remove_device" value="1">
+                        <input type="hidden" name="device_uid" value="<?= htmlspecialchars($d['user_id']) ?>">
+                        <input type="hidden" name="device_id" value="<?= htmlspecialchars($d['id']) ?>">
+                        <input type="hidden" name="challenge_code">
+                        <button class="btn btn-sm btn-outline" data-confirm="确定移除该设备？移除后需重新验证码验证">移除</button>
+                    </form>
+                </td>
+            </tr>
             <?php endforeach; ?>
-            <?php if ($devCount === 0): ?><tr><td colspan="7" style="text-align:center;color:var(--text-muted)">暂无已信任设备</td></tr><?php endif; ?>
+            <?php if (empty($devRows)): ?><tr><td colspan="7" style="text-align:center;color:var(--text-muted)">暂无已信任设备</td></tr><?php endif; ?>
         </table>
         </div>
+        <?= renderPager(['page' => $dp, 'pages' => $devPages, 'per_page' => $dpp, 'total' => $devTotal], 'dp', ['tab' => 'threat'], 'dpp') ?>
     </div>
 
     <div class="card">

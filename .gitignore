@@ -28,3 +28,5 @@ __pycache__/
 !README.md
 # docs/ 目录（含敏感运维信息，不应进入公开仓库）
 docs/
+
+_hfish_bridge.php

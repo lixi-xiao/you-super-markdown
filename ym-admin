@@ -149,13 +149,18 @@ install_one_dep() {
 # v3.3.13/v4.5.0：环境自检与依赖补装——参数为空格分隔的依赖清单（缺省用内置兜底清单），
 # 自动检测缺失项并 apt/yum 安装；任一失败返回非 0（apply-update 据此中断并回滚）。
 ensure_env_deps() {
-    local cache_dir="$WEB_ROOT/data/cache/thumbs" deps_all deps_uniq d ok=0
-    # ① 缩略图缓存目录（img.php 写缓存需 www-data 可写）
-    if [ ! -d "$cache_dir" ]; then
-        mkdir -p "$cache_dir" 2>/dev/null
-        chown -R www-data:www-data "$WEB_ROOT/data/cache" 2>/dev/null
-        echo "  [环境] 已创建缩略图缓存目录 $cache_dir"
-    fi
+    local deps_all deps_uniq d ok=0 cache_sub cache_dir
+    # ① 缓存目录可写自愈（v4.8.4 起 covers + thumbs 全覆盖）：
+    #    目录缺失则创建；已存在但属主非 www-data（如发布流程曾以 root 重建 data/cache/covers）则统一 chown，
+    #    避免 cover.php/img.php 后台补图静默失败、池永远为空（主页卡片无封面且无日志，见踩坑 #43）。
+    for cache_sub in thumbs covers; do
+        cache_dir="$WEB_ROOT/data/cache/$cache_sub"
+        if [ ! -d "$cache_dir" ] || [ "$(stat -c %U "$cache_dir" 2>/dev/null)" != "www-data" ]; then
+            mkdir -p "$cache_dir" 2>/dev/null
+            chown -R www-data:www-data "$WEB_ROOT/data/cache" 2>/dev/null
+            echo "  [环境] 已修复封面/缩略图缓存目录 $cache_dir"
+        fi
+    done
     # ② 汇总依赖清单（参数 + 内置兜底，去重）
     deps_all="$REQUIRED_DEPS_FALLBACK $1"
     deps_uniq=""

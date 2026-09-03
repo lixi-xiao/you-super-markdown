@@ -45,6 +45,19 @@ $throttle = 5;            // 构建节流（秒）：每次请求至多补 1 张
 $manifest = $poolDir . '/manifest.json';
 $flagFile = $poolDir . '/.building';
 if (!is_dir($poolDir)) @mkdir($poolDir, 0755, true);
+// v4.8.4：缓存池目录不可写自愈 + 静默失败可见化（事故修复，见踩坑 #43）：
+//   事故——发布流程曾以 root 清空并重建 data/cache/covers，目录归 root 后 www-data 无法写入，
+//   补图每次静默失败 → 池永远为空 → 卡片封面 404（主页无背景）且无任何日志，多日未被发现。
+//   自愈——目录缺失/不可写时每小时节流尝试：父目录可写且池目录为空则删除并以本进程属主重建
+//   （rmdir 只删空目录）；仍不可写则在父目录落 .covers_unwritable 标记，使故障可被巡检发现，不再无限静默。
+$errMark = __DIR__ . '/data/cache/.covers_unwritable';
+if (is_dir($poolDir) && is_writable($poolDir)) {
+    if (is_file($errMark)) @unlink($errMark);   // 可写：清除历史告警标记
+} elseif (!is_file($errMark) || (time() - filemtime($errMark)) >= 3600) {
+    if (is_dir($poolDir)) @rmdir($poolDir);
+    if (!is_dir($poolDir)) @mkdir($poolDir, 0755, true);
+    if (!is_dir($poolDir) || !is_writable($poolDir)) @touch($errMark);
+}
 
 function coverPoolRead($m) {
     return is_file($m) ? (json_decode(@file_get_contents($m), true) ?: []) : [];

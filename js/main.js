@@ -185,7 +185,7 @@
         if (!window.MathJax) {
             window.MathJax = {
                 tex: {
-                    inlineMath: [['$', '$'], ['\\(', '\\)']],
+                    inlineMath: [['\\(', '\\)'], ['$', '$']],
                     displayMath: [['$$', '$$'], ['\\[', '\\]']],
                     processEscapes: true
                 },
@@ -196,7 +196,9 @@
         var onReady = function() {
             (MathJax.startup.promise || Promise.resolve()).then(cb).catch(cb);
         };
-        if (window.MathJax && MathJax.startup) { onReady(); return; }
+        // v4.9.1-fix：判据必须检测引擎真实就绪（typesetPromise 存在），而非 window.MathJax.startup 键——
+        //   配置对象自身也含 startup 键（{typeset:false}），原判据导致首次调用误判"已加载"提前 return，脚本永不追加
+        if (window.MathJax && typeof MathJax.typesetPromise === 'function') { onReady(); return; }
         var s = document.createElement('script');
         s.src = 'vendor/mathjax/es5/tex-chtml.js';
         s.onload = onReady;

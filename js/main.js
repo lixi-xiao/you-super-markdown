@@ -216,6 +216,28 @@
         // 保守探测公式定界符：$$ 块、LaTeX 原生 \[ \(、成对行内 $…$
         return /\$\$|\\\[|\\\(|\$[^$\n]*\$/.test(text || '');
     }
+    // v4.9.2-fix：保护 LaTeX 原生括号定界符不被 CommonMark 转义剥掉——
+    //   CommonMark 把 `\(` `\[` 视为"转义括号"，渲染时会删除反斜杠（\(a+b\) → (a+b)），
+    //   导致 MathJax 的 inlineMath/displayMath 永远匹配不到 \(...\) / \[...\]（踩坑 #44 同源问题的另一半）。
+    //   做法：marked 渲染前，把正文（跳过围栏代码块）中的 \( \) \[ \] 替换为反斜杠的 HTML 实体 &#92;，
+    //   marked 输出实体、浏览器解析文本节点后仍是字面 `\(`，MathJax 即可正常配对。
+    //   副作用说明：普通正文里原本想"转义括号"的作者会看到字面 `\(`（本平台定位公式优先，属预期）。
+    function protectLatexDelims(t) {
+        var out = [], inFence = false;
+        var lines = String(t).split('\n');
+        for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i];
+            if (/^\s*```/.test(ln)) { inFence = !inFence; out.push(ln); continue; }
+            if (!inFence) {
+                ln = ln.split('\\(').join('&#92;(')
+                         .split('\\)').join('&#92;)')
+                         .split('\\[').join('&#92;[')
+                         .split('\\]').join('&#92;]');
+            }
+            out.push(ln);
+        }
+        return out.join('\n');
+    }
     const topBar = document.getElementById('topBar');
     const btnSearch = document.getElementById('btnSearch');
     const btnToc = document.getElementById('btnToc');
@@ -1305,6 +1327,8 @@
                     return '@@YM_VIDEO_' + (videoSlots.length - 1) + '@@';
                 });
                 mdContent = mdContent.replace(/^(<!--.*?-->)?\s*#\s+.*\r?\n?/, '');
+                // v4.9.2-fix：先保护 \(...\)/\[...\] 定界符（CommonMark 会剥反斜杠），再交给 marked 渲染
+                mdContent = protectLatexDelims(mdContent);
                 const parsedHtml = typeof marked !== 'undefined' ? marked.parse(mdContent) : '<pre>' + escapeHTML(mdContent) + '</pre>';
                 markdownBody.innerHTML = buildDocHeader(fileMeta) + parsedHtml + buildBottomCards(fileMeta);
                 markdownBody.querySelectorAll('table').forEach(table => {

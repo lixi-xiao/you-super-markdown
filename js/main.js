@@ -174,6 +174,46 @@
             });
         } catch (e) { cb(); }
     }
+    // v4.9.0：数学公式渲染（MathJax 3 本地化 tex-chtml.js，约 1.1MB）——阅读页按需加载，仅排版文章正文容器
+    // 语法：$$ 块级 / $ 行内 / \(...\)、\[...\]（与 Typora/GitHub 主流一致），\$ 转义输出字面美元
+    // 节流：正文不含公式（$$、\( \[ 或成对 $…$）时完全不加载脚本——无公式文章零额外流量
+    // 安全：渲染完全在浏览器端、仅针对正文容器执行；代码块/行内代码由 skipHtmlTags(pre/code) 跳过不会误渲染；
+    //       公式语法错误由 MathJax 以原文形式展示，不执行任何脚本，服务端无任何解析面
+    // 约束：块级 $$…$$ 段落内勿含空行（marked 会把空行拆为两个 <p>，MathJax 无法跨节点配对）
+    function ensureMathJax(cb) {
+        cb = cb || function() {};
+        if (!window.MathJax) {
+            window.MathJax = {
+                tex: {
+                    inlineMath: [['$', '$'], ['\\(', '\\)']],
+                    displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                    processEscapes: true
+                },
+                options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'annotation', 'annotation-xml'] },
+                startup: { typeset: false }   // 关闭启动时全页自动排版，由 renderMathBlocks 精确排版正文容器
+            };
+        }
+        var onReady = function() {
+            (MathJax.startup.promise || Promise.resolve()).then(cb).catch(cb);
+        };
+        if (window.MathJax && MathJax.startup) { onReady(); return; }
+        var s = document.createElement('script');
+        s.src = 'vendor/mathjax/es5/tex-chtml.js';
+        s.onload = onReady;
+        s.onerror = function() { console.error('[mathjax] 公式引擎加载失败，公式将按原文显示'); };
+        document.head.appendChild(s);
+    }
+    function renderMathBlocks(root) {
+        if (window.MathJax && MathJax.typesetPromise) {
+            MathJax.typesetPromise([root]).catch(function(e) {
+                console.error('[mathjax] 排版出错（已保留原文）', e);
+            });
+        }
+    }
+    function hasMathInMd(text) {
+        // 保守探测公式定界符：$$ 块、LaTeX 原生 \[ \(、成对行内 $…$
+        return /\$\$|\\\[|\\\(|\$[^$\n]*\$/.test(text || '');
+    }
     const topBar = document.getElementById('topBar');
     const btnSearch = document.getElementById('btnSearch');
     const btnToc = document.getElementById('btnToc');
@@ -1279,6 +1319,10 @@
                         a.setAttribute('rel', 'noopener noreferrer');
                     }
                 });
+                // v4.9.0：正文含公式（$$ / \( \[ / 成对 $）时按需加载 MathJax 并排版正文容器（无公式则零加载）
+                if (hasMathInMd(mdContent)) {
+                    ensureMathJax(function() { renderMathBlocks(markdownBody); });
+                }
                 // v3.2.5：mermaid 流程图渲染（```mermaid 代码块 → 实际图表；优先于 hljs 高亮处理）；v4.2.2 起按需加载
                 // v4.7.14：mermaid 渲染完成后执行 hljs 和 addCopyButtons，避免异步加载时序问题
                 renderMermaidBlocks(markdownBody, function() {

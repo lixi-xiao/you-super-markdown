@@ -148,3 +148,146 @@
     #archiveView .archive-item { padding: 12px 14px; }
   }
 }
+
+/* ============================================================================
+   P2-2：文章页（阅读视图 #readingView）外壳
+   做法同 P2-1：仅以「壳容器 ID」(#readingView / #floatingButtons) 作前缀提权，
+   覆盖后加载的 style.css 旧类样式；不改 style.css、不改 js/main.js 的 JS 钩子。
+   范围：文章头部 / 正文容器外框 / 上一篇下一篇 / 底部卡片 / 评论容器外框 / 浮动按钮组间距。
+   保持原样：.markdown-body 内部正文排版（标题·段落·代码·表格·引用·公式·mermaid）、
+   评论内部交互与弹窗（.cmt-modal 与 .cmt-confirm 系列）、所有模态框（.ann-modal 系列）、
+   音乐播放器（.music 系列）。
+   不新增玻璃拟态；不设置任何 card 的 background，以保留既有「卡片背景 / 背景图 / 暗色 /
+   bg-blur 透明度」机制（这些规则由 style.css 的 body.bg-blur / [data-theme] 控制）。
+   ============================================================================ */
+@layer components {
+  /* ── 正文容器外框（仅圆角 + 阴影；内部排版一律不动） ────── */
+  #readingView .markdown-body {
+    border-radius: 22px;
+    box-shadow: var(--shadow);
+  }
+
+  /* ── 文章头部 ─────────────────────────────────────────── */
+  #readingView .doc-header { margin-bottom: 30px; }
+  #readingView .doc-header .doc-stats {
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+    font-size: 0.82em;
+    color: var(--text-muted);
+    letter-spacing: 0.01em;
+  }
+  #readingView .doc-stats .stat-item {
+    gap: 6px;
+    padding: 4px 12px 4px 8px;
+    border-radius: 999px;
+    background: var(--accent-light);
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-shadow: none;
+  }
+  #readingView .doc-stats .stat-item .meta-icon,
+  #readingView .doc-stats .stat-item .meta-icon svg {
+    background: transparent !important;
+    color: var(--accent) !important;
+    stroke: var(--accent) !important;
+    padding: 0;
+  }
+  #readingView .doc-header .doc-title {
+    font-size: 2.15em;
+    font-weight: 800;
+    line-height: 1.28;
+    letter-spacing: -0.022em;
+    margin-bottom: 16px;
+  }
+  #readingView .doc-header .doc-info {
+    gap: 16px;
+    font-size: 0.86em;
+    color: var(--text-muted);
+  }
+  #readingView .doc-info .info-item { gap: 5px; }
+  #readingView .doc-info .info-item .meta-icon {
+    background: transparent;
+    color: var(--text-muted);
+    padding: 0;
+    opacity: 0.85;
+  }
+  #readingView .doc-info .info-item .meta-icon svg { stroke: var(--text-muted); }
+  #readingView .doc-info .tag-list .tag-text { color: var(--text-muted); }
+
+  /* ── 上一篇 / 下一篇 ──────────────────────────────────── */
+  #readingView .prev-next-nav {
+    margin-top: 28px;
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+  }
+  #readingView .prev-next-btn {
+    padding: 18px 20px;
+    gap: 10px;
+    font-weight: 600;
+  }
+  #readingView .nav-arrow { font-size: 1.7em; color: var(--accent); }
+  #readingView .nav-text { font-size: 0.92em; }
+
+  /* ── 底部卡片（分享 / 文章信息） ─────────────────────── */
+  #readingView .article-bottom-cards {
+    margin-top: 36px;
+    padding-top: 28px;
+    gap: 18px;
+  }
+  #readingView .share-card,
+  #readingView .article-info-card {
+    border-radius: 18px;
+    padding: 22px 24px;
+  }
+  #readingView .share-card-top { gap: 12px; }
+  #readingView .share-card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+  }
+  #readingView .share-card-title,
+  #readingView .info-card-title {
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  #readingView .share-card-desc { line-height: 1.6; }
+  #readingView .share-card-btn {
+    border-radius: 999px;
+    padding: 10px 36px;
+    font-weight: 700;
+  }
+  #readingView .info-card-url { font-weight: 600; }
+  #readingView .info-card-meta { flex-wrap: wrap; gap: 26px; }
+  #readingView .info-card-author { color: var(--text-secondary); }
+
+  /* ── 评论容器外框（内部交互与弹窗一律不动） ───────────── */
+  #readingView .comment-section {
+    border-radius: 18px;
+    padding: 22px;
+  }
+  #readingView .cmt-capsule-section { margin-top: 28px; }
+  #readingView .cmt-capsule-bar { margin-bottom: 14px; }
+  #readingView .cmt-input-section { margin-top: 18px; }
+  #readingView .cmt-input-box { border-radius: 18px; }
+  #readingView .cmt-capsule-btn,
+  #readingView .cmt-user-inner { box-shadow: var(--shadow-sm); }
+
+  /* ── 浮动按钮组（仅组内间距；不改按钮内图标，音乐入口外观不动） ── */
+  #floatingButtons { gap: 10px; }
+
+  /* ── 移动端：紧凑化，杜绝横向溢出 ─────────────────────── */
+  @media (max-width: 640px) {
+    #readingView .doc-header { margin-bottom: 22px; }
+    #readingView .doc-header .doc-title { font-size: 1.7em; }
+    #readingView .doc-stats .stat-item { padding: 3px 10px 3px 7px; }
+    #readingView .prev-next-nav { margin-top: 22px; border-radius: 16px; }
+    #readingView .prev-next-btn { padding: 14px 16px; }
+    #readingView .nav-arrow { font-size: 1.5em; }
+    #readingView .article-bottom-cards { margin-top: 26px; padding-top: 20px; }
+    #readingView .share-card,
+    #readingView .article-info-card { padding: 18px; border-radius: 16px; }
+    #readingView .info-card-meta { gap: 16px; }
+    #readingView .comment-section { padding: 16px; border-radius: 16px; }
+  }
+}

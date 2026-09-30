@@ -1,15 +1,13 @@
-<?php
-http_response_code(404);
+<?php http_response_code(404);
 require_once __DIR__ . '/utils.php';
-$cfg = loadSiteConfig();
-$siteName = $cfg['site_title'] ?? 'You Super Markdown';
-$bgType = $cfg['bg_type'] ?? 'none';
-$bgImage = $cfg['bg_image'] ?? '';
-$bgApi = $cfg['bg_api_url'] ?? '';
-$bgBlur = !empty($cfg['bg_blur_enabled']) ? '1' : '0';
-$bgBlurLevel = intval($cfg['bg_blur_level'] ?? 0);
-$bgCardOpacity = intval($cfg['bg_card_opacity'] ?? 100);
-?>
+$siteCfg = loadSiteConfig();
+$siteName = $siteCfg['site_title'] ?? 'You Super Markdown';
+$bgType = $siteCfg['bg_type'] ?? 'none';
+$bgImage = $siteCfg['bg_image'] ?? '';
+$bgApi = $siteCfg['bg_api_url'] ?? '';
+$bgBlur = !empty($siteCfg['bg_blur_enabled']) ? '1' : '0';
+$bgBlurLevel = intval($siteCfg['bg_blur_level'] ?? 0);
+$bgCardOpacity = intval($siteCfg['bg_card_opacity'] ?? 100);?>
 <!DOCTYPE html>
 <html lang="zh-CN" data-theme="light">
 <head>

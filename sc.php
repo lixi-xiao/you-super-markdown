@@ -24,8 +24,8 @@ function mayManageArticle($meta) {
         || (empty($meta['author_id']) && ($meta['author'] ?? '') === $myNick);
 }
 
-$dataDir = './data/articles';
-if (!is_dir($dataDir)) mkdir($dataDir, 0755, true);
+$articlesDir = './data/articles';
+if (!is_dir($articlesDir)) mkdir($articlesDir, 0755, true);
 
 $saveErr = '';
 $saveOk = false;
@@ -33,27 +33,27 @@ $saveOk = false;
 // ====== 统一表单处理（在所有 HTML 输出之前） ======
 
 // 删除文档
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_file'])) {
+if (isset($_POST['delete_file']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         header('Location: sc.php?csrf=1');
         exit;
     }
-    $delFile = basename($_POST['delete_file']);
-    $delPath = $dataDir . '/' . $delFile;
-    if (file_exists($delPath) && strtolower(pathinfo($delFile, PATHINFO_EXTENSION)) === 'md') {
-        $realDataPath = realpath($dataDir);
-        $realDelPath = realpath($delPath);
-        if ($realDelPath !== false && strpos($realDelPath, $realDataPath) === 0) {
-            if (mayManageArticle(readArticleMeta($delPath))) {
+    $victimFile = basename($_POST['delete_file']);
+    $victimPath = $articlesDir . '/' . $victimFile;
+    if (file_exists($victimPath) && strtolower(pathinfo($victimFile, PATHINFO_EXTENSION)) === 'md') {
+        $rootReal = realpath($articlesDir);
+        $victimReal = realpath($victimPath);
+        if ($victimReal !== false && strpos($victimReal, $rootReal) === 0) {
+            if (mayManageArticle(readArticleMeta($victimPath))) {
                 // v3.3.1：系统文章（更新历史）与隐藏文章受保护——文档管理不可删除（仅在公告侧展示）
-                $delMeta = readArticleMeta($delPath);
-                if (in_array($delFile, ['更新历史.md'], true) || !empty($delMeta['hidden'])) {
-                    logUnauthorized('越权尝试删除系统/隐藏文章: ' . $delFile);
+                $victimMeta = readArticleMeta($victimPath);
+                if (in_array($victimFile, ['更新历史.md'], true) || !empty($victimMeta['hidden'])) {
+                    logUnauthorized('越权尝试删除系统/隐藏文章: ' . $victimFile);
                 } else {
-                    unlink($delPath);
+                    unlink($victimPath);
                 }
             } else {
-                logUnauthorized('越权尝试删除文章: ' . $delFile);
+                logUnauthorized('越权尝试删除文章: ' . $victimFile);
             }
         }
     }
@@ -64,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_file'])) {
 // ====== v3.3.0：富媒体压缩包批量上传（md + 图片 + 视频 一体导入，独立于纯 MD 上传） ======
 // 图片 → data/images/、视频 → data/videos/（均强制合法性校验）、md → data/articles/ 且引用路径自动重写；
 // 解析完即删临时 zip，不占服务器空间
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['rich_zip']) && ($_FILES['rich_zip']['error'] ?? -1) === UPLOAD_ERR_OK) {
+if (isset($_FILES['rich_zip']) && ($_FILES['rich_zip']['error'] ?? -1) === UPLOAD_ERR_OK && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         header('Location: sc.php?rich_zip=csrf_error');
         exit;
@@ -73,122 +73,122 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['rich_zip']) && ($_FI
         header('Location: sc.php?rich_zip=too_large');
         exit;
     }
-    $zip = new ZipArchive();
-    if ($zip->open($_FILES['rich_zip']['tmp_name']) !== true) {
+    $archive = new ZipArchive();
+    if ($archive->open($_FILES['rich_zip']['tmp_name']) !== true) {
         header('Location: sc.php?rich_zip=open_failed');
         exit;
     }
-    $imgDir = './data/images';
-    $vidDir = './data/videos';
-    if (!is_dir($imgDir)) mkdir($imgDir, 0755, true);
-    if (!is_dir($vidDir)) mkdir($vidDir, 0755, true);
-    $imgExt = ['jpg' => 1, 'jpeg' => 1, 'png' => 1, 'gif' => 1, 'webp' => 1];
-    $vidExt = ['mp4' => 1, 'webm' => 1];
-    $imgMap = []; // 原 basename => data/images/新名
-    $vidMap = []; // 原 basename => data/videos/新名
-    $mdList = []; // ['name' => 原相对路径, 'content' => 内容]
-    $cnt = ['md' => 0, 'img' => 0, 'vid' => 0];
+    $imageDir = './data/images';
+    $videoDir = './data/videos';
+    if (!is_dir($imageDir)) mkdir($imageDir, 0755, true);
+    if (!is_dir($videoDir)) mkdir($videoDir, 0755, true);
+    $imageExts = ['jpg' => 1, 'jpeg' => 1, 'png' => 1, 'gif' => 1, 'webp' => 1];
+    $videoExts = ['mp4' => 1, 'webm' => 1];
+    $imageMap = []; // 原 basename => data/images/新名
+    $videoMap = []; // 原 basename => data/videos/新名
+    $docList = []; // ['name' => 原相对路径, 'content' => 内容]
+    $tally = ['md' => 0, 'img' => 0, 'vid' => 0];
     // v4.1.6：富媒体包发布方式——立即发布（默认）/ 存草稿 / 定时发布；显式选择非「立即发布」时覆盖导入 md 的发布状态
-    $richStatus = $_POST['publish_status'] ?? 'published';
-    if (!in_array($richStatus, ['published', 'draft', 'scheduled'], true)) $richStatus = 'published';
-    $richAt = trim($_POST['publish_at'] ?? '');
-    if ($richStatus === 'scheduled' && $richAt === '') $richStatus = 'published'; // 定时未填时间 → 立即发布（与编辑器一致）
-    $richStatusMeta = [];
-    if ($richStatus !== 'published') {
-        $richStatusMeta['status'] = $richStatus;
-        if ($richStatus === 'scheduled') $richStatusMeta['publish_at'] = str_replace('T', ' ', $richAt);
+    $pubStatusRich = $_POST['publish_status'] ?? 'published';
+    if (!in_array($pubStatusRich, ['published', 'draft', 'scheduled'], true)) $pubStatusRich = 'published';
+    $pubAtRich = trim($_POST['publish_at'] ?? '');
+    if ($pubStatusRich === 'scheduled' && $pubAtRich === '') $pubStatusRich = 'published'; // 定时未填时间 → 立即发布（与编辑器一致）
+    $pubMetaRich = [];
+    if ($pubStatusRich !== 'published') {
+        $pubMetaRich['status'] = $pubStatusRich;
+        if ($pubStatusRich === 'scheduled') $pubMetaRich['publish_at'] = str_replace('T', ' ', $pubAtRich);
     }
-    $zipSafe = true;
-    $errKey = '';
-    if ($zip->numFiles > 200) { $zipSafe = false; $errKey = 'too_many'; }
-    $totalZipSize = 0;
-    for ($i = 0; $zipSafe && $i < $zip->numFiles; $i++) {
-        $stat = $zip->statIndex($i);
-        $totalZipSize += (int)($stat['size'] ?? 0);
-        if ($totalZipSize > 80 * 1024 * 1024) { $zipSafe = false; $errKey = 'too_large'; break; }
+    $archiveOk = true;
+    $failKey = '';
+    if ($archive->numFiles > 200) { $archiveOk = false; $failKey = 'too_many'; }
+    $archiveBytes = 0;
+    for ($idx = 0; $archiveOk && $idx < $archive->numFiles; $idx++) {
+        $entryStat = $archive->statIndex($idx);
+        $archiveBytes += (int)($entryStat['size'] ?? 0);
+        if ($archiveBytes > 80 * 1024 * 1024) { $archiveOk = false; $failKey = 'too_large'; break; }
         // v3.3.1：先按中央目录预检单文件解压大小，超限直接拒绝（避免先解压进内存再检查的内存型 DoS）
-        if ((int)($stat['size'] ?? 0) > 40 * 1024 * 1024) { $zipSafe = false; $errKey = 'file_too_large'; break; }
-        $entryName = $zip->getNameIndex($i);
-        if (substr($entryName, -1) === '/' || strpos(basename($entryName), '.') === 0) continue; // 目录/隐藏文件跳过
-        $entryExt = strtolower(pathinfo($entryName, PATHINFO_EXTENSION));
-        $content = $zip->getFromIndex($i);
-        if ($content === false) continue;
-        if (strlen($content) > 40 * 1024 * 1024) { $zipSafe = false; $errKey = 'file_too_large'; break; }
-        if (in_array($entryExt, ['md', 'txt', 'markdown'], true)) {
-            $mdList[] = ['name' => $entryName, 'content' => $content];
-        } elseif (isset($imgExt[$entryExt])) {
+        if ((int)($entryStat['size'] ?? 0) > 40 * 1024 * 1024) { $archiveOk = false; $failKey = 'file_too_large'; break; }
+        $entryPath = $archive->getNameIndex($idx);
+        if (substr($entryPath, -1) === '/' || strpos(basename($entryPath), '.') === 0) continue; // 目录/隐藏文件跳过
+        $entryExtLower = strtolower(pathinfo($entryPath, PATHINFO_EXTENSION));
+        $text = $archive->getFromIndex($idx);
+        if ($text === false) continue;
+        if (strlen($text) > 40 * 1024 * 1024) { $archiveOk = false; $failKey = 'file_too_large'; break; }
+        if (in_array($entryExtLower, ['md', 'txt', 'markdown'], true)) {
+            $docList[] = ['name' => $entryPath, 'content' => $text];
+        } elseif (isset($imageExts[$entryExtLower])) {
             // 图片强制校验：内容必须为真实图片（finfo buffer MIME）
-            if (!validateImageBuffer($content)) continue; // 伪装/损坏 → 跳过该文件（不中断整体）
-            $fname = date('Ymd') . '_' . bin2hex(random_bytes(8)) . '.' . $entryExt;
-            if (file_put_contents($imgDir . '/' . $fname, $content, LOCK_EX)) {
-                $imgMap[basename($entryName)] = 'data/images/' . $fname;
-                $cnt['img']++;
+            if (!validateImageBuffer($text)) continue; // 伪装/损坏 → 跳过该文件（不中断整体）
+            $storedName = date('Ymd') . '_' . bin2hex(random_bytes(8)) . '.' . $entryExtLower;
+            if (file_put_contents($imageDir . '/' . $storedName, $text, LOCK_EX)) {
+                $imageMap[basename($entryPath)] = 'data/images/' . $storedName;
+                $tally['img']++;
             }
-        } elseif (isset($vidExt[$entryExt])) {
+        } elseif (isset($videoExts[$entryExtLower])) {
             // 视频强制校验：容器结构（ftyp box / EBML 魔数）+ MIME
-            if (!validateVideoBuffer($content, $entryExt)) continue;
-            $fname = date('Ymd') . '_' . bin2hex(random_bytes(8)) . '.' . $entryExt;
-            if (file_put_contents($vidDir . '/' . $fname, $content, LOCK_EX)) {
-                $vidMap[basename($entryName)] = 'data/videos/' . $fname;
-                $cnt['vid']++;
+            if (!validateVideoBuffer($text, $entryExtLower)) continue;
+            $storedName = date('Ymd') . '_' . bin2hex(random_bytes(8)) . '.' . $entryExtLower;
+            if (file_put_contents($videoDir . '/' . $storedName, $text, LOCK_EX)) {
+                $videoMap[basename($entryPath)] = 'data/videos/' . $storedName;
+                $tally['vid']++;
             }
         }
         // 其他类型忽略（不导入）
     }
     // md 导入 + 路径重写（第二遍，图片/视频映射已齐）
-    if ($zipSafe) {
-        $licenseUrlMap = ['CC BY 4.0' => 'https://creativecommons.org/licenses/by/4.0/', 'CC BY-SA 4.0' => 'https://creativecommons.org/licenses/by-sa/4.0/', 'CC BY-NC 4.0' => 'https://creativecommons.org/licenses/by-nc/4.0/', 'CC BY-NC-SA 4.0' => 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'CC BY-ND 4.0' => 'https://creativecommons.org/licenses/by-nd/4.0/', 'CC BY-NC-ND 4.0' => 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'CC0 1.0' => 'https://creativecommons.org/publicdomain/zero/1.0/'];
-        foreach ($mdList as $md) {
-            $baseName = basename($md['name']);
-            if (empty($baseName)) continue;
-            $safeName = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '', pathinfo($baseName, PATHINFO_FILENAME));
-            if (empty($safeName)) $safeName = 'doc_' . time() . '_' . $cnt['md'];
-            $targetName = $safeName . '.md';
-            if (file_exists($dataDir . '/' . $targetName)) {
-                $targetName = $safeName . '_' . time() . '.md';
+    if ($archiveOk) {
+        $licenseUrls = ['CC BY 4.0' => 'https://creativecommons.org/licenses/by/4.0/', 'CC BY-SA 4.0' => 'https://creativecommons.org/licenses/by-sa/4.0/', 'CC BY-NC 4.0' => 'https://creativecommons.org/licenses/by-nc/4.0/', 'CC BY-NC-SA 4.0' => 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'CC BY-ND 4.0' => 'https://creativecommons.org/licenses/by-nd/4.0/', 'CC BY-NC-ND 4.0' => 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'CC0 1.0' => 'https://creativecommons.org/publicdomain/zero/1.0/'];
+        foreach ($docList as $doc) {
+            $leafName = basename($doc['name']);
+            if (empty($leafName)) continue;
+            $slugName = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '', pathinfo($leafName, PATHINFO_FILENAME));
+            if (empty($slugName)) $slugName = 'doc_' . time() . '_' . $tally['md'];
+            $destName = $slugName . '.md';
+            if (file_exists($articlesDir . '/' . $destName)) {
+                $destName = $slugName . '_' . time() . '.md';
             }
-            $content = $md['content'];
+            $text = $doc['content'];
             // 路径自动重写：!video[]() 与 ![]() 引用命中本次导入文件则改为站内路径（外链/已是站内路径不动）
-            $content = preg_replace_callback('/!video\[([^\]]*)\]\(([^)\s]+)\)/', function ($m) use ($vidMap) {
-                if (preg_match('/^(https?:)?\/\//i', $m[2]) || strpos($m[2], 'data/videos/') === 0) return $m[0];
-                $b = basename($m[2]);
-                if (!isset($vidMap[$b])) return $m[0];
-                return substr($m[0], 0, strrpos($m[0], '(') + 1) . $vidMap[$b] . ')';
-            }, $content);
-            $content = preg_replace_callback('/!\[([^\]]*)\]\(([^)\s]+)\)/', function ($m) use ($imgMap) {
-                if (preg_match('/^(https?:)?\/\//i', $m[2]) || strpos($m[2], 'data/images/') === 0) return $m[0];
-                $b = basename($m[2]);
-                if (!isset($imgMap[$b])) return $m[0];
-                return substr($m[0], 0, strrpos($m[0], '(') + 1) . $imgMap[$b] . ')';
-            }, $content);
-            if (!preg_match('/^<!--META/', $content)) {
-                $meta = ['category' => $_POST['category'] ?? '', 'tags' => $_POST['tags'] ?? '', 'excerpt' => $_POST['excerpt'] ?? '', 'author' => $_POST['author'] ?? '', 'author_id' => $myId, 'license' => $_POST['license'] ?? 'CC BY-NC-SA 4.0', 'licenseUrl' => ($licenseUrlMap[$_POST['license'] ?? 'CC BY-NC-SA 4.0'] ?? '')];
+            $text = preg_replace_callback('/!video\[([^\]]*)\]\(([^)\s]+)\)/', function ($hit) use ($videoMap) {
+                if (preg_match('/^(https?:)?\/\//i', $hit[2]) || strpos($hit[2], 'data/videos/') === 0) return $hit[0];
+                $leaf = basename($hit[2]);
+                if (!isset($videoMap[$leaf])) return $hit[0];
+                return substr($hit[0], 0, strrpos($hit[0], '(') + 1) . $videoMap[$leaf] . ')';
+            }, $text);
+            $text = preg_replace_callback('/!\[([^\]]*)\]\(([^)\s]+)\)/', function ($hit) use ($imageMap) {
+                if (preg_match('/^(https?:)?\/\//i', $hit[2]) || strpos($hit[2], 'data/images/') === 0) return $hit[0];
+                $leaf = basename($hit[2]);
+                if (!isset($imageMap[$leaf])) return $hit[0];
+                return substr($hit[0], 0, strrpos($hit[0], '(') + 1) . $imageMap[$leaf] . ')';
+            }, $text);
+            if (!preg_match('/^<!--META/', $text)) {
+                $frontMatter = ['category' => $_POST['category'] ?? '', 'tags' => $_POST['tags'] ?? '', 'excerpt' => $_POST['excerpt'] ?? '', 'author' => $_POST['author'] ?? '', 'author_id' => $myId, 'license' => $_POST['license'] ?? 'CC BY-NC-SA 4.0', 'licenseUrl' => ($licenseUrls[$_POST['license'] ?? 'CC BY-NC-SA 4.0'] ?? '')];
                 // v4.1.6：表单显式选择非「立即发布」时写入发布状态（默认立即发布，保持原行为）
-                if ($richStatusMeta) {
-                    $meta = array_merge($meta, $richStatusMeta);
-                    if ($richStatus === 'draft') unset($meta['publish_at']);
+                if ($pubMetaRich) {
+                    $frontMatter = array_merge($frontMatter, $pubMetaRich);
+                    if ($pubStatusRich === 'draft') unset($frontMatter['publish_at']);
                 }
-                $content = "<!--META" . json_encode($meta, JSON_UNESCAPED_UNICODE) . "-->\n" . $content;
-            } elseif ($richStatusMeta && preg_match('/^<!--META(.*?)-->/s', $content, $m)) {
+                $text = "<!--META" . json_encode($frontMatter, JSON_UNESCAPED_UNICODE) . "-->\n" . $text;
+            } elseif ($pubMetaRich && preg_match('/^<!--META(.*?)-->/s', $text, $hit)) {
                 // v4.1.6：md 自带 META 时，表单显式选择非「立即发布」则覆盖其发布状态（重建 META 头）
-                $meta = json_decode(trim($m[1]), true);
-                if (!is_array($meta)) $meta = [];
-                $meta = array_merge($meta, $richStatusMeta);
-                if ($richStatus === 'draft') unset($meta['publish_at']);
-                $content = preg_replace('/^<!--META.*?-->/s', "<!--META" . json_encode($meta, JSON_UNESCAPED_UNICODE) . "-->", $content, 1);
+                $frontMatter = json_decode(trim($hit[1]), true);
+                if (!is_array($frontMatter)) $frontMatter = [];
+                $frontMatter = array_merge($frontMatter, $pubMetaRich);
+                if ($pubStatusRich === 'draft') unset($frontMatter['publish_at']);
+                $text = preg_replace('/^<!--META.*?-->/s', "<!--META" . json_encode($frontMatter, JSON_UNESCAPED_UNICODE) . "-->", $text, 1);
             }
-            if (file_put_contents($dataDir . '/' . $targetName, $content, LOCK_EX)) {
-                $cnt['md']++;
+            if (file_put_contents($articlesDir . '/' . $destName, $text, LOCK_EX)) {
+                $tally['md']++;
             }
         }
     }
-    $zip->close();
+    $archive->close();
     @unlink($_FILES['rich_zip']['tmp_name']); // 解析完即删，不占服务器空间
-    if ($cnt['md'] > 0) triggerArticleBackup(); // v3.3.5：上传含 md → 触发守护进程立即备份
-    if ($zipSafe) {
-        header('Location: sc.php?rich_zip=ok&md=' . $cnt['md'] . '&img=' . $cnt['img'] . '&vid=' . $cnt['vid']);
+    if ($tally['md'] > 0) triggerArticleBackup(); // v3.3.5：上传含 md → 触发守护进程立即备份
+    if ($archiveOk) {
+        header('Location: sc.php?rich_zip=ok&md=' . $tally['md'] . '&img=' . $tally['img'] . '&vid=' . $tally['vid']);
     } else {
-        header('Location: sc.php?rich_zip=' . ($errKey ?: 'aborted'));
+        header('Location: sc.php?rich_zip=' . ($failKey ?: 'aborted'));
     }
     exit;
 }
@@ -196,195 +196,195 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['rich_zip']) && ($_FI
 // 获取文章内容（AJAX）
 if (isset($_GET['action']) && $_GET['action'] === 'get_content') {
     header('Content-Type: application/json; charset=utf-8');
-    $reqFile = basename($_GET['file'] ?? '');
-    if (strtolower(pathinfo($reqFile, PATHINFO_EXTENSION)) !== 'md') {
+    $askFile = basename($_GET['file'] ?? '');
+    if (strtolower(pathinfo($askFile, PATHINFO_EXTENSION)) !== 'md') {
         echo json_encode(['success' => false]); exit;
     }
-    $reqPath = $dataDir . '/' . $reqFile;
-    if (!file_exists($reqPath)) { echo json_encode(['success' => false]); exit; }
+    $askPath = $articlesDir . '/' . $askFile;
+    if (!file_exists($askPath)) { echo json_encode(['success' => false]); exit; }
     // 最小权限：写作者只能读取自己的文章（站长可读全部）
-    if (!$isStationAdmin && !mayManageArticle(readArticleMeta($reqPath))) {
-        logUnauthorized('越权尝试读取文章内容: ' . $reqFile);
+    if (!$isStationAdmin && !mayManageArticle(readArticleMeta($askPath))) {
+        logUnauthorized('越权尝试读取文章内容: ' . $askFile);
         echo json_encode(['success' => false, 'error' => '无权访问']); exit;
     }
-    $raw = file_get_contents($reqPath);
-    $meta = []; $content = $raw;
-    if (preg_match('/<!--META(.*?)-->/s', $raw, $m)) {
-        $meta = json_decode(trim($m[1]), true) ?: [];
-        $content = preg_replace('/<!--META.*?-->\n?/s', '', $raw);
+    $blob = file_get_contents($askPath);
+    $frontMatter = []; $text = $blob;
+    if (preg_match('/<!--META(.*?)-->/s', $blob, $hit)) {
+        $frontMatter = json_decode(trim($hit[1]), true) ?: [];
+        $text = preg_replace('/<!--META.*?-->\n?/s', '', $blob);
     }
-    $title = '';
-    $contentWithoutCode = preg_replace('/```[\s\S]*?```/', '', $content);
-    if (preg_match('/^#\s+(.+)/m', $contentWithoutCode, $tm)) $title = $tm[1];
-    else $title = preg_replace('/\.md$/i', '', $reqFile);
+    $docTitle = '';
+    $titleProbe = preg_replace('/```[\s\S]*?```/', '', $text);
+    if (preg_match('/^#\s+(.+)/m', $titleProbe, $titleHit)) $docTitle = $titleHit[1];
+    else $docTitle = preg_replace('/\.md$/i', '', $askFile);
     // v3.1.11：返回该文章当前是否为公告（编辑弹窗「作为公告」开关初始状态；仅站长可设）
-    $isAnn = $isStationAdmin && (bool)db_one('SELECT 1 FROM announcement WHERE article = ? LIMIT 1', [$reqFile]);
-    echo json_encode(['success' => true, 'title' => $title, 'content' => $content, 'meta' => $meta, 'is_announce' => $isAnn], JSON_UNESCAPED_UNICODE);
+    $isPinnedAnn = $isStationAdmin && (bool)db_one('SELECT 1 FROM announcement WHERE article = ? LIMIT 1', [$askFile]);
+    echo json_encode(['success' => true, 'title' => $docTitle, 'content' => $text, 'meta' => $frontMatter, 'is_announce' => $isPinnedAnn], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 // 上传/保存文档
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) || isset($_POST['content']) || isset($_POST['url']) || isset($_POST['update_file']))) {
+if ((isset($_FILES['markdown_file']) || isset($_POST['content']) || isset($_POST['url']) || isset($_POST['update_file'])) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         $saveErr = 'csrf_error';
     } else {
-        $title = $_POST['title'] ?? '';
-        $category = $_POST['category'] ?? '';
-        $tags = $_POST['tags'] ?? '';
-        $excerpt = $_POST['excerpt'] ?? '';
-        $content = $_POST['content'] ?? '';
-        $author = $_POST['author'] ?? '';
-        $license = $_POST['license'] ?? 'CC BY-NC-SA 4.0';
-        $upFile = $_FILES['markdown_file'] ?? null;
-        $url = $_POST['url'] ?? '';
-        $updateFile = $_POST['update_file'] ?? '';
+        $docTitle = $_POST['title'] ?? '';
+        $cat = $_POST['category'] ?? '';
+        $tagStr = $_POST['tags'] ?? '';
+        $digest = $_POST['excerpt'] ?? '';
+        $text = $_POST['content'] ?? '';
+        $writer = $_POST['author'] ?? '';
+        $licenseName = $_POST['license'] ?? 'CC BY-NC-SA 4.0';
+        $uploadedFile = $_FILES['markdown_file'] ?? null;
+        $fetchUrl = $_POST['url'] ?? '';
+        $editTarget = $_POST['update_file'] ?? '';
 
-        $isZip = false;
-        if ($upFile && $upFile['error'] === UPLOAD_ERR_OK) {
-            $ext = strtolower(pathinfo($upFile['name'], PATHINFO_EXTENSION));
-            if ($ext === 'zip') {
-                $isZip = true;
-                $zip = new ZipArchive();
-                if ($zip->open($upFile['tmp_name']) === true) {
-                    $extractedCount = 0;
+        $isArchive = false;
+        if ($uploadedFile && $uploadedFile['error'] === UPLOAD_ERR_OK) {
+            $fileExt = strtolower(pathinfo($uploadedFile['name'], PATHINFO_EXTENSION));
+            if ($fileExt === 'zip') {
+                $isArchive = true;
+                $archive = new ZipArchive();
+                if ($archive->open($uploadedFile['tmp_name']) === true) {
+                    $importedCount = 0;
                     // 防 zip bomb：限制文件数量与解压总大小
-                    $zipSafe = true;
-                    if ($zip->numFiles > 200) {
-                        $zipSafe = false;
+                    $archiveOk = true;
+                    if ($archive->numFiles > 200) {
+                        $archiveOk = false;
                         $saveErr = 'ZIP 内文件过多（最多 200 个），已拒绝导入';
                     }
-                    $totalZipSize = 0;
-                    for ($i = 0; $zipSafe && $i < $zip->numFiles; $i++) {
-                        $stat = $zip->statIndex($i);
-                        $totalZipSize += (int)($stat['size'] ?? 0);
-                        if ($totalZipSize > 50 * 1024 * 1024) {
-                            $zipSafe = false;
+                    $archiveBytes = 0;
+                    for ($idx = 0; $archiveOk && $idx < $archive->numFiles; $idx++) {
+                        $entryStat = $archive->statIndex($idx);
+                        $archiveBytes += (int)($entryStat['size'] ?? 0);
+                        if ($archiveBytes > 50 * 1024 * 1024) {
+                            $archiveOk = false;
                             $saveErr = 'ZIP 解压总大小超限（最大 50MB），已拒绝导入';
                             break;
                         }
-                        $entryName = $zip->getNameIndex($i);
-                        if (substr($entryName, -1) === '/' || strpos(basename($entryName), '.') === 0) continue;
-                        $entryExt = strtolower(pathinfo($entryName, PATHINFO_EXTENSION));
-                        if (!in_array($entryExt, ['md', 'txt', 'markdown'])) continue;
-                        $baseName = basename($entryName);
-                        if (empty($baseName)) continue;
-                        $safeName = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '', pathinfo($baseName, PATHINFO_FILENAME));
-                        if (empty($safeName)) $safeName = 'doc_' . time() . '_' . $i;
-                        $targetName = $safeName . '.md';
-                        if (file_exists($dataDir . '/' . $targetName)) {
-                            $targetName = $safeName . '_' . time() . '.md';
+                        $entryPath = $archive->getNameIndex($idx);
+                        if (substr($entryPath, -1) === '/' || strpos(basename($entryPath), '.') === 0) continue;
+                        $entryExtLower = strtolower(pathinfo($entryPath, PATHINFO_EXTENSION));
+                        if (!in_array($entryExtLower, ['md', 'txt', 'markdown'])) continue;
+                        $leafName = basename($entryPath);
+                        if (empty($leafName)) continue;
+                        $slugName = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '', pathinfo($leafName, PATHINFO_FILENAME));
+                        if (empty($slugName)) $slugName = 'doc_' . time() . '_' . $idx;
+                        $destName = $slugName . '.md';
+                        if (file_exists($articlesDir . '/' . $destName)) {
+                            $destName = $slugName . '_' . time() . '.md';
                         }
-                        $fileContent = $zip->getFromIndex($i);
-                        if ($fileContent === false) continue;
-                        if (strlen($fileContent) > 10 * 1024 * 1024) {
-                            $zipSafe = false;
+                        $docBody = $archive->getFromIndex($idx);
+                        if ($docBody === false) continue;
+                        if (strlen($docBody) > 10 * 1024 * 1024) {
+                            $archiveOk = false;
                             $saveErr = 'ZIP 内单个文件超过 10MB，已拒绝导入';
                             break;
                         }
-                        if (!preg_match('/^<!--META/', $fileContent)) {
-                            $licenseUrlMap = ['CC BY 4.0' => 'https://creativecommons.org/licenses/by/4.0/', 'CC BY-SA 4.0' => 'https://creativecommons.org/licenses/by-sa/4.0/', 'CC BY-NC 4.0' => 'https://creativecommons.org/licenses/by-nc/4.0/', 'CC BY-NC-SA 4.0' => 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'CC BY-ND 4.0' => 'https://creativecommons.org/licenses/by-nd/4.0/', 'CC BY-NC-ND 4.0' => 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'CC0 1.0' => 'https://creativecommons.org/publicdomain/zero/1.0/'];
-                            $meta = json_encode(['category' => $category, 'tags' => $tags, 'excerpt' => $excerpt, 'author' => $author, 'author_id' => $myId, 'license' => $license, 'licenseUrl' => ($licenseUrlMap[$license] ?? '')], JSON_UNESCAPED_UNICODE);
-                            $fileContent = "<!--META" . $meta . "-->\n" . $fileContent;
+                        if (!preg_match('/^<!--META/', $docBody)) {
+                            $licenseUrls = ['CC BY 4.0' => 'https://creativecommons.org/licenses/by/4.0/', 'CC BY-SA 4.0' => 'https://creativecommons.org/licenses/by-sa/4.0/', 'CC BY-NC 4.0' => 'https://creativecommons.org/licenses/by-nc/4.0/', 'CC BY-NC-SA 4.0' => 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'CC BY-ND 4.0' => 'https://creativecommons.org/licenses/by-nd/4.0/', 'CC BY-NC-ND 4.0' => 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'CC0 1.0' => 'https://creativecommons.org/publicdomain/zero/1.0/'];
+                            $metaJsonStr = json_encode(['category' => $cat, 'tags' => $tagStr, 'excerpt' => $digest, 'author' => $writer, 'author_id' => $myId, 'license' => $licenseName, 'licenseUrl' => ($licenseUrls[$licenseName] ?? '')], JSON_UNESCAPED_UNICODE);
+                            $docBody = "<!--META" . $metaJsonStr . "-->\n" . $docBody;
                         }
-                        if (file_put_contents($dataDir . '/' . $targetName, $fileContent, LOCK_EX)) {
-                            $extractedCount++;
+                        if (file_put_contents($articlesDir . '/' . $destName, $docBody, LOCK_EX)) {
+                            $importedCount++;
                         }
                     }
-                    $zip->close();
-                    @unlink($upFile['tmp_name']);
-                    if ($zipSafe) {
-                        $saveOk = $extractedCount > 0 ? 'ZIP 解压完成，共导入 ' . $extractedCount . ' 篇文档' : 'ZIP 中未找到可识别的 Markdown 文件';
-                        if ($extractedCount === 0) $saveErr = 'ZIP 中未找到可识别的 Markdown 文件';
+                    $archive->close();
+                    @unlink($uploadedFile['tmp_name']);
+                    if ($archiveOk) {
+                        $saveOk = $importedCount > 0 ? 'ZIP 解压完成，共导入 ' . $importedCount . ' 篇文档' : 'ZIP 中未找到可识别的 Markdown 文件';
+                        if ($importedCount === 0) $saveErr = 'ZIP 中未找到可识别的 Markdown 文件';
                     }
                 } else {
                     $saveErr = '无法打开 ZIP 文件';
                 }
             } else {
-                $content = file_get_contents($upFile['tmp_name']);
+                $text = file_get_contents($uploadedFile['tmp_name']);
             }
         }
 
-        if (!$isZip && !empty($url) && empty($content)) {
+        if (!$isArchive && !empty($fetchUrl) && empty($text)) {
             // v3.0.6：SSRF 安全抓取——一次解析 + pin 解析后 IP 直连（Host/SNI 保留原域名），
             // 消除"先 gethostbyname 校验、后 file_get_contents 二次解析"的 DNS rebinding TOCTOU；内网/未识别默认拒绝
-            $fetched = fetchHttpContent($url);
-            if ($fetched === false) { $saveErr = '无法从该链接获取内容'; }
-            else { $content = $fetched; }
+            $grabbed = fetchHttpContent($fetchUrl);
+            if ($grabbed === false) { $saveErr = '无法从该链接获取内容'; }
+            else { $text = $grabbed; }
         }
 
-        if (empty($content) && !$saveErr) { $saveErr = '请提供 Markdown 内容'; }
+        if (empty($text) && !$saveErr) { $saveErr = '请提供 Markdown 内容'; }
 
-        if (!$saveErr && !$isZip) {
-            if (empty($title)) {
-                $contentWithoutCode = preg_replace('/```[\s\S]*?```/', '', $content);
-                if (preg_match('/^#\s+(.+)/m', $contentWithoutCode, $m)) { $title = $m[1]; }
-                else { $title = '未命名文档'; }
+        if (!$saveErr && !$isArchive) {
+            if (empty($docTitle)) {
+                $titleProbe = preg_replace('/```[\s\S]*?```/', '', $text);
+                if (preg_match('/^#\s+(.+)/m', $titleProbe, $hit)) { $docTitle = $hit[1]; }
+                else { $docTitle = '未命名文档'; }
             }
-            $licenseUrlMap = ['CC BY 4.0' => 'https://creativecommons.org/licenses/by/4.0/', 'CC BY-SA 4.0' => 'https://creativecommons.org/licenses/by-sa/4.0/', 'CC BY-NC 4.0' => 'https://creativecommons.org/licenses/by-nc/4.0/', 'CC BY-NC-SA 4.0' => 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'CC BY-ND 4.0' => 'https://creativecommons.org/licenses/by-nd/4.0/', 'CC BY-NC-ND 4.0' => 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'CC0 1.0' => 'https://creativecommons.org/publicdomain/zero/1.0/'];
-            $licenseUrl = $licenseUrlMap[$license] ?? '';
+            $licenseUrls = ['CC BY 4.0' => 'https://creativecommons.org/licenses/by/4.0/', 'CC BY-SA 4.0' => 'https://creativecommons.org/licenses/by-sa/4.0/', 'CC BY-NC 4.0' => 'https://creativecommons.org/licenses/by-nc/4.0/', 'CC BY-NC-SA 4.0' => 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'CC BY-ND 4.0' => 'https://creativecommons.org/licenses/by-nd/4.0/', 'CC BY-NC-ND 4.0' => 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'CC0 1.0' => 'https://creativecommons.org/publicdomain/zero/1.0/'];
+            $licenseLink = $licenseUrls[$licenseName] ?? '';
             // v4.0.0：发布状态——published 立即发布 / draft 存草稿 / scheduled 定时发布（publish_at 格式 Y-m-d\TH:i）
-            $publishStatus = $_POST['publish_status'] ?? 'published';
-            if (!in_array($publishStatus, ['published', 'draft', 'scheduled'], true)) $publishStatus = 'published';
-            $publishAt = trim($_POST['publish_at'] ?? '');
-            if ($publishStatus === 'scheduled' && $publishAt === '') $publishStatus = 'published';
+            $pubStatus = $_POST['publish_status'] ?? 'published';
+            if (!in_array($pubStatus, ['published', 'draft', 'scheduled'], true)) $pubStatus = 'published';
+            $pubAt = trim($_POST['publish_at'] ?? '');
+            if ($pubStatus === 'scheduled' && $pubAt === '') $pubStatus = 'published';
             // 定时时间转 "Y-m-d H:i" 存 META（list/read 均按此格式比较）
-            $publishAtStored = '';
-            if ($publishAt !== '') {
-                $publishAtStored = str_replace('T', ' ', $publishAt);
+            $pubAtStored = '';
+            if ($pubAt !== '') {
+                $pubAtStored = str_replace('T', ' ', $pubAt);
             }
-            $meta = ['category' => $category, 'tags' => $tags, 'excerpt' => $excerpt, 'author' => $author, 'author_id' => $myId, 'license' => $license, 'licenseUrl' => $licenseUrl];
-            if ($publishStatus !== 'published') {
-                $meta['status'] = $publishStatus;
-                if ($publishStatus === 'scheduled' && $publishAtStored !== '') $meta['publish_at'] = $publishAtStored;
+            $frontMatter = ['category' => $cat, 'tags' => $tagStr, 'excerpt' => $digest, 'author' => $writer, 'author_id' => $myId, 'license' => $licenseName, 'licenseUrl' => $licenseLink];
+            if ($pubStatus !== 'published') {
+                $frontMatter['status'] = $pubStatus;
+                if ($pubStatus === 'scheduled' && $pubAtStored !== '') $frontMatter['publish_at'] = $pubAtStored;
             } else {
-                unset($meta['status'], $meta['publish_at']);
+                unset($frontMatter['status'], $frontMatter['publish_at']);
             }
-            $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE);
-            $fullContent = "<!--META" . $metaJson . "-->\n" . $content;
+            $metaJsonStr = json_encode($frontMatter, JSON_UNESCAPED_UNICODE);
+            $finalBody = "<!--META" . $metaJsonStr . "-->\n" . $text;
 
-            if (!empty($updateFile)) {
-                $fn = basename($updateFile);
-                $fp = $dataDir . '/' . $fn;
-                if (file_exists($fp)) {
-                    if (!mayManageArticle(readArticleMeta($fp))) {
+            if (!empty($editTarget)) {
+                $destLeaf = basename($editTarget);
+                $destPath = $articlesDir . '/' . $destLeaf;
+                if (file_exists($destPath)) {
+                    if (!mayManageArticle(readArticleMeta($destPath))) {
                         $saveErr = '无权编辑该文章';
-                        logUnauthorized('越权尝试编辑文章: ' . $fn);
-                    } elseif (file_put_contents($fp, $fullContent, LOCK_EX)) {
+                        logUnauthorized('越权尝试编辑文章: ' . $destLeaf);
+                    } elseif (file_put_contents($destPath, $finalBody, LOCK_EX)) {
                         $saveOk = '文档已更新';
-                        auditLog('article_update', $fn, '更新文档: ' . $title);
+                        auditLog('article_update', $destLeaf, '更新文档: ' . $docTitle);
                     } else { $saveErr = '保存失败'; }
                 } else { $saveErr = '原文件不存在'; }
             } else {
-                if ($upFile && $upFile['error'] === UPLOAD_ERR_OK) {
-                    $originalName = pathinfo($upFile['name'], PATHINFO_FILENAME);
-                    $fn = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '', $originalName);
-                } else { $fn = ''; }
-                if (empty($fn)) { $fn = 'doc_' . time(); }
-                $fn .= '.md';
-                if (file_put_contents($dataDir . '/' . $fn, $fullContent, LOCK_EX)) {
+                if ($uploadedFile && $uploadedFile['error'] === UPLOAD_ERR_OK) {
+                    $origLeaf = pathinfo($uploadedFile['name'], PATHINFO_FILENAME);
+                    $destLeaf = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '', $origLeaf);
+                } else { $destLeaf = ''; }
+                if (empty($destLeaf)) { $destLeaf = 'doc_' . time(); }
+                $destLeaf .= '.md';
+                if (file_put_contents($articlesDir . '/' . $destLeaf, $finalBody, LOCK_EX)) {
                     $saveOk = '文档已创建';
-                    auditLog('article_create', $fn, '创建文档: ' . $title);
+                    auditLog('article_create', $destLeaf, '创建文档: ' . $docTitle);
                 } else { $saveErr = '保存失败'; }
             }
         }
 
         // v3.1.11：文章发布界面「作为公告」开关（仅站长可设）——
         // 开启 → 该文章在首页公告区展示；关闭 → 移除其公告。系统文章（更新历史）受保护不被误删。
-        if ($saveOk && !$isZip && $isStationAdmin && !empty($fn)) {
-            $protectedAnn = ['更新历史.md'];
-            if (!in_array($fn, $protectedAnn, true)) {
-                $exAnn = db_one('SELECT id FROM announcement WHERE article = ? LIMIT 1', [$fn]);
+        if ($saveOk && !$isArchive && $isStationAdmin && !empty($destLeaf)) {
+            $lockedAnn = ['更新历史.md'];
+            if (!in_array($destLeaf, $lockedAnn, true)) {
+                $existingAnn = db_one('SELECT id FROM announcement WHERE article = ? LIMIT 1', [$destLeaf]);
                 if (!empty($_POST['as_announce'])) {
-                    if (!$exAnn) {
-                        addAnnouncement('manual', $fn, $myId, $title, $excerpt);
-                        auditLog('announce_from_article', $fn, '将文章设为公告: ' . $title);
+                    if (!$existingAnn) {
+                        addAnnouncement('manual', $destLeaf, $myId, $docTitle, $digest);
+                        auditLog('announce_from_article', $destLeaf, '将文章设为公告: ' . $docTitle);
                     } else {
-                        updateAnnouncement($exAnn['id'], $fn, $title, $excerpt);
+                        updateAnnouncement($existingAnn['id'], $destLeaf, $docTitle, $digest);
                     }
                 } else {
-                    if ($exAnn) {
-                        deleteAnnouncement($exAnn['id']);
-                        auditLog('announce_remove', $fn, '取消文章公告: ' . $title);
+                    if ($existingAnn) {
+                        deleteAnnouncement($existingAnn['id']);
+                        auditLog('announce_remove', $destLeaf, '取消文章公告: ' . $docTitle);
                     }
                 }
             }
@@ -392,8 +392,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
     }
     // v3.3.5：纯 MD 上传/新建/编辑成功 → 触发守护进程立即备份（富媒体 zip 已在上面单独触发）
     if ($saveOk) triggerArticleBackup();
-    $qs = $saveOk ? 'success=1' : 'error=' . urlencode($saveErr);
-    header('Location: sc.php?' . $qs);
+    $queryStr = $saveOk ? 'success=1' : 'error=' . urlencode($saveErr);
+    header('Location: sc.php?' . $queryStr);
     exit;
 }
 
@@ -410,29 +410,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])) {
 
 // ====== 页面数据准备 ======
 
-$files = glob($dataDir . '/*.md');
+$mdFiles = glob($articlesDir . '/*.md');
 $docItems = [];
-$pinnedKeys = getPinnedList();
-if ($files) {
-    usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
-    foreach ($files as $file) {
-        $filename = basename($file);
-        if (strpos($filename, '.') === 0) continue;
-        $listMeta = readArticleMeta($file);
+$pinKeys = getPinnedList();
+if ($mdFiles) {
+    usort($mdFiles, function($a, $b) { return filemtime($b) - filemtime($a); });
+    foreach ($mdFiles as $entryFile) {
+        $leafFile = basename($entryFile);
+        if (strpos($leafFile, '.') === 0) continue;
+        $metaBox = readArticleMeta($entryFile);
         // v3.3.1：系统文章（更新历史）与隐藏文章不在文档管理列表显示（仅在公告侧展示，防误删）
-        if (in_array($filename, ['更新历史.md'], true) || !empty($listMeta['hidden'])) continue;
+        if (in_array($leafFile, ['更新历史.md'], true) || !empty($metaBox['hidden'])) continue;
         // 写作者仅显示自己的文章（最小权限）
-        if (!$isStationAdmin && !mayManageArticle($listMeta)) continue;
-        $content = file_get_contents($file);
-        $displayName = preg_replace('/\.md$/i', '', $filename);
-        if (preg_match('/^#\s+(.+)/m', $content, $m)) { $displayName = $m[1]; }
-        $isPinned = in_array($filename, $pinnedKeys);
-        $docItems[] = ['name' => $filename, 'displayName' => $displayName, 'pinned' => $isPinned, 'meta' => $listMeta];
+        if (!$isStationAdmin && !mayManageArticle($metaBox)) continue;
+        $rawText = file_get_contents($entryFile);
+        $displayName = preg_replace('/\.md$/i', '', $leafFile);
+        if (preg_match('/^#\s+(.+)/m', $rawText, $hit)) { $displayName = $hit[1]; }
+        $pinnedFlag = in_array($leafFile, $pinKeys);
+        $docItems[] = ['name' => $leafFile, 'displayName' => $displayName, 'pinned' => $pinnedFlag, 'meta' => $metaBox];
     }
 }
-usort($docItems, function($a, $b) {
-    if ($a['pinned'] && !$b['pinned']) return -1;
-    if (!$a['pinned'] && $b['pinned']) return 1;
+usort($docItems, function($x, $y) {
+    if ($x['pinned'] && !$y['pinned']) return -1;
+    if (!$x['pinned'] && $y['pinned']) return 1;
     return 0;
 });
 $flagSaved = isset($_GET['success']);

@@ -22,10 +22,10 @@ if (file_exists($baseMd5File)) {
 function isStationAdmin() {
     return checkRole(ROLE_STATION_ADMIN);
 }
-function sendJson($data, $code = 200) {
-    http_response_code($code);
+function sendJson($respData, $httpStatus = 200) {
+    http_response_code($httpStatus);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    echo json_encode($respData, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -141,9 +141,7 @@ function ysmShareRenderMeta($m) {
     if (!empty($m['image'])) echo '    <meta name="twitter:image" content="' . $e($m['image']) . '">' . "\n";
 }
 
-if (!is_dir('./data/articles')) {
-    mkdir('./data/articles', 0755, true);
-}
+if (!is_dir('./data/articles')) mkdir('./data/articles', 0755, true);
 $siteConf = loadSiteConfig();
 $siteHeading = $siteConf['site_title'] ?? 'You Super Markdown';
 // v3.1.6：首页公告卡片数据（公告表 + 关联文章提取封面图/标签/字数；纯文字公告无关联文章）
@@ -250,7 +248,7 @@ if ($seg !== '' && !in_array($seg, [
     exit;
 }
 
-$action = isset($_GET['action']) ? $_GET['action'] : '';
+$action = $_GET['action'] ?? '';
 
 // CSRF 防护：index.php 所有 POST 操作（pin/unpin/delete/update）统一校验
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -259,33 +257,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-if ($action === 'pin') {
+if ('pin' === $action) {
     if (!isStationAdmin()) { logUnauthorized('越权尝试置顶文章', true); sendJson(['success' => false, 'error' => '无权限'], 403); }
-    header('Content-Type: application/json; charset=utf-8');
-    $file = basename($_POST['file'] ?? '');
-    if (empty($file)) { echo json_encode(['success' => false]); exit; }
-    $pinned = getPinnedList();
-    if (!in_array($file, $pinned)) {
-        $pinned[] = $file;
-        savePinnedList($pinned);
+    header('Content-Type: application/json; charset=utf-8'); $targetFile = basename($_POST['file'] ?? '');
+    if (empty($targetFile)) { echo json_encode(['success' => false]); exit; }
+    $pinList = getPinnedList();
+    if (!in_array($targetFile, $pinList)) {
+        $pinList[] = $targetFile;
+        savePinnedList($pinList);
     }
-    echo json_encode(['success' => true]);
-    exit;
+    echo json_encode(['success' => true]); exit;
 }
-if ($action === 'unpin') {
+if ('unpin' === $action) {
     if (!isStationAdmin()) { logUnauthorized('越权尝试取消置顶文章', true); sendJson(['success' => false, 'error' => '无权限'], 403); }
-    header('Content-Type: application/json; charset=utf-8');
-    $file = basename($_POST['file'] ?? '');
-    if (empty($file)) { echo json_encode(['success' => false]); exit; }
-    $pinned = getPinnedList();
-    $pinned = array_values(array_diff($pinned, [$file]));
-    savePinnedList($pinned);
-    echo json_encode(['success' => true]);
-    exit;
+    header('Content-Type: application/json; charset=utf-8'); $targetFile = basename($_POST['file'] ?? '');
+    if (empty($targetFile)) { echo json_encode(['success' => false]); exit; }
+    $pinList = getPinnedList();
+    $pinList = array_values(array_diff($pinList, [$targetFile]));
+    savePinnedList($pinList);
+    echo json_encode(['success' => true]); exit;
 }
-if ($action === 'list') {
-    header('Content-Type: application/json; charset=utf-8');
-    $files = glob('./data/articles/*.md');
+if ('list' === $action) {
+    header('Content-Type: application/json; charset=utf-8'); $mdFiles = glob('./data/articles/*.md');
     $articleItems = [];
     $pinnedSet = getPinnedList();
     // v3.1.11：设为公告的文章不在文章列表展示（公告单独展示，不产生文章卡片）
@@ -294,15 +287,15 @@ if ($action === 'list') {
     $viewCounts = [];
     foreach (db_all('SELECT article, views FROM page_views') as $v) $viewCounts[$v['article']] = (int)$v['views'];
     $nowMin = date('Y-m-d H:i');
-    if ($files) {
-        usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
-        foreach ($files as $cardIndex => $file) {
-            $filename = basename($file);
-            if (strpos($filename, '.') === 0) continue;
-            $content = file_get_contents($file);
+    if ($mdFiles) {
+        usort($mdFiles, function($a, $b) { return filemtime($b) - filemtime($a); });
+        foreach ($mdFiles as $slotIndex => $entryFile) {
+            $baseName = basename($entryFile);
+            if (strpos($baseName, '.') === 0) continue;
+            $rawText = file_get_contents($entryFile);
             // v3.1.10：META 标记 hidden 的文章不进首页列表（如「更新历史」仅保留公告入口）
             // v4.0.0：草稿（status=draft）不进列表；定时（status=scheduled 且未到 publish_at）也不进列表
-            if (preg_match('/<!--META(.*?)-->/s', $content, $hm)) {
+            if (preg_match('/<!--META(.*?)-->/s', $rawText, $hm)) {
                 $hmeta = json_decode(trim($hm[1]), true);
                 if (!empty($hmeta['hidden'])) continue;
                 $mStatus = $hmeta['status'] ?? 'published';
@@ -311,14 +304,14 @@ if ($action === 'list') {
                 if ($mStatus === 'scheduled' && $mPublishAt !== '' && $mPublishAt > $nowMin) continue;
             }
             // v3.1.11：公告关联文章不进列表
-            if (isset($announcementFiles[$filename])) continue;
-            $lines = explode("\n", $content);
-            $title = '';
-            $wordCount = mb_strlen(preg_replace('/\s+/', '', $content), 'UTF-8');
+            if (isset($announcementFiles[$baseName])) continue;
+            $rawLines = explode("\n", $rawText);
+            $cardTitle = '';
+            $wordCount = mb_strlen(preg_replace('/\s+/', '', $rawText), 'UTF-8');
             $category = ''; $tags = []; $excerpt = ''; $author = '';
             $license = 'CC BY-NC-SA 4.0';
             $licenseUrl = 'https://creativecommons.org/licenses/by-nc-sa/4.0/';
-            if (preg_match('/<!--META(.*?)-->/s', $content, $metaMatch)) {
+            if (preg_match('/<!--META(.*?)-->/s', $rawText, $metaMatch)) {
                 $meta = json_decode(trim($metaMatch[1]), true);
                 if ($meta) {
                     $category = $meta['category'] ?? '';
@@ -335,31 +328,31 @@ if ($action === 'list') {
                 }
             }
             $inCodeBlock = false;
-            foreach ($lines as $line) {
-                $trimmed = trim($line);
-                if (preg_match('/^```/', $trimmed)) { $inCodeBlock = !$inCodeBlock; continue; }
+            foreach ($rawLines as $rawLine) {
+                $trimLine = trim($rawLine);
+                if (preg_match('/^```/', $trimLine)) { $inCodeBlock = !$inCodeBlock; continue; }
                 if ($inCodeBlock) continue;
-                if (preg_match('/^#\s+(.+)/', $trimmed, $matches)) { $title = $matches[1]; break; }
+                if (preg_match('/^#\s+(.+)/', $trimLine, $hitMatches)) { $cardTitle = $hitMatches[1]; break; }
             }
-            if (empty($title)) $title = preg_replace('/\.md$/i', '', $filename);
+            if (empty($cardTitle)) $cardTitle = preg_replace('/\.md$/i', '', $baseName);
             if (empty($excerpt)) {
-                $textContent = preg_replace('/^<!--.*?-->\n?/s', '', $content);
-                $textContent = preg_replace('/^#.*$/m', '', $textContent);
-                $textContent = preg_replace('/```.*?```/s', '', $textContent);
-                $textContent = preg_replace('/\[([^\]]+)\]\([^\)]+\)/', '$1', $textContent);
-                $textContent = preg_replace('/[#*>`\-_\|~\[\]]/', '', $textContent);
-                $textContent = trim(preg_replace('/\s+/', ' ', $textContent));
-                $excerpt = mb_substr($textContent, 0, 120, 'UTF-8');
-                if (mb_strlen($textContent, 'UTF-8') > 120) $excerpt .= '...';
+                $plainText = preg_replace('/^<!--.*?-->\n?/s', '', $rawText);
+                $plainText = preg_replace('/^#.*$/m', '', $plainText);
+                $plainText = preg_replace('/```.*?```/s', '', $plainText);
+                $plainText = preg_replace('/\[([^\]]+)\]\([^\)]+\)/', '$1', $plainText);
+                $plainText = preg_replace('/[#*>`\-_\|~\[\]]/', '', $plainText);
+                $plainText = trim(preg_replace('/\s+/', ' ', $plainText));
+                $excerpt = mb_substr($plainText, 0, 120, 'UTF-8');
+                if (mb_strlen($plainText, 'UTF-8') > 120) $excerpt .= '...';
             }
             if (empty($tags)) {
-                if (preg_match_all('/#(\w+)/u', $content, $matches)) $tags = array_slice(array_unique($matches[1]), 0, 5);
+                if (preg_match_all('/#(\w+)/u', $rawText, $hitMatches)) $tags = array_slice(array_unique($hitMatches[1]), 0, 5);
                 if (empty($tags)) $tags = ['markdown', '文档'];
             }
-            $isPinned = in_array($filename, $pinnedSet);
+            $isPinned = in_array($baseName, $pinnedSet);
             // v3.1.12：文章卡片封面——正文第一张图片（图片仅作为文章展示，公告不再使用）
             $cover = '';
-            if (preg_match('/!\[[^\]]*\]\(([^)\s]+)\)/', $content, $im)) {
+            if (preg_match('/!\[[^\]]*\]\(([^)\s]+)\)/', $rawText, $im)) {
                 $cover = $im[1];
                 if (strpos($cover, 'data/') === 0) $cover = '/' . $cover;
             }
@@ -377,20 +370,19 @@ if ($action === 'list') {
                     $cover = $siteConf['bg_image'];
                     if (strpos($cover, 'data/') === 0) $cover = '/' . $cover;
                 } else {
-                    $cover = 'cover.php?i=' . $cardIndex;
+                    $cover = 'cover.php?i=' . $slotIndex;
                 }
             }
             $articleItems[] = [
-                'name' => $filename, 'displayName' => $title, 'category' => $category,
-                'size' => filesize($file), 'modified' => date('Y-m-d', filemtime($file)),
-                'modifiedTimestamp' => filemtime($file), 'excerpt' => $excerpt,
+                'name' => $baseName, 'displayName' => $cardTitle, 'category' => $category,
+                'size' => filesize($entryFile), 'modified' => date('Y-m-d', filemtime($entryFile)),
+                'modifiedTimestamp' => filemtime($entryFile), 'excerpt' => $excerpt,
                 'wordCount' => $wordCount, 'tags' => $tags, 'author' => $author,
                 'license' => $license, 'licenseUrl' => $licenseUrl, 'pinned' => $isPinned,
                 'cover' => $cover,
-                'views' => $viewCounts[$filename] ?? 0,
+                'views' => $viewCounts[$baseName] ?? 0,
                 'status' => $mStatus ?? 'published',
-                'publishAt' => $mPublishAt ?? '',
-            ];
+                'publishAt' => $mPublishAt ?? ''];
         }
     }
     usort($articleItems, function($a, $b) {
@@ -406,8 +398,7 @@ if ($action === 'list') {
     exit;
 }
 if ($action === 'read') {
-    header('Content-Type: application/json; charset=utf-8');
-    $requestedFile = isset($_GET['file']) ? $_GET['file'] : '';
+    header('Content-Type: application/json; charset=utf-8'); $requestedFile = isset($_GET['file']) ? $_GET['file'] : '';
     $filename = basename($requestedFile);
     $filepath = './data/articles/' . $filename;
     if (!file_exists($filepath) || !is_file($filepath)) {
@@ -571,66 +562,66 @@ if ($action === 'update') {
  * @return array 文章数组
  */
 function collectPublishedArticles($q = '') {
-    $files = glob('./data/articles/*.md');
-    $out = [];
-    $announcementFiles = array_flip(array_column(db_all("SELECT article FROM announcement WHERE article != ''"), 'article'));
-    $nowMin = date('Y-m-d H:i');
-    $qLow = mb_strtolower(trim($q), 'UTF-8');
-    if ($files) {
-        usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
-        foreach ($files as $file) {
-            $filename = basename($file);
-            if (strpos($filename, '.') === 0) continue;
-            $content = @file_get_contents($file);
-            if ($content === false) continue;
-            if (preg_match('/<!--META(.*?)-->/s', $content, $hm)) {
-                $hmeta = json_decode(trim($hm[1]), true) ?: [];
-                if (!empty($hmeta['hidden'])) continue;
-                $mStatus = $hmeta['status'] ?? 'published';
-                $mPublishAt = $hmeta['publish_at'] ?? '';
-                if ($mStatus === 'draft') continue;
-                if ($mStatus === 'scheduled' && $mPublishAt !== '' && $mPublishAt > $nowMin) continue;
+    $mdFiles = glob('./data/articles/*.md');
+    $items = [];
+    $annFiles = array_flip(array_column(db_all("SELECT article FROM announcement WHERE article != ''"), 'article'));
+    $nowStamp = date('Y-m-d H:i');
+    $needle = mb_strtolower(trim($q), 'UTF-8');
+    if ($mdFiles) {
+        usort($mdFiles, function($a, $b) { return filemtime($b) - filemtime($a); });
+        foreach ($mdFiles as $entryFile) {
+            $leafFile = basename($entryFile);
+            if (strpos($leafFile, '.') === 0) continue;
+            $rawText = @file_get_contents($entryFile);
+            if ($rawText === false) continue;
+            if (preg_match('/<!--META(.*?)-->/s', $rawText, $metaHit)) {
+                $metaBox = json_decode(trim($metaHit[1]), true) ?: [];
+                if (!empty($metaBox['hidden'])) continue;
+                $st = $metaBox['status'] ?? 'published';
+                $pubAt = $metaBox['publish_at'] ?? '';
+                if ($st === 'draft') continue;
+                if ($st === 'scheduled' && $pubAt !== '' && $pubAt > $nowStamp) continue;
             }
-            if (isset($announcementFiles[$filename])) continue;
-            $plain = preg_replace('/<!--META.*?-->\n?/s', '', $content);
-            $title = '';
-            if (preg_match('/^#\s+(.+)/m', $plain, $tm)) $title = trim($tm[1]);
-            if ($title === '') $title = preg_replace('/\.md$/i', '', $filename);
-            $category = $hmeta['category'] ?? '';
-            $rawTags = $hmeta['tags'] ?? '';
-            $tags = is_array($rawTags) ? array_values(array_filter(array_map('trim', $rawTags), fn($t) => $t !== ''))
-                                       : array_values(array_filter(array_map('trim', explode(',', (string)$rawTags)), fn($t) => $t !== ''));
-            $excerpt = $hmeta['excerpt'] ?? '';
-            $author = $hmeta['author'] ?? '';
+            if (isset($annFiles[$leafFile])) continue;
+            $flat = preg_replace('/<!--META.*?-->\n?/s', '', $rawText);
+            $cardTitle = '';
+            if (preg_match('/^#\s+(.+)/m', $flat, $titleHit)) $cardTitle = trim($titleHit[1]);
+            if ($cardTitle === '') $cardTitle = preg_replace('/\.md$/i', '', $leafFile);
+            $cat = $metaBox['category'] ?? '';
+            $tagRaw = $metaBox['tags'] ?? '';
+            $tagList = is_array($tagRaw) ? array_values(array_filter(array_map('trim', $tagRaw), fn($t) => $t !== ''))
+                                       : array_values(array_filter(array_map('trim', explode(',', (string)$tagRaw)), fn($t) => $t !== ''));
+            $digest = $metaBox['excerpt'] ?? '';
+            $writer = $metaBox['author'] ?? '';
             // v4.0.0：搜索摘要——META 无手写摘要时自动生成（与 list 接口同算法，保证搜索结果有预览）
-            if ($excerpt === '') {
-                $textContent = preg_replace('/^#.*$/m', '', $plain);
-                $textContent = preg_replace('/```.*?```/s', '', $textContent);
-                $textContent = preg_replace('/\[([^\]]+)\]\([^\)]+\)/', '$1', $textContent);
-                $textContent = preg_replace('/[#*>`\-_\|~\[\]]/', '', $textContent);
-                $textContent = trim(preg_replace('/\s+/', ' ', $textContent));
-                $excerpt = mb_substr($textContent, 0, 120, 'UTF-8');
-                if (mb_strlen($textContent, 'UTF-8') > 120) $excerpt .= '...';
+            if ($digest === '') {
+                $plainText = preg_replace('/^#.*$/m', '', $flat);
+                $plainText = preg_replace('/```.*?```/s', '', $plainText);
+                $plainText = preg_replace('/\[([^\]]+)\]\([^\)]+\)/', '$1', $plainText);
+                $plainText = preg_replace('/[#*>`\-_\|~\[\]]/', '', $plainText);
+                $plainText = trim(preg_replace('/\s+/', ' ', $plainText));
+                $digest = mb_substr($plainText, 0, 120, 'UTF-8');
+                if (mb_strlen($plainText, 'UTF-8') > 120) $digest .= '...';
             }
             // 全文搜索：标题 / 标签 / 摘要 / 正文关键词匹配（忽略大小写）
-            if ($qLow !== '') {
-                $haystack = mb_strtolower($title . ' ' . $plain . ' ' . implode(' ', $tags) . ' ' . $excerpt . ' ' . $author, 'UTF-8');
-                if (mb_strpos($haystack, $qLow, 0, 'UTF-8') === false) continue;
+            if ($needle !== '') {
+                $hayText = mb_strtolower($cardTitle . ' ' . $flat . ' ' . implode(' ', $tagList) . ' ' . $digest . ' ' . $writer, 'UTF-8');
+                if (mb_strpos($hayText, $needle, 0, 'UTF-8') === false) continue;
             }
-            $out[] = [
-                'name' => $filename,
-                'displayName' => $title,
-                'category' => $category,
-                'tags' => $tags,
-                'excerpt' => $excerpt,
-                'author' => $author,
-                'modified' => date('Y-m-d', filemtime($file)),
-                'modifiedTimestamp' => filemtime($file),
-                'size' => filesize($file),
+            $items[] = [
+                'name' => $leafFile,
+                'displayName' => $cardTitle,
+                'category' => $cat,
+                'tags' => $tagList,
+                'excerpt' => $digest,
+                'author' => $writer,
+                'modified' => date('Y-m-d', filemtime($entryFile)),
+                'modifiedTimestamp' => filemtime($entryFile),
+                'size' => filesize($entryFile),
             ];
         }
     }
-    return $out;
+    return $items;
 }
 
 // v4.0.0：站内全文搜索（标题/标签/摘要/正文），GET /?action=search&q=关键词

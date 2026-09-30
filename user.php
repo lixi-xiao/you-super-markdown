@@ -22,7 +22,7 @@ if (!$u) {
 
 $avatarSrc = ($u['avatar'] !== '' && strpos($u['avatar'], 'data/') === 0)
     ? $u['avatar']
-    : ($u['avatar'] !== '' ? $u['avatar'] : 'api.php?action=avatar&qq=' . urlencode($u['qq']));
+    : ($u['avatar'] !== '' ? $u['avatar'] : 'api.php?action=avatar&account=' . urlencode($u['account']));
 $roleLabels = [ROLE_USER => '普通用户', ROLE_AUTHOR => '写作者', ROLE_STATION_ADMIN => '站长', ROLE_GUEST => '访客'];
 $roleLabel = $roleLabels[$u['role']] ?? '用户';
 $roleBadgeClass = $u['role'] === ROLE_STATION_ADMIN ? 'up-badge-station'
@@ -89,7 +89,7 @@ $initial = mb_substr($u['nickname'] ?: '?', 0, 1, 'UTF-8');
         <div class="up-name"><?= htmlspecialchars($u['nickname']) ?><span class="up-badge <?= $roleBadgeClass ?>"><?= htmlspecialchars($roleLabel) ?></span></div>
         <div class="up-sign"><?= htmlspecialchars($u['signature'] ?: '这个人很懒，还没有留下签名~') ?></div>
         <div class="up-meta">
-            <div><b><?= htmlspecialchars(substr($u['qq'] ?: '--', 0, 3)) ?>***</b><br>QQ</div>
+            <div><b><?= htmlspecialchars(substr($u['account'] ?: '--', 0, 3)) ?>***</b><br>QQ</div>
             <div><b><?= htmlspecialchars($u['created'] ?: '--') ?></b><br>注册时间</div>
         </div>
         <a class="up-back" href="./">← 返回主页</a>

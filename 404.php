@@ -1,21 +1,21 @@
 <?php
 http_response_code(404);
 require_once __DIR__ . '/utils.php';
-$_cfg404 = loadSiteConfig();
-$_siteTitle404 = $_cfg404['site_title'] ?? 'You Super Markdown';
-$_bgType404 = $_cfg404['bg_type'] ?? 'none';
-$_bgImage404 = $_cfg404['bg_image'] ?? '';
-$_bgApiUrl404 = $_cfg404['bg_api_url'] ?? '';
-$_bgBlur404 = !empty($_cfg404['bg_blur_enabled']) ? '1' : '0';
-$_bgBlurLevel404 = intval($_cfg404['bg_blur_level'] ?? 0);
-$_bgCardOpacity404 = intval($_cfg404['bg_card_opacity'] ?? 100);
+$cfg = loadSiteConfig();
+$siteName = $cfg['site_title'] ?? 'You Super Markdown';
+$bgType = $cfg['bg_type'] ?? 'none';
+$bgImage = $cfg['bg_image'] ?? '';
+$bgApi = $cfg['bg_api_url'] ?? '';
+$bgBlur = !empty($cfg['bg_blur_enabled']) ? '1' : '0';
+$bgBlurLevel = intval($cfg['bg_blur_level'] ?? 0);
+$bgCardOpacity = intval($cfg['bg_card_opacity'] ?? 100);
 ?>
 <!DOCTYPE html>
 <html lang="zh-CN" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>404 - 页面未找到 · <?= htmlspecialchars($_siteTitle404) ?></title>
+    <title>404 - 页面未找到 · <?= htmlspecialchars($siteName) ?></title>
     <!-- v4.0.0：深色模式跟随系统——在 CSS 加载前同步设置 data-theme，避免闪白（与主站一致） -->
     <script>
         (function() {
@@ -31,7 +31,7 @@ $_bgCardOpacity404 = intval($_cfg404['bg_card_opacity'] ?? 100);
     <!-- v4.1.0：资源使用绝对路径——未知路径（如 /xxx/yyy/）下相对路径会解析到错误位置导致样式加载失败 -->
     <link rel="stylesheet" href="/css/style.css?v=<?= @filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
-<body data-bg-type="<?= htmlspecialchars($_bgType404) ?>" data-bg-image="<?= htmlspecialchars($_bgImage404) ?>" data-bg-api-url="<?= htmlspecialchars($_bgApiUrl404) ?>" data-bg-blur="<?= htmlspecialchars($_bgBlur404) ?>" data-bg-blur-level="<?= $_bgBlurLevel404 ?>" data-bg-card-opacity="<?= $_bgCardOpacity404 ?>" style="padding-left:0">
+<body data-bg-type="<?= htmlspecialchars($bgType) ?>" data-bg-image="<?= htmlspecialchars($bgImage) ?>" data-bg-api-url="<?= htmlspecialchars($bgApi) ?>" data-bg-blur="<?= htmlspecialchars($bgBlur) ?>" data-bg-blur-level="<?= $bgBlurLevel ?>" data-bg-card-opacity="<?= $bgCardOpacity ?>" style="padding-left:0">
 <script>
     // v4.1.0：404 页无侧边栏，覆盖 style.css 宽屏 body{padding-left:280px}（否则整页右移 280px 不居中）
     // v4.0.0：背景应用（与 js/main.js applyBg 同一逻辑，404 页不加载 main.js 故内联）

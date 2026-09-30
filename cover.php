@@ -12,7 +12,7 @@
 // 安全：不接收外部 URL（只读固定源 FIXED_IMG_API），
 //       复用 fetchHttpContent 的 SSRF 加固（内网拒绝 + 单次解析 pin IP + TLS 域名校验），无新攻击通道。
 require_once __DIR__ . '/utils.php';
-security_check();
+runRequestSecurityCheck();
 set_time_limit(0);
 ignore_user_abort(true);
 

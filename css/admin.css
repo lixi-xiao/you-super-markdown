@@ -1485,7 +1485,7 @@ td code {
     }
 }
 
-/* ---------- 菜单卡片（youyou 首页用） ---------- */
+/* ---------- 菜单卡片（管理后台首页用） ---------- */
 .menu-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -1546,7 +1546,7 @@ td code {
     stroke: currentColor; fill: none; stroke-width: 2;
 }
 
-/* ---------- 用户栏（youyou 首页用） ---------- */
+/* ---------- 用户栏（管理后台首页用） ---------- */
 .user-bar {
     margin-top: 24px;
     padding: 16px 20px;

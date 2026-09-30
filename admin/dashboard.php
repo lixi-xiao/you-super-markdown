@@ -65,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     requireAdminEnv();
 }
 
-$users = loadUsers();
+$users = fetchAllUsers();
 $config = loadSiteConfig();
 $siteTitle = $config['site_title'] ?? 'You Super Markdown';
 $msg = $_GET['msg'] ?? '';
@@ -376,30 +376,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $newRole = $_POST['role'] ?? ROLE_USER;
         if (!in_array($newRole, [ROLE_STATION_ADMIN, ROLE_AUTHOR, ROLE_USER])) $newRole = ROLE_USER;
         $newNick = trim($_POST['nickname'] ?? '');
-        $newQQ = trim($_POST['qq'] ?? '');
+        $newAccount = trim($_POST['account'] ?? '');
         $newPwd = trim($_POST['password'] ?? '');
-        if ($newNick && $newQQ && $newPwd) {
+        if ($newNick && $newAccount && $newPwd) {
             $vp = validatePassword($newPwd);
             if ($vp !== true) {
                 $msg = 'pw_weak';
             } else {
                 // QQ 唯一性检查（避免同 QQ 账号登录歧义）
-                $qqExists = false;
-                foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
-                if ($qqExists) {
-                    $msg = 'qq_duplicate';
+                $accountExists = false;
+                foreach ($users as $uu) { if (($uu['account'] ?? '') === $newAccount) { $accountExists = true; break; } }
+                if ($accountExists) {
+                    $msg = 'account_duplicate';
                 } else {
                     $users[] = [
                         'id' => bin2hex(random_bytes(8)),
-                        'qq' => $newQQ,
+                        'account' => $newAccount,
                         'nickname' => $newNick,
                         'password' => password_hash($newPwd, PASSWORD_DEFAULT),
                         'role' => $newRole,
                         'created' => date('Y-m-d H:i:s'),
                         'created_by' => getCurrentUserId(),
                     ];
-                    saveUsers($users);
-                    auditLog('user_create', $newQQ, "创建用户: {$newNick}, 角色: {$newRole}");
+                    replaceAllUsers($users);
+                    auditLog('user_create', $newAccount, "创建用户: {$newNick}, 角色: {$newRole}");
                     $msg = 'user_created';
                 }
             }
@@ -408,9 +408,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $delId = $_POST['user_id'] ?? '';
         foreach ($users as $i => $u) {
             if ($u['id'] === $delId && ($u['role'] ?? '') !== ROLE_SUPER_ADMIN) {
-                auditLog('user_delete', $u['qq'] ?? $delId, "删除用户: {$u['nickname']}");
+                auditLog('user_delete', $u['account'] ?? $delId, "删除用户: {$u['nickname']}");
                 array_splice($users, $i, 1);
-                saveUsers($users);
+                replaceAllUsers($users);
                 $msg = 'user_deleted';
                 break;
             }
@@ -430,14 +430,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     if (($uu['station_id'] ?? '') !== '' && $oldRole === ROLE_STATION_ADMIN && $newRole !== ROLE_STATION_ADMIN) {
                         $uu['station_id'] = '';
                     }
-                    auditLog('user_role_change', $uu['qq'] ?? $uid, "修改权限: {$uu['nickname']} {$oldRole} → {$newRole}");
+                    auditLog('user_role_change', $uu['account'] ?? $uid, "修改权限: {$uu['nickname']} {$oldRole} → {$newRole}");
                     $msg = 'role_changed';
                     break;
                 }
             }
             unset($uu);
             if ($msg !== 'role_changed') $msg = 'role_invalid';
-            saveUsers($users);
+            replaceAllUsers($users);
         }
     } elseif ($_POST['action'] === 'set_user_disabled') {
         // v2.11.4：禁用/启用账号（禁用后无法登录/评论/进后台，已登录会话立即失效）
@@ -446,13 +446,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         foreach ($users as &$uu) {
             if ($uu['id'] === $uid && ($uu['role'] ?? '') !== ROLE_SUPER_ADMIN) {
                 $uu['disabled'] = $disabled ? 1 : 0;
-                auditLog('user_disable', $uu['qq'] ?? $uid, ($disabled ? '禁用账号: ' : '启用账号: ') . ($uu['nickname'] ?? ''));
+                auditLog('user_disable', $uu['account'] ?? $uid, ($disabled ? '禁用账号: ' : '启用账号: ') . ($uu['nickname'] ?? ''));
                 $msg = $disabled ? 'user_disabled' : 'user_enabled';
                 break;
             }
         }
         unset($uu);
-        saveUsers($users);
+        replaceAllUsers($users);
     } elseif ($_POST['action'] === 'set_user_station') {
         // v2.11.5：超管设定写作者归属站长
         $uid = $_POST['user_id'] ?? '';
@@ -468,14 +468,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             foreach ($users as &$uu) {
                 if ($uu['id'] === $uid && ($uu['role'] ?? '') === ROLE_AUTHOR) {
                     $uu['station_id'] = $stationId;
-                    auditLog('user_station_change', $uu['qq'] ?? $uid, "设定归属站长: {$uu['nickname']} → {$stationId}");
+                    auditLog('user_station_change', $uu['account'] ?? $uid, "设定归属站长: {$uu['nickname']} → {$stationId}");
                     $found = true;
                     break;
                 }
             }
             unset($uu);
             if (!$found) { $msg = 'station_invalid'; }
-            else { saveUsers($users); $msg = 'station_changed'; }
+            else { replaceAllUsers($users); $msg = 'station_changed'; }
         }
     } elseif ($_POST['action'] === 'reset_password') {
         // v2.11.5：重置用户密码（生成随机强密码，仅本次显示给超管）
@@ -486,8 +486,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         foreach ($users as &$uu) {
             if ($uu['id'] === $uid && ($uu['role'] ?? '') !== ROLE_SUPER_ADMIN) {
                 $uu['password'] = $newHash;
-                auditLog('user_reset_pwd', $uu['qq'] ?? $uid, "重置密码: {$uu['nickname']}");
-                $newQQForFlash = $uu['qq'] ?? '';
+                auditLog('user_reset_pwd', $uu['account'] ?? $uid, "重置密码: {$uu['nickname']}");
+                $newAccountForFlash = $uu['account'] ?? '';
                 $found = true;
                 break;
             }
@@ -496,9 +496,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if (!$found) {
             $msg = 'reset_fail';
         } else {
-            saveUsers($users);
+            replaceAllUsers($users);
             // 新密码通过 session flash 传递（避免明文进 URL）
-            $_SESSION['flash_reset_pwd'] = ['qq' => $newQQForFlash ?? '', 'pwd' => $newPwd];
+            $_SESSION['flash_reset_pwd'] = ['account' => $newAccountForFlash ?? '', 'pwd' => $newPwd];
             $msg = 'pwd_reset';
         }
     }
@@ -576,7 +576,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ban_action'])) {
         $types = $_POST['types'] ?? [];
         $reason = trim($_POST['reason'] ?? '');
         if ($ip && !empty($types)) {
-            addBan($ip, $types, $reason);
+            banIp($ip, $types, $reason);
             header('Location: dashboard.php?tab=security&bmsg=' . urlencode('封禁已添加'));
             exit;
         }
@@ -687,9 +687,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gen_reset_code'])) {
         header('Location: dashboard.php?tab=threat&msg=challenge_failed');
         exit;
     }
-    $rqq = trim((string)($_POST['reset_qq'] ?? ''));
+    $resetAccount = trim((string)($_POST['reset_account'] ?? ''));
     $target = null;
-    foreach ($users as $u) { if (($u['qq'] ?? '') === $rqq) { $target = $u; break; } }
+    foreach ($users as $u) { if (($u['account'] ?? '') === $resetAccount) { $target = $u; break; } }
     if (!$target) {
         header('Location: dashboard.php?tab=threat&msg=reset_user_not_found');
         exit;
@@ -782,7 +782,7 @@ function loadBans() {
     return loadBansList();
 }
 function saveBans($bans) {
-    return saveBansList($bans);
+    return replaceAllBans($bans);
 }
 $banMsg = $_GET['bmsg'] ?? '';
 ?>
@@ -866,7 +866,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>
             联动风控
         </a>
-        <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
+        <a href="#" onclick="bindLogoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             退出登录
         </a>
@@ -889,11 +889,11 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php $flashPwd = $_SESSION['flash_reset_pwd']; unset($_SESSION['flash_reset_pwd']); ?>
     <div class="msg msg-warn" style="border:1px dashed var(--accent);background:var(--accent-light,#f0f5ff)">
         <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        用户 <strong><?= htmlspecialchars($flashPwd['qq'] ?? '') ?></strong> 的新密码：<code style="font-size:1.1em;font-weight:700"><?= htmlspecialchars($flashPwd['pwd'] ?? '') ?></code>
+        用户 <strong><?= htmlspecialchars($flashPwd['account'] ?? '') ?></strong> 的新密码：<code style="font-size:1.1em;font-weight:700"><?= htmlspecialchars($flashPwd['pwd'] ?? '') ?></code>
         （仅本次显示，请立即复制并安全告知用户）
     </div>
     <?php endif; ?>
-    <?php if ($msg === 'qq_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
+    <?php if ($msg === 'account_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
     <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>密码至少 8 位，且必须包含大写字母、小写字母与数字</div><?php endif; ?>
     <?php if ($msg === 'challenge_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>挑战码无效或已过期，请重新生成</div><?php endif; ?>
 
@@ -965,7 +965,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         </div>
     </form>
     <?php
-    $users = loadUsers();
+    $users = fetchAllUsers();
     ?>
     <div class="card">
         <div class="card-title">
@@ -983,7 +983,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                 </div>
                 <div class="form-group">
                     <label class="form-label">QQ号</label>
-                    <input class="form-input" name="qq" placeholder="登录账号">
+                    <input class="form-input" name="account" placeholder="登录账号">
                 </div>
                 <div class="form-group">
                     <label class="form-label">密码（至少 8 位，含大小写字母与数字）</label>
@@ -1021,7 +1021,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         }
     }
     $stationNames = [];
-    foreach ($users as $su) { if (($su['role'] ?? '') === ROLE_STATION_ADMIN) $stationNames[$su['id']] = ($su['nickname'] ?: $su['qq']); }
+    foreach ($users as $su) { if (($su['role'] ?? '') === ROLE_STATION_ADMIN) $stationNames[$su['id']] = ($su['nickname'] ?: $su['account']); }
     $superAdmins = []; $groupStations = []; $groupAuthors = []; $groupUsers = [];
     foreach ($users as $uu) {
         $r = $uu['role'] ?? 'user';
@@ -1038,10 +1038,10 @@ $banMsg = $_GET['bmsg'] ?? '';
     }
     // v4.7.5：用户管理分页——四张表（超管/站长/写作者/普通用户）各自分页，均参与搜索；默认每页 10 条
     // 搜索字段统一为昵称/UID/QQ/邮箱/归属站长（_station）；页码与每页条数互相独立、互不干扰
-    $saPaged = paginateList($superAdmins, ['nickname', 'qq', 'id', 'email', '_station'], $usersQ, (int)($_GET['sa_page'] ?? 1), $saPerPage);
-    $stPaged = paginateList($groupStations, ['nickname', 'qq', 'id', 'email', '_station'], $usersQ, (int)($_GET['st_page'] ?? 1), $stPerPage);
-    $auPaged = paginateList($groupAuthors, ['nickname', 'qq', 'id', 'email', '_station'], $usersQ, (int)($_GET['au_page'] ?? 1), $auPerPage);
-    $usPaged = paginateList($groupUsers, ['nickname', 'qq', 'id', 'email', '_station'], $usersQ, (int)($_GET['us_page'] ?? 1), $usPerPage);
+    $saPaged = paginateList($superAdmins, ['nickname', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['sa_page'] ?? 1), $saPerPage);
+    $stPaged = paginateList($groupStations, ['nickname', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['st_page'] ?? 1), $stPerPage);
+    $auPaged = paginateList($groupAuthors, ['nickname', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['au_page'] ?? 1), $auPerPage);
+    $usPaged = paginateList($groupUsers, ['nickname', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['us_page'] ?? 1), $usPerPage);
     // v4.7.5：分页链接需保留其他三张表的页码/每页条数，切换任一表页码不重置其余表
     $saPgExtra = ['tab' => 'users', 'users_q' => $usersQ, 'st_page' => (int)($_GET['st_page'] ?? 1), 'au_page' => (int)($_GET['au_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'st_per_page' => $stPerPage, 'au_per_page' => $auPerPage, 'us_per_page' => $usPerPage];
     $stPgExtra = ['tab' => 'users', 'users_q' => $usersQ, 'sa_page' => (int)($_GET['sa_page'] ?? 1), 'au_page' => (int)($_GET['au_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'sa_per_page' => $saPerPage, 'au_per_page' => $auPerPage, 'us_per_page' => $usPerPage];
@@ -1058,7 +1058,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             $stationLabel = '';
         }
         return [
-            'nickname' => $u['nickname'] ?? '', 'qq' => $u['qq'] ?? '',
+            'nickname' => $u['nickname'] ?? '', 'account' => $u['account'] ?? '',
             'email' => $u['email'] ?? '未绑定', 'role' => $role,
             'station' => $stationLabel,
             'disabled' => !empty($u['disabled']),
@@ -1079,7 +1079,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         $uid = htmlspecialchars($u['id']);
         $isAuthor = ($u['role'] ?? '') === ROLE_AUTHOR;
         $name = htmlspecialchars($u['nickname'] ?? '');
-        $qq = htmlspecialchars($u['qq'] ?? '');
+        $account = htmlspecialchars($u['account'] ?? '');
         $roleKey = (string)($u['role'] ?? 'user');
         $roleLabel = ['station_admin' => '站长', 'author' => '写作者', 'user' => '普通用户'][$roleKey] ?? '普通用户';
         $initial = htmlspecialchars(mb_strlen($u['nickname'] ?? '') ? mb_substr((string)$u['nickname'], 0, 1) : '?');
@@ -1090,9 +1090,9 @@ $banMsg = $_GET['bmsg'] ?? '';
         $h = '<button type="button" class="user-op-btn" data-op-target="uop-' . $uid . '" title="管理用户"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>';
         $h .= '<template id="uop-' . $uid . '">';
         // 用户信息头（头像按角色色光环）
-        $h .= '<div class="user-op-modal-user"><div class="user-op-avatar role-' . htmlspecialchars($roleKey) . '">' . $initial . '</div><div><div class="user-op-user-name">' . $name . '</div><div class="user-op-user-meta"><span>UID: ' . $qq . '</span><span class="role-badge role-' . htmlspecialchars($roleKey) . '">' . $roleLabel . '</span><span style="color:' . $statusColor . '">' . $statusTxt . '</span></div></div></div>';
+        $h .= '<div class="user-op-modal-user"><div class="user-op-avatar role-' . htmlspecialchars($roleKey) . '">' . $initial . '</div><div><div class="user-op-user-name">' . $name . '</div><div class="user-op-user-meta"><span>UID: ' . $account . '</span><span class="role-badge role-' . htmlspecialchars($roleKey) . '">' . $roleLabel . '</span><span style="color:' . $statusColor . '">' . $statusTxt . '</span></div></div></div>';
         // 查看详情（只读，无需挑战码）
-        $h .= '<button type="button" class="user-op-item" data-detail=\'' . htmlspecialchars(json_encode($detail, JSON_UNESCAPED_UNICODE), ENT_QUOTES) . '\' onclick="ymOpenUserDetail(this)"><span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span><span class="user-op-txt">查看详情</span></button>';
+        $h .= '<button type="button" class="user-op-item" data-detail=\'' . htmlspecialchars(json_encode($detail, JSON_UNESCAPED_UNICODE), ENT_QUOTES) . '\' onclick="ysmOpenUserDetail(this)"><span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span><span class="user-op-txt">查看详情</span></button>';
         // 权限设置
         $h .= '<div class="user-op-sep"></div><div class="user-op-head">权限设置</div>';
         $h .= '<form method="post" class="need-challenge"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="set_user_role"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
@@ -1142,7 +1142,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <?php foreach ($saPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
-                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
+                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
                 <td><span class="role-badge role-super_admin"><?= htmlspecialchars($u['role'] ?? '') ?></span></td>
                 <td><?= ymStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
@@ -1164,7 +1164,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <?php foreach ($stPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
-                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
+                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
                 <td><?= ymStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
                 <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
@@ -1186,7 +1186,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <?php foreach ($auPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
-                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
+                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
                 <td style="color:var(--text-secondary)"><?= htmlspecialchars($stationNames[$u['station_id'] ?? ''] ?? '超管') ?></td>
                 <td><?= ymStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
@@ -1209,7 +1209,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <?php foreach ($usPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
-                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['qq'] ?? '') ?></code></td>
+                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
                 <td><?= ymStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
                 <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
@@ -2917,7 +2917,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     $codesPaged = paginateList($codeRows, ['email', 'purpose', 'code', 'ip'], trim($_GET['vq'] ?? ''), $codePage, 10);
     $pendRows = db_all('SELECT * FROM pending_author_creates ORDER BY created DESC');
     $pendPage = max(1, (int)($_GET['pp'] ?? 1));
-    $pendsPaged = paginateList($pendRows, ['email', 'nickname', 'qq', 'status'], trim($_GET['pq'] ?? ''), $pendPage, 10);
+    $pendsPaged = paginateList($pendRows, ['email', 'nickname', 'account', 'status'], trim($_GET['pq'] ?? ''), $pendPage, 10);
     $purposeLabel = fn($p) => ['register' => '注册', 'author_verify' => '写作者验证', 'author_confirm' => '超管确认'][$p] ?? $p;
     $statusLabel = fn($s) => ['verify_pending' => '等写作者验证', 'pending' => '待超管确认', 'confirmed' => '已确认', 'rejected' => '已拒绝', 'expired' => '已过期'][$s] ?? $s;
     ?>
@@ -3017,7 +3017,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td><?= date('Y-m-d H:i:s', (int)$pd['created']) ?></td>
                 <td><?= htmlspecialchars($pd['email']) ?></td>
                 <td><?= htmlspecialchars($pd['nickname']) ?></td>
-                <td><?= htmlspecialchars($pd['qq']) ?></td>
+                <td><?= htmlspecialchars($pd['account']) ?></td>
                 <td><?= $statusLabel($pd['status']) ?></td>
                 <td><?= $pd['confirmed_at'] ? htmlspecialchars($pd['confirmed_at']) : '—' ?></td>
             </tr>
@@ -3096,7 +3096,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <tr><th>账号</th><th>角色</th><th>设备指纹</th><th>UA</th><th>首次</th><th>最近</th><th>操作</th></tr>
             <?php foreach ($devRows as $d): ?>
             <tr>
-                <td><?= htmlspecialchars($d['qq'] ?? '') ?></td>
+                <td><?= htmlspecialchars($d['account'] ?? '') ?></td>
                 <td><?= htmlspecialchars($d['role'] ?? '') ?></td>
                 <td><code><?= htmlspecialchars(substr($d['fp_hash'], 0, 16)) ?>…</code></td>
                 <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($d['ua'] ?? '') ?>"><?= htmlspecialchars(mb_substr($d['ua'] ?? '', 0, 40, 'UTF-8')) ?></td>
@@ -3129,7 +3129,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <div class="form-row">
                 <div class="form-group">
                     <label class="form-label">用户 QQ 号</label>
-                    <input class="form-input" type="text" name="reset_qq" placeholder="填写待找回用户的 QQ 号" maxlength="15" required>
+                    <input class="form-input" type="text" name="reset_account" placeholder="填写待找回用户的 QQ 号" maxlength="15" required>
                 </div>
             </div>
             <div class="form-row">
@@ -3205,7 +3205,7 @@ document.addEventListener('submit', function(e) {
     f.submit();
 });
 // 登出走 POST + CSRF（防 GET 登出被 CSRF 利用）
-function logoutSubmit(e) {
+function bindLogoutSubmit(e) {
     e.preventDefault();
     var fd = new FormData();
     fd.append('logout', '1');
@@ -3232,12 +3232,12 @@ function toggleSidebar() {
     });
 })();
 // v2.11.5：用户详情弹窗（展示完整资料 + 关联统计）
-function ymEsc(s) {
+function ysmEsc(s) {
     var el = document.createElement('span');
     el.textContent = (s === null || s === undefined) ? '' : String(s);
     return el.innerHTML;
 }
-function ymOpenUserDetail(btn) {
+function ysmOpenUserDetail(btn) {
     var d = {};
     try { d = JSON.parse(btn.getAttribute('data-detail') || '{}'); } catch (e) { return; }
     // v3.0.5：详情弹窗在二级菜单之上打开——先收起操作菜单，避免被其遮罩挡住
@@ -3245,7 +3245,7 @@ function ymOpenUserDetail(btn) {
     if (opModal) opModal.style.display = 'none';
     var roleMap = { 'super_admin': '系统管理员', 'station_admin': '站长', 'author': '写作者', 'user': '普通用户' };
     var base = [
-        ['昵称', d.nickname], ['UID（QQ）', d.qq], ['邮箱', d.email],
+        ['昵称', d.nickname], ['UID（QQ）', d.account], ['邮箱', d.email],
         ['角色', roleMap[d.role] || d.role], ['归属站长', d.station || '—'],
         ['状态', d.disabled ? '已禁用' : '正常'], ['创建时间', d.created], ['创建者', d.created_by || '—'],
         ['签名', d.signature || '—'], ['最后登录', d.last_login]
@@ -3253,14 +3253,14 @@ function ymOpenUserDetail(btn) {
     var stats = [['登录次数', d.login_count], ['评论数', d.comments], ['文章数', d.articles]];
     var h = '<div class="user-detail-grid">';
     base.forEach(function(r) {
-        h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + ymEsc(r[1]) + '</span></div>';
+        h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + ysmEsc(r[1]) + '</span></div>';
     });
     h += '</div><div class="user-detail-sec">关联统计</div><div class="user-detail-grid">';
     stats.forEach(function(r) {
-        h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + ymEsc(r[1]) + '</span></div>';
+        h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + ysmEsc(r[1]) + '</span></div>';
     });
     h += '</div>';
-    document.getElementById('udTitle').textContent = '用户详情 - ' + (d.nickname || d.qq || '');
+    document.getElementById('udTitle').textContent = '用户详情 - ' + (d.nickname || d.account || '');
     document.getElementById('udBody').innerHTML = h;
     document.getElementById('userDetailModal').style.display = 'flex';
 }

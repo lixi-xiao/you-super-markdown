@@ -3,7 +3,7 @@ require_once __DIR__ . '/../utils.php';
 secureSessionStart();
 
 // v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
-security_check();
+runRequestSecurityCheck();
 
 // 获取 URL 中的 entry_token（如 /admin/entry/a3Bf9xQ2mZ1k）
 $requestUri = $_SERVER['REQUEST_URI'] ?? '';
@@ -68,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             [$devOk, $devErr] = email_code_verify($pending['email'], trim((string)($_POST['device_code_input'] ?? '')), 'device_login');
             if ($devOk) {
-                $users = loadUsers();
+                $users = fetchAllUsers();
                 $superAdmin = null;
                 foreach ($users as $u) { if ($u['id'] === $pending['uid']) { $superAdmin = $u; break; } }
                 if (!$superAdmin || !empty($superAdmin['disabled'])) {
@@ -85,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     clearRefreshCookie(); // v4.6.0：超管无 refresh——清掉旧 ym_rt，杜绝续期绕过 30 分钟限制
                     $_SESSION['cmt_user'] = [
                         'id' => $superAdmin['id'],
-                        'qq' => $superAdmin['qq'] ?? '',
+                        'account' => $superAdmin['account'] ?? '',
                         'nickname' => $superAdmin['nickname'] ?? '高级管理员',
                         'role' => ROLE_SUPER_ADMIN,
                         'pw_hash' => $superAdmin['password'] ?? '',
@@ -122,7 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db_exec('UPDATE entries SET used = 1 WHERE token = ?', [$entryToken]);
 
             // 加载用户
-            $users = loadUsers();
+            $users = fetchAllUsers();
             $superAdmin = null;
             foreach ($users as $u) {
                 if (($u['role'] ?? '') === ROLE_SUPER_ADMIN) { $superAdmin = $u; break; }
@@ -159,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     clearRefreshCookie(); // v4.6.0：超管无 refresh——清掉旧 ym_rt，杜绝续期绕过 30 分钟限制
                     $_SESSION['cmt_user'] = [
                         'id' => $superAdmin['id'],
-                        'qq' => $superAdmin['qq'] ?? '',
+                        'account' => $superAdmin['account'] ?? '',
                         'nickname' => $superAdmin['nickname'] ?? '高级管理员',
                         'role' => ROLE_SUPER_ADMIN,
                         'pw_hash' => $superAdmin['password'] ?? '',

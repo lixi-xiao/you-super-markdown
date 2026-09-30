@@ -87,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         } else {
             $nick = mb_substr($nick, 0, 20, 'UTF-8');
             $sign = mb_substr($sign, 0, 16, 'UTF-8');
-            $users = loadUsers();
+            $users = fetchAllUsers();
             foreach ($users as &$usr) {
                 if ($usr['id'] === $myId) {
                     $usr['nickname'] = $nick;
@@ -97,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 }
             }
             unset($usr);
-            saveUsers($users);
+            replaceAllUsers($users);
             $_SESSION['cmt_user']['nickname'] = $nick;
             $_SESSION['cmt_user']['signature'] = $sign;
             if ($newPw !== '') $_SESSION['cmt_user']['pw_hash'] = password_hash($newPw, PASSWORD_DEFAULT);
@@ -121,12 +121,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 if (!$ok) {
                     $msg = 'email_code_bad';
                 } else {
-                    $users = loadUsers();
+                    $users = fetchAllUsers();
                     foreach ($users as &$usr) {
                         if ($usr['id'] === $myId) { $usr['email'] = $newEmail; break; }
                     }
                     unset($usr);
-                    saveUsers($users);
+                    replaceAllUsers($users);
                     $_SESSION['cmt_user']['email'] = $newEmail;
                     auditLog('email_change', $myId, '写作者更换绑定邮箱为 ' . $newEmail);
                     $msg = 'email_saved';
@@ -202,7 +202,7 @@ if (is_dir($articlesDir)) {
         <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         <div class="sidebar-title"><span>写作者</span>后台</div>
         <div class="sidebar-user">
-            <div class="sidebar-user-avatar"><?php if (!empty($currentUser['qq'])): ?><img src="https://q1.qlogo.cn/g?b=qq&nk=<?= urlencode($currentUser['qq']) ?>&s=100" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
+            <div class="sidebar-user-avatar"><?php if (!empty($currentUser['account'])): ?><img src="https://q1.qlogo.cn/g?b=qq&nk=<?= urlencode($currentUser['account']) ?>&s=100" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
             <div class="sidebar-user-info">
                 <div class="sidebar-user-name"><?= htmlspecialchars($currentUser['nickname'] ?? '写作者') ?></div>
                 <div class="sidebar-user-role">写作者</div>
@@ -228,7 +228,7 @@ if (is_dir($articlesDir)) {
             <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             返回主页
         </a>
-        <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
+        <a href="#" onclick="bindLogoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             退出登录
         </a>
@@ -298,7 +298,7 @@ if (is_dir($articlesDir)) {
     <?php if ($msg === 'email_disabled'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱验证已关闭，无法更换邮箱</div><?php endif; ?>
     <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>请求已过期，请重试</div><?php endif; ?>
     <?php $myAvatar = $currentUser['avatar'] ?? '';
-          $avatarSrc = ($myAvatar !== '' && strpos($myAvatar, 'data/') === 0) ? '../' . $myAvatar : ($myAvatar !== '' ? $myAvatar : '../api.php?action=avatar&qq=' . urlencode($currentUser['qq'] ?? '')); ?>
+          $avatarSrc = ($myAvatar !== '' && strpos($myAvatar, 'data/') === 0) ? '../' . $myAvatar : ($myAvatar !== '' ? $myAvatar : '../api.php?action=avatar&account=' . urlencode($currentUser['account'] ?? '')); ?>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -307,7 +307,7 @@ if (is_dir($articlesDir)) {
         <div class="table-wrap">
         <table>
             <tr><th style="width:120px">项目</th><th>内容</th></tr>
-            <tr><td style="color:var(--text-muted)">登录账号（QQ）</td><td><code><?= htmlspecialchars($currentUser['qq'] ?? '') ?></code>（不可修改）</td></tr>
+            <tr><td style="color:var(--text-muted)">登录账号（QQ）</td><td><code><?= htmlspecialchars($currentUser['account'] ?? '') ?></code>（不可修改）</td></tr>
             <tr><td style="color:var(--text-muted)">绑定邮箱</td><td><?= htmlspecialchars($currentUser['email'] ?? '未绑定') ?></td></tr>
             <tr><td style="color:var(--text-muted)">角色</td><td>写作者</td></tr>
         </table>
@@ -399,7 +399,7 @@ function toggleSidebar() {
     document.getElementById('sidebarOverlay').classList.toggle('active');
 }
 // 登出走 POST + CSRF
-function logoutSubmit(e) {
+function bindLogoutSubmit(e) {
     e.preventDefault();
     var fd = new FormData();
     fd.append('logout', '1');

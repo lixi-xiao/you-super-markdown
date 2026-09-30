@@ -546,13 +546,13 @@
             if (data.success) { allFiles = data.files; renderCategoryBar(); renderAnnouncements(); renderHomeContent(); renderSidebarList(allFiles); }
         } catch (err) { cardsGrid.innerHTML = '<div class="empty-state">⚠️ 加载失败</div>'; }
     }
-    // v3.1.6：首页公告卡片（服务端 window.YM_ANNOUNCEMENTS 数据；整卡可点跳详情）
+    // v3.1.6：首页公告卡片（服务端 window.YSM_ANNOUNCEMENTS 数据；整卡可点跳详情）
     // v3.1.8：无关联文章的公告（纯文字/更新公告）点击弹出完整内容弹窗，手机端可看全文
     // v3.3.4：取消公告筛选条——公告数量少、筛公告意义不大，标签改为纯展示（可点跳详情保留）
     function renderAnnouncements() {
         var sec = document.getElementById('announcementSection');
         if (!sec) return;
-        var anns = window.YM_ANNOUNCEMENTS || [];
+        var anns = window.YSM_ANNOUNCEMENTS || [];
         if (!anns.length) { sec.innerHTML = ''; sec.style.display = 'none'; return; }
         sec.style.display = '';
         var listHTML = anns.map(function(a) {
@@ -593,7 +593,7 @@
             c.addEventListener('click', function() {
                 var id = c.getAttribute('data-ann-id');
                 var ann = null;
-                (window.YM_ANNOUNCEMENTS || []).forEach(function(a) { if (a.id === id) ann = a; });
+                (window.YSM_ANNOUNCEMENTS || []).forEach(function(a) { if (a.id === id) ann = a; });
                 if (ann) openAnnounceDetail(ann);
             });
         });
@@ -623,7 +623,7 @@
             var annVideoSlots = [];
             var annBody = a.body.replace(/!video\[([^\]]*)\]\(([^)\s]+)\)/g, function(m, t, s) {
                 annVideoSlots.push({ title: t, src: s.trim() });
-                return '@@YM_VIDEO_' + (annVideoSlots.length - 1) + '@@';
+                return '@@YSM_VIDEO_' + (annVideoSlots.length - 1) + '@@';
             });
             content.innerHTML = marked.parse(annBody);
             // v3.3.0：公告视频渲染（仅站内 data/videos/；外链按纯文本保留）
@@ -671,9 +671,9 @@
         while (walker.nextNode()) textNodes.push(walker.currentNode);
         textNodes.forEach(function(node) {
             var val = node.nodeValue;
-            if (val.indexOf('@@YM_VIDEO_') === -1) return;
+            if (val.indexOf('@@YSM_VIDEO_') === -1) return;
             var frag = document.createDocumentFragment();
-            var re = /@@YM_VIDEO_(\d+)@@/g;
+            var re = /@@YSM_VIDEO_(\d+)@@/g;
             var last = 0, m;
             while ((m = re.exec(val)) !== null) {
                 if (m.index > last) frag.appendChild(document.createTextNode(val.slice(last, m.index)));
@@ -1176,7 +1176,7 @@
         if (archiveMode) { cardsGrid.style.display = 'none'; if (archiveView) archiveView.style.display = 'block'; }
         else if (archiveView) archiveView.style.display = 'none';
         showSidebarFileList(); highlightSidebarItem('');
-        document.title = (window.YM_SITE_TITLE || 'You Markdown');
+        document.title = (window.YSM_SITE_TITLE || 'You Markdown');
         cmtOnArticleHide();
         const savedScroll = sessionStorage.getItem('md-list-scroll');
         if (savedScroll) { requestAnimationFrame(() => window.scrollTo(0, parseInt(savedScroll))); } else { window.scrollTo(0, 0); }
@@ -1257,7 +1257,7 @@
             '<div style="color:var(--text-secondary);margin-bottom:24px;">' + (filename ? '文件 ' + escapeHTML(filename) + ' 未找到，可能已被删除。' : '你访问的页面不存在。') + '</div>' +
             '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">返回首页</a>' +
             '</div>';
-        document.title = '404 - 文档不存在 | ' + (window.YM_SITE_TITLE || 'You Markdown');
+        document.title = '404 - 文档不存在 | ' + (window.YSM_SITE_TITLE || 'You Markdown');
     }
     // v4.6.1：加载失败（网络错误/响应非 JSON）——与「文件不存在」区分，避免误报"文档不存在"
     function showLoadError(filename) {
@@ -1268,7 +1268,7 @@
             '<div style="color:var(--text-secondary);margin-bottom:24px;">' + (filename ? '文件 ' + escapeHTML(filename) + ' 暂时无法加载，请检查网络后重试。' : '网络异常，请稍后重试。') + '</div>' +
             '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">返回首页</a>' +
             '</div>';
-        document.title = '加载失败 | ' + (window.YM_SITE_TITLE || 'You Markdown');
+        document.title = '加载失败 | ' + (window.YSM_SITE_TITLE || 'You Markdown');
     }
     // v4.6.1：内容已获取但渲染过程出错（marked/highlight 等）——独立提示并输出控制台错误，便于定位
     function showRenderError(filename) {
@@ -1279,7 +1279,7 @@
             '<div style="color:var(--text-secondary);margin-bottom:24px;">文件内容已获取，但页面渲染时发生错误。请查看浏览器控制台或联系管理员。</div>' +
             '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">返回首页</a>' +
             '</div>';
-        document.title = '渲染失败 | ' + (window.YM_SITE_TITLE || 'You Markdown');
+        document.title = '渲染失败 | ' + (window.YSM_SITE_TITLE || 'You Markdown');
     }
     async function loadFile(filename, pushState = true) {
         showReading();
@@ -1317,14 +1317,14 @@
                       wordCount: (data.wordCount > 0) ? data.wordCount : ((listMeta && listMeta.wordCount) || 0),
                       modified: data.modified || (listMeta && listMeta.modified) || '' }
                 );
-                document.title = fileMeta.displayName + ' - ' + (window.YM_SITE_TITLE || 'You Markdown');
+                document.title = fileMeta.displayName + ' - ' + (window.YSM_SITE_TITLE || 'You Markdown');
                 currentFileName = filename;
                 let mdContent = data.content;
                 // v3.3.0：提取 !video[标题](站内相对路径) 语法为占位符，marked 渲染后转 <video> 播放器（防跳转）
                 var videoSlots = [];
                 mdContent = mdContent.replace(/!video\[([^\]]*)\]\(([^)\s]+)\)/g, function(m, t, s) {
                     videoSlots.push({ title: t, src: s.trim() });
-                    return '@@YM_VIDEO_' + (videoSlots.length - 1) + '@@';
+                    return '@@YSM_VIDEO_' + (videoSlots.length - 1) + '@@';
                 });
                 mdContent = mdContent.replace(/^(<!--.*?-->)?\s*#\s+.*\r?\n?/, '');
                 // v4.9.2-fix：先保护 \(...\)/\[...\] 定界符（CommonMark 会剥反斜杠），再交给 marked 渲染
@@ -1429,7 +1429,7 @@
                 if (savedReadScroll) { requestAnimationFrame(() => window.scrollTo(0, parseInt(savedReadScroll))); }
                 // v3.3.11：公告为单向通知——公告关联文章（如「更新历史」）不显示评论区
                 var _annFileMap = {};
-                (window.YM_ANNOUNCEMENTS || []).forEach(function(_a) { if (_a.article) _annFileMap[_a.article] = 1; });
+                (window.YSM_ANNOUNCEMENTS || []).forEach(function(_a) { if (_a.article) _annFileMap[_a.article] = 1; });
                 if (_annFileMap[filename]) { cmtOnArticleHide(); } else { cmtOnArticleLoad(); }
         } catch (err) {
             console.error('[loadFile render error]', err);
@@ -1781,10 +1781,10 @@
         const mm = d.getMinutes().toString().padStart(2, '0');
         return Y + '-' + M + '-' + D + ' ' + hh + ':' + mm;
     }
-    function cmtAvatarHtml(url, name, qq) {
+    function cmtAvatarHtml(url, name, account) {
         const initial = cmtEscape((name||'?').charAt(0));
         // v2.10.0：优先使用自定义头像（data/avatars/...），未上传时回退 QQ 头像
-        const src = url ? url : (qq ? 'api.php?action=avatar&qq=' + encodeURIComponent(qq) : '');
+        const src = url ? url : (account ? 'api.php?action=avatar&account=' + encodeURIComponent(account) : '');
         if (src) return '<img src="' + cmtEscape(src) + '" alt="" class="cmt-avatar-img" onerror="this.style.display=\'none\';this.parentNode.querySelector(\'.cmt-avatar-text\').style.display=\'flex\'"/><span class="cmt-avatar-text" style="display:none">' + initial + '</span>';
         return '<span class="cmt-avatar-text">' + initial + '</span>';
     }
@@ -1880,13 +1880,13 @@
         if (cmtResetForm) cmtResetForm.style.display = 'none';
     }
     if (cmtLoginBtn) cmtLoginBtn.addEventListener('click', async () => {
-        const qq = cmtLoginQQ.value.trim(), pw = cmtLoginPw.value;
+        const account = cmtLoginQQ.value.trim(), pw = cmtLoginPw.value;
         cmtLoginErr.textContent = '';
-        if (!qq || !pw) { cmtLoginErr.textContent = '请填写QQ号和密码'; return; }
+        if (!account || !pw) { cmtLoginErr.textContent = '请填写QQ号和密码'; return; }
         // v2.11.1：提交前动态刷新 token（与当前 session 绑定，杜绝「会话失败」）
         await ensureFreshCsrf();
         cmtLoginBtn.disabled = true; cmtLoginBtn.textContent = '登录中...';
-        fetch('api.php?action=login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, password: pw }) })
+        fetch('api.php?action=login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account, password: pw }) })
             .then(r => r.json()).then(d => {
                 // v4.7.0：管理角色陌生设备 → 切到设备验证视图（邮件验证码确认后完成登录）
                 if (d.need_device_verify) {
@@ -1983,12 +1983,12 @@
     });
     // 发送找回验证码
     if (cmtResetSendCode) cmtResetSendCode.addEventListener('click', async () => {
-        const qq = cmtResetQQ.value.trim(), email = cmtResetEmail.value.trim();
+        const account = cmtResetQQ.value.trim(), email = cmtResetEmail.value.trim();
         cmtResetErr.textContent = '';
-        if (!qq || !email) { cmtResetErr.textContent = '请填写账号与绑定邮箱'; return; }
+        if (!account || !email) { cmtResetErr.textContent = '请填写账号与绑定邮箱'; return; }
         await ensureFreshCsrf();
         cmtResetSendCode.disabled = true; cmtResetSendCode.textContent = '发送中...';
-        fetch('api.php?action=password_reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'send_code', qq, email }) })
+        fetch('api.php?action=password_reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'send_code', account, email }) })
             .then(r => r.json()).then(d => {
                 if (d.success) {
                     cmtResetErr.textContent = '验证码已发送至 ' + (d.masked_email || '绑定邮箱') + '，请在5分钟内完成重置';
@@ -2002,13 +2002,13 @@
     });
     // 重置密码
     if (cmtResetBtn) cmtResetBtn.addEventListener('click', async () => {
-        const qq = cmtResetQQ.value.trim(), code = cmtResetCode.value.trim(), pw = cmtResetPw.value;
+        const account = cmtResetQQ.value.trim(), code = cmtResetCode.value.trim(), pw = cmtResetPw.value;
         cmtResetErr.textContent = '';
         cmtResetErr.style.color = '';
-        if (!qq || !code || !pw) { cmtResetErr.textContent = '请完整填写账号、验证码与新密码'; return; }
+        if (!account || !code || !pw) { cmtResetErr.textContent = '请完整填写账号、验证码与新密码'; return; }
         await ensureFreshCsrf();
         cmtResetBtn.disabled = true; cmtResetBtn.textContent = '重置中...';
-        fetch('api.php?action=password_reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'do_reset', qq, code, new_password: pw }) })
+        fetch('api.php?action=password_reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'do_reset', account, code, new_password: pw }) })
             .then(r => r.json()).then(d => {
                 if (d.success) {
                     cmtResetErr.textContent = '密码已重置，请使用新密码登录';
@@ -2096,11 +2096,11 @@
     });
 
     if (cmtRegBtn) cmtRegBtn.addEventListener('click', async () => {
-        const qq = cmtRegQQ.value.trim(), nick = cmtRegNick.value.trim(), pw = cmtRegPw.value;
+        const account = cmtRegQQ.value.trim(), nick = cmtRegNick.value.trim(), pw = cmtRegPw.value;
         const email = regVerifyOn ? cmtRegEmail.value.trim() : '';
         const code = regVerifyOn ? cmtRegCode.value.trim() : '';
         cmtRegErr.textContent = '';
-        if (!qq || !pw) { cmtRegErr.textContent = '请填写QQ号和密码'; return; }
+        if (!account || !pw) { cmtRegErr.textContent = '请填写QQ号和密码'; return; }
         if (pw.length < 8 || !/[a-z]/.test(pw) || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw)) { cmtRegErr.textContent = '密码至少8位，且需包含大写字母、小写字母与数字'; return; }
         if (regVerifyOn) {
             if (!email) { cmtRegErr.textContent = '请填写邮箱'; return; }
@@ -2111,7 +2111,7 @@
         cmtRegBtn.disabled = true; cmtRegBtn.textContent = '注册中...';
         // v4.4.0：注册请求携带蜜罐字段原值（机器人自动填充会被后端静默拒绝）
         const hpVal = cmtRegHoneypot ? cmtRegHoneypot.value.trim() : '';
-        fetch('api.php?action=register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw, email, code, website: hpVal }) })
+        fetch('api.php?action=register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account, nickname: nick, password: pw, email, code, website: hpVal }) })
             .then(r => r.json()).then(d => {
                 if (d.success) { if (d.user) { cmtUser = d.user; } cmtCloseModal(cmtAuthModal); cmtUpdateUI(); cmtLoad(); }
                 else { cmtRegErr.textContent = d.error || '注册失败'; }
@@ -2214,13 +2214,13 @@
         }).catch(() => { if (emailErr) emailErr.textContent = '网络错误'; cmtEmailSave.disabled = false; });
     });
     if (cmtAdminSave) cmtAdminSave.addEventListener('click', () => {
-        const qq = cmtAdminQQ.value.trim(), nick = cmtAdminNick.value.trim(), pw = cmtAdminPw.value, pw2 = cmtAdminPw2.value;
+        const account = cmtAdminQQ.value.trim(), nick = cmtAdminNick.value.trim(), pw = cmtAdminPw.value, pw2 = cmtAdminPw2.value;
         cmtAdminErr.textContent = '';
-        if (!qq) { cmtAdminErr.textContent = '请填写QQ号'; return; }
+        if (!account) { cmtAdminErr.textContent = '请填写QQ号'; return; }
         if (!nick) { cmtAdminErr.textContent = '请填写昵称'; return; }
         if (pw && (pw.length < 8 || !/[a-z]/.test(pw) || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw))) { cmtAdminErr.textContent = '密码至少8位，且需包含大写字母、小写字母与数字'; return; }
         if (pw !== pw2) { cmtAdminErr.textContent = '两次密码不一致'; return; }
-        fetch('api.php?action=admin_setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qq, nickname: nick, password: pw }) })
+        fetch('api.php?action=admin_setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account, nickname: nick, password: pw }) })
             .then(r => r.json()).then(d => {
                 if (d.success) { if (cmtUser) { cmtUser.nickname = nick; cmtUser.avatar = d.user.avatar || cmtUser.avatar; } cmtCloseModal(cmtAdminModal); cmtUpdateUI(); }
                 else { cmtAdminErr.textContent = d.error || '保存失败'; }
@@ -2311,7 +2311,7 @@
         const rLink = r.user_id ? '<a class="cmt-user-link" href="user.php?id=' + encodeURIComponent(r.user_id) + '">' : '';
         const rLinkEnd = r.user_id ? '</a>' : '';
         return '<div class="cmt-reply-item" data-id="' + r.id + '" data-del="' + rDel + '">' +
-            '<div class="cmt-reply-top"><div class="cmt-reply-avatar">' + rLink + cmtAvatarHtml(r.avatar, r.nickname, r.qq) + rLinkEnd + '</div>' +
+            '<div class="cmt-reply-top"><div class="cmt-reply-avatar">' + rLink + cmtAvatarHtml(r.avatar, r.nickname, r.account) + rLinkEnd + '</div>' +
             '<div class="cmt-reply-info"><div class="cmt-reply-name-row">' + rLink + '<span class="cmt-reply-name">' + cmtEscape(r.nickname||'') + '</span>' + rLinkEnd + replyToHtml + '<span class="cmt-reply-time">' + cmtFormatTime(r.created_at) + '</span></div>' +
             '</div></div>' +
             '<div class="cmt-reply-text">' + cmtEscape(r.content) + '</div>' +
@@ -2349,7 +2349,7 @@
             const uLink = c.user_id ? '<a class="cmt-user-link" href="user.php?id=' + encodeURIComponent(c.user_id) + '">' : '';
             const uLinkEnd = c.user_id ? '</a>' : '';
             return '<div class="cmt-item" data-id="' + c.id + '" data-del="' + canDel + '">' +
-                '<div class="cmt-top' + noSignCls + '"><div class="cmt-avatar">' + uLink + cmtAvatarHtml(c.avatar, c.nickname, c.qq) + uLinkEnd + '</div>' +
+                '<div class="cmt-top' + noSignCls + '"><div class="cmt-avatar">' + uLink + cmtAvatarHtml(c.avatar, c.nickname, c.account) + uLinkEnd + '</div>' +
                 '<div class="cmt-info"><div class="cmt-name-row">' + uLink + '<span class="cmt-name">' + cmtEscape(c.nickname||'') + '</span>' + uLinkEnd + '<span class="cmt-time">' + cmtFormatTime(c.created_at) + '</span></div>' +
                 sign + '</div></div>' +
                 '<div class="cmt-text">' + cmtEscape(c.content) + '</div>' +
@@ -3419,7 +3419,7 @@
                 if (dropdownRole) dropdownRole.textContent = roleLabel;
                 if (dropdownAvatar) {
                     var initial = nickname.charAt(0).toUpperCase();
-                    // v2.11.1：API 返回的 qq 已打码，头像一律用 avatar 字段（不再用 qq 拼 URL）
+                    // v2.11.1：API 返回的 account 已打码，头像一律用 avatar 字段（不再用 account 拼 URL）
                     if (userData.avatar) {
                         dropdownAvatar.innerHTML = '<img src="' + escHtml(userData.avatar) + '" alt="" onerror="this.style.display=\'none\';this.parentNode.textContent=\'' + escHtml(initial) + '\'">';
                     } else {

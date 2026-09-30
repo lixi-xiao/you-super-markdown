@@ -18,7 +18,7 @@ if (!$row) {
     } else {
         if (create_author_from_pending($row)) {
             update_pending_author_status($row['id'], 'confirmed');
-            auditLog('author_confirm', $row['qq'] ?? '', "超管确认创建写作者: {$row['nickname']}");
+            auditLog('author_confirm', $row['account'] ?? '', "超管确认创建写作者: {$row['nickname']}");
             $result = '确认成功！写作者账号已创建，站长可通知其登录。';
             $okResult = true;
         } else {

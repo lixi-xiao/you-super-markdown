@@ -1,12 +1,13 @@
 <?php
 // ============================================================
-// You Super Markdown — SQLite 数据访问层（v2.5.0）
+// You Super Markdown — SQLite 数据访问层（v5.0.0）
 // 单一 PDO 连接 + schema 建表 + 通用查询辅助。
-// 数据文件：data/ym.db（WAL 模式）；articles/*.md 仍为文件。
+// 数据文件：data/ysm.db（WAL 模式）；articles/*.md 仍为文件。
+// v5.0.0：schema 一次性成型（不再有 ALTER TABLE 增量补丁）；4.x 老库请用 ysm-migrate 迁移。
 // 注意：本文件被 utils.php require_once，所有读写函数复用同一个连接。
 // ============================================================
 
-define('YM_DB_FILE', __DIR__ . '/data/ym.db');
+define('YSM_DB_FILE', __DIR__ . '/data/ysm.db');
 
 /**
  * 获取 PDO 单例（含 schema 初始化）
@@ -15,9 +16,9 @@ define('YM_DB_FILE', __DIR__ . '/data/ym.db');
 function db() {
     static $pdo = null;
     if ($pdo === null) {
-        $dir = dirname(YM_DB_FILE);
+        $dir = dirname(YSM_DB_FILE);
         if (!is_dir($dir)) { @mkdir($dir, 0755, true); }
-        $pdo = new PDO('sqlite:' . YM_DB_FILE);
+        $pdo = new PDO('sqlite:' . YSM_DB_FILE);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         $pdo->exec('PRAGMA journal_mode=WAL');
@@ -32,9 +33,11 @@ function db() {
  * 建立全部表结构（幂等）
  */
 function db_init_schema($pdo) {
+    // v5.0.0：schema 一次成型——原 qq 列更名 account；email/disabled/last_login/login_count/tv 直接内建，
+    // 不再使用 ALTER TABLE 增量补丁（4.x 老库的补列由 ysm-migrate 负责）。
     $pdo->exec('CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
-        qq TEXT UNIQUE,
+        account TEXT UNIQUE,
         nickname TEXT,
         password TEXT,
         avatar TEXT,
@@ -42,39 +45,13 @@ function db_init_schema($pdo) {
         role TEXT,
         station_id TEXT,
         created TEXT,
-        created_by TEXT
+        created_by TEXT,
+        email TEXT,
+        disabled INTEGER DEFAULT 0,
+        last_login TEXT,
+        login_count INTEGER DEFAULT 0,
+        tv INTEGER DEFAULT 0
     )');
-    // v2.9.0：users 表新增 email 字段（注册邮箱验证用；老用户无邮箱不受影响）。
-    // SQLite 的 ADD COLUMN 不支持 UNIQUE 约束，邮箱唯一性由应用层检查保证。
-    try {
-        $pdo->exec('ALTER TABLE users ADD COLUMN email TEXT');
-    } catch (Exception $e) {
-        // 列已存在（幂等），忽略
-    }
-    // v2.11.4：users 表新增 disabled 字段（超管禁用账号开关，1=已禁用；禁用后无法登录/评论/进后台）
-    try {
-        $pdo->exec('ALTER TABLE users ADD COLUMN disabled INTEGER DEFAULT 0');
-    } catch (Exception $e) {
-        // 列已存在（幂等），忽略
-    }
-    // v2.11.5：users 表新增 last_login / login_count（超管用户详情统计：最后登录时间与登录次数）
-    try {
-        $pdo->exec('ALTER TABLE users ADD COLUMN last_login TEXT');
-    } catch (Exception $e) {
-        // 列已存在（幂等），忽略
-    }
-    try {
-        $pdo->exec('ALTER TABLE users ADD COLUMN login_count INTEGER DEFAULT 0');
-    } catch (Exception $e) {
-        // 列已存在（幂等），忽略
-    }
-    // v4.5.0：users 表新增 tv 字段（token_version，同账号并发踢旧——每次登录 +1，
-    // 旧会话/token 携带的 tv 与新值不符即失效）
-    try {
-        $pdo->exec('ALTER TABLE users ADD COLUMN tv INTEGER DEFAULT 0');
-    } catch (Exception $e) {
-        // 列已存在（幂等），忽略
-    }
     // v4.5.0：refresh token 表（双 token 短时效：登录态过期后用 refresh 自动续期，
     // 绑定环境指纹 + token_version，换环境/踢旧后失效）
     $pdo->exec('CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -136,7 +113,7 @@ function db_init_schema($pdo) {
         id TEXT PRIMARY KEY,
         email TEXT,
         nickname TEXT,
-        qq TEXT,
+        account TEXT,
         password_hash TEXT,
         station_id TEXT,
         verify_code_id TEXT,
@@ -153,7 +130,8 @@ function db_init_schema($pdo) {
         ip TEXT PRIMARY KEY,
         types_json TEXT,
         reason TEXT,
-        time TEXT
+        time TEXT,
+        expires INTEGER DEFAULT 0
     )');
     $pdo->exec('CREATE TABLE IF NOT EXISTS audit (
         id TEXT PRIMARY KEY,
@@ -174,7 +152,7 @@ function db_init_schema($pdo) {
         article TEXT,
         parent_id TEXT,
         user_id TEXT,
-        qq TEXT,
+        account TEXT,
         nickname TEXT,
         avatar TEXT,
         signature TEXT,
@@ -215,23 +193,15 @@ function db_init_schema($pdo) {
         date TEXT,
         ord INTEGER DEFAULT 0
     )');
-    // v3.2.3：公告表补 body 列（markdown 正文，站长可上传 .md 导入；老库幂等补齐）
-    try { $pdo->exec('ALTER TABLE announcement ADD COLUMN body TEXT'); } catch (Exception $e) { /* 列已存在 */ }
-    $pdo->exec('CREATE TABLE IF NOT EXISTS login_fails (ip TEXT, t INTEGER, acc TEXT)');
-    // v2.11.0：老库 login_fails 无 acc 列（登录失败按账号维度计数），幂等补齐
-    try { $pdo->exec('ALTER TABLE login_fails ADD COLUMN acc TEXT'); } catch (Exception $e) { /* 列已存在 */ }
-    // v4.5.0：限速表补 fp 列（环境指纹维度——指纹+IP 双维限速；旧记录 fp 为空按 IP 维度兼容）
-    foreach (['login_fails', 'reg_rates', 'comment_rates', 'honeypot_rates', 'music_rates'] as $rt) {
-        try { $pdo->exec("ALTER TABLE {$rt} ADD COLUMN fp TEXT"); } catch (Exception $e) { /* 列已存在 */ }
-    }
-    $pdo->exec('CREATE TABLE IF NOT EXISTS reg_rates (ip TEXT, t INTEGER)');
-    $pdo->exec('CREATE TABLE IF NOT EXISTS comment_rates (ip TEXT, t INTEGER)');
+    // v5.0.0：公告表已将 body（markdown 正文）内建到 CREATE TABLE，不再 ALTER 补齐。
+    // v5.0.0：限速表一次性内建 acc/fp 列（登录失败按 IP+账号+指纹计数；指纹+IP 双维限速）。
+    $pdo->exec('CREATE TABLE IF NOT EXISTS login_fails (ip TEXT, t INTEGER, acc TEXT, fp TEXT)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS reg_rates (ip TEXT, t INTEGER, fp TEXT)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS comment_rates (ip TEXT, t INTEGER, fp TEXT)');
     // v4.4.0：注册蜜罐触发计数表（短时间连续命中蜜罐 → 自动封禁 IP）
-    $pdo->exec('CREATE TABLE IF NOT EXISTS honeypot_rates (ip TEXT, t INTEGER)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS honeypot_rates (ip TEXT, t INTEGER, fp TEXT)');
     // v4.7.4：音乐接口出站限速表（第三方 API 聚合接口，防滥用放大外呼；fp 列与 db_rate_add 对齐）
     $pdo->exec('CREATE TABLE IF NOT EXISTS music_rates (ip TEXT, fp TEXT, t INTEGER)');
-    // v4.4.0：bans 表补 expires 列（0=永久封禁；>0=过期时间戳，老库幂等补齐）
-    try { $pdo->exec('ALTER TABLE bans ADD COLUMN expires INTEGER DEFAULT 0'); } catch (Exception $e) { /* 列已存在 */ }
     // v2.11.0：登录锁定表（60 秒内同 IP 或同账号失败 ≥3 次 → 锁 15 分钟，IP+账号双级）
     $pdo->exec('CREATE TABLE IF NOT EXISTS login_locks (
         key TEXT PRIMARY KEY,
@@ -253,6 +223,8 @@ function db_init_schema($pdo) {
         ip TEXT, action TEXT, user TEXT, user_id TEXT, ua TEXT, time TEXT
     )');
     $pdo->exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
+    // v5.0.0：schema 版本表（迁移器据 schema_version/epoch 判断库结构版本，与业务 meta 分离）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT)');
     // v4.0.0：站内访问统计——page_views 每文章累计 PV；views_log 按 文章+IP+日期 去重计数防刷
     $pdo->exec('CREATE TABLE IF NOT EXISTS page_views (
         article TEXT PRIMARY KEY,
@@ -266,6 +238,9 @@ function db_init_schema($pdo) {
         PRIMARY KEY (article, ip, day)
     )');
     // v4.0.0：评论邮件订阅设置（key 复用 config 表，无需新表）
+    // v5.0.0：写入 schema 版本标记（s=5.0.0，epoch=1；迁移器据此判断是否需要升级）
+    $pdo->exec("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '5.0.0')");
+    $pdo->exec("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('epoch', '1')");
 }
 
 /**

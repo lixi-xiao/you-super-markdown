@@ -44,7 +44,7 @@ function migrate_insert_comments($pdo, $article, $comments, $parentId = null) {
         if (!is_array($c)) continue;
         $id = isset($c['id']) && $c['id'] !== '' ? $c['id'] : bin2hex(random_bytes(8));
         $st = $pdo->prepare(
-            'INSERT INTO comments (id, article, parent_id, user_id, qq, nickname, avatar, signature, content, likes, created_at)
+            'INSERT INTO comments (id, article, parent_id, user_id, account, nickname, avatar, signature, content, likes, created_at)
              VALUES (?,?,?,?,?,?,?,?,?,?,?)'
         );
         $st->execute([

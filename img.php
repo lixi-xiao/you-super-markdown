@@ -2,7 +2,7 @@
 // v3.3.12：站内图片缩略图服务（首页卡片封面加速）——/img.php?src=/data/images/xxx.jpg&w=640
 // 安全：仅允许站内 data/images/ 下安全文件；GD 生成缩略图并磁盘缓存；无 GD 时透传原图（功能降级不中断）
 require_once __DIR__ . '/utils.php';
-security_check();
+runRequestSecurityCheck();
 
 error_reporting(0);
 $src = isset($_GET['src']) ? trim((string)$_GET['src']) : '';

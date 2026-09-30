@@ -24,8 +24,8 @@ if (!$row || $row['status'] !== 'verify_pending' || ($row['email'] ?? '') !== $e
             // 验证通过：生成超管确认 token，状态转 pending（待超管确认），发确认邮件
             $token = bin2hex(random_bytes(16));
             db_exec("UPDATE pending_author_creates SET status = 'pending', verify_code_id = ?, confirm_token = ? WHERE id = ?", [$verr['id'], $token, $pid]);
-            auditLog('author_verify_pass', $row['qq'] ?? '', "写作者验证邮箱: {$row['nickname']}");
-            sendAdminConfirmMail($pid, $token, $row['nickname'], $row['qq'], $email);
+            auditLog('author_verify_pass', $row['account'] ?? '', "写作者验证邮箱: {$row['nickname']}");
+            sendAdminConfirmMail($pid, $token, $row['nickname'], $row['account'], $email);
             $done = true;
         }
     }

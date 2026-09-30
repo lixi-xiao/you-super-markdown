@@ -3,7 +3,7 @@ require_once __DIR__ . '/utils.php';
 secureSessionStart();
 
 // v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
-security_check();
+runRequestSecurityCheck();
 
 // 守护进程 MD5 校验钩子：每次请求检查 index.php 自身完整性
 $guardStateFile = '/opt/you-markdown/guard-state.json';
@@ -19,10 +19,10 @@ if (file_exists($baseMd5File)) {
     }
 }
 
-function isAdmin() {
+function isStationAdmin() {
     return checkRole(ROLE_STATION_ADMIN);
 }
-function jsonOut($data, $code = 200) {
+function sendJson($data, $code = 200) {
     http_response_code($code);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
@@ -31,10 +31,10 @@ function jsonOut($data, $code = 200) {
 if (!is_dir('./data/articles')) {
     mkdir('./data/articles', 0755, true);
 }
-$_siteConfig = loadSiteConfig();
-$_siteTitle = $_siteConfig['site_title'] ?? 'You Markdown';
+$siteConf = loadSiteConfig();
+$siteHeading = $siteConf['site_title'] ?? 'You Markdown';
 // v3.1.6：首页公告卡片数据（公告表 + 关联文章提取封面图/标签/字数；纯文字公告无关联文章）
-function _annCoverTag($article) {
+function collectAnnouncementCardMeta($article) {
     $cover = ''; $tags = []; $words = 0; $meta = [];
     $p = __DIR__ . '/data/articles/' . basename($article);
     if ($article !== '' && is_file($p)) {
@@ -63,17 +63,17 @@ function _annCoverTag($article) {
 // v3.1.10：公告可见范围（站长后台可调）——all 所有人 / users 仅登录用户 / managers 仅站长及以上
 // v3.1.12：可见范围仅作用于「更新公告」（更新历史.md）；其他公告始终可见
 //          封面不再作为公告展示（图片仅作为文章内配图，cover 恒为空）
-$_annVis = $_siteConfig['announce_visibility'] ?? 'all';
-$_announcements = [];
-foreach (getAnnouncements(20) as $_an) {
-    $isUpdate = ($_an['article'] ?? '') === '更新历史.md';
-    if ($isUpdate && $_annVis === 'managers' && !checkRole(ROLE_STATION_ADMIN)) continue;
-    if ($isUpdate && $_annVis === 'users' && !checkRole(ROLE_USER)) continue;
-    [, $tg, $wc, ] = _annCoverTag($_an['article'] ?? '');
-    $_announcements[] = [
-        'id' => $_an['id'], 'type' => $_an['type'], 'article' => $_an['article'],
-        'title' => $_an['title'], 'summary' => $_an['summary'], 'date' => $_an['date'],
-        'body' => $_an['body'] ?? '',
+$annVisibility = $siteConf['announce_visibility'] ?? 'all';
+$announcementCards = [];
+foreach (getAnnouncements(20) as $annItem) {
+    $isUpdate = ($annItem['article'] ?? '') === '更新历史.md';
+    if ($isUpdate && $annVisibility === 'managers' && !checkRole(ROLE_STATION_ADMIN)) continue;
+    if ($isUpdate && $annVisibility === 'users' && !checkRole(ROLE_USER)) continue;
+    [, $tg, $wc, ] = collectAnnouncementCardMeta($annItem['article'] ?? '');
+    $announcementCards[] = [
+        'id' => $annItem['id'], 'type' => $annItem['type'], 'article' => $annItem['article'],
+        'title' => $annItem['title'], 'summary' => $annItem['summary'], 'date' => $annItem['date'],
+        'body' => $annItem['body'] ?? '',
         'cover' => '', 'tags' => $tg, 'words' => $wc,
     ];
 }
@@ -82,19 +82,19 @@ foreach (getAnnouncements(20) as $_an) {
 $musicEnabled = true;
 // 置顶列表读写由 utils.php 提供（SQLite）；此处仅作全局别名
 // 自定义入口路径路由（L1 隐藏入口扩展）
-$requestUri = $_SERVER['REQUEST_URI'] ?? '';
-$urlPath = parse_url($requestUri, PHP_URL_PATH);
-$urlPath = trim($urlPath, '/');
-$pathParts = explode('/', $urlPath);
-$firstSegment = $pathParts[0] ?? '';
+$reqUri = $_SERVER['REQUEST_URI'] ?? '';
+$cleanPath = parse_url($reqUri, PHP_URL_PATH);
+$cleanPath = trim($cleanPath, '/');
+$segs = explode('/', $cleanPath);
+$seg = $segs[0] ?? '';
 
 $stationPath = getStationPath();
 $authorPath = getAuthorPath();
 $hideDefaults = isDefaultPathHidden();
 
 // 自定义路径匹配 → 转发到对应 dashboard
-if ($stationPath !== 'station' && $firstSegment === $stationPath) {
-    if (isset($pathParts[1]) && $pathParts[1] === 'dashboard.php') {
+if ($stationPath !== 'station' && $seg === $stationPath) {
+    if (isset($segs[1]) && $segs[1] === 'dashboard.php') {
         require __DIR__ . '/station/dashboard.php';
         exit;
     }
@@ -102,8 +102,8 @@ if ($stationPath !== 'station' && $firstSegment === $stationPath) {
     require __DIR__ . '/404.php';
     exit;
 }
-if ($authorPath !== 'author' && $firstSegment === $authorPath) {
-    if (isset($pathParts[1]) && $pathParts[1] === 'dashboard.php') {
+if ($authorPath !== 'author' && $seg === $authorPath) {
+    if (isset($segs[1]) && $segs[1] === 'dashboard.php') {
         require __DIR__ . '/author/dashboard.php';
         exit;
     }
@@ -114,12 +114,12 @@ if ($authorPath !== 'author' && $firstSegment === $authorPath) {
 
 // 隐藏默认路径：自定义路径生效后，默认路径返回 404
 if ($hideDefaults) {
-    if ($stationPath !== 'station' && $firstSegment === 'station') {
+    if ($stationPath !== 'station' && $seg === 'station') {
         http_response_code(404);
         require __DIR__ . '/404.php';
         exit;
     }
-    if ($authorPath !== 'author' && $firstSegment === 'author') {
+    if ($authorPath !== 'author' && $seg === 'author') {
         http_response_code(404);
         require __DIR__ . '/404.php';
         exit;
@@ -128,7 +128,7 @@ if ($hideDefaults) {
 
 // v4.0.0：未知路径返回 404 页（nginx try_files 会把不存在的路径 fallback 到 index.php，
 //          此时非空路径且不是已知入口/接口/静态页 → 统一 404，避免裸首页外壳）
-if ($firstSegment !== '' && !in_array($firstSegment, [
+if ($seg !== '' && !in_array($seg, [
     'index.php', 'api.php', 'img.php', 'music.php', 'sc.php', 'user.php',
     'verify-author.php', 'verify-confirm.php', '404.php', 'robots.txt', 'favicon.ico',
 ], true)) {
@@ -142,12 +142,12 @@ $action = isset($_GET['action']) ? $_GET['action'] : '';
 // CSRF 防护：index.php 所有 POST 操作（pin/unpin/delete/update）统一校验
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) {
-        jsonOut(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+        sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
     }
 }
 
 if ($action === 'pin') {
-    if (!isAdmin()) { logUnauthorized('越权尝试置顶文章', true); jsonOut(['success' => false, 'error' => '无权限'], 403); }
+    if (!isStationAdmin()) { logUnauthorized('越权尝试置顶文章', true); sendJson(['success' => false, 'error' => '无权限'], 403); }
     header('Content-Type: application/json; charset=utf-8');
     $file = basename($_POST['file'] ?? '');
     if (empty($file)) { echo json_encode(['success' => false]); exit; }
@@ -160,7 +160,7 @@ if ($action === 'pin') {
     exit;
 }
 if ($action === 'unpin') {
-    if (!isAdmin()) { logUnauthorized('越权尝试取消置顶文章', true); jsonOut(['success' => false, 'error' => '无权限'], 403); }
+    if (!isStationAdmin()) { logUnauthorized('越权尝试取消置顶文章', true); sendJson(['success' => false, 'error' => '无权限'], 403); }
     header('Content-Type: application/json; charset=utf-8');
     $file = basename($_POST['file'] ?? '');
     if (empty($file)) { echo json_encode(['success' => false]); exit; }
@@ -173,17 +173,17 @@ if ($action === 'unpin') {
 if ($action === 'list') {
     header('Content-Type: application/json; charset=utf-8');
     $files = glob('./data/articles/*.md');
-    $fileList = [];
-    $pinnedList = getPinnedList();
+    $articleItems = [];
+    $pinnedSet = getPinnedList();
     // v3.1.11：设为公告的文章不在文章列表展示（公告单独展示，不产生文章卡片）
-    $annArticles = array_flip(array_column(db_all("SELECT article FROM announcement WHERE article != ''"), 'article'));
+    $announcementFiles = array_flip(array_column(db_all("SELECT article FROM announcement WHERE article != ''"), 'article'));
     // v4.0.0：浏览量一次取回构建 map，避免逐篇查询
-    $viewsMap = [];
-    foreach (db_all('SELECT article, views FROM page_views') as $v) $viewsMap[$v['article']] = (int)$v['views'];
-    $nowStr = date('Y-m-d H:i');
+    $viewCounts = [];
+    foreach (db_all('SELECT article, views FROM page_views') as $v) $viewCounts[$v['article']] = (int)$v['views'];
+    $nowMin = date('Y-m-d H:i');
     if ($files) {
         usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
-        foreach ($files as $listIdx => $file) {
+        foreach ($files as $cardIndex => $file) {
             $filename = basename($file);
             if (strpos($filename, '.') === 0) continue;
             $content = file_get_contents($file);
@@ -195,10 +195,10 @@ if ($action === 'list') {
                 $mStatus = $hmeta['status'] ?? 'published';
                 $mPublishAt = $hmeta['publish_at'] ?? '';
                 if ($mStatus === 'draft') continue;
-                if ($mStatus === 'scheduled' && $mPublishAt !== '' && $mPublishAt > $nowStr) continue;
+                if ($mStatus === 'scheduled' && $mPublishAt !== '' && $mPublishAt > $nowMin) continue;
             }
             // v3.1.11：公告关联文章不进列表
-            if (isset($annArticles[$filename])) continue;
+            if (isset($announcementFiles[$filename])) continue;
             $lines = explode("\n", $content);
             $title = '';
             $wordCount = mb_strlen(preg_replace('/\s+/', '', $content), 'UTF-8');
@@ -243,7 +243,7 @@ if ($action === 'list') {
                 if (preg_match_all('/#(\w+)/u', $content, $matches)) $tags = array_slice(array_unique($matches[1]), 0, 5);
                 if (empty($tags)) $tags = ['markdown', '文档'];
             }
-            $isPinned = in_array($filename, $pinnedList);
+            $isPinned = in_array($filename, $pinnedSet);
             // v3.1.12：文章卡片封面——正文第一张图片（图片仅作为文章展示，公告不再使用）
             $cover = '';
             if (preg_match('/!\[[^\]]*\]\(([^)\s]+)\)/', $content, $im)) {
@@ -259,37 +259,37 @@ if ($action === 'list') {
             // v4.2.2：封面槽位由随机改为「列表位置 % 24」稳定值——同一文章永远同一 URL → 浏览器缓存命中，
             //         重复访问不再重下 ~978KB 封面；不同文章不同槽位，每卡仍不同图（池内每 6h 轮换内容）
             if ($cover === '') {
-                $bgType = $_siteConfig['bg_type'] ?? 'none';
-                if ($bgType === 'image' && !empty($_siteConfig['bg_image'])) {
-                    $cover = $_siteConfig['bg_image'];
+                $bgType = $siteConf['bg_type'] ?? 'none';
+                if ($bgType === 'image' && !empty($siteConf['bg_image'])) {
+                    $cover = $siteConf['bg_image'];
                     if (strpos($cover, 'data/') === 0) $cover = '/' . $cover;
                 } else {
-                    $cover = 'cover.php?i=' . $listIdx;
+                    $cover = 'cover.php?i=' . $cardIndex;
                 }
             }
-            $fileList[] = [
+            $articleItems[] = [
                 'name' => $filename, 'displayName' => $title, 'category' => $category,
                 'size' => filesize($file), 'modified' => date('Y-m-d', filemtime($file)),
                 'modifiedTimestamp' => filemtime($file), 'excerpt' => $excerpt,
                 'wordCount' => $wordCount, 'tags' => $tags, 'author' => $author,
                 'license' => $license, 'licenseUrl' => $licenseUrl, 'pinned' => $isPinned,
                 'cover' => $cover,
-                'views' => $viewsMap[$filename] ?? 0,
+                'views' => $viewCounts[$filename] ?? 0,
                 'status' => $mStatus ?? 'published',
                 'publishAt' => $mPublishAt ?? '',
             ];
         }
     }
-    usort($fileList, function($a, $b) {
+    usort($articleItems, function($a, $b) {
         if ($a['pinned'] && !$b['pinned']) return -1;
         if (!$a['pinned'] && $b['pinned']) return 1;
         return $b['modifiedTimestamp'] - $a['modifiedTimestamp'];
     });
-    $total = count($fileList);
+    $total = count($articleItems);
     $page = max(1, intval($_GET['page'] ?? 1));
     $perPage = max(1, min(200, intval($_GET['per_page'] ?? 100)));
-    $pagedList = array_slice($fileList, ($page - 1) * $perPage, $perPage);
-    echo json_encode(['success' => true, 'files' => $pagedList, 'count' => $total, 'page' => $page, 'per_page' => $perPage, 'total_pages' => max(1, ceil($total / $perPage))], JSON_UNESCAPED_UNICODE);
+    $pageSlice = array_slice($articleItems, ($page - 1) * $perPage, $perPage);
+    echo json_encode(['success' => true, 'files' => $pageSlice, 'count' => $total, 'page' => $page, 'per_page' => $perPage, 'total_pages' => max(1, ceil($total / $perPage))], JSON_UNESCAPED_UNICODE);
     exit;
 }
 if ($action === 'read') {
@@ -387,8 +387,8 @@ if ($action === 'read') {
     exit;
 }
 if ($action === 'delete') {
-    if (!isAdmin()) { logUnauthorized('越权尝试删除文章: ' . ($_GET['file'] ?? $_POST['file'] ?? ''), true); jsonOut(['success' => false, 'error' => '无权限'], 403); }
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') jsonOut(['success' => false, 'error' => '请求方式错误'], 405);
+    if (!isStationAdmin()) { logUnauthorized('越权尝试删除文章: ' . ($_GET['file'] ?? $_POST['file'] ?? ''), true); sendJson(['success' => false, 'error' => '无权限'], 403); }
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendJson(['success' => false, 'error' => '请求方式错误'], 405);
     header('Content-Type: application/json; charset=utf-8');
     $requestedFile = $_POST['file'] ?? '';
     $filename = basename($requestedFile);
@@ -413,8 +413,8 @@ if ($action === 'delete') {
     exit;
 }
 if ($action === 'update') {
-    if (!isAdmin()) { logUnauthorized('越权尝试修改文章: ' . ($_GET['file'] ?? ''), true); jsonOut(['success' => false, 'error' => '无权限'], 403); }
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') jsonOut(['success' => false, 'error' => '请求方式错误'], 405);
+    if (!isStationAdmin()) { logUnauthorized('越权尝试修改文章: ' . ($_GET['file'] ?? ''), true); sendJson(['success' => false, 'error' => '无权限'], 403); }
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendJson(['success' => false, 'error' => '请求方式错误'], 405);
     header('Content-Type: application/json; charset=utf-8');
     $input = json_decode(file_get_contents('php://input'), true);
     $requestedFile = $input['file'] ?? '';
@@ -457,11 +457,11 @@ if ($action === 'update') {
  * @param string $q 关键词（全文搜索用，可留空取全部）
  * @return array 文章数组
  */
-function _publishedArticles($q = '') {
+function collectPublishedArticles($q = '') {
     $files = glob('./data/articles/*.md');
     $out = [];
-    $annArticles = array_flip(array_column(db_all("SELECT article FROM announcement WHERE article != ''"), 'article'));
-    $nowStr = date('Y-m-d H:i');
+    $announcementFiles = array_flip(array_column(db_all("SELECT article FROM announcement WHERE article != ''"), 'article'));
+    $nowMin = date('Y-m-d H:i');
     $qLow = mb_strtolower(trim($q), 'UTF-8');
     if ($files) {
         usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
@@ -476,9 +476,9 @@ function _publishedArticles($q = '') {
                 $mStatus = $hmeta['status'] ?? 'published';
                 $mPublishAt = $hmeta['publish_at'] ?? '';
                 if ($mStatus === 'draft') continue;
-                if ($mStatus === 'scheduled' && $mPublishAt !== '' && $mPublishAt > $nowStr) continue;
+                if ($mStatus === 'scheduled' && $mPublishAt !== '' && $mPublishAt > $nowMin) continue;
             }
-            if (isset($annArticles[$filename])) continue;
+            if (isset($announcementFiles[$filename])) continue;
             $plain = preg_replace('/<!--META.*?-->\n?/s', '', $content);
             $title = '';
             if (preg_match('/^#\s+(.+)/m', $plain, $tm)) $title = trim($tm[1]);
@@ -536,7 +536,7 @@ if ($action === 'search') {
         echo json_encode(['success' => false, 'error' => '搜索太频繁，请稍后再试'], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    $hits = _publishedArticles($q);
+    $hits = collectPublishedArticles($q);
     echo json_encode(['success' => true, 'query' => $q, 'files' => $hits, 'count' => count($hits)], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -544,14 +544,14 @@ if ($action === 'search') {
 // v4.0.0：RSS 订阅（最近 20 篇已发布文章），GET /?action=rss
 if ($action === 'rss') {
     header('Content-Type: application/xml; charset=utf-8');
-    $feed = _publishedArticles();
-    $siteTitle = htmlspecialchars($_siteTitle, ENT_XML1, 'UTF-8');
+    $feed = collectPublishedArticles();
+    $siteTitle = htmlspecialchars($siteHeading, ENT_XML1, 'UTF-8');
     // v4.1.0：Host 头加固——仅接受合法域名/端口格式，防 Host 注入伪造订阅链接域名
-    $_rawHost = $_SERVER['HTTP_HOST'] ?? '';
-    if (!preg_match('/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/', $_rawHost) || $_rawHost === '') {
-        $_rawHost = 'localhost';
+    $hostRaw = $_SERVER['HTTP_HOST'] ?? '';
+    if (!preg_match('/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/', $hostRaw) || $hostRaw === '') {
+        $hostRaw = 'localhost';
     }
-    $baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . $_rawHost;
+    $baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . $hostRaw;
     $self = $baseUrl . '/index.php?action=rss';
     echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
     echo '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>' . "\n";
@@ -577,13 +577,13 @@ if ($action === 'rss') {
 
 // v4.1.0：RSS 订阅引导页——浏览器点击 RSS 图标不再直接弹 XML 树，改为友好说明页（阅读器抓取仍走 ?action=rss）
 if ($action === 'rss_guide') {
-    $_rawHost2 = $_SERVER['HTTP_HOST'] ?? '';
-    if (!preg_match('/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/', $_rawHost2) || $_rawHost2 === '') {
-        $_rawHost2 = 'localhost';
+    $hostRaw2 = $_SERVER['HTTP_HOST'] ?? '';
+    if (!preg_match('/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/', $hostRaw2) || $hostRaw2 === '') {
+        $hostRaw2 = 'localhost';
     }
-    $guideBase = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . $_rawHost2;
+    $guideBase = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . $hostRaw2;
     $rssAbs = $guideBase . '/index.php?action=rss';
-    $feedCount = count(_publishedArticles());
+    $feedCount = count(collectPublishedArticles());
     ?>
 <!DOCTYPE html>
 <html lang="zh-CN" data-theme="light">
@@ -591,7 +591,7 @@ if ($action === 'rss_guide') {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
-<title>RSS 订阅 · <?= htmlspecialchars($_siteTitle) ?></title>
+<title>RSS 订阅 · <?= htmlspecialchars($siteHeading) ?></title>
 <script>
 (function() {
     try {
@@ -667,11 +667,11 @@ if ($action === 'rss_guide') {
         })();
     </script>
     <!-- v4.0.0：RSS 订阅（浏览器可发现） -->
-    <link rel="alternate" type="application/rss+xml" title="<?= htmlspecialchars($_siteTitle) ?> RSS" href="/index.php?action=rss">
-    <title><?= htmlspecialchars($_siteTitle) ?></title>
+    <link rel="alternate" type="application/rss+xml" title="<?= htmlspecialchars($siteHeading) ?> RSS" href="/index.php?action=rss">
+    <title><?= htmlspecialchars($siteHeading) ?></title>
     <!-- v3.1.4：链接解析/分享预览卡片使用自定义站名（微信/QQ/Telegram 等读取 og 标签） -->
-    <meta property="og:title" content="<?= htmlspecialchars($_siteTitle) ?>">
-    <meta property="og:site_name" content="<?= htmlspecialchars($_siteTitle) ?>">
+    <meta property="og:title" content="<?= htmlspecialchars($siteHeading) ?>">
+    <meta property="og:site_name" content="<?= htmlspecialchars($siteHeading) ?>">
     <meta property="og:type" content="website">
     <meta property="og:description" content="一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>" type="image/svg+xml">
@@ -687,13 +687,13 @@ if ($action === 'rss_guide') {
 </head>
 <?php
 // v4.2.0：API 背景——空值回退固定 16:9 图片源；追加 `_t` 时间参数防浏览器缓存，每次进站换一张随机背景
-$_bgApiUrl = trim((string)($_siteConfig['bg_api_url'] ?? ''));
-if (($_siteConfig['bg_type'] ?? 'none') === 'api' && $_bgApiUrl === '') $_bgApiUrl = FIXED_IMG_API;
-if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : '?') . '_t=' . time();
+$bgApi = trim((string)($siteConf['bg_api_url'] ?? ''));
+if (($siteConf['bg_type'] ?? 'none') === 'api' && $bgApi === '') $bgApi = FIXED_IMG_API;
+if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t=' . time();
 ?>
-<body data-guest-comments="<?= !empty($_siteConfig['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($_siteConfig['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($_siteConfig['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($_siteConfig['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($_bgApiUrl) ?>" data-bg-blur="<?= !empty($_siteConfig['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($_siteConfig['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($_siteConfig['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($_siteConfig['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($_siteConfig['music_auto_play'] ?? '') ?>" data-bg-music="<?= (!empty($_siteConfig['bg_music_enabled']) && is_file(__DIR__ . '/data/bgm/background.mp3')) ? '1' : '0' ?>">
+<body data-guest-comments="<?= !empty($siteConf['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($siteConf['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($siteConf['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($bgApi) ?>" data-bg-blur="<?= !empty($siteConf['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($siteConf['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($siteConf['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($siteConf['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($siteConf['music_auto_play'] ?? '') ?>" data-bg-music="<?= (!empty($siteConf['bg_music_enabled']) && is_file(__DIR__ . '/data/bgm/background.mp3')) ? '1' : '0' ?>">
 <header class="top-bar" id="topBar">
-    <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($_siteTitle) ?></a></div>
+    <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($siteHeading) ?></a></div>
     <div class="header-right">
         <!-- v4.1.0：RSS 订阅入口（点击进友好引导页，不再直接弹 XML；阅读器自动发现仍走 ?action=rss） -->
         <a class="icon-btn rss-btn" id="btnRss" title="RSS 订阅" href="/index.php?action=rss_guide" target="_blank" rel="noopener" aria-label="RSS 订阅">
@@ -749,7 +749,7 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
     <div class="sidebar-header">
         <div class="sidebar-brand">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <?= htmlspecialchars($_siteTitle) ?>
+            <?= htmlspecialchars($siteHeading) ?>
         </div>
         <div style="display:flex;align-items:center;gap:4px;">
             <span class="sidebar-count" id="sidebarCount">0</span>
@@ -1087,9 +1087,9 @@ if ($_bgApiUrl !== '') $_bgApiUrl .= (strpos($_bgApiUrl, '?') !== false ? '&' : 
         </div>
     </div>
 </div>
-<script>window.YM_SITE_TITLE = <?= json_encode($_siteTitle, JSON_UNESCAPED_UNICODE) ?>;
+<script>window.YSM_SITE_TITLE = <?= json_encode($siteHeading, JSON_UNESCAPED_UNICODE) ?>;
 // v3.1.6：公告卡片数据（服务端已转义标题/摘要，tags/cover 由文章提取）
-window.YM_ANNOUNCEMENTS = <?= json_encode($_announcements, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;</script>
+window.YSM_ANNOUNCEMENTS = <?= json_encode($announcementCards, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;</script>
 <script src="js/main.js?v=<?= filemtime(__DIR__ . '/js/main.js') ?>" defer></script>
 <script>
 // 背景图片应用

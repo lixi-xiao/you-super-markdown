@@ -16,7 +16,7 @@ $myId = getCurrentUserId();
 $myNick = $_SESSION['cmt_user']['nickname'] ?? '';
 
 // 文章归属辅助：写作者仅能管理自己的文章（author_id 匹配；兼容旧文章按作者昵称匹配）
-function getArticleMeta($filePath) {
+function readArticleMeta($filePath) {
     $raw = @file_get_contents($filePath);
     if ($raw && preg_match('/<!--META(.*?)-->/s', $raw, $m)) {
         $meta = json_decode(trim($m[1]), true);
@@ -24,7 +24,7 @@ function getArticleMeta($filePath) {
     }
     return [];
 }
-function canManageArticle($meta) {
+function mayManageArticle($meta) {
     global $isStationAdmin, $myId, $myNick;
     if ($isStationAdmin) return true;
     return ($meta['author_id'] ?? '') === $myId
@@ -34,8 +34,8 @@ function canManageArticle($meta) {
 $dataDir = './data/articles';
 if (!is_dir($dataDir)) mkdir($dataDir, 0755, true);
 
-$editError = '';
-$editSuccess = false;
+$saveErr = '';
+$saveOk = false;
 
 // ====== 统一表单处理（在所有 HTML 输出之前） ======
 
@@ -51,9 +51,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_file'])) {
         $realDataPath = realpath($dataDir);
         $realDelPath = realpath($delPath);
         if ($realDelPath !== false && strpos($realDelPath, $realDataPath) === 0) {
-            if (canManageArticle(getArticleMeta($delPath))) {
+            if (mayManageArticle(readArticleMeta($delPath))) {
                 // v3.3.1：系统文章（更新历史）与隐藏文章受保护——文档管理不可删除（仅在公告侧展示）
-                $delMeta = getArticleMeta($delPath);
+                $delMeta = readArticleMeta($delPath);
                 if (in_array($delFile, ['更新历史.md'], true) || !empty($delMeta['hidden'])) {
                     logUnauthorized('越权尝试删除系统/隐藏文章: ' . $delFile);
                 } else {
@@ -210,7 +210,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_content') {
     $reqPath = $dataDir . '/' . $reqFile;
     if (!file_exists($reqPath)) { echo json_encode(['success' => false]); exit; }
     // 最小权限：写作者只能读取自己的文章（站长可读全部）
-    if (!$isStationAdmin && !canManageArticle(getArticleMeta($reqPath))) {
+    if (!$isStationAdmin && !mayManageArticle(readArticleMeta($reqPath))) {
         logUnauthorized('越权尝试读取文章内容: ' . $reqFile);
         echo json_encode(['success' => false, 'error' => '无权访问']); exit;
     }
@@ -233,7 +233,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_content') {
 // 上传/保存文档
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) || isset($_POST['content']) || isset($_POST['url']) || isset($_POST['update_file']))) {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
-        $editError = 'csrf_error';
+        $saveErr = 'csrf_error';
     } else {
         $title = $_POST['title'] ?? '';
         $category = $_POST['category'] ?? '';
@@ -242,23 +242,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
         $content = $_POST['content'] ?? '';
         $author = $_POST['author'] ?? '';
         $license = $_POST['license'] ?? 'CC BY-NC-SA 4.0';
-        $uploadedFile = $_FILES['markdown_file'] ?? null;
+        $upFile = $_FILES['markdown_file'] ?? null;
         $url = $_POST['url'] ?? '';
         $updateFile = $_POST['update_file'] ?? '';
 
         $isZip = false;
-        if ($uploadedFile && $uploadedFile['error'] === UPLOAD_ERR_OK) {
-            $ext = strtolower(pathinfo($uploadedFile['name'], PATHINFO_EXTENSION));
+        if ($upFile && $upFile['error'] === UPLOAD_ERR_OK) {
+            $ext = strtolower(pathinfo($upFile['name'], PATHINFO_EXTENSION));
             if ($ext === 'zip') {
                 $isZip = true;
                 $zip = new ZipArchive();
-                if ($zip->open($uploadedFile['tmp_name']) === true) {
+                if ($zip->open($upFile['tmp_name']) === true) {
                     $extractedCount = 0;
                     // 防 zip bomb：限制文件数量与解压总大小
                     $zipSafe = true;
                     if ($zip->numFiles > 200) {
                         $zipSafe = false;
-                        $editError = 'ZIP 内文件过多（最多 200 个），已拒绝导入';
+                        $saveErr = 'ZIP 内文件过多（最多 200 个），已拒绝导入';
                     }
                     $totalZipSize = 0;
                     for ($i = 0; $zipSafe && $i < $zip->numFiles; $i++) {
@@ -266,7 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
                         $totalZipSize += (int)($stat['size'] ?? 0);
                         if ($totalZipSize > 50 * 1024 * 1024) {
                             $zipSafe = false;
-                            $editError = 'ZIP 解压总大小超限（最大 50MB），已拒绝导入';
+                            $saveErr = 'ZIP 解压总大小超限（最大 50MB），已拒绝导入';
                             break;
                         }
                         $entryName = $zip->getNameIndex($i);
@@ -285,7 +285,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
                         if ($fileContent === false) continue;
                         if (strlen($fileContent) > 10 * 1024 * 1024) {
                             $zipSafe = false;
-                            $editError = 'ZIP 内单个文件超过 10MB，已拒绝导入';
+                            $saveErr = 'ZIP 内单个文件超过 10MB，已拒绝导入';
                             break;
                         }
                         if (!preg_match('/^<!--META/', $fileContent)) {
@@ -298,16 +298,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
                         }
                     }
                     $zip->close();
-                    @unlink($uploadedFile['tmp_name']);
+                    @unlink($upFile['tmp_name']);
                     if ($zipSafe) {
-                        $editSuccess = $extractedCount > 0 ? 'ZIP 解压完成，共导入 ' . $extractedCount . ' 篇文档' : 'ZIP 中未找到可识别的 Markdown 文件';
-                        if ($extractedCount === 0) $editError = 'ZIP 中未找到可识别的 Markdown 文件';
+                        $saveOk = $extractedCount > 0 ? 'ZIP 解压完成，共导入 ' . $extractedCount . ' 篇文档' : 'ZIP 中未找到可识别的 Markdown 文件';
+                        if ($extractedCount === 0) $saveErr = 'ZIP 中未找到可识别的 Markdown 文件';
                     }
                 } else {
-                    $editError = '无法打开 ZIP 文件';
+                    $saveErr = '无法打开 ZIP 文件';
                 }
             } else {
-                $content = file_get_contents($uploadedFile['tmp_name']);
+                $content = file_get_contents($upFile['tmp_name']);
             }
         }
 
@@ -315,13 +315,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
             // v3.0.6：SSRF 安全抓取——一次解析 + pin 解析后 IP 直连（Host/SNI 保留原域名），
             // 消除"先 gethostbyname 校验、后 file_get_contents 二次解析"的 DNS rebinding TOCTOU；内网/未识别默认拒绝
             $fetched = fetchHttpContent($url);
-            if ($fetched === false) { $editError = '无法从该链接获取内容'; }
+            if ($fetched === false) { $saveErr = '无法从该链接获取内容'; }
             else { $content = $fetched; }
         }
 
-        if (empty($content) && !$editError) { $editError = '请提供 Markdown 内容'; }
+        if (empty($content) && !$saveErr) { $saveErr = '请提供 Markdown 内容'; }
 
-        if (!$editError && !$isZip) {
+        if (!$saveErr && !$isZip) {
             if (empty($title)) {
                 $contentWithoutCode = preg_replace('/```[\s\S]*?```/', '', $content);
                 if (preg_match('/^#\s+(.+)/m', $contentWithoutCode, $m)) { $title = $m[1]; }
@@ -353,31 +353,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
                 $fn = basename($updateFile);
                 $fp = $dataDir . '/' . $fn;
                 if (file_exists($fp)) {
-                    if (!canManageArticle(getArticleMeta($fp))) {
-                        $editError = '无权编辑该文章';
+                    if (!mayManageArticle(readArticleMeta($fp))) {
+                        $saveErr = '无权编辑该文章';
                         logUnauthorized('越权尝试编辑文章: ' . $fn);
                     } elseif (file_put_contents($fp, $fullContent, LOCK_EX)) {
-                        $editSuccess = '文档已更新';
+                        $saveOk = '文档已更新';
                         auditLog('article_update', $fn, '更新文档: ' . $title);
-                    } else { $editError = '保存失败'; }
-                } else { $editError = '原文件不存在'; }
+                    } else { $saveErr = '保存失败'; }
+                } else { $saveErr = '原文件不存在'; }
             } else {
-                if ($uploadedFile && $uploadedFile['error'] === UPLOAD_ERR_OK) {
-                    $originalName = pathinfo($uploadedFile['name'], PATHINFO_FILENAME);
+                if ($upFile && $upFile['error'] === UPLOAD_ERR_OK) {
+                    $originalName = pathinfo($upFile['name'], PATHINFO_FILENAME);
                     $fn = preg_replace('/[^a-zA-Z0-9_\-\x{4e00}-\x{9fa5}]/u', '', $originalName);
                 } else { $fn = ''; }
                 if (empty($fn)) { $fn = 'doc_' . time(); }
                 $fn .= '.md';
                 if (file_put_contents($dataDir . '/' . $fn, $fullContent, LOCK_EX)) {
-                    $editSuccess = '文档已创建';
+                    $saveOk = '文档已创建';
                     auditLog('article_create', $fn, '创建文档: ' . $title);
-                } else { $editError = '保存失败'; }
+                } else { $saveErr = '保存失败'; }
             }
         }
 
         // v3.1.11：文章发布界面「作为公告」开关（仅站长可设）——
         // 开启 → 该文章在首页公告区展示；关闭 → 移除其公告。系统文章（更新历史）受保护不被误删。
-        if ($editSuccess && !$isZip && $isStationAdmin && !empty($fn)) {
+        if ($saveOk && !$isZip && $isStationAdmin && !empty($fn)) {
             $protectedAnn = ['更新历史.md'];
             if (!in_array($fn, $protectedAnn, true)) {
                 $exAnn = db_one('SELECT id FROM announcement WHERE article = ? LIMIT 1', [$fn]);
@@ -398,8 +398,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['markdown_file']) ||
         }
     }
     // v3.3.5：纯 MD 上传/新建/编辑成功 → 触发守护进程立即备份（富媒体 zip 已在上面单独触发）
-    if ($editSuccess) triggerArticleBackup();
-    $qs = $editSuccess ? 'success=1' : 'error=' . urlencode($editError);
+    if ($saveOk) triggerArticleBackup();
+    $qs = $saveOk ? 'success=1' : 'error=' . urlencode($saveErr);
     header('Location: sc.php?' . $qs);
     exit;
 }
@@ -418,33 +418,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['logout'])) {
 // ====== 页面数据准备 ======
 
 $files = glob($dataDir . '/*.md');
-$fileList = [];
-$pinnedNames = getPinnedList();
+$docItems = [];
+$pinnedKeys = getPinnedList();
 if ($files) {
     usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
     foreach ($files as $file) {
         $filename = basename($file);
         if (strpos($filename, '.') === 0) continue;
-        $listMeta = getArticleMeta($file);
+        $listMeta = readArticleMeta($file);
         // v3.3.1：系统文章（更新历史）与隐藏文章不在文档管理列表显示（仅在公告侧展示，防误删）
         if (in_array($filename, ['更新历史.md'], true) || !empty($listMeta['hidden'])) continue;
         // 写作者仅显示自己的文章（最小权限）
-        if (!$isStationAdmin && !canManageArticle($listMeta)) continue;
+        if (!$isStationAdmin && !mayManageArticle($listMeta)) continue;
         $content = file_get_contents($file);
         $displayName = preg_replace('/\.md$/i', '', $filename);
         if (preg_match('/^#\s+(.+)/m', $content, $m)) { $displayName = $m[1]; }
-        $isPinned = in_array($filename, $pinnedNames);
-        $fileList[] = ['name' => $filename, 'displayName' => $displayName, 'pinned' => $isPinned, 'meta' => $listMeta];
+        $isPinned = in_array($filename, $pinnedKeys);
+        $docItems[] = ['name' => $filename, 'displayName' => $displayName, 'pinned' => $isPinned, 'meta' => $listMeta];
     }
 }
-usort($fileList, function($a, $b) {
+usort($docItems, function($a, $b) {
     if ($a['pinned'] && !$b['pinned']) return -1;
     if (!$a['pinned'] && $b['pinned']) return 1;
     return 0;
 });
-$showSuccess = isset($_GET['success']);
-$showError = $_GET['error'] ?? '';
-$showDeleted = isset($_GET['deleted']);
+$flagSaved = isset($_GET['success']);
+$errText = $_GET['error'] ?? '';
+$flagDeleted = isset($_GET['deleted']);
 // v3.3.0：富媒体压缩包导入结果（md/图片/视频 计数）
 $richZipOk = isset($_GET['rich_zip']) && $_GET['rich_zip'] === 'ok';
 $richZipMd = (int)($_GET['md'] ?? 0);
@@ -498,7 +498,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
             <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             返回首页
         </a>
-        <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
+        <a href="#" onclick="bindLogoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             退出登录
         </a>
@@ -514,9 +514,9 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
         <div class="page-subtitle">撰写、上传和管理文章</div>
     </div>
 
-    <?php if ($showSuccess): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= htmlspecialchars($editSuccess ?: '操作成功') ?></div><?php endif; ?>
-    <?php if ($showError): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= htmlspecialchars($showError) ?></div><?php endif; ?>
-    <?php if ($showDeleted): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>文档已删除</div><?php endif; ?>
+    <?php if ($flagSaved): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= htmlspecialchars($saveOk ?: '操作成功') ?></div><?php endif; ?>
+    <?php if ($errText): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= htmlspecialchars($errText) ?></div><?php endif; ?>
+    <?php if ($flagDeleted): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>文档已删除</div><?php endif; ?>
     <?php if ($richZipOk): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>富媒体压缩包导入完成：文档 <?= $richZipMd ?> 篇、图片 <?= $richZipImg ?> 张、视频 <?= $richZipVid ?> 个（zip 已自动删除）</div><?php endif; ?>
     <?php if ($richZipErrMsg): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= htmlspecialchars($richZipErrMsg) ?></div><?php endif; ?>
 
@@ -690,9 +690,9 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-            已有文章（<?= count($fileList) ?> 篇）
+            已有文章（<?= count($docItems) ?> 篇）
         </div>
-        <?php if (empty($fileList)): ?>
+        <?php if (empty($docItems)): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             <p>暂无文档</p>
@@ -701,7 +701,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
         <div class="table-wrap">
         <table>
             <tr><th>标题</th><th>状态</th><th>置顶</th><th>查看</th><th>编辑</th><th>删除</th></tr>
-            <?php foreach ($fileList as $f): ?>
+            <?php foreach ($docItems as $f): ?>
             <?php
             // v4.0.0：列表状态标记（草稿 / 定时 / 已发布）
             $fStatus = $f['meta']['status'] ?? 'published';
@@ -717,8 +717,8 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                     <button class="btn-link pin-btn <?= $f['pinned'] ? 'pinned' : '' ?>" data-name="<?= htmlspecialchars($f['name']) ?>" data-pinned="<?= $f['pinned'] ? '1' : '0' ?>"><?= $f['pinned'] ? '已置顶' : '置顶' ?></button>
                 </td>
                 <td><a class="btn-link" href="index.php?file=<?= urlencode($f['name']) ?>" target="_blank">查看</a></td>
-                <td><button class="btn-link" onclick="openEditModal('<?= htmlspecialchars($f['name']) ?>')">编辑</button></td>
-                <td><button class="btn-link danger" onclick="confirmDelete('<?= htmlspecialchars($f['name']) ?>', '<?= htmlspecialchars($f['displayName']) ?>')">删除</button></td>
+                <td><button class="btn-link" onclick="openArticleEditor('<?= htmlspecialchars($f['name']) ?>')">编辑</button></td>
+                <td><button class="btn-link danger" onclick="openDeleteConfirmModal('<?= htmlspecialchars($f['name']) ?>', '<?= htmlspecialchars($f['displayName']) ?>')">删除</button></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -732,12 +732,12 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
     <div class="modal-box" style="max-width:380px">
         <div class="modal-head">
             <div class="modal-title">确认删除</div>
-            <button class="modal-close" onclick="closeModal('deleteModal')">&times;</button>
+            <button class="modal-close" onclick="closeModalById('deleteModal')">&times;</button>
         </div>
         <div class="modal-body">
             <p id="deleteModalText" style="font-size:0.92em;color:var(--text-secondary);margin-bottom:18px">确定要删除这篇文章吗？此操作不可撤销。</p>
             <div class="modal-actions">
-                <button class="btn btn-outline" onclick="closeModal('deleteModal')">取消</button>
+                <button class="btn btn-outline" onclick="closeModalById('deleteModal')">取消</button>
                 <form method="post" style="display:inline">
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                     <input type="hidden" name="delete_file" id="deleteConfirmFile">
@@ -753,7 +753,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
     <div class="modal-box" style="max-width:720px;max-height:90vh;overflow-y:auto">
         <div class="modal-head">
             <div class="modal-title">编辑文档 <span id="editFileName" style="font-weight:400;color:var(--text-muted);font-size:0.82em"></span></div>
-            <button class="modal-close" onclick="closeModal('editModal')">&times;</button>
+            <button class="modal-close" onclick="closeModalById('editModal')">&times;</button>
         </div>
         <div class="modal-body">
             <form method="post" enctype="multipart/form-data">
@@ -834,7 +834,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
                 <?php endif; ?>
                 <div class="modal-actions">
                     <button type="submit" class="btn btn-primary">保存修改</button>
-                    <button type="button" class="btn btn-outline" onclick="closeModal('editModal')">取消</button>
+                    <button type="button" class="btn btn-outline" onclick="closeModalById('editModal')">取消</button>
                 </div>
             </form>
         </div>
@@ -842,12 +842,12 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
 </div>
 
 <script>
-function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+function closeModalById(id) { document.getElementById(id).classList.remove('active'); }
 document.querySelectorAll('.modal-overlay').forEach(function(m) {
     m.addEventListener('click', function(e) { if (e.target === m) m.classList.remove('active'); });
 });
 
-function confirmDelete(fn, dn) {
+function openDeleteConfirmModal(fn, dn) {
     document.getElementById('deleteModalText').textContent = '确定要删除「' + dn + '」吗？此操作不可撤销。';
     document.getElementById('deleteConfirmFile').value = fn;
     document.getElementById('deleteModal').classList.add('active');
@@ -871,15 +871,15 @@ document.querySelectorAll('.method-tab').forEach(function(b) {
     var info = document.getElementById('fileInfo'), nm = document.getElementById('fileInfoName');
     var rb = document.getElementById('fileRemoveBtn');
     if (!dz) return;
-    function show(f) { nm.textContent = f.name + ' (' + (f.size/1024).toFixed(1) + ' KB)'; info.style.display = 'flex'; dz.style.display = 'none'; }
-    function clearF() { fi.value = ''; info.style.display = 'none'; dz.style.display = 'block'; }
-    fi.addEventListener('change', function() { if (this.files.length) show(this.files[0]); });
-    if (rb) rb.addEventListener('click', clearF);
+    function showPickedFileInfo(f) { nm.textContent = f.name + ' (' + (f.size/1024).toFixed(1) + ' KB)'; info.style.display = 'flex'; dz.style.display = 'none'; }
+    function resetFilePicker() { fi.value = ''; info.style.display = 'none'; dz.style.display = 'block'; }
+    fi.addEventListener('change', function() { if (this.files.length) showPickedFileInfo(this.files[0]); });
+    if (rb) rb.addEventListener('click', resetFilePicker);
     ['dragenter','dragover'].forEach(function(e) { dz.addEventListener(e, function(ev) { ev.preventDefault(); dz.classList.add('dragover'); }); });
     ['dragleave','drop'].forEach(function(e) { dz.addEventListener(e, function(ev) { ev.preventDefault(); dz.classList.remove('dragover'); }); });
     dz.addEventListener('drop', function(e) {
         var f = e.dataTransfer.files;
-        if (f.length && f[0].name.match(/\.(md|txt|markdown|zip)$/i)) { fi.files = f; show(f[0]); }
+        if (f.length && f[0].name.match(/\.(md|txt|markdown|zip)$/i)) { fi.files = f; showPickedFileInfo(f[0]); }
     });
 })();
 
@@ -889,15 +889,15 @@ document.querySelectorAll('.method-tab').forEach(function(b) {
     var info = document.getElementById('richZipInfo'), nm = document.getElementById('richZipInfoName');
     var rb = document.getElementById('richZipRemoveBtn');
     if (!dz || !fi) return;
-    function show(f) { nm.textContent = f.name + ' (' + (f.size/1024/1024).toFixed(2) + ' MB)'; info.style.display = 'flex'; dz.style.display = 'none'; }
-    function clearF() { fi.value = ''; info.style.display = 'none'; dz.style.display = 'block'; }
-    fi.addEventListener('change', function() { if (this.files.length) show(this.files[0]); });
-    if (rb) rb.addEventListener('click', clearF);
+    function showPickedFileInfo(f) { nm.textContent = f.name + ' (' + (f.size/1024/1024).toFixed(2) + ' MB)'; info.style.display = 'flex'; dz.style.display = 'none'; }
+    function resetFilePicker() { fi.value = ''; info.style.display = 'none'; dz.style.display = 'block'; }
+    fi.addEventListener('change', function() { if (this.files.length) showPickedFileInfo(this.files[0]); });
+    if (rb) rb.addEventListener('click', resetFilePicker);
     ['dragenter','dragover'].forEach(function(e) { dz.addEventListener(e, function(ev) { ev.preventDefault(); dz.classList.add('dragover'); }); });
     ['dragleave','drop'].forEach(function(e) { dz.addEventListener(e, function(ev) { ev.preventDefault(); dz.classList.remove('dragover'); }); });
     dz.addEventListener('drop', function(e) {
         var f = e.dataTransfer.files;
-        if (f.length && f[0].name.match(/\.zip$/i)) { fi.files = f; show(f[0]); }
+        if (f.length && f[0].name.match(/\.zip$/i)) { fi.files = f; showPickedFileInfo(f[0]); }
     });
 })();
 
@@ -969,12 +969,12 @@ document.querySelectorAll('.method-tab').forEach(function(b) {
 (function() {
     var ta = document.getElementById('contentArea'), ct = document.getElementById('charCount');
     if (!ta || !ct) return;
-    function u() { var l = ta.value.replace(/\s/g,'').length; ct.textContent = l > 0 ? l + ' 字' : ''; }
-    ta.addEventListener('input', u);
+    function updateEditorCharCount() { var l = ta.value.replace(/\s/g,'').length; ct.textContent = l > 0 ? l + ' 字' : ''; }
+    ta.addEventListener('input', updateEditorCharCount);
 })();
 
 // 编辑弹窗
-function openEditModal(fn) {
+function openArticleEditor(fn) {
     document.getElementById('editFileName').textContent = fn;
     document.getElementById('editUpdateFile').value = fn;
     document.getElementById('editContent').value = '加载中...';
@@ -1095,13 +1095,13 @@ document.getElementById('editContent')?.addEventListener('input', function() {
 (function() {
     var p = new URLSearchParams(window.location.search);
     var ef = p.get('edit');
-    if (ef) openEditModal(ef);
+    if (ef) openArticleEditor(ef);
 })();
 
 // 置顶/取消置顶（index.php 的 POST 需要 CSRF token）
 var scCsrfToken = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
 // 登出走 POST + CSRF
-function logoutSubmit(e) {
+function bindLogoutSubmit(e) {
     e.preventDefault();
     var fd = new FormData();
     fd.append('logout', '1');

@@ -188,10 +188,10 @@ function fetchHttpContent($url, $ua = null) {
     }
     return @file_get_contents($targetUrl, false, stream_context_create($opts));
 }
-function loadUsers() {
+function fetchAllUsers() {
     return db_all('SELECT * FROM users ORDER BY rowid');
 }
-function saveUsers($users) {
+function replaceAllUsers($users) {
     // 全量替换（保持原函数语义：写入完整用户列表）
     // v2.5.4：INSERT OR REPLACE 防止列表内重复 id 触发唯一约束冲突导致事务回滚
     // v2.9.0：列清单加入 email（注册验证引入，漏列会导致全量替换时邮箱丢失）
@@ -200,10 +200,10 @@ function saveUsers($users) {
     $pdo->beginTransaction();
     try {
         $pdo->exec('DELETE FROM users');
-        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, qq, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled, last_login, login_count, tv) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, account, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled, last_login, login_count, tv) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
         foreach ($users as $u) {
             $st->execute([
-                $u['id'] ?? '', $u['qq'] ?? '', $u['nickname'] ?? '', $u['password'] ?? '',
+                $u['id'] ?? '', $u['account'] ?? '', $u['nickname'] ?? '', $u['password'] ?? '',
                 $u['avatar'] ?? '', $u['signature'] ?? '', $u['role'] ?? 'user',
                 $u['station_id'] ?? '', $u['created'] ?? '', $u['created_by'] ?? '',
                 $u['email'] ?? '', (int)($u['disabled'] ?? 0),
@@ -334,7 +334,7 @@ function validateCustomPath($path) {
         return '路径仅允许字母、数字和连字符，长度4-30字符，首尾必须是字母或数字';
     }
     $reserved = ['admin', 'api', 'data', 'css', 'js', 'fonts', 'music', 'sc',
-                 'index', '404', 'youyou', 'oauth', 'login', 'logout', 'register'];
+                 'index', '404', 'oauth', 'login', 'logout', 'register'];
     if (in_array(strtolower($path), $reserved, true)) {
         return '该路径为系统保留关键字，请换一个';
     }
@@ -354,7 +354,7 @@ function loadBansList() {
     }
     return $bans;
 }
-function saveBansList($bans) {
+function replaceAllBans($bans) {
     $pdo = db();
     $pdo->beginTransaction();
     try {
@@ -373,7 +373,7 @@ function saveBansList($bans) {
         throw $e;
     }
 }
-function addBan($ip, $types, $reason = '', $duration = 0) {
+function banIp($ip, $types, $reason = '', $duration = 0) {
     // $duration：0=永久封禁；>0=封禁秒数（v4.4.0 注册蜜罐自动封禁使用）
     $expires = $duration > 0 ? time() + $duration : 0;
     $existing = db_one('SELECT * FROM bans WHERE ip = ?', [$ip]);
@@ -405,11 +405,11 @@ function getClientIP() {
     return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 }
 // ============================================================
-// v3.0.8 统一安全入口（checkScanner：扫描器 UA 黑名单检测）
+// v3.0.8 统一安全入口（detectScannerUA：扫描器 UA 黑名单检测）
 // 命中 sqlmap/nikto/nmap/acunetix/masscan/zgrab/curl 等工具特征：
 // 返回 403 + 记录越权日志 + 按现有封禁机制封禁来源 IP
 // ============================================================
-function checkScanner() {
+function detectScannerUA() {
     $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
     if ($ua === '') return false;
     $l = strtolower($ua);
@@ -423,8 +423,8 @@ function checkScanner() {
     }
     return false;
 }
-function security_check() {
-    $tool = checkScanner();
+function runRequestSecurityCheck() {
+    $tool = detectScannerUA();
     if ($tool === false) return;
     $ip = getClientIP();
     logUnauthorized('扫描器UA检测: ' . $tool);
@@ -503,7 +503,7 @@ define('ROLE_HIERARCHY', [
     'admin' => 40,  // 向后兼容旧版 admin 角色
 ]);
 
-function loadRoles() {
+function getRoleDefinitions() {
     // 角色定义基本静态，从 meta 表读取覆盖（若无则用默认值）
     $defaults = [
         ROLE_SUPER_ADMIN => ['label' => '高级管理员', 'can' => ['*']],
@@ -588,7 +588,7 @@ function validateJWT($token) {
     $uid = $data['sub'] ?? '';
     if ($uid !== '') {
         $found = false;
-        foreach (loadUsers() as $u) {
+        foreach (fetchAllUsers() as $u) {
             if ($u['id'] === $uid) { $found = true; break; }
         }
         if (!$found) return false;
@@ -626,7 +626,7 @@ function revokeCurrentJWT() {
 function validateBackendUser() {
     $uid = $_SESSION['cmt_user']['id'] ?? '';
     if ($uid === '') return false;
-    foreach (loadUsers() as $u) {
+    foreach (fetchAllUsers() as $u) {
         if ($u['id'] === $uid) {
             // v2.11.4：被禁用账号后台立即失效（踢出会话）
             if (!empty($u['disabled'])) return false;
@@ -1172,7 +1172,7 @@ function notifyLoginEvent($u, $clientIP) {
     $now = date('Y-m-d H:i:s');
     $body = "时间：{$now}\n"
           . "服务器：{$host}\n"
-          . "账号：{$u['nickname']}（" . maskQQ($u['qq'] ?? '') . "）\n"
+          . "账号：{$u['nickname']}（" . maskQQ($u['account'] ?? '') . "）\n"
           . "角色：{$roleName}\n"
           . "IP：{$clientIP}";
     $html = renderMailHtml($site, $subject, $body, ['server' => $host, 'time' => $now]);
@@ -1201,7 +1201,7 @@ function notifyPasswordReset($u, $clientIP, $mode) {
     $modeLabel = $mode === 'admin_reset' ? '超管协助重置码' : '邮箱验证码自助找回';
     $now = date('Y-m-d H:i:s');
     $subject = "[{$site} 通知] 账号密码已重置";
-    $body = "账号：{$u['nickname']}（" . maskQQ($u['qq'] ?? '') . "）\n"
+    $body = "账号：{$u['nickname']}（" . maskQQ($u['account'] ?? '') . "）\n"
           . "角色：{$u['role']}\n"
           . "重置方式：{$modeLabel}\n"
           . "IP：{$clientIP}\n"
@@ -1306,12 +1306,12 @@ function avatar_upload($userId, $file) {
         if ($e !== $ext && file_exists($dir . $name . '.' . $e)) @unlink($dir . $name . '.' . $e);
     }
     $url = 'data/avatars/' . $name . '.' . $ext . '?v=' . time();
-    $users = loadUsers();
+    $users = fetchAllUsers();
     foreach ($users as &$u) {
         if ($u['id'] === $userId) { $u['avatar'] = $url; break; }
     }
     unset($u);
-    saveUsers($users);
+    replaceAllUsers($users);
     if (!empty($_SESSION['cmt_user']['id']) && $_SESSION['cmt_user']['id'] === $userId) {
         $_SESSION['cmt_user']['avatar'] = $url;
     }
@@ -1321,17 +1321,17 @@ function avatar_upload($userId, $file) {
 /**
  * 用户公开详情（v2.10.0）：个人详情页数据。
  * 排除超管：超管无公开页面，返回 null。
- * @return array|null ['id','qq','nickname','avatar','signature','created','role']
+ * @return array|null ['id','account','nickname','avatar','signature','created','role']
  */
 function get_public_user($id) {
     if (!is_string($id) || $id === '') return null;
-    $users = loadUsers();
+    $users = fetchAllUsers();
     foreach ($users as $u) {
         if ($u['id'] === $id) {
             if (($u['role'] ?? '') === ROLE_SUPER_ADMIN) return null;
             return [
                 'id' => $u['id'],
-                'qq' => $u['qq'] ?? '',
+                'account' => $u['account'] ?? '',
                 'nickname' => $u['nickname'] ?? '',
                 'avatar' => $u['avatar'] ?? '',
                 'signature' => $u['signature'] ?? '',
@@ -1347,21 +1347,21 @@ function get_public_user($id) {
  * v2.11.0：登录失败计数（IP+账号双级写入 login_fails）
  * v4.5.0：$fp 非空时额外按环境指纹计数（防换 IP 绕过）
  */
-function loginFailAdd($ip, $qq, $fp = '') {
-    db_exec('INSERT INTO login_fails (ip, t, acc, fp) VALUES (?,?,?,?)', [$ip, time(), $qq, (string)$fp]);
+function loginFailAdd($ip, $account, $fp = '') {
+    db_exec('INSERT INTO login_fails (ip, t, acc, fp) VALUES (?,?,?,?)', [$ip, time(), $account, (string)$fp]);
 }
 /** 60 秒窗口内，同 IP / 同账号 / 同指纹跨 IP 失败次数（任一命中即计数） */
-function loginFailCount($ip, $qq, $window = 60, $fp = null) {
+function loginFailCount($ip, $account, $window = 60, $fp = null) {
     $cutoff = time() - $window;
     if ($fp !== null && $fp !== '') {
-        $r = db_one('SELECT COUNT(*) AS c FROM login_fails WHERE t > ? AND (ip = ? OR acc = ? OR (fp = ? AND fp != ""))', [$cutoff, $ip, $qq, $fp]);
+        $r = db_one('SELECT COUNT(*) AS c FROM login_fails WHERE t > ? AND (ip = ? OR acc = ? OR (fp = ? AND fp != ""))', [$cutoff, $ip, $account, $fp]);
     } else {
-        $r = db_one('SELECT COUNT(*) AS c FROM login_fails WHERE t > ? AND (ip = ? OR acc = ?)', [$cutoff, $ip, $qq]);
+        $r = db_one('SELECT COUNT(*) AS c FROM login_fails WHERE t > ? AND (ip = ? OR acc = ?)', [$cutoff, $ip, $account]);
     }
     return (int)($r['c'] ?? 0);
 }
-function loginFailClear($ip, $qq) {
-    db_exec('DELETE FROM login_fails WHERE ip = ? OR acc = ?', [$ip, $qq]);
+function loginFailClear($ip, $account) {
+    db_exec('DELETE FROM login_fails WHERE ip = ? OR acc = ?', [$ip, $account]);
 }
 /** 登录锁定：返回剩余秒数；0 表示未锁定（过期自动清理） */
 function loginLocked($key) {
@@ -1522,22 +1522,22 @@ function bgMusicSize() {
 /**
  * v2.11.0：QQ 号隐私打码（非超管视角）。保留前 3 后 4；短号（≤7 位）保留首尾各 1；≤4 位全打码。
  */
-function maskQQ($qq) {
-    $qq = (string)$qq;
-    $len = strlen($qq);
+function maskQQ($account) {
+    $account = (string)$account;
+    $len = strlen($account);
     if ($len <= 4) return str_repeat('*', $len);
-    if ($len <= 7) return substr($qq, 0, 1) . str_repeat('*', $len - 2) . substr($qq, -1);
-    return substr($qq, 0, 3) . str_repeat('*', $len - 7) . substr($qq, -4);
+    if ($len <= 7) return substr($account, 0, 1) . str_repeat('*', $len - 2) . substr($account, -1);
+    return substr($account, 0, 3) . str_repeat('*', $len - 7) . substr($account, -4);
 }
 
 /**
- * v2.11.1：对外返回的用户信息统一脱敏——去除 pw_hash，QQ 打码（防登录/注册/check
- * 接口泄露完整 QQ 给前端；头像走 avatar 字段，前端不再依赖完整 qq 拼 URL）。
+ * v2.11.1：对外返回的用户信息统一脱敏——去除 pw_hash，账号打码（防登录/注册/check
+ * 接口泄露完整账号给前端；头像走 avatar 字段，前端不再依赖完整 account 拼 URL）。
  */
 function sanitizeUserForClient($u) {
     if (!is_array($u)) return $u;
     unset($u['pw_hash']);
-    if (isset($u['qq']) && $u['qq'] !== '') $u['qq'] = maskQQ($u['qq']);
+    if (isset($u['account']) && $u['account'] !== '') $u['account'] = maskQQ($u['account']);
     return $u;
 }
 
@@ -1642,7 +1642,7 @@ function getDevicesPaginated($page, $per) {
     $page = max(1, (int)$page); $per = min(100, max(5, (int)$per));
     $roles = implode(',', array_map(function($r) { return "'" . $r . "'"; }, [ROLE_STATION_ADMIN, ROLE_AUTHOR, ROLE_SUPER_ADMIN]));
     $total = (int)(db_one("SELECT COUNT(*) AS c FROM device_fps d JOIN users u ON d.user_id = u.id WHERE u.role IN ($roles)")['c'] ?? 0);
-    $rows = db_all("SELECT d.id, d.user_id, d.fp_hash, d.ua, d.first_seen, d.last_seen, u.qq, u.role, u.nickname
+    $rows = db_all("SELECT d.id, d.user_id, d.fp_hash, d.ua, d.first_seen, d.last_seen, u.account, u.role, u.nickname
         FROM device_fps d JOIN users u ON d.user_id = u.id WHERE u.role IN ($roles)
         ORDER BY d.last_seen DESC LIMIT ? OFFSET ?", [$per, ($page - 1) * $per]);
     return [$rows, $total];
@@ -1756,7 +1756,7 @@ function maybeLinkedBlock($dimType, $dimKey) {
     $l1 = (int)threatCfg('threat_l1', 40);
     if ($score >= $l3) {
         // 永久：IP 进 bans（可超管解封）；指纹维度用远期登录锁（近十年）
-        if ($dimType === 'ip') addBan($dimKey, ['link'], '联动封锁：威胁评分达永久阈值(' . $score . ')');
+        if ($dimType === 'ip') banIp($dimKey, ['link'], '联动封锁：威胁评分达永久阈值(' . $score . ')');
         else linkedLock('link:' . $dimType . ':' . $dimKey, 10 * 365 * 86400, '联动封锁永久');
     } elseif ($score >= $l2) {
         linkedLock('link:' . $dimType . ':' . $dimKey, (int)threatCfg('threat_l2_dur', 86400), '联动封锁24小时');
@@ -1928,11 +1928,11 @@ function verifyArithChallenge($answer) {
 }
 
 /** 创建写作者双重确认中间态，返回 [pendingId, confirmToken]；$status: verify_pending(等写作者验证码) / pending(待超管确认) */
-function create_pending_author($email, $nickname, $qq, $passwordHash, $stationId, $verifyCodeId = '', $status = 'pending') {
+function create_pending_author($email, $nickname, $account, $passwordHash, $stationId, $verifyCodeId = '', $status = 'pending') {
     $id = genId();
     $token = ($status === 'pending') ? bin2hex(random_bytes(16)) : '';
-    db_exec('INSERT INTO pending_author_creates (id,email,nickname,qq,password_hash,station_id,verify_code_id,confirm_token,status,created,confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
-        $id, $email, $nickname, $qq, $passwordHash, $stationId, $verifyCodeId, $token, $status, time(), '',
+    db_exec('INSERT INTO pending_author_creates (id,email,nickname,account,password_hash,station_id,verify_code_id,confirm_token,status,created,confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
+        $id, $email, $nickname, $account, $passwordHash, $stationId, $verifyCodeId, $token, $status, time(), '',
     ]);
     return [$id, $token];
 }
@@ -1953,14 +1953,14 @@ function update_pending_author_status($id, $status) {
 }
 /** 创建写作者账号（超管确认后执行）；邮箱/QQ 冲突返回 false */
 function create_author_from_pending($row) {
-    $users = loadUsers();
+    $users = fetchAllUsers();
     foreach ($users as $u) {
-        if (($u['qq'] ?? '') === $row['qq']) return false;
+        if (($u['account'] ?? '') === $row['account']) return false;
         if (!empty($u['email']) && ($u['email'] ?? '') === $row['email']) return false;
     }
     $users[] = [
         'id' => genId(),
-        'qq' => $row['qq'],
+        'account' => $row['account'],
         'email' => $row['email'],
         'nickname' => $row['nickname'],
         'password' => $row['password_hash'],
@@ -1969,12 +1969,12 @@ function create_author_from_pending($row) {
         'created' => date('Y-m-d H:i:s'),
         'created_by' => 'dual_verify',
     ];
-    saveUsers($users);
+    replaceAllUsers($users);
     return true;
 }
 
 /** 给超管发送写作者创建确认邮件（一次性链接，confirm_link_ttl 秒有效） */
-function sendAdminConfirmMail($pendingId, $token, $nick, $qq, $email) {
+function sendAdminConfirmMail($pendingId, $token, $nick, $account, $email) {
     $cfg = loadSiteConfig();
     $adminEmail = $cfg['admin_email'] ?? '';
     if (!$adminEmail) return false;
@@ -1986,7 +1986,7 @@ function sendAdminConfirmMail($pendingId, $token, $nick, $qq, $email) {
     $now = date('Y-m-d H:i:s');
     $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
     $subject = "[{$site}] 写作者创建确认";
-    $body = "站长申请创建写作者：\n昵称：{$nick}\nQQ：{$qq}\n邮箱：{$email}\n\n"
+    $body = "站长申请创建写作者：\n昵称：{$nick}\nQQ：{$account}\n邮箱：{$email}\n\n"
           . "点击以下链接确认（" . intdiv($ttl, 3600) . " 小时内有效，一次性）：\n{$link}\n\n时间：{$now}";
     // v2.9.0：确认邮件信息卡（昵称/QQ/邮箱）+ 渐变确认按钮
     $htmlDetail = '<div style="text-align:center;">'
@@ -1994,7 +1994,7 @@ function sendAdminConfirmMail($pendingId, $token, $nick, $qq, $email) {
         . '</div>'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px;background:#f8fafc;border:1px solid #edf0f5;border-radius:12px;">'
         . '<tr><td style="padding:14px 20px;width:76px;color:#a0aec0;font-size:12px;">昵称</td><td style="padding:14px 20px;color:#2d3748;font-size:14px;font-weight:600;">' . $e($nick) . '</td></tr>'
-        . '<tr><td style="padding:10px 20px;width:76px;color:#a0aec0;font-size:12px;border-top:1px solid #edf0f5;">QQ</td><td style="padding:10px 20px;color:#2d3748;font-size:14px;border-top:1px solid #edf0f5;">' . $e($qq) . '</td></tr>'
+        . '<tr><td style="padding:10px 20px;width:76px;color:#a0aec0;font-size:12px;border-top:1px solid #edf0f5;">QQ</td><td style="padding:10px 20px;color:#2d3748;font-size:14px;border-top:1px solid #edf0f5;">' . $e($account) . '</td></tr>'
         . '<tr><td style="padding:10px 20px;width:76px;color:#a0aec0;font-size:12px;border-top:1px solid #edf0f5;">邮箱</td><td style="padding:10px 20px;color:#2d3748;font-size:14px;border-top:1px solid #edf0f5;">' . $e($email) . '</td></tr>'
         . '</table>'
         . '<div style="text-align:center;margin-top:26px;">'

@@ -59,7 +59,7 @@ if (!empty($config['hide_default_paths'])) {
     }
 }
 
-$users = loadUsers();
+$users = fetchAllUsers();
 $config = loadSiteConfig();
 $siteTitle = $config['site_title'] ?? 'You Markdown';
 $currentUser = $_SESSION['cmt_user'] ?? [];
@@ -111,7 +111,7 @@ if (is_dir(__DIR__ . '/../data/articles')) {
 $stMyNick = $currentUser['nickname'] ?? '';
 function stAuthorDetail($a, $statComments, $statArticles, $myNick) {
     return [
-        'nickname' => $a['nickname'] ?? '', 'qq' => maskQQ($a['qq'] ?? ''),
+        'nickname' => $a['nickname'] ?? '', 'account' => maskQQ($a['account'] ?? ''),
         'email' => $a['email'] ?? '未绑定', 'station' => $myNick,
         'disabled' => !empty($a['disabled']),
         'created' => $a['created'] ?? '', 'signature' => $a['signature'] ?? '',
@@ -141,13 +141,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             }
         } elseif ($_POST['action'] === 'create_author') {
             $newNick = trim($_POST['nickname'] ?? '');
-            $newQQ = trim($_POST['qq'] ?? '');
+            $newAccount = trim($_POST['account'] ?? '');
             $newPwd = trim($_POST['password'] ?? '');
             $newEmail = trim($_POST['email'] ?? '');
             // v2.11.0：滑块人机验证已彻底移除；新增 QQ 号格式校验（5-12 位数字，防注入/异常账号）
-            if (!preg_match('/^[1-9][0-9]{4,11}$/', $newQQ)) {
-                $msg = 'qq_invalid';
-            } elseif ($newNick && $newQQ && $newPwd) {
+            if (!preg_match('/^[1-9][0-9]{4,11}$/', $newAccount)) {
+                $msg = 'account_invalid';
+            } elseif ($newNick && $newAccount && $newPwd) {
                 $vp = validatePassword($newPwd);
                 if ($vp !== true) {
                     $msg = 'pw_weak';
@@ -157,14 +157,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                         if (!email_valid($newEmail)) { $msg = 'email_invalid'; }
                         elseif (email_exists($newEmail)) { $msg = 'email_duplicate'; }
                         else {
-                            $qqExists = false;
-                            foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
-                            if ($qqExists) {
-                                $msg = 'qq_duplicate';
+                            $accountExists = false;
+                            foreach ($users as $uu) { if (($uu['account'] ?? '') === $newAccount) { $accountExists = true; break; } }
+                            if ($accountExists) {
+                                $msg = 'account_duplicate';
                             } else {
                                 // 建 verify_pending 中间态（等写作者通过邮件链接自助验证码）
                                 [$pid, ] = create_pending_author(
-                                    $newEmail, $newNick, $newQQ,
+                                    $newEmail, $newNick, $newAccount,
                                     password_hash($newPwd, PASSWORD_DEFAULT), $myId, '', 'verify_pending'
                                 );
                                 $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
@@ -175,21 +175,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                                     update_pending_author_status($pid, 'expired');
                                     $msg = 'send_fail';
                                 } else {
-                                    auditLog('author_create_init', $newQQ, "站长发起创建写作者: {$newNick}（等待写作者验证邮箱）");
+                                    auditLog('author_create_init', $newAccount, "站长发起创建写作者: {$newNick}（等待写作者验证邮箱）");
                                     $msg = 'code_sent_await_author';
                                 }
                             }
                         }
                     } else {
                         // 双重确认关闭：直接创建（原逻辑）
-                        $qqExists = false;
-                        foreach ($users as $uu) { if (($uu['qq'] ?? '') === $newQQ) { $qqExists = true; break; } }
-                        if ($qqExists) {
-                            $msg = 'qq_duplicate';
+                        $accountExists = false;
+                        foreach ($users as $uu) { if (($uu['account'] ?? '') === $newAccount) { $accountExists = true; break; } }
+                        if ($accountExists) {
+                            $msg = 'account_duplicate';
                         } else {
                             $users[] = [
                                 'id' => bin2hex(random_bytes(8)),
-                                'qq' => $newQQ,
+                                'account' => $newAccount,
                                 'email' => $newEmail,
                                 'nickname' => $newNick,
                                 'password' => password_hash($newPwd, PASSWORD_DEFAULT),
@@ -198,8 +198,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                                 'created' => date('Y-m-d H:i:s'),
                                 'created_by' => $myId,
                             ];
-                            saveUsers($users);
-                            auditLog('author_create', $newQQ, "站长创建写作者: {$newNick}");
+                            replaceAllUsers($users);
+                            auditLog('author_create', $newAccount, "站长创建写作者: {$newNick}");
                             $msg = 'author_created';
                         }
                     }
@@ -209,9 +209,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             $delId = $_POST['user_id'] ?? '';
             foreach ($users as $i => $u) {
                 if ($u['id'] === $delId && ($u['role'] ?? '') === ROLE_AUTHOR && ($u['station_id'] ?? '') === $myId) {
-                    auditLog('author_delete', $u['qq'] ?? $delId, "站长删除写作者: {$u['nickname']}");
+                    auditLog('author_delete', $u['account'] ?? $delId, "站长删除写作者: {$u['nickname']}");
                     array_splice($users, $i, 1);
-                    saveUsers($users);
+                    replaceAllUsers($users);
                     $msg = 'author_deleted';
                     break;
                 }
@@ -287,7 +287,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         } else {
             $nick = mb_substr($nick, 0, 20, 'UTF-8');
             $sign = mb_substr($sign, 0, 16, 'UTF-8');
-            $users = loadUsers();
+            $users = fetchAllUsers();
             foreach ($users as &$usr) {
                 if ($usr['id'] === $myId) {
                     $usr['nickname'] = $nick;
@@ -297,7 +297,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 }
             }
             unset($usr);
-            saveUsers($users);
+            replaceAllUsers($users);
             $_SESSION['cmt_user']['nickname'] = $nick;
             $_SESSION['cmt_user']['signature'] = $sign;
             if ($newPw !== '') $_SESSION['cmt_user']['pw_hash'] = password_hash($newPw, PASSWORD_DEFAULT);
@@ -321,12 +321,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 if (!$ok) {
                     $msg = 'email_code_bad';
                 } else {
-                    $users = loadUsers();
+                    $users = fetchAllUsers();
                     foreach ($users as &$usr) {
                         if ($usr['id'] === $myId) { $usr['email'] = $newEmail; break; }
                     }
                     unset($usr);
-                    saveUsers($users);
+                    replaceAllUsers($users);
                     $_SESSION['cmt_user']['email'] = $newEmail;
                     auditLog('email_change', $myId, '站长更换绑定邮箱为 ' . $newEmail);
                     $msg = 'email_saved';
@@ -470,7 +470,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <div class="sidebar-title"><span>站长</span>后台</div>
         <div class="sidebar-user">
-            <div class="sidebar-user-avatar"><?php if (!empty($currentUser['qq'])): ?><img src="https://q1.qlogo.cn/g?b=qq&nk=<?= urlencode($currentUser['qq']) ?>&s=100" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
+            <div class="sidebar-user-avatar"><?php if (!empty($currentUser['account'])): ?><img src="https://q1.qlogo.cn/g?b=qq&nk=<?= urlencode($currentUser['account']) ?>&s=100" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
             <div class="sidebar-user-info">
                 <div class="sidebar-user-name"><?= htmlspecialchars($currentUser['nickname'] ?? '站长') ?></div>
                 <div class="sidebar-user-role">站长</div>
@@ -516,7 +516,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             返回主页
         </a>
-        <a href="#" onclick="logoutSubmit(event)" class="sidebar-link danger">
+        <a href="#" onclick="bindLogoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             退出登录
         </a>
@@ -526,12 +526,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 <div class="main">
     <?php if ($msg === 'author_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者已创建</div><?php endif; ?>
     <?php if ($msg === 'code_sent_await_author'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>已提交！验证码已发送到写作者邮箱，请其打开邮件链接自助验证；验证通过后将通知超管确认</div><?php endif; ?>
-    <?php if ($msg === 'qq_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>QQ号格式不正确（应为 5-12 位数字）</div><?php endif; ?>
+    <?php if ($msg === 'account_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>QQ号格式不正确（应为 5-12 位数字）</div><?php endif; ?>
     <?php if ($msg === 'email_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱格式不正确</div><?php endif; ?>
     <?php if ($msg === 'email_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该邮箱已被使用</div><?php endif; ?>
     <?php if ($msg === 'send_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>验证码发送失败（请确认 SMTP 邮件配置）</div><?php endif; ?>
     <?php if ($msg === 'author_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者已删除</div><?php endif; ?>
-    <?php if ($msg === 'qq_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
+    <?php if ($msg === 'account_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
     <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>请求已过期，请重试</div><?php endif; ?>
     <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>密码至少 8 位，且必须包含大写字母、小写字母与数字</div><?php endif; ?>
     <?php if ($msg === 'saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>保存成功</div><?php endif; ?>
@@ -565,7 +565,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 </div>
                 <div class="form-group">
                     <label class="form-label">QQ号（5-12 位数字）</label>
-                    <input class="form-input" name="qq" placeholder="登录账号" pattern="[1-9][0-9]{4,11}" title="QQ号应为 5-12 位数字">
+                    <input class="form-input" name="account" placeholder="登录账号" pattern="[1-9][0-9]{4,11}" title="QQ号应为 5-12 位数字">
                 </div>
                 <div class="form-group">
                     <label class="form-label">密码（至少 8 位，含大小写字母与数字）</label>
@@ -606,7 +606,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <?php foreach ($myAuthors as $a): ?>
             <tr>
                 <td><?= htmlspecialchars($a['nickname'] ?? '') ?></td>
-                <td style="color:var(--text-muted)"><?= htmlspecialchars(maskQQ($a['qq'] ?? '')) ?></td>
+                <td style="color:var(--text-muted)"><?= htmlspecialchars(maskQQ($a['account'] ?? '')) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['created'] ?? '') ?></td>
                 <td>
                     <button type="button" class="btn-link" onclick="stOpenDetail(this)" data-detail='<?= htmlspecialchars(json_encode(stAuthorDetail($a, $st_statComments, $st_statArticles, $stMyNick), JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>'>查看参数</button>
@@ -1163,7 +1163,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <?php if ($msg === 'email_disabled'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱验证已关闭，无法更换邮箱</div><?php endif; ?>
     <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>请求已过期，请重试</div><?php endif; ?>
     <?php $myAvatar = $currentUser['avatar'] ?? '';
-          $avatarSrc = ($myAvatar !== '' && strpos($myAvatar, 'data/') === 0) ? '../' . $myAvatar : ($myAvatar !== '' ? $myAvatar : '../api.php?action=avatar&qq=' . urlencode($currentUser['qq'] ?? '')); ?>
+          $avatarSrc = ($myAvatar !== '' && strpos($myAvatar, 'data/') === 0) ? '../' . $myAvatar : ($myAvatar !== '' ? $myAvatar : '../api.php?action=avatar&account=' . urlencode($currentUser['account'] ?? '')); ?>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -1172,7 +1172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <div class="table-wrap">
         <table>
             <tr><th style="width:120px">项目</th><th>内容</th></tr>
-            <tr><td style="color:var(--text-muted)">登录账号（QQ）</td><td><code><?= htmlspecialchars($currentUser['qq'] ?? '') ?></code>（不可修改）</td></tr>
+            <tr><td style="color:var(--text-muted)">登录账号（QQ）</td><td><code><?= htmlspecialchars($currentUser['account'] ?? '') ?></code>（不可修改）</td></tr>
             <tr><td style="color:var(--text-muted)">绑定邮箱</td><td><?= htmlspecialchars($currentUser['email'] ?? '未绑定') ?></td></tr>
             <tr><td style="color:var(--text-muted)">角色</td><td>站长</td></tr>
         </table>
@@ -1389,7 +1389,7 @@ function toggleSidebar() {
     document.getElementById('sidebarOverlay').classList.toggle('active');
 }
 // 登出走 POST + CSRF
-function logoutSubmit(e) {
+function bindLogoutSubmit(e) {
     e.preventDefault();
     var fd = new FormData();
     fd.append('logout', '1');
@@ -1439,7 +1439,7 @@ function stOpenDetail(btn) {
     var d = {};
     try { d = JSON.parse(btn.getAttribute('data-detail') || '{}'); } catch (e) { return; }
     var rows = [
-        ['昵称', d.nickname], ['UID（QQ）', d.qq], ['邮箱', d.email],
+        ['昵称', d.nickname], ['UID（QQ）', d.account], ['邮箱', d.email],
         ['归属站长', d.station], ['状态', d.disabled ? '已禁用' : '正常'],
         ['创建时间', d.created], ['签名', d.signature || '—'],
         ['最后登录', d.last_login]
@@ -1454,7 +1454,7 @@ function stOpenDetail(btn) {
         h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + stEsc(r[1]) + '</span></div>';
     });
     h += '</div>';
-    document.getElementById('stDetailTitle').textContent = '写作者参数 - ' + (d.nickname || d.qq || '');
+    document.getElementById('stDetailTitle').textContent = '写作者参数 - ' + (d.nickname || d.account || '');
     document.getElementById('stDetailBody').innerHTML = h;
     document.getElementById('stDetailModal').style.display = 'flex';
 }

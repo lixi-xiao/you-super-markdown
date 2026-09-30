@@ -236,7 +236,7 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'trigger_update') {
     }
     // 读取上传的更新包路径（仅接受已上传到固定目录的路径，防止任意路径注入）
     $pkgPath = trim($_POST['package_path'] ?? '');
-    if ($pkgPath !== '' && strpos($pkgPath, '/tmp/ym-update-packages/') !== 0) {
+    if ($pkgPath !== '' && strpos($pkgPath, '/tmp/ysm-update-packages/') !== 0) {
         echo json_encode(['success' => false, 'error' => '更新包路径非法'], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -306,7 +306,7 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'upload_package') {
         echo json_encode(['success' => false, 'error' => '仅支持 zip/tar.gz 格式'], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    $pkgDir = '/tmp/ym-update-packages';
+    $pkgDir = '/tmp/ysm-update-packages';
     if (!is_dir($pkgDir)) mkdir($pkgDir, 0755, true);
     $pkgPath = $pkgDir . '/update-package.' . $ext;
     if (!move_uploaded_file($file['tmp_name'], $pkgPath)) {
@@ -315,7 +315,7 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'upload_package') {
     }
     // 尝试读取版本信息
     $targetVersion = '';
-    $tmpDir = tempnam(sys_get_temp_dir(), 'ym');
+    $tmpDir = tempnam(sys_get_temp_dir(), 'ysm');
     unlink($tmpDir);
     mkdir($tmpDir, 0755, true);
     if ($ext === 'zip') {
@@ -350,13 +350,13 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'hfish_sync') {
         echo json_encode(['success' => false, 'error' => 'csrf_error'], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    $syncScript = __DIR__ . '/../ym-hfish-sync.py';
+    $syncScript = __DIR__ . '/../ysm-hfish-sync.py';
     $outArr = [];
     $rc = 1;
     if (file_exists($syncScript)) {
         exec('python3 ' . escapeshellarg($syncScript) . ' 2>&1', $outArr, $rc);
     } else {
-        $outArr[] = '同步脚本不存在: ym-hfish-sync.py';
+        $outArr[] = '同步脚本不存在: ysm-hfish-sync.py';
     }
     $output = implode("\n", $outArr);
     auditLog('hfish_sync', '', '手动触发蜜罐同步: ' . $output);
@@ -543,7 +543,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
     $config['max_comments_per_minute'] = max(1, intval($_POST['max_comments_per_minute'] ?? 5));
     $config['max_registrations_per_ip'] = max(1, intval($_POST['max_registrations_per_ip'] ?? 3));
     $config['hide_default_paths'] = !empty($_POST['hide_default_paths']);
-    // v4.1.7：蜜罐攻击封禁阈值（1-100，ym-hfish-sync.py 读取；写入 config 表供后台可配）
+    // v4.1.7：蜜罐攻击封禁阈值（1-100，ysm-hfish-sync.py 读取；写入 config 表供后台可配）
     $config['hfish_ban_threshold'] = min(100, max(1, intval($_POST['hfish_ban_threshold'] ?? 10)));
     // v4.4.0：注册蜜罐自动封禁（与上方 HFish 蜜罐独立，仅针对注册表单隐藏字段）——触发次数 + 封禁时长（15 分钟~永久）
     $config['honeypot_ban_count'] = min(50, max(1, intval($_POST['honeypot_ban_count'] ?? 3)));
@@ -553,8 +553,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_save_config'])) {
     saveSiteConfig($config);
     auditLog('config_update', 'site_config', '修改安全设置');
     // v4.1.8：安全配置（含蜜罐阈值）变更后立即刷新蜜罐快照——界面阈值/封禁状态即时生效，无需等 5 分钟轮询
-    if (is_file(__DIR__ . '/../ym-hfish-sync.py')) {
-        exec('python3 ' . escapeshellarg(__DIR__ . '/../ym-hfish-sync.py') . ' > /dev/null 2>&1 &');
+    if (is_file(__DIR__ . '/../ysm-hfish-sync.py')) {
+        exec('python3 ' . escapeshellarg(__DIR__ . '/../ysm-hfish-sync.py') . ' > /dev/null 2>&1 &');
     }
     header('Location: dashboard.php?tab=config&msg=saved');
     exit;
@@ -1047,7 +1047,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     $stPgExtra = ['tab' => 'users', 'users_q' => $usersQ, 'sa_page' => (int)($_GET['sa_page'] ?? 1), 'au_page' => (int)($_GET['au_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'sa_per_page' => $saPerPage, 'au_per_page' => $auPerPage, 'us_per_page' => $usPerPage];
     $auPgExtra = ['tab' => 'users', 'users_q' => $usersQ, 'sa_page' => (int)($_GET['sa_page'] ?? 1), 'st_page' => (int)($_GET['st_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'sa_per_page' => $saPerPage, 'st_per_page' => $stPerPage, 'us_per_page' => $usPerPage];
     $usPgExtra = ['tab' => 'users', 'users_q' => $usersQ, 'sa_page' => (int)($_GET['sa_page'] ?? 1), 'st_page' => (int)($_GET['st_page'] ?? 1), 'au_page' => (int)($_GET['au_page'] ?? 1), 'sa_per_page' => $saPerPage, 'st_per_page' => $stPerPage, 'au_per_page' => $auPerPage];
-    function ymUserDetail($u, $stationNames, $statComments, $statArticles) {
+    function ysmUserDetail($u, $stationNames, $statComments, $statArticles) {
         // v3.0.5：归属统一以超管为顶级——站长归属=超管；写作者未指定站长时归属=超管
         $role = $u['role'] ?? 'user';
         if ($role === ROLE_STATION_ADMIN) {
@@ -1070,11 +1070,11 @@ $banMsg = $_GET['bmsg'] ?? '';
             'articles' => $statArticles[$u['id']] ?? 0,
         ];
     }
-    function ymStatusBadge($u) {
+    function ysmStatusBadge($u) {
         if (!empty($u['disabled'])) return '<span class="role-badge" style="background:rgba(229,72,77,.12);color:var(--danger,#e5484d)">已禁用</span>';
         return '<span class="role-badge" style="background:rgba(52,199,89,.12);color:#34c759">正常</span>';
     }
-    function ymOpMenu($u, $stationNames, $detail) {
+    function ysmOpMenu($u, $stationNames, $detail) {
         if (($u['role'] ?? '') === ROLE_SUPER_ADMIN) return '<span style="color:var(--text-muted);font-size:0.82em">—</span>';
         $uid = htmlspecialchars($u['id']);
         $isAuthor = ($u['role'] ?? '') === ROLE_AUTHOR;
@@ -1144,7 +1144,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
                 <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
                 <td><span class="role-badge role-super_admin"><?= htmlspecialchars($u['role'] ?? '') ?></span></td>
-                <td><?= ymStatusBadge($u) ?></td>
+                <td><?= ysmStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
             </tr>
             <?php endforeach; ?>
@@ -1165,9 +1165,9 @@ $banMsg = $_GET['bmsg'] ?? '';
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
                 <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
-                <td><?= ymStatusBadge($u) ?></td>
+                <td><?= ysmStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
-                <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
+                <td><?= ysmOpMenu($u, $stationNames, ysmUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
             </tr>
             <?php endforeach; ?>
             <?php if (!$stPaged['items']): ?><tr><td colspan="5" class="table-empty"><?= $usersQ !== '' ? '无匹配用户' : '暂无数据' ?></td></tr><?php endif; ?>
@@ -1188,9 +1188,9 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
                 <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
                 <td style="color:var(--text-secondary)"><?= htmlspecialchars($stationNames[$u['station_id'] ?? ''] ?? '超管') ?></td>
-                <td><?= ymStatusBadge($u) ?></td>
+                <td><?= ysmStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
-                <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
+                <td><?= ysmOpMenu($u, $stationNames, ysmUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
             </tr>
             <?php endforeach; ?>
             <?php if (!$auPaged['items']): ?><tr><td colspan="6" class="table-empty"><?= $usersQ !== '' ? '无匹配用户' : '暂无数据' ?></td></tr><?php endif; ?>
@@ -1210,9 +1210,9 @@ $banMsg = $_GET['bmsg'] ?? '';
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
                 <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
-                <td><?= ymStatusBadge($u) ?></td>
+                <td><?= ysmStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
-                <td><?= ymOpMenu($u, $stationNames, ymUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
+                <td><?= ysmOpMenu($u, $stationNames, ysmUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
             </tr>
             <?php endforeach; ?>
             <?php if (!$usPaged['items']): ?><tr><td colspan="5" class="table-empty"><?= $usersQ !== '' ? '无匹配用户' : '暂无数据' ?></td></tr><?php endif; ?>
@@ -1332,7 +1332,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <div><div class="toggle-label">自动封禁越权用户</div><div class="toggle-desc">尝试越权访问的 IP 将自动被封禁</div></div>
                 <label class="toggle"><input type="checkbox" name="auto_ban_unauthorized" <?= empty($config['auto_ban_unauthorized']) ? '' : 'checked' ?>><span class="slider"></span></label>
             </div>
-            <!-- v4.1.7：蜜罐攻击封禁阈值（后台可配，ym-hfish-sync.py 读取） -->
+            <!-- v4.1.7：蜜罐攻击封禁阈值（后台可配，ysm-hfish-sync.py 读取） -->
             <div class="toggle-row" style="align-items:center">
                 <div><div class="toggle-label">蜜罐攻击封禁阈值</div><div class="toggle-desc">攻击次数达到该值自动封禁 IP（当前 <span style="color:var(--accent);font-weight:600"><?= (int)($config['hfish_ban_threshold'] ?? 10) ?></span> 次；调低更敏感）</div></div>
                 <input type="number" class="form-input" name="hfish_ban_threshold" value="<?= (int)($config['hfish_ban_threshold'] ?? 10) ?>" min="1" max="100" style="width:88px;flex-shrink:0" title="蜜罐攻击封禁阈值（1-100）">
@@ -2032,11 +2032,11 @@ $banMsg = $_GET['bmsg'] ?? '';
             <div style="font-weight:600;color:var(--text);margin-bottom:6px">系统支持三种更新方式：</div>
             <div style="display:flex;flex-direction:column;gap:8px">
                 <div><span style="font-weight:600;color:var(--accent)">① SSH 服务器连接更新（推荐）</span><br>
-                在服务器终端（SSH）执行 <code>sudo ym-admin apply-update</code>，从本页已确认的更新包直接应用；适合习惯命令行的用户，全程自动备份、校验签名、失败自动回滚。</div>
+                在服务器终端（SSH）执行 <code>sudo ysm-admin apply-update</code>，从本页已确认的更新包直接应用；适合习惯命令行的用户，全程自动备份、校验签名、失败自动回滚。</div>
                 <div><span style="font-weight:600;color:var(--accent)">② 上传更新包更新（手动上传）</span><br>
-                在下方「手动更新」区上传 <code>ZIP / tar.gz</code> 更新包到服务器，再执行 <code>sudo ym-admin apply-update</code>；适合更新包已下载到本地、不想从仓库拉取的场景。</div>
+                在下方「手动更新」区上传 <code>ZIP / tar.gz</code> 更新包到服务器，再执行 <code>sudo ysm-admin apply-update</code>；适合更新包已下载到本地、不想从仓库拉取的场景。</div>
                 <div><span style="font-weight:600;color:var(--accent)">③ 在线更新（后台检查更新）</span><br>
-                点击上方「检查更新」自动连接 GitHub 仓库，识别最新版本并展示可用的更新包，选定后按提示在 SSH 执行 <code>sudo ym-admin apply-update</code>。</div>
+                点击上方「检查更新」自动连接 GitHub 仓库，识别最新版本并展示可用的更新包，选定后按提示在 SSH 执行 <code>sudo ysm-admin apply-update</code>。</div>
             </div>
             <div style="font-weight:600;color:var(--text);margin:10px 0 6px">更新包类型：</div>
             <div style="display:flex;flex-direction:column;gap:8px">
@@ -2096,7 +2096,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <div class="update-progress-step" id="upStep4"><span class="step-icon">⏳</span> 完成</div>
             </div>
             <div style="margin-top:12px">
-                <p style="color:var(--text-muted);font-size:0.85em" id="updateProgressHint">请在 SSH 中执行: <code id="sshCommandText">ym-admin apply-update</code></p>
+                <p style="color:var(--text-muted);font-size:0.85em" id="updateProgressHint">请在 SSH 中执行: <code id="sshCommandText">ysm-admin apply-update</code></p>
             </div>
         </div>
     </div>
@@ -2147,7 +2147,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     var pendingUpdateUrl = ''; // v3.2.0：在线更新选中的仓库包下载地址（全量/增量包）
 
     function switchChannel(ch) {
-        var code = prompt('切换更新通道为敏感操作，请在 SSH 中执行 sudo ym-admin challenge 获取确认码后输入：');
+        var code = prompt('切换更新通道为敏感操作，请在 SSH 中执行 sudo ysm-admin challenge 获取确认码后输入：');
         if (!code) return;
         var fd = new FormData();
         fd.append('ajax', 'save_channel');
@@ -2318,7 +2318,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     function startUpdateProgress(token) {
         document.getElementById('updateActionContent').style.display = 'none';
         document.getElementById('updateProgressContent').style.display = 'block';
-        document.getElementById('sshCommandText').textContent = 'ym-admin apply-update';
+        document.getElementById('sshCommandText').textContent = 'ysm-admin apply-update';
         document.getElementById('upStep1').className = 'update-progress-step active';
         document.getElementById('upStep1').innerHTML = '<span class="step-icon">⏳</span> 等待 SSH 确认';
         document.getElementById('upStep2').className = 'update-progress-step';
@@ -2391,7 +2391,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                         setTimeout(function() {
                             document.getElementById('mUpStep2').className = 'update-progress-step completed';
                             document.getElementById('mUpStep3').className = 'update-progress-step active';
-                            document.getElementById('manualUpdateHint').textContent = '更新包已上传，请通过 SSH 执行: ym-admin apply-update';
+                            document.getElementById('manualUpdateHint').textContent = '更新包已上传，请通过 SSH 执行: ysm-admin apply-update';
                             // 也显示到执行更新卡片
                             var verText = d.target_version ? 'v' + d.target_version : '未知版本';
                             document.getElementById('updateActionCard').style.display = 'block';
@@ -2573,9 +2573,9 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php
     $guardStatus = 'unknown';
     $guardPid = false;
-    exec('systemctl is-active ym-guard 2>/dev/null', $output, $code);
+    exec('systemctl is-active ysm-guard 2>/dev/null', $output, $code);
     $guardStatus = $code === 0 ? 'active' : 'inactive';
-    $guardPid = trim(shell_exec('systemctl show ym-guard -p MainPID --value 2>/dev/null') ?? '');
+    $guardPid = trim(shell_exec('systemctl show ysm-guard -p MainPID --value 2>/dev/null') ?? '');
     ?>
     <div class="card">
         <div class="card-title">
@@ -2611,7 +2611,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php if ($dMsg === 'saved'): ?>
         <div class="msg" style="margin:0 0 16px;background:rgba(46,204,113,0.15);color:#2ecc71"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>自动备份配置已保存，守护进程下个周期生效</div>
     <?php elseif ($dMsg === 'save_failed'): ?>
-        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">配置写入失败，请检查 /opt/you-markdown/backup.conf 权限</div>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">配置写入失败，请检查 /opt/you-super-markdown/backup.conf 权限</div>
     <?php elseif ($dMsg === 'challenge_failed'): ?>
         <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">挑战码无效或已过期，请重新生成</div>
     <?php elseif ($dMsg === 'csrf_error'): ?>
@@ -2666,7 +2666,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                     <svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                     保存配置
                 </button>
-                <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px">保存需 SSH 生成挑战码（sudo ym-admin challenge），300 秒有效</span>
+                <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px">保存需 SSH 生成挑战码（sudo ysm-admin challenge），300 秒有效</span>
             </div>
         </form>
     </div>
@@ -2690,7 +2690,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             </tbody>
         </table>
         <?php endif; ?>
-        <p style="color:var(--text-muted);font-size:0.82em;margin-top:8px">数据库备份固定 1 份滚动；文章备份按保留份数自动清除；手动/更新备份超时自动清除。手动整站备份：SSH 执行 <code>sudo ym-admin backup</code>。</p>
+        <p style="color:var(--text-muted);font-size:0.82em;margin-top:8px">数据库备份固定 1 份滚动；文章备份按保留份数自动清除；手动/更新备份超时自动清除。手动整站备份：SSH 执行 <code>sudo ysm-admin backup</code>。</p>
     </div>
 
     <?php elseif ($tab === 'hfish'): ?>
@@ -2839,13 +2839,13 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <tr><td style="color:var(--text-muted)">授权码</td>
                     <td><?php $smtpPassSrc = smtpPassSource(); ?>
                         <?php if ($smtpPassSrc === 'env'): ?>
-                        <span style="color:#34c759;font-size:0.85em">✅ 已通过服务器环境变量 <code>YM_SMTP_PASS</code> 注入（php-fpm 配置，Web 端不可见；修改需在服务器操作）</span>
+                        <span style="color:#34c759;font-size:0.85em">✅ 已通过服务器环境变量 <code>YSM_SMTP_PASS</code> 注入（php-fpm 配置，Web 端不可见；修改需在服务器操作）</span>
                         <?php elseif ($smtpPassSrc === 'config'): ?>
-                        <span style="color:#f59e0b;font-size:0.85em">⚠️ 使用 config 表密文兜底。建议迁移到环境变量：在 php-fpm pool 配置添加 <code>env[YM_SMTP_PASS] = "授权码"</code> 后 <code>systemctl reload php8.3-fpm</code></span>
+                        <span style="color:#f59e0b;font-size:0.85em">⚠️ 使用 config 表密文兜底。建议迁移到环境变量：在 php-fpm pool 配置添加 <code>env[YSM_SMTP_PASS] = "授权码"</code> 后 <code>systemctl reload php8.3-fpm</code></span>
                         <?php elseif ($smtpPassSrc === 'file'): ?>
-                        <span style="color:#34c759;font-size:0.85em">✅ 已通过服务器密钥文件 <code>/opt/you-markdown/secrets/smtp_pass</code> 提供（CLI/守护进程告警可用；Web 端仍优先环境变量）</span>
+                        <span style="color:#34c759;font-size:0.85em">✅ 已通过服务器密钥文件 <code>/opt/you-super-markdown/secrets/smtp_pass</code> 提供（CLI/守护进程告警可用；Web 端仍优先环境变量）</span>
                         <?php else: ?>
-                        <span style="color:#ef4444;font-size:0.85em">❌ 未配置密码。请在服务器 php-fpm pool 配置添加 <code>env[YM_SMTP_PASS] = "授权码"</code>（独立专用发信账号），并 <code>systemctl reload php8.3-fpm</code></span>
+                        <span style="color:#ef4444;font-size:0.85em">❌ 未配置密码。请在服务器 php-fpm pool 配置添加 <code>env[YSM_SMTP_PASS] = "授权码"</code>（独立专用发信账号），并 <code>systemctl reload php8.3-fpm</code></span>
                         <?php endif; ?></td></tr>
                 <tr><td style="color:var(--text-muted)">发件人（可空=账号）</td>
                     <td><input class="form-input" style="width:220px" type="text" name="smtp_from" value="<?= htmlspecialchars($smtpCfg['from']) ?>" placeholder="留空则用发信账号"></td></tr>
@@ -2855,7 +2855,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                     <svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                     保存配置
                 </button>
-                <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px">保存需 SSH 生成挑战码（sudo ym-admin challenge），300 秒有效</span>
+                <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px">保存需 SSH 生成挑战码（sudo ysm-admin challenge），300 秒有效</span>
             </div>
         </form>
         <div style="margin-top:14px">
@@ -2879,7 +2879,7 @@ $banMsg = $_GET['bmsg'] ?? '';
 
     <script>
     function testSmtpMail() {
-        var code = prompt('请在 SSH 中执行 sudo ym-admin challenge 获取 6 位确认码后输入：');
+        var code = prompt('请在 SSH 中执行 sudo ysm-admin challenge 获取 6 位确认码后输入：');
         if (!code) return;
         var fd = new FormData();
         fd.append('ajax', 'test_smtp');
@@ -2973,7 +2973,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                     <button type="submit" class="btn btn-primary">保存配置</button>
                 </div>
             </div>
-            <div class="form-hint" style="margin-top:8px;font-size:12px;color:var(--text-muted)">保存为敏感操作：需 SSH 执行 <code>sudo ym-admin challenge</code> 获取 6 位确认码</div>
+            <div class="form-hint" style="margin-top:8px;font-size:12px;color:var(--text-muted)">保存为敏感操作：需 SSH 执行 <code>sudo ysm-admin challenge</code> 获取 6 位确认码</div>
         </form>
     </div>
     <div class="card">
@@ -3152,7 +3152,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             </div>
             <div class="modal-body">
                 <p style="color:var(--text-secondary);margin-bottom:16px">请在 SSH 中执行以下命令生成确认码：</p>
-                <div class="code-block">ym-admin challenge</div>
+                <div class="code-block">ysm-admin challenge</div>
                 <div style="margin-top:16px">
                     <label class="form-label">输入 6 位确认码</label>
                     <input class="form-input" type="text" id="challengeCodeInput" placeholder="例如: A3B9F2" maxlength="6" style="text-transform:uppercase;letter-spacing:4px;font-size:1.2em;text-align:center" autocomplete="off">
@@ -3190,14 +3190,14 @@ $banMsg = $_GET['bmsg'] ?? '';
     </div>
 
 <script>
-// 敏感操作挑战码统一处理：提交前弹出确认码输入（SSH: sudo ym-admin challenge）
+// 敏感操作挑战码统一处理：提交前弹出确认码输入（SSH: sudo ysm-admin challenge）
 // v3.0.3：改为事件委托（document submit），支持动态注入的 need-challenge 表单（用户操作弹窗）
 document.addEventListener('submit', function(e) {
     var f = e.target;
     if (!f || !f.classList || !f.classList.contains('need-challenge')) return;
     e.preventDefault();
     if (f.dataset.confirm && !confirm(f.dataset.confirm)) return;
-    var code = prompt('请在 SSH 中执行 sudo ym-admin challenge 获取 6 位确认码后输入：');
+    var code = prompt('请在 SSH 中执行 sudo ysm-admin challenge 获取 6 位确认码后输入：');
     if (!code) return;
     var hid = f.querySelector('input[name="challenge_code"]');
     if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = 'challenge_code'; f.appendChild(hid); }

@@ -724,9 +724,9 @@ if ($action === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     sendJson(['success' => true]);
 }
-// v4.5.0：refresh 接口——登录态过期后，用 httpOnly ym_rt + 当前环境指纹自动续期（换环境则失败，需重新登录）
+// v4.5.0：refresh 接口——登录态过期后，用 httpOnly ysm_rt + 当前环境指纹自动续期（换环境则失败，需重新登录）
 if ($action === 'refresh' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $rt = $_COOKIE['ym_rt'] ?? '';
+    $rt = $_COOKIE['ysm_rt'] ?? '';
     $reqFp = getRequestFp();
     $row = consumeRefreshToken($rt, $reqFp, -1); // 先按记录自身 tv 校验，再取用户当前 tv
     if (!$row) {

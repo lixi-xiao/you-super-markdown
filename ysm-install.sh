@@ -2,7 +2,7 @@
 # ================================================================
 # You Super Markdown 一键安装脚本（版本读取自 app-config.json）
 # 功能：部署源码 + 配置 Nginx + 守护进程 + 防火墙 + SSL + CLI 工具
-# 使用：sudo bash ym-install.sh
+# 使用：sudo bash ysm-install.sh
 # ================================================================
 set -e
 
@@ -15,6 +15,7 @@ if [ -z "$APP_VER" ]; then APP_VER="0.0.0"; fi
 # 解析命令行参数（支持全自动/半自动，小白也可全部回车走默认）
 INSTALL_HFISH=true
 AUTO_YES=false
+GEN_SIGNING_KEY=false
 DOMAIN_ARG=""
 WEB_ROOT_ARG=""
 EMAIL_ARG=""
@@ -50,22 +51,23 @@ for arg in "$@"; do
             HFISH_NODE_PORT_ARG="${arg#*=}"
             ;;
         --help|-h)
-            echo "用法: sudo bash ym-install.sh [选项]"
+            echo "用法: sudo bash ysm-install.sh [选项]"
             echo ""
             echo "选项（可与环境变量互换，参数优先）:"
-            echo "  --domain=域名       站点域名（等价环境变量 YM_DOMAIN）"
-            echo "  --web-root=路径     Web 根目录（默认 /var/www/you-markdown，等价 YM_WEB_ROOT）"
-            echo "  --email=邮箱        管理员邮箱（必填：告警收件人 + 超管设备验证通道，等价 YM_ADMIN_EMAIL）"
+            echo "  --domain=域名       站点域名（等价环境变量 YSM_DOMAIN）"
+            echo "  --web-root=路径     Web 根目录（默认 /var/www/you-super-markdown，等价 YSM_WEB_ROOT）"
+            echo "  --email=邮箱        管理员邮箱（必填：告警收件人 + 超管设备验证通道，等价 YSM_ADMIN_EMAIL）"
             echo "  --skip-hfish       跳过 Hfish 蜜罐安装"
-            echo "  --hfish-password=密 蜜獾账户密码（留空自动生成强密码，等价 YM_HFISH_PASSWORD）"
-            echo "  --hfish-port-panel=端口  蜜獾管理面板端口（默认 4433，自动检测占用，等价 YM_HFISH_PANEL_PORT）"
-            echo "  --hfish-port-node=端口   蜜獾节点通信端口（默认 4434，等价 YM_HFISH_NODE_PORT）"
+            echo "  --gen-signing-key  生成自定义更新签名信任根（交互式，含四次确认；默认使用安装包内官方公钥）"
+            echo "  --hfish-password=密 蜜獾账户密码（留空自动生成强密码，等价 YSM_HFISH_PASSWORD）"
+            echo "  --hfish-port-panel=端口  蜜獾管理面板端口（默认 4433，自动检测占用，等价 YSM_HFISH_PANEL_PORT）"
+            echo "  --hfish-port-node=端口   蜜獾节点通信端口（默认 4434，等价 YSM_HFISH_NODE_PORT）"
             echo "  --help, -h         显示此帮助信息"
             echo ""
             echo "示例:"
-            echo "  sudo bash ym-install.sh                              # 交互式（小白默认流程）"
-            echo "  sudo bash ym-install.sh --yes --domain=blog.example.com   # 全自动"
-            echo "  YM_DOMAIN=x.example.com sudo bash ym-install.sh      # 环境变量方式"
+            echo "  sudo bash ysm-install.sh                              # 交互式（小白默认流程）"
+            echo "  sudo bash ysm-install.sh --yes --domain=blog.example.com   # 全自动"
+            echo "  YSM_DOMAIN=x.example.com sudo bash ysm-install.sh      # 环境变量方式"
             exit 0
             ;;
     esac
@@ -103,7 +105,7 @@ echo "============================================"
 echo ""
 
 if [ "$EUID" -ne 0 ]; then
-    err "请使用 root 权限运行此脚本 (sudo bash ym-install.sh)"
+    err "请使用 root 权限运行此脚本 (sudo bash ysm-install.sh)"
 fi
 
 # 检测系统
@@ -206,11 +208,11 @@ configure_php_timezone
 echo ""
 log "请提供以下部署信息（直接回车使用默认值；全自动模式 --yes 跳过本环节）"
 
-# 域名：--domain / YM_DOMAIN > 交互输入（必填）
-DOMAIN="${DOMAIN_ARG:-${YM_DOMAIN:-}}"
+# 域名：--domain / YSM_DOMAIN > 交互输入（必填）
+DOMAIN="${DOMAIN_ARG:-${YSM_DOMAIN:-}}"
 if [ -z "$DOMAIN" ]; then
     if [ "$AUTO_YES" = true ]; then
-        err "全自动模式需提供域名: --domain=你的域名 (或环境变量 YM_DOMAIN)"
+        err "全自动模式需提供域名: --domain=你的域名 (或环境变量 YSM_DOMAIN)"
     fi
     read -p "  域名 (必填，如 youmarkdown.example.com): " DOMAIN
     if [ -z "$DOMAIN" ]; then
@@ -218,19 +220,19 @@ if [ -z "$DOMAIN" ]; then
     fi
 fi
 
-# Web 根目录：--web-root / YM_WEB_ROOT > 交互默认 /var/www/you-markdown
-WEB_ROOT="${WEB_ROOT_ARG:-${YM_WEB_ROOT:-}}"
+# Web 根目录：--web-root / YSM_WEB_ROOT > 交互默认 /var/www/you-super-markdown
+WEB_ROOT="${WEB_ROOT_ARG:-${YSM_WEB_ROOT:-}}"
 if [ -z "$WEB_ROOT" ]; then
     if [ "$AUTO_YES" = true ]; then
-        WEB_ROOT="/var/www/you-markdown"
+        WEB_ROOT="/var/www/you-super-markdown"
     else
-        read -p "  Web 根目录 (默认 /var/www/you-markdown): " WEB_ROOT
-        WEB_ROOT=${WEB_ROOT:-/var/www/you-markdown}
+        read -p "  Web 根目录 (默认 /var/www/you-super-markdown): " WEB_ROOT
+        WEB_ROOT=${WEB_ROOT:-/var/www/you-super-markdown}
     fi
 fi
 
 # v4.7.3：管理员邮箱——必填 + 格式校验（该邮箱 = 告警收件人 + 超管设备二次验证码发送目标；超管无独立绑定邮箱）
-ADMIN_EMAIL="${EMAIL_ARG:-${YM_ADMIN_EMAIL:-}}"
+ADMIN_EMAIL="${EMAIL_ARG:-${YSM_ADMIN_EMAIL:-}}"
 valid_email() {
     case "$1" in
         *@*.*) return 0 ;;
@@ -292,14 +294,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 创建 Web 根目录
 mkdir -p "$WEB_ROOT"
 
-# 拷贝源码（排除不需要的文件和旧版目录；自身 ym-install.sh 不部署进 Web 根，
+# 拷贝源码（排除不需要的文件；自身 ysm-install.sh 不部署进 Web 根，
 # 纵深防御：即使 nginx 配置失误，攻击者也无法通过 Web 下载安装脚本源码）
 rsync -av --exclude='恢复.zip' --exclude='test_*.py' --exclude='__pycache__' \
-    --exclude='youyou/' --exclude='ym-install.sh' "$SCRIPT_DIR/" "$WEB_ROOT/" > /dev/null 2>&1 || \
+    --exclude='ysm-install.sh' "$SCRIPT_DIR/" "$WEB_ROOT/" > /dev/null 2>&1 || \
     cp -r "$SCRIPT_DIR/"* "$WEB_ROOT/" 2>/dev/null
-
-# 清理旧版残留目录
-rm -rf "$WEB_ROOT/youyou" 2>/dev/null
 
 # 设置权限
 chown -R root:www-data "$WEB_ROOT"
@@ -325,7 +324,7 @@ fi
 
 log "文件部署完成"
 
-# 写入站点域名到 app-config.json（供 ym-admin 生成管理入口 URL；v2.10.2 起禁止 ym-admin 硬编码域名）
+# 写入站点域名到 app-config.json（供 ysm-admin 生成管理入口 URL；v2.10.2 起禁止 ysm-admin 硬编码域名）
 php -r "
     \$p = '$WEB_ROOT/app-config.json';
     if (file_exists(\$p)) {
@@ -344,59 +343,52 @@ log "初始化高级管理员账号..."
 SUPER_PASSWORD=$(openssl rand -base64 12 | tr -d '=+/')
 SUPER_PASSWORD_HASH=$(php -r "echo password_hash('$SUPER_PASSWORD', PASSWORD_DEFAULT);")
 SUPER_ID=$(openssl rand -hex 8)
-SUPER_QQ="admin_$(openssl rand -hex 4)"
-
-# 创建用户数据
-mkdir -p "$WEB_ROOT/data"
-cat > "$WEB_ROOT/data/.users.json" << EOF
-[
-    {
-        "id": "$SUPER_ID",
-        "qq": "$SUPER_QQ",
-        "nickname": "高级管理员",
-        "password": "$SUPER_PASSWORD_HASH",
-        "avatar": "",
-        "signature": "高级管理员",
-        "role": "super_admin",
-        "created": "$(date '+%Y-%m-%d %H:%M:%S')"
-    }
-]
-EOF
-chown www-data:www-data "$WEB_ROOT/data/.users.json"
-chmod 640 "$WEB_ROOT/data/.users.json"
-
-# 角色定义已内置在 utils.php loadRoles() 的默认值中，无需单独落盘
+SUPER_ACCOUNT="admin_$(openssl rand -hex 4)"
 
 # 生成 JWT 密钥
+mkdir -p "$WEB_ROOT/data"
 JWT_SECRET=$(openssl rand -hex 32)
 echo "$JWT_SECRET" > "$WEB_ROOT/data/.jwt_secret"
 chmod 600 "$WEB_ROOT/data/.jwt_secret"
 chown www-data:www-data "$WEB_ROOT/data/.jwt_secret"
 
-# 初始化配置
-cat > "$WEB_ROOT/data/.config.json" << EOF
-{
-    "site_title": "You Super Markdown",
-    "registration_enabled": true,
-    "guest_comments_enabled": false,
-    "admin_email": "${ADMIN_EMAIL}",
-    "update_channel": "stable",
-    "auto_ban": true,
-    "auto_ban_unauthorized": true,
-    "max_login_fails": 10,
-    "station_path": "station",
-    "author_path": "author",
-    "hide_default_paths": true,
-    "email_verify_enabled": ${VERIFY_EMAIL_FLAG},
-    "author_dual_verify_enabled": ${VERIFY_DUAL_FLAG},
-    "verify_code_ttl": 300,
-    "confirm_link_ttl": 86400,
-    "resend_cooldown": 60
-}
-EOF
-chown www-data:www-data "$WEB_ROOT/data/.config.json"
+# 初始化管理员与站点配置（v5.0.0 起直接写 SQLite；schema 由 db.php db_init_schema() 建立，
+# 不再落盘 JSON 种子文件、也不再依赖一次性 JSON→SQLite 迁移脚本）
+SUPER_ID="$SUPER_ID" SUPER_ACCOUNT="$SUPER_ACCOUNT" SUPER_PASSWORD_HASH="$SUPER_PASSWORD_HASH" \
+ADMIN_EMAIL="$ADMIN_EMAIL" VERIFY_EMAIL_FLAG="$VERIFY_EMAIL_FLAG" VERIFY_DUAL_FLAG="$VERIFY_DUAL_FLAG" \
+php -r "
+    require '$WEB_ROOT/utils.php';
+    replaceAllUsers([[
+        'id' => getenv('SUPER_ID'),
+        'account' => getenv('SUPER_ACCOUNT'),
+        'nickname' => '高级管理员',
+        'password' => getenv('SUPER_PASSWORD_HASH'),
+        'avatar' => '',
+        'signature' => '高级管理员',
+        'role' => 'super_admin',
+        'created' => date('Y-m-d H:i:s'),
+    ]]);
+    \$cfg = loadSiteConfig();
+    \$cfg['site_title'] = 'You Super Markdown';
+    \$cfg['registration_enabled'] = true;
+    \$cfg['guest_comments_enabled'] = false;
+    \$cfg['admin_email'] = getenv('ADMIN_EMAIL');
+    \$cfg['update_channel'] = 'stable';
+    \$cfg['auto_ban'] = true;
+    \$cfg['auto_ban_unauthorized'] = true;
+    \$cfg['max_login_fails'] = 10;
+    \$cfg['station_path'] = 'station';
+    \$cfg['author_path'] = 'author';
+    \$cfg['hide_default_paths'] = true;
+    \$cfg['email_verify_enabled'] = getenv('VERIFY_EMAIL_FLAG') === 'true';
+    \$cfg['author_dual_verify_enabled'] = getenv('VERIFY_DUAL_FLAG') === 'true';
+    \$cfg['verify_code_ttl'] = 300;
+    \$cfg['confirm_link_ttl'] = 86400;
+    \$cfg['resend_cooldown'] = 60;
+    saveSiteConfig(\$cfg);
+" 2>/dev/null || warn "管理员初始化写入 SQLite 失败，请检查 data/ 目录权限"
 
-log "高级管理员账号已创建（凭据不展示，进后台请用上方 OTP 入口或 ym-admin login）"
+log "高级管理员账号已创建（凭据不展示，进后台请用上方 OTP 入口或 ysm-admin login）"
 
 # ================================================================
 # 4. 生成 OTP 入口
@@ -408,26 +400,16 @@ OTP=$(openssl rand -base64 9 | tr -d '=+/' | cut -c1-12)
 OTP_HASH=$(php -r "echo password_hash('$OTP', PASSWORD_DEFAULT);")
 ENTRY_EXPIRES=$(( $(date +%s) + 600 ))
 
-cat > "$WEB_ROOT/data/.entries.json" << EOF
-[
-    {
-        "token": "$ENTRY_TOKEN",
-        "otp_hash": "$OTP_HASH",
-        "expires": $ENTRY_EXPIRES,
-        "used": 0,
-        "created": "$(date '+%Y-%m-%d %H:%M:%S')"
-    }
-]
-EOF
-chown www-data:www-data "$WEB_ROOT/data/.entries.json"
+ENTRY_TOKEN="$ENTRY_TOKEN" OTP_HASH="$OTP_HASH" ENTRY_EXPIRES="$ENTRY_EXPIRES" \
+php -r "
+    require '$WEB_ROOT/utils.php';
+    addEntry(getenv('ENTRY_TOKEN'), getenv('OTP_HASH'), (int)getenv('ENTRY_EXPIRES'));
+" 2>/dev/null || warn "OTP 入口写入 SQLite 失败，请稍后用 sudo ysm-admin login 重新生成"
 
-# 将种子 JSON 数据导入 SQLite（v2.5.0 起使用 SQLite；幂等）
-log "初始化 SQLite 数据库..."
-php "$WEB_ROOT/ym-migrate" 2>&1 || warn "数据迁移失败，请手动执行: php $WEB_ROOT/ym-migrate"
 # 确保 PHP-FPM（www-data）可写 SQLite 及 WAL/SHM 文件；data 目录组可写供 CLI 只读命令无 sudo 读取
 chown -R www-data:www-data "$WEB_ROOT/data"
 chmod 775 "$WEB_ROOT/data" 2>/dev/null || true
-chmod 660 "$WEB_ROOT/data/ym.db" 2>/dev/null || true
+chmod 660 "$WEB_ROOT/data/ysm.db" 2>/dev/null || true
 
 # ================================================================
 # 5. 配置 Nginx
@@ -513,7 +495,7 @@ server {
     }
 
     # 禁止访问 SQLite 数据库（含 WAL/SHM 文件）
-    location ~ ^/data/ym\.db(-wal|-shm)?\$ {
+    location ~ ^/data/ysm\.db(-wal|-shm)?\$ {
         deny all;
         return 403;
     }
@@ -547,7 +529,7 @@ server {
     }
 
     # 禁止访问 CLI/安装/迁移/调试文件（无后缀脚本显式封禁）
-    location ~ ^/(ym-admin|ym-install\.sh|ym-guard\.py|ym-hfish-sync\.py|ym-migrate|test\.php|debug\.php|entry_debug\.php|entry_fixed\.php)\$ {
+    location ~ ^/(ysm-admin|ysm-install\.sh|ysm-guard\.py|ysm-hfish-sync\.py|_hfish_bridge\.php|test\.php|debug\.php|entry_debug\.php|entry_fixed\.php)\$ {
         deny all;
         return 403;
     }
@@ -606,15 +588,126 @@ else
 fi
 
 # ================================================================
+# 信任根部署（更新签名公钥 update_signing_public.pem）
+#   默认：部署安装包内官方公钥；
+#   仅当显式传入 --gen-signing-key 时，进入「生成信任根」交互流程。
+# 四次确认：①人工执行官方安装包 ②必须带 --gen-signing-key 才出现生成界面
+#          ③展示私钥前确认「已准备好」 ④生成后回填公钥指纹校验通过才继续。
+# 私钥：AES-256 口令加密 → 仅展示一次 → 立即 shred 删净；绝不写入日志/备份/命令历史。
+# 注意：不提供「事后更换信任根」命令——如需更换只能重装并显式带 --gen-signing-key。
+# ================================================================
+setup_trust_root() {
+    local pub_target="/opt/you-super-markdown/update_signing_public.pem"
+
+    # ② 未显式带 --gen-signing-key：使用安装包内官方公钥
+    if [ "$GEN_SIGNING_KEY" != true ]; then
+        if [ -f "$SCRIPT_DIR/update_signing_public.pem" ]; then
+            install -m 644 "$SCRIPT_DIR/update_signing_public.pem" "$pub_target"
+            log "已部署官方更新签名公钥: $pub_target"
+        else
+            warn "安装包未包含官方公钥（update_signing_public.pem）——更新通道失败封闭（未部署公钥一律拒绝更新）"
+            warn "如需自行签发并更新，请带 --gen-signing-key 重新安装以生成信任根"
+        fi
+        return 0
+    fi
+
+    # ① 安装包层面：生成信任根必须在交互式终端人工执行
+    echo ""
+    warn "============ 生成信任根（更新签名密钥对）============"
+    warn "即将生成一对新的更新签名密钥，并以你的公钥替换服务器信任根。"
+    warn "私钥仅用于你今后自行签发更新包，请务必备份到离线安全位置。"
+    echo ""
+    if [ ! -t 0 ]; then
+        err "生成信任根必须人工在交互式终端执行（检测到非交互输入），已中止安装"
+    fi
+    read -r -p "  确认这是人工执行官方安装包、且已完整阅读上述说明？输入 yes 继续: " _ack
+    if [ "$_ack" != "yes" ]; then
+        err "未确认，已中止安装（未生成信任根）"
+    fi
+
+    local tmpdir priv pub fpr fpr_in fpr_norm
+    tmpdir=$(mktemp -d)
+    chmod 700 "$tmpdir"
+    priv="$tmpdir/update_signing_private.pem"
+    pub="$tmpdir/update_signing_public.pem"
+
+    # 生成 RSA-3072 私钥（AES-256 口令加密；口令由 openssl 交互提示，不经命令行 → 不落入日志/命令历史）
+    log "生成 RSA-3072 私钥（AES-256 口令加密，openssl 将提示设置口令）..."
+    if ! openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -aes256 -out "$priv"; then
+        rm -rf "$tmpdir"
+        err "私钥生成失败，已中止安装"
+    fi
+    chmod 600 "$priv"
+
+    # 导出公钥 + 计算 SHA256 指纹（先展示公钥供用户保存与核对）
+    if ! openssl pkey -in "$priv" -pubout -out "$pub"; then
+        shred -u "$priv" 2>/dev/null || rm -f "$priv"
+        rm -rf "$tmpdir"
+        err "公钥导出失败，已中止安装"
+    fi
+    fpr=$(openssl pkey -pubin -in "$pub" -outform DER 2>/dev/null | openssl dgst -sha256 2>/dev/null | awk '{print $NF}')
+
+    echo ""
+    echo "============================================"
+    echo "  新信任根 · 公钥（请抄写/保存）"
+    echo "============================================"
+    cat "$pub"
+    echo "--------------------------------------------"
+    echo "  公钥 SHA256 指纹: $fpr"
+    echo "============================================"
+    echo ""
+
+    # ④ 回填公钥指纹校验；不通过 → 中止安装、不替换信任根
+    read -r -p "  请回填上面的公钥 SHA256 指纹以确认（可含冒号，不区分大小写）: " fpr_in
+    fpr_in=$(printf '%s' "$fpr_in" | tr -d ':\r\n' | tr 'A-F' 'a-f')
+    fpr_norm=$(printf '%s' "$fpr" | tr -d ':\r\n' | tr 'A-F' 'a-f')
+    if [ -z "$fpr_in" ] || [ "$fpr_in" != "$fpr_norm" ]; then
+        shred -u "$priv" 2>/dev/null || rm -f "$priv"
+        rm -rf "$tmpdir"
+        err "公钥指纹校验不通过，已中止安装（未替换信任根）"
+    fi
+    log "公钥指纹校验通过"
+
+    # ③ 展示私钥前，确认用户「已准备好」
+    echo ""
+    warn "下一步将『仅显示一次』你的私钥（口令加密 PEM）。"
+    warn "请确保已可用于离线保存（纸质抄写 / 加密移动介质）；该步骤后私钥将立即彻底销毁、无法找回。"
+    read -r -p "  已准备好接收私钥？输入 ready 继续: " _ready
+    if [ "$_ready" != "ready" ]; then
+        shred -u "$priv" 2>/dev/null || rm -f "$priv"
+        rm -rf "$tmpdir"
+        err "未确认已准备好，已中止安装（未替换信任根）"
+    fi
+
+    echo ""
+    echo "================ 私钥（仅此一次显示）================"
+    cat "$priv"
+    echo "===================================================="
+    echo ""
+
+    # 替换信任根：以用户公钥覆盖服务器公钥
+    install -m 644 "$pub" "$pub_target"
+    log "已用你的公钥替换服务器信任根: $pub_target"
+
+    # 私钥立即 shred 删净（不留任何临时副本）
+    shred -u "$priv" 2>/dev/null || rm -f "$priv"
+    rm -rf "$tmpdir"
+    echo "  （私钥已彻底销毁；请立即核对上方内容并离线妥善保管）"
+
+    # 审计日志：仅记录公钥指纹，绝不记录私钥
+    php -r "require_once '$WEB_ROOT/utils.php'; auditLog('trust_root_replaced', 'update', '安装时以 --gen-signing-key 生成并以用户公钥替换更新签名信任根（SHA256 指纹: $fpr）');" 2>/dev/null || true
+    return 0
+}
+
+# ================================================================
 # 7. 部署守护进程
 # ================================================================
 log "部署守护进程..."
 
 # 创建母本目录
-INSTALL_BASE="/opt/you-markdown/install-base"
+INSTALL_BASE="/opt/you-super-markdown/install-base"
 mkdir -p "$INSTALL_BASE"
-rsync -av --exclude='data/' --exclude='*.json' --exclude='youyou/' "$WEB_ROOT/" "$INSTALL_BASE/" > /dev/null 2>&1
-rm -rf "$INSTALL_BASE/youyou" 2>/dev/null
+rsync -av --exclude='data/' --exclude='*.json' "$WEB_ROOT/" "$INSTALL_BASE/" > /dev/null 2>&1
 chown -R root:root "$INSTALL_BASE"
 chmod -R 755 "$INSTALL_BASE"
 find "$INSTALL_BASE" -type f -exec chmod 644 {} \;
@@ -623,64 +716,91 @@ find "$INSTALL_BASE" -type f -exec chmod 644 {} \;
 chattr -R +i "$INSTALL_BASE" 2>/dev/null || warn "chattr 不可用，母本未锁定（建议安装 e2fsprogs）"
 
 # 创建日志镜像目录（chattr +i 锁定，防 PHP 权限/未知 bug 篡改审计镜像）
-mkdir -p /opt/you-markdown/logs
-chown www-data:www-data /opt/you-markdown/logs
-chmod 750 /opt/you-markdown/logs
+mkdir -p /opt/you-super-markdown/logs
+chown www-data:www-data /opt/you-super-markdown/logs
+chmod 750 /opt/you-super-markdown/logs
 
 # 创建自动备份目录（数据库 30 分钟备份 / 文章每日备份）并 chattr +i 锁定
 # 备份目录与母本同理念：root 锁定，守护进程写入时临时解锁→重锁，PHP 权限不可篡改
-mkdir -p /opt/you-markdown/backups/db /opt/you-markdown/backups/articles
-chown root:www-data /opt/you-markdown/backups /opt/you-markdown/backups/db /opt/you-markdown/backups/articles
-chmod 775 /opt/you-markdown/backups /opt/you-markdown/backups/db /opt/you-markdown/backups/articles
-chattr -R +i /opt/you-markdown/backups/db /opt/you-markdown/backups/articles 2>/dev/null || warn "chattr 不可用，备份目录未锁定（建议安装 e2fsprogs）"
-chattr +i /opt/you-markdown/logs 2>/dev/null || warn "chattr 不可用，日志镜像目录未锁定（建议安装 e2fsprogs）"
+mkdir -p /opt/you-super-markdown/backups/db /opt/you-super-markdown/backups/articles
+chown root:www-data /opt/you-super-markdown/backups /opt/you-super-markdown/backups/db /opt/you-super-markdown/backups/articles
+chmod 775 /opt/you-super-markdown/backups /opt/you-super-markdown/backups/db /opt/you-super-markdown/backups/articles
+chattr -R +i /opt/you-super-markdown/backups/db /opt/you-super-markdown/backups/articles 2>/dev/null || warn "chattr 不可用，备份目录未锁定（建议安装 e2fsprogs）"
+chattr +i /opt/you-super-markdown/logs 2>/dev/null || warn "chattr 不可用，日志镜像目录未锁定（建议安装 e2fsprogs）"
+
+# ================================================================
+# 6.5 审计链母密钥（v5.0.0 P7：链密钥化——安装时生成一次，仅 root 独占保存）
+# ================================================================
+# 母密钥用于 HMAC-SHA256 加封/校验审计链（由 root 守护进程加封，PHP/www-data 读不到 → 伪造不出链）。
+# 存放于 webroot 外 /opt/you-super-markdown/secrets/audit_key（root 0600，chattr +i 锁定）。
+# 绝不写入任何 web 可读位置；丢失将导致历史链永久无法校验（须随 root 备份一并保存）。
+AUDIT_SECRETS_DIR="/opt/you-super-markdown/secrets"
+AUDIT_KEY_FILE="$AUDIT_SECRETS_DIR/audit_key"
+mkdir -p "$AUDIT_SECRETS_DIR"
+chown root:root "$AUDIT_SECRETS_DIR"
+chmod 700 "$AUDIT_SECRETS_DIR"
+if [ ! -s "$AUDIT_KEY_FILE" ]; then
+    openssl rand -hex 32 > "$AUDIT_KEY_FILE"
+    chown root:root "$AUDIT_KEY_FILE"
+    chmod 600 "$AUDIT_KEY_FILE"
+    chattr +i "$AUDIT_KEY_FILE" 2>/dev/null || warn "chattr 不可用，审计母密钥未锁定（建议安装 e2fsprogs）"
+    log "审计链母密钥已生成: $AUDIT_KEY_FILE (root 0600, webroot 外)"
+else
+    log "审计链母密钥已存在，保留原密钥（不覆盖）"
+fi
+# 记录密钥 SHA256 指纹进安装审计（与 trust_root_replaced 同级；绝不记录密钥本体）
+AUDIT_KEY_FPR=$(sha256sum "$AUDIT_KEY_FILE" | awk '{print $1}')
+php -r "require_once '$WEB_ROOT/utils.php'; auditLog('audit_key_created', 'audit', 'v5.0.0 安装时生成审计链母密钥（HMAC-SHA256，root 0600，webroot 外 secrets/audit_key；SHA256 指纹: $AUDIT_KEY_FPR）');" 2>/dev/null || true
+
+# 部署更新签名信任根（默认官方公钥；--gen-signing-key 时进入「四次确认」的生成流程）
+setup_trust_root
 
 # 初始化自动备份配置（默认：库 30 分钟 / 文章保留 7 份 / 手动备份保留 5 份，后台可改）
 # v3.3.6：模板补齐 v3.3.5 的两个开关（上传触发立即备份 / 单篇篡改还原），全新安装即完整
-cat > /opt/you-markdown/backup.conf << 'BACKUPCONF'
-# 自动备份配置（守护进程 ym-guard.py 读取；超管后台/SSH 可改）
+cat > /opt/you-super-markdown/backup.conf << 'BACKUPCONF'
+# 自动备份配置（守护进程 ysm-guard.py 读取；超管后台/SSH 可改）
 DB_BACKUP_INTERVAL_MIN=30
 ARTICLE_BACKUP_KEEP=7
 MANUAL_BACKUP_KEEP=5
 ARTICLE_TRIGGER_BACKUP=1
 ARTICLE_SINGLE_RESTORE=1
 BACKUPCONF
-chown root:www-data /opt/you-markdown/backup.conf
-chmod 664 /opt/you-markdown/backup.conf
+chown root:www-data /opt/you-super-markdown/backup.conf
+chmod 664 /opt/you-super-markdown/backup.conf
 
 # 安装守护进程脚本
-cp "$SCRIPT_DIR/ym-guard.py" /opt/you-markdown/ym-guard.py
-chmod 700 /opt/you-markdown/ym-guard.py
+cp "$SCRIPT_DIR/ysm-guard.py" /opt/you-super-markdown/ysm-guard.py
+chmod 700 /opt/you-super-markdown/ysm-guard.py
 
 # 创建邮件告警脚本（v2.8.0：mail 失败时落盘 alert.log，可追溯"邮件没发出去"）
-touch /opt/you-markdown/alert.log 2>/dev/null || true
-chown root:www-data /opt/you-markdown/alert.log 2>/dev/null || true
-chmod 664 /opt/you-markdown/alert.log 2>/dev/null || true
-cat > /usr/local/bin/ym-alert << 'EOF'
+touch /opt/you-super-markdown/alert.log 2>/dev/null || true
+chown root:www-data /opt/you-super-markdown/alert.log 2>/dev/null || true
+chmod 664 /opt/you-super-markdown/alert.log 2>/dev/null || true
+cat > /usr/local/bin/ysm-alert << 'EOF'
 #!/bin/bash
 TO="$1"
 SUBJECT="$2"
 BODY="$3"
 if command -v mail >/dev/null 2>&1; then
-    echo "$BODY" | mail -s "$SUBJECT" "$TO" 2>/tmp/ym-alert.err
+    echo "$BODY" | mail -s "$SUBJECT" "$TO" 2>/tmp/ysm-alert.err
     RC=$?
     if [ $RC -ne 0 ]; then
-        ERR=$(head -1 /tmp/ym-alert.err 2>/dev/null)
-        echo "$(date '+%Y-%m-%d %H:%M:%S') [FAIL] mail 命令失败(rc=$RC): $ERR" >> /opt/you-markdown/alert.log 2>/dev/null || true
+        ERR=$(head -1 /tmp/ysm-alert.err 2>/dev/null)
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [FAIL] mail 命令失败(rc=$RC): $ERR" >> /opt/you-super-markdown/alert.log 2>/dev/null || true
     fi
-    rm -f /tmp/ym-alert.err
+    rm -f /tmp/ysm-alert.err
     exit $RC
 else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [FAIL] mail 命令不存在，无法发送告警" >> /opt/you-markdown/alert.log 2>/dev/null || true
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [FAIL] mail 命令不存在，无法发送告警" >> /opt/you-super-markdown/alert.log 2>/dev/null || true
     exit 1
 fi
 EOF
-chmod +x /usr/local/bin/ym-alert
+chmod +x /usr/local/bin/ysm-alert
 
 # 注册 systemd 服务
 APP_NAME=$(php -r "\$c = json_decode(@file_get_contents('$SCRIPT_DIR/app-config.json'), true); echo \$c['app_name'] ?? 'You Super Markdown';" 2>/dev/null)
 DOCS_URL=$(php -r "\$c = json_decode(@file_get_contents('$SCRIPT_DIR/app-config.json'), true); echo \$c['docs_url'] ?? '';" 2>/dev/null)
-cat > /etc/systemd/system/ym-guard.service << EOF
+cat > /etc/systemd/system/ysm-guard.service << EOF
 [Unit]
 Description=${APP_NAME} File Guard Daemon
 Documentation=${DOCS_URL}
@@ -689,8 +809,8 @@ Before=nginx.service
 
 [Service]
 Type=notify
-ExecStart=/usr/bin/python3 /opt/you-markdown/ym-guard.py
-Environment=YM_WEB_ROOT=$WEB_ROOT
+ExecStart=/usr/bin/python3 /opt/you-super-markdown/ysm-guard.py
+Environment=YSM_WEB_ROOT=$WEB_ROOT
 Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=5
@@ -699,7 +819,7 @@ User=root
 Group=root
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=$WEB_ROOT /opt/you-markdown
+ReadWritePaths=$WEB_ROOT /opt/you-super-markdown
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
@@ -712,16 +832,16 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable ym-guard
-systemctl start ym-guard
+systemctl enable ysm-guard
+systemctl start ysm-guard
 log "守护进程已启动"
 
 # 注册 cron 兜底
-cat > /etc/cron.d/ym-guard << EOF
+cat > /etc/cron.d/ysm-guard << EOF
 # You Super Markdown 守护进程兜底检查（每5分钟）
-*/5 * * * * root /usr/bin/systemctl is-active --quiet ym-guard || /usr/bin/systemctl start ym-guard
-# 每天凌晨3点发送每日审计报告（ym-admin audit-report：校验哈希链并经 SMTP 发送给管理员，无 MTA 依赖）
-0 3 * * * root /usr/local/bin/ym-admin audit-report > /dev/null 2>&1
+*/5 * * * * root /usr/bin/systemctl is-active --quiet ysm-guard || /usr/bin/systemctl start ysm-guard
+# 每天凌晨3点发送每日审计报告（ysm-admin audit-report：校验哈希链并经 SMTP 发送给管理员，无 MTA 依赖）
+0 3 * * * root /usr/local/bin/ysm-admin audit-report > /dev/null 2>&1
 EOF
 
 # ================================================================
@@ -776,8 +896,8 @@ install_hfish() {
     HFISH_USER=$(php -r "\$c = json_decode(@file_get_contents('$SCRIPT_DIR/app-config.json'), true); echo \$c['hfish_user'] ?? 'xiao';" 2>/dev/null)
     HFISH_USER=${HFISH_USER:-xiao}
 
-    # 蜜獾账户密码：--hfish-password / YM_HFISH_PASSWORD > 交互输入（留空自动生成强密码）
-    HFISH_PASSWORD="${HFISH_PASSWORD_ARG:-${YM_HFISH_PASSWORD:-}}"
+    # 蜜獾账户密码：--hfish-password / YSM_HFISH_PASSWORD > 交互输入（留空自动生成强密码）
+    HFISH_PASSWORD="${HFISH_PASSWORD_ARG:-${YSM_HFISH_PASSWORD:-}}"
     if [ -z "$HFISH_PASSWORD" ] && [ "$AUTO_YES" != true ]; then
         read -s -p "  蜜獾账户密码 (留空自动生成强密码): " HFISH_PASSWORD
         echo ""
@@ -791,15 +911,15 @@ install_hfish() {
     echo ""
     info "配置蜜罐端口（默认值即可；若被占用会自动顺延）："
 
-    # 管理面板端口：--hfish-port-panel / YM_HFISH_PANEL_PORT > 交互默认 4433 > 自动检测占用
-    HFISH_PANEL_PORT="${HFISH_PANEL_PORT_ARG:-${YM_HFISH_PANEL_PORT:-}}"
+    # 管理面板端口：--hfish-port-panel / YSM_HFISH_PANEL_PORT > 交互默认 4433 > 自动检测占用
+    HFISH_PANEL_PORT="${HFISH_PANEL_PORT_ARG:-${YSM_HFISH_PANEL_PORT:-}}"
     if [ -z "$HFISH_PANEL_PORT" ] && [ "$AUTO_YES" != true ]; then
         read -p "  Web 管理面板端口 (默认 4433): " HFISH_PANEL_PORT
     fi
     HFISH_PANEL_PORT=$(pick_free_port "${HFISH_PANEL_PORT:-4433}")
 
-    # 节点通信端口：--hfish-port-node / YM_HFISH_NODE_PORT > 交互默认 4434 > 自动检测占用且避开面板端口
-    HFISH_NODE_PORT="${HFISH_NODE_PORT_ARG:-${YM_HFISH_NODE_PORT:-}}"
+    # 节点通信端口：--hfish-port-node / YSM_HFISH_NODE_PORT > 交互默认 4434 > 自动检测占用且避开面板端口
+    HFISH_NODE_PORT="${HFISH_NODE_PORT_ARG:-${YSM_HFISH_NODE_PORT:-}}"
     if [ -z "$HFISH_NODE_PORT" ] && [ "$AUTO_YES" != true ]; then
         read -p "  节点通信端口 (默认 4434): " HFISH_NODE_PORT
     fi
@@ -814,14 +934,14 @@ install_hfish() {
     echo "  节点通信端口: $HFISH_NODE_PORT"
     echo ""
 
-    # 保存端口配置（供 ym-admin 读取）
-    mkdir -p /opt/you-markdown
-    cat > /opt/you-markdown/hfish-ports.conf << PORTCONF
+    # 保存端口配置（供 ysm-admin 读取）
+    mkdir -p /opt/you-super-markdown
+    cat > /opt/you-super-markdown/hfish-ports.conf << PORTCONF
 HFISH_PANEL_PORT=$HFISH_PANEL_PORT
 HFISH_NODE_PORT=$HFISH_NODE_PORT
 HFISH_USER=$HFISH_USER
 PORTCONF
-    chmod 600 /opt/you-markdown/hfish-ports.conf
+    chmod 600 /opt/you-super-markdown/hfish-ports.conf
 
     # 使用官方一键安装脚本部署 Hfish
     log "运行 Hfish 官方一键安装脚本..."
@@ -848,8 +968,8 @@ PORTCONF
         fi
         # 自动配置蜜獾账户：名称改为 hfish_user，密码与服务器一致
         configure_hfish_account "$HFISH_USER" "$HFISH_PASSWORD"
-        # 设计指标：管理面板仅本机可访问，需经 SSH 隧道（ym-admin hfish-panel），不提供公网 URL
-        info "Hfish 管理面板: 仅本机访问（SSH 隧道 → sudo ym-admin hfish-panel）"
+        # 设计指标：管理面板仅本机可访问，需经 SSH 隧道（ysm-admin hfish-panel），不提供公网 URL
+        info "Hfish 管理面板: 仅本机访问（SSH 隧道 → sudo ysm-admin hfish-panel）"
         info "蜜獾账户: $HFISH_USER（密码已配置，登录后请妥善保管）"
     else
         warn "Hfish 服务启动失败，请检查: systemctl status hfish"
@@ -857,7 +977,7 @@ PORTCONF
     fi
 
     # 防火墙配置
-    # 设计指标：管理面板端口（HFISH_PANEL_PORT）不开放公网，仅经 ym-admin hfish-panel SSH 隧道本机访问；
+    # 设计指标：管理面板端口（HFISH_PANEL_PORT）不开放公网，仅经 ysm-admin hfish-panel SSH 隧道本机访问；
     # 节点通信端口为蜜罐诱饵/节点通道，需公网可达才能捕获攻击者（蜜罐本意：故意暴露的诱饵），故放行
     log "配置 Hfish 防火墙规则..."
     ufw allow "${HFISH_NODE_PORT}/tcp" comment 'Hfish node' > /dev/null 2>&1 || true
@@ -914,8 +1034,8 @@ set -e  # 恢复 set -e
 
 # 9.3 邮件告警配置（可选，v2.8.0：SMTP 直连，配置写入 config 表；后台「邮件设置」可随时修改/测试）
 configure_mail() {
-    if [ "$AUTO_YES" = true ] && [ -z "${YM_SMTP_HOST:-}" ]; then
-        info "已跳过邮件配置（后台「邮件设置」可随时配置，或环境变量 YM_SMTP_*）"
+    if [ "$AUTO_YES" = true ] && [ -z "${YSM_SMTP_HOST:-}" ]; then
+        info "已跳过邮件配置（后台「邮件设置」可随时配置，或环境变量 YSM_SMTP_*）"
         return 0
     fi
     echo ""
@@ -929,12 +1049,12 @@ configure_mail() {
         info "已跳过邮件配置（后台「邮件设置」可随时配置）"
         return 0
     fi
-    SMTP_HOST="${YM_SMTP_HOST:-}"
-    SMTP_PORT="${YM_SMTP_PORT:-465}"
-    SMTP_ENC="${YM_SMTP_ENC:-ssl}"
-    SMTP_USER="${YM_SMTP_USER:-}"
-    SMTP_PASS="${YM_SMTP_PASS:-}"
-    SMTP_FROM="${YM_SMTP_FROM:-}"
+    SMTP_HOST="${YSM_SMTP_HOST:-}"
+    SMTP_PORT="${YSM_SMTP_PORT:-465}"
+    SMTP_ENC="${YSM_SMTP_ENC:-ssl}"
+    SMTP_USER="${YSM_SMTP_USER:-}"
+    SMTP_PASS="${YSM_SMTP_PASS:-}"
+    SMTP_FROM="${YSM_SMTP_FROM:-}"
     [ -z "$SMTP_HOST" ] && read -p "  SMTP 服务器 (如 smtp.163.com): " SMTP_HOST
     [ -z "$SMTP_PORT" ] && read -p "  端口 (默认 465): " SMTP_PORT
     [ -z "$SMTP_ENC" ] && read -p "  加密方式 (ssl/tls/plain, 默认 ssl): " SMTP_ENC
@@ -947,17 +1067,17 @@ configure_mail() {
     SMTP_PORT=${SMTP_PORT:-465}
     SMTP_ENC=${SMTP_ENC:-ssl}
     # v3.0.9：授权码改为环境变量注入（密钥不落 Web 可达盘）——
-    # ① php-fpm pool env[YM_SMTP_PASS]（root 只读，Web/DB 均不可见）
-    # ② root 密钥文件 /opt/you-markdown/secrets/smtp_pass（0600，供 CLI 发信如 audit-report 注入）
-    SECRETS_DIR="/opt/you-markdown/secrets"
+    # ① php-fpm pool env[YSM_SMTP_PASS]（root 只读，Web/DB 均不可见）
+    # ② root 密钥文件 /opt/you-super-markdown/secrets/smtp_pass（0600，供 CLI 发信如 audit-report 注入）
+    SECRETS_DIR="/opt/you-super-markdown/secrets"
     mkdir -p "$SECRETS_DIR"
     printf '%s' "$SMTP_PASS" > "$SECRETS_DIR/smtp_pass"
     chmod 600 "$SECRETS_DIR/smtp_pass"
     POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/www.conf"
     if [ -f "$POOL_CONF" ]; then
-        sed -i '/env\[YM_SMTP_PASS\]/d' "$POOL_CONF" 2>/dev/null || true
+        sed -i '/env\[YSM_SMTP_PASS\]/d' "$POOL_CONF" 2>/dev/null || true
         ESC_PASS=$(printf '%s' "$SMTP_PASS" | sed 's/[\\"]/\\&/g')
-        printf '\nenv[YM_SMTP_PASS] = "%s"\n' "$ESC_PASS" >> "$POOL_CONF"
+        printf '\nenv[YSM_SMTP_PASS] = "%s"\n' "$ESC_PASS" >> "$POOL_CONF"
         systemctl reload "php${PHP_VER}-fpm" 2>/dev/null || true
         info "授权码已注入 php-fpm 环境变量（$POOL_CONF，Web 端不可见）"
     else
@@ -989,7 +1109,7 @@ configure_mail() {
         log "SMTP 双向验证：发送确认码邮件到 $ADMIN_EMAIL ..."
         VERIFY_CODE=$(php -r "echo str_pad((string)random_int(0,999999),6,'0',STR_PAD_LEFT);")
         php -r "require '$WEB_ROOT/utils.php'; db_exec('INSERT INTO email_codes (id,email,code,purpose,expires,used,created,ip,operator_role) VALUES (?,?,?,?,?,0,?,?,?)', [bin2hex(random_bytes(8)), '$ADMIN_EMAIL', '$VERIFY_CODE', 'install_verify', time()+300, time(), 'install', 'install']);" 2>/dev/null || true
-        SEND_RESULT=$(YM_SMTP_PASS="$(cat "$SECRETS_DIR/smtp_pass" 2>/dev/null)" \
+        SEND_RESULT=$(YSM_SMTP_PASS="$(cat "$SECRETS_DIR/smtp_pass" 2>/dev/null)" \
         ADMIN_EMAIL_B64=$(printf '%s' "$ADMIN_EMAIL" | base64 -w0 2>/dev/null || printf '%s' "$ADMIN_EMAIL" | base64) \
         CODE_B64=$(printf '%s' "$VERIFY_CODE" | base64 -w0 2>/dev/null || printf '%s' "$VERIFY_CODE" | base64) \
         php -r "
@@ -1039,254 +1159,14 @@ configure_mail
 # ================================================================
 log "安装 CLI 管理工具..."
 
-cat > /usr/local/bin/ym-admin << 'EOF'
-#!/bin/bash
-WEB_ROOT="${YM_WEB_ROOT:-/var/www/you-markdown}"
-ENTRIES_FILE="$WEB_ROOT/data/.entries.json"
-USERS_FILE="$WEB_ROOT/data/.users.json"
-
-case "${1:-}" in
-    login)
-        ENTRY_TOKEN=$(openssl rand -base64 9 | tr -d '=+/' | cut -c1-12)
-        OTP=$(openssl rand -base64 9 | tr -d '=+/' | cut -c1-12)
-        OTP_HASH=$(php -r "echo password_hash('$OTP', PASSWORD_DEFAULT);")
-        EXPIRES=$(( $(date +%s) + 600 ))
-
-        echo '[{"token":"'$ENTRY_TOKEN'","otp_hash":"'$OTP_HASH'","expires":'$EXPIRES',"used":0,"created":"'$(date '+%Y-%m-%d %H:%M:%S')'"}]' > "$ENTRIES_FILE"
-        chown www-data:www-data "$ENTRIES_FILE" 2>/dev/null || true
-
-        echo ""
-        echo "============================================"
-        echo "  管理入口（仅显示一次，10分钟有效）"
-        echo "============================================"
-        echo ""
-        echo "  入口 URL: https://$(grep -m1 'server_name' /etc/nginx/sites-enabled/*.conf 2>/dev/null | grep -v 'server_name _' | awk '{print $2}' | tr -d ';' | head -1)/admin/entry/$ENTRY_TOKEN"
-        echo "  一次性密码: $OTP"
-        echo ""
-        echo "  ⚠️ 请立即保存！"
-        echo "============================================"
-        echo ""
-        ;;
-
-    create-station)
-        NAME="${2:-}"
-        if [ -z "$NAME" ]; then echo "用法: ym-admin create-station <站长名称>"; exit 1; fi
-        QQ="station_$(openssl rand -hex 4)"
-        PWD=$(openssl rand -base64 12 | tr -d '=+/')
-        php -r "
-            \$users = json_decode(file_get_contents('$USERS_FILE'), true);
-            \$users[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'station_admin','created'=>date('Y-m-d H:i:s')];
-            file_put_contents('$USERS_FILE', json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
-        "
-        echo "站长账号已创建: $NAME (QQ: $QQ, 密码: $PWD)"
-        ;;
-
-    create-author)
-        NAME="${2:-}"
-        STATION_ID="${3:-}"
-        if [ -z "$NAME" ]; then echo "用法: ym-admin create-author <写作者名称> [站长ID]"; exit 1; fi
-        QQ="author_$(openssl rand -hex 4)"
-        PWD=$(openssl rand -base64 12 | tr -d '=+/')
-        php -r "
-            \$users = json_decode(file_get_contents('$USERS_FILE'), true);
-            \$users[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'author','station_id'=>'$STATION_ID','created'=>date('Y-m-d H:i:s')];
-            file_put_contents('$USERS_FILE', json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
-        "
-        echo "写作者账号已创建: $NAME (QQ: $QQ, 密码: $PWD)"
-        ;;
-
-    revoke-user)
-        USER_ID="${2:-}"
-        if [ -z "$USER_ID" ]; then echo "用法: ym-admin revoke-user <用户ID>"; exit 1; fi
-        php -r "
-            \$users = json_decode(file_get_contents('$USERS_FILE'), true);
-            \$users = array_values(array_filter(\$users, fn(\$u) => (\$u['id']??'')!=='$USER_ID'));
-            file_put_contents('$USERS_FILE', json_encode(\$users, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
-        "
-        echo "用户已吊销: $USER_ID"
-        ;;
-
-    backup)
-        BACKUP_DIR="/opt/you-markdown/backups"
-        mkdir -p "$BACKUP_DIR"
-        tar -czf "$BACKUP_DIR/ym-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$WEB_ROOT" data/ 2>/dev/null
-        echo "备份完成: $BACKUP_DIR"
-        ;;
-
-    status)
-        echo "守护进程: $(systemctl is-active ym-guard 2>/dev/null || echo 'unknown')"
-        echo "Nginx: $(systemctl is-active nginx 2>/dev/null || echo 'unknown')"
-        PHP_FPM_SVC="php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm"
-        echo "PHP-FPM: $(systemctl is-active $PHP_FPM_SVC 2>/dev/null || systemctl is-active php-fpm 2>/dev/null || echo 'unknown')"
-        [ -f "$WEB_ROOT/data/.users.json" ] && echo "用户数: $(php -r "echo count(json_decode(file_get_contents('$USERS_FILE'),true)?:[]);")"
-        ;;
-
-    log-verify)
-        php -r "
-            require_once '$WEB_ROOT/utils.php';
-            \$r = verifyAuditChain();
-            echo \$r['valid'] ? '审计日志哈希链校验通过 ('.\$r['count'].' 条)' : '校验失败！断裂于第 '.\$r['broken_at'].' 条';
-        "
-        ;;
-
-    audit-report)
-        # 每日审计报告：校验结果经 sendAlert 走 SMTP 直连发送给管理员（无 MTA 依赖，失败落盘 alert.log）
-        php -r "
-            require_once '$WEB_ROOT/utils.php';
-            \$r = verifyAuditChain();
-            \$result = \$r['valid'] ? '审计日志哈希链校验通过 ('.\$r['count'].' 条)' : '校验失败！断裂于第 '.\$r['broken_at'].' 条';
-            echo \$result . PHP_EOL;
-            sendAlert('每日审计报告', \$result);
-        "
-        ;;
-
-    challenge)
-        CODE=$(openssl rand -hex 3)
-        EXPIRES=$(( $(date +%s) + 60 ))
-        php -r "
-            \$f = '$WEB_ROOT/data/.challenge.json';
-            \$challenges = file_exists(\$f) ? json_decode(file_get_contents(\$f), true) : [];
-            if (!is_array(\$challenges)) \$challenges = [];
-            \$challenges = array_filter(\$challenges, function(\$c) { return (\$c['expires'] ?? 0) > time() && empty(\$c['used']); });
-            \$challenges[] = ['code'=>'$CODE', 'expires'=>$EXPIRES, 'used'=>0, 'created'=>time()];
-            file_put_contents(\$f, json_encode(array_values(\$challenges), JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
-        " 2>/dev/null
-        echo "挑战码: $CODE (300秒有效)"
-        ;;
-
-    set-smtp-pass)
-        # v3.3.7：快捷修改 SMTP 授权码（密钥不落盘：root 密钥文件 + php-fpm 环境变量双写 + reload + 测试邮件）
-        if [ "$(id -u)" -ne 0 ]; then
-            echo "错误：修改 SMTP 授权码需 root 权限（sudo ym-admin set-smtp-pass）"
-            exit 1
-        fi
-        SMTP_PASS=""
-        case "${2:-}" in
-            "")
-                read -s -p "请输入新的 SMTP 授权码（输入时不可见）: " SMTP_PASS
-                echo ""
-                ;;
-            --pass=*)
-                SMTP_PASS="${2#--pass=}"
-                ;;
-            *)
-                echo "用法: ym-admin set-smtp-pass [--pass=新授权码]"
-                exit 1
-                ;;
-        esac
-        if [ -z "$SMTP_PASS" ]; then echo "错误：授权码不能为空"; exit 1; fi
-        SECRETS_DIR="/opt/you-markdown/secrets"
-        mkdir -p "$SECRETS_DIR"
-        printf '%s' "$SMTP_PASS" > "$SECRETS_DIR/smtp_pass"
-        chmod 600 "$SECRETS_DIR/smtp_pass"
-        echo "[1/3] 已更新 CLI 密钥文件: $SECRETS_DIR/smtp_pass (0600)"
-        PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)
-        POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/www.conf"
-        if [ -f "$POOL_CONF" ]; then
-            sed -i '/env\[YM_SMTP_PASS\]/d' "$POOL_CONF" 2>/dev/null || true
-            ESC_PASS=$(printf '%s' "$SMTP_PASS" | sed 's/[\\"]/\\&/g')
-            printf '\nenv[YM_SMTP_PASS] = "%s"\n' "$ESC_PASS" >> "$POOL_CONF"
-            systemctl reload "php${PHP_VER}-fpm" 2>/dev/null || true
-            echo "[2/3] 已更新 Web 端 php-fpm 环境变量并 reload ($POOL_CONF)"
-        else
-            echo "[2/3] 警告：未找到 php-fpm pool 配置 ($POOL_CONF)，仅更新了 CLI 密钥文件"
-        fi
-        php -r "require_once '$WEB_ROOT/utils.php'; auditLog('smtp_pass_update', 'smtp', 'CLI 更新 SMTP 授权码（密钥不落盘，未记录明文）');" 2>/dev/null || true
-        echo "[3/3] 发送测试邮件..."
-        TEST_RESULT=$(YM_SMTP_PASS="$SMTP_PASS" php -r "
-            require_once '$WEB_ROOT/utils.php';
-            \$cfg = loadSiteConfig();
-            \$to = \$cfg['admin_email'] ?? '';
-            if (\$to === '') { echo 'NO_ADMIN_EMAIL'; exit(0); }
-            \$site = \$cfg['site_title'] ?? 'You Super Markdown';
-            \$msg = 'SMTP 授权码已更新成功。若收到此邮件说明新的授权码配置正确，安全告警可正常发送。';
-            \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')]);
-            [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown] SMTP 授权码已更新', \$msg, \$html);
-            echo \$ok ? 'MAIL_OK' : ('MAIL_FAIL: ' . \$err);
-        " 2>/dev/null)
-        case "$TEST_RESULT" in
-            MAIL_OK) echo "测试邮件发送成功，新的授权码已生效" ;;
-            NO_ADMIN_EMAIL) echo "警告：未设置管理员邮箱，跳过测试邮件（后台「系统配置」可设置 admin_email）" ;;
-            *) echo "警告：测试邮件发送失败: ${TEST_RESULT#MAIL_FAIL: }（可在后台「邮件设置」检查 SMTP 配置）" ;;
-        esac
-        echo "SMTP 授权码更新完成"
-        ;;
-
-    hfish-panel)
-        PORTS_FILE="/opt/you-markdown/hfish-ports.conf"
-        if [ ! -f "$PORTS_FILE" ]; then
-            echo "Hfish 未安装或配置文件不存在"
-            exit 1
-        fi
-        source "$PORTS_FILE"
-        PANEL_PORT="${HFISH_PANEL_PORT:-9001}"
-        echo ""
-        echo "============================================"
-        echo "  Hfish 管理面板隧道已建立"
-        echo "============================================"
-        echo ""
-        echo "  本地访问地址: http://127.0.0.1:${PANEL_PORT}"
-        echo ""
-        echo "  请在本地浏览器中打开上述地址"
-        echo "  按 Ctrl+C 关闭隧道"
-        echo "============================================"
-        echo ""
-        ssh -L "${PANEL_PORT}:127.0.0.1:${PANEL_PORT}" -N root@127.0.0.1
-        ;;
-
-    hfish-status)
-        echo "=== Hfish 蜜罐状态 ==="
-        echo ""
-        PORTS_FILE="/opt/you-markdown/hfish-ports.conf"
-        if [ -f "$PORTS_FILE" ]; then
-            source "$PORTS_FILE"
-            echo "配置端口:"
-            echo "  假 HTTP 服务: ${HFISH_HTTP_PORT:-8080}"
-            echo "  假 SSH 服务:  ${HFISH_SSH_PORT:-2222}"
-            echo "  管理面板:     ${HFISH_PANEL_PORT:-9001} (仅 127.0.0.1)"
-        else
-            echo "  端口配置文件不存在"
-        fi
-        echo ""
-        echo "服务状态:"
-        if systemctl is-active --quiet hfish 2>/dev/null; then
-            echo "  hfish.service: 运行中"
-        else
-            echo "  hfish.service: 未运行"
-        fi
-        ;;
-
-    *)
-        echo "You Super Markdown CLI 管理工具"
-        echo ""
-        echo "用法: ym-admin <命令> [参数]"
-        echo ""
-        echo "命令:"
-        echo "  login                    生成 OTP 管理入口"
-        echo "  create-station <名称>     创建站长账号"
-        echo "  create-author <名称>      创建写作者账号"
-        echo "  revoke-user <用户ID>      吊销用户"
-        echo "  backup                    备份数据"
-        echo "  status                    查看服务状态"
-        echo "  log-verify                校验审计日志哈希链"
-        echo "  audit-report              每日审计报告（校验结果经 SMTP 发送给管理员）"
-        echo "  challenge                 生成挑战码"
-        echo "  set-smtp-pass [--pass=授权码] 修改 SMTP 授权码（需 sudo；密钥文件 + php-fpm 环境变量双写，自动发测试邮件）"
-        echo "  hfish-panel               建立 SSH 隧道访问 Hfish 管理面板"
-        echo "  hfish-status              查看 Hfish 蜜罐状态"
-        echo ""
-        echo "环境变量:"
-        echo "  YM_WEB_ROOT               Web 根目录 (默认 /var/www/you-markdown)"
-        ;;
-esac
-EOF
-chmod +x /usr/local/bin/ym-admin
-# 覆盖为项目内完整版（含 apply-update/rollback，challenge 落盘）
-if [ -f "$SCRIPT_DIR/ym-admin" ]; then
-    cp "$SCRIPT_DIR/ym-admin" /usr/local/bin/ym-admin
-    chmod +x /usr/local/bin/ym-admin
+# 安装项目内完整版 CLI（含 apply-update/rollback、challenge 落盘等）
+if [ -f "$SCRIPT_DIR/ysm-admin" ]; then
+    cp "$SCRIPT_DIR/ysm-admin" /usr/local/bin/ysm-admin
+    chmod +x /usr/local/bin/ysm-admin
+else
+    err "未找到 CLI 管理工具 ysm-admin（安装包不完整，安装终止）"
 fi
-log "CLI 管理工具已安装到 /usr/local/bin/ym-admin"
+log "CLI 管理工具已安装到 /usr/local/bin/ysm-admin"
 
 # ================================================================
 # 10. 完成
@@ -1302,34 +1182,34 @@ echo "  一次性密码: $OTP"
 echo ""
 echo "  ⚠️ 以上信息仅显示一次，请立即保存！"
 echo ""
-echo "  高级管理员账号已创建（凭据不展示；进后台请使用上方 OTP 入口或 ym-admin login）"
-echo "  CLI 管理工具: ym-admin login"
-echo "  守护进程: systemctl status ym-guard"
+echo "  高级管理员账号已创建（凭据不展示；进后台请使用上方 OTP 入口或 ysm-admin login）"
+echo "  CLI 管理工具: ysm-admin login"
+echo "  守护进程: systemctl status ysm-guard"
 if [ "${HFISH_INSTALLED:-false}" = true ]; then
     echo ""
     echo "  Hfish 蜜罐:"
-    echo "    管理面板端口: ${HFISH_PANEL_PORT}（SSH 隧道访问 → ym-admin hfish-panel）"
+    echo "    管理面板端口: ${HFISH_PANEL_PORT}（SSH 隧道访问 → ysm-admin hfish-panel）"
     echo "    节点通信端口: ${HFISH_NODE_PORT}"
     echo "    蜜獾账户:     ${HFISH_USER}"
     if [ "${HFISH_PASSWORD_GENERATED:-false}" = true ]; then
         echo "    蜜獾密码:     $HFISH_PASSWORD"
     fi
-    echo "    查看状态:     ym-admin hfish-status"
+    echo "    查看状态:     ysm-admin hfish-status"
 fi
 echo ""
-echo "  下次登录需执行: sudo ym-admin login"
+echo "  下次登录需执行: sudo ysm-admin login"
 echo "============================================"
 echo ""
 
 # 保存到 root 只读文件
-cat > /root/ym-credentials.txt << EOF
+cat > /root/ysm-credentials.txt << EOF
 You Super Markdown 管理员凭证
 ========================
 网站: https://$DOMAIN
 首次 OTP 入口: https://$DOMAIN/admin/entry/$ENTRY_TOKEN
 首次 OTP 密码: $OTP
-（高级管理员账号凭据不展示；后续管理入口请用 sudo ym-admin login 生成）
+（高级管理员账号凭据不展示；后续管理入口请用 sudo ysm-admin login 生成）
 安装时间: $(date)
 EOF
-chmod 600 /root/ym-credentials.txt
-log "凭证已保存到 /root/ym-credentials.txt"
+chmod 600 /root/ysm-credentials.txt
+log "凭证已保存到 /root/ysm-credentials.txt"

@@ -641,9 +641,13 @@ function validateBackendUser() {
 // ============================================================
 // 链尾文件保留（root 只读镜像 + 守护背书依赖）；主日志存 audit 表
 define('AUDIT_CHAIN_FILE', __DIR__ . '/data/.audit_chain');
-define('AUDIT_MIRROR_DIR', '/opt/you-markdown/logs/');
-define('AUDIT_MIRROR_DB', AUDIT_MIRROR_DIR . 'ym.db');
-define('EMAIL_ALERT', '/usr/local/bin/ym-alert');
+define('AUDIT_MIRROR_DIR', '/opt/you-super-markdown/logs/');
+define('AUDIT_MIRROR_DB', AUDIT_MIRROR_DIR . 'ysm.db');
+define('EMAIL_ALERT', '/usr/local/bin/ysm-alert');
+// v5.0.0 P7（审计链加固）：审计母密钥——安装期由 ysm-install.sh 用 openssl rand -hex 32 生成一次，
+// 存放于 webroot 外 /opt/you-super-markdown/secrets/audit_key（root 0600）。仅 root/守护进程可读；
+// www-data（PHP）读不到，故 PHP 无法计算合法 hash（链由 root 守护进程加封）。
+define('AUDIT_KEY_FILE', '/opt/you-super-markdown/secrets/audit_key');
 
 function auditLog($action, $target = '', $detail = '', $result = 'success') {
     $user = $_SESSION['cmt_user'] ?? null;
@@ -659,40 +663,42 @@ function auditLog($action, $target = '', $detail = '', $result = 'success') {
         'detail' => $detail,
         'result' => $result,
     ];
-    // v2.8.1 修复（踩坑 #25）：prev_hash 以 audit 表最后一条 hash 为唯一真源，
-    // 不再信任 .audit_chain 链尾文件——镜像背书与链尾文件独立更新可能错位，
-    // 恢复审计表后链尾文件残留旧值会导致下一条记录断链。链尾文件仅作冗余备份照常刷新。
-    $prevHash = '';
-    try {
-        $last = db_one('SELECT hash FROM audit ORDER BY rowid DESC LIMIT 1');
-        if ($last && !empty($last['hash'])) {
-            $prevHash = $last['hash'];
-        }
-    } catch (Exception $e) {
-        // 表异常时兜底读链尾文件（不应发生，仅防御）
-        if (file_exists(AUDIT_CHAIN_FILE)) {
-            $prevHash = trim(file_get_contents(AUDIT_CHAIN_FILE));
-        }
-    }
-    $entry['prev_hash'] = $prevHash;
-    $entryJson = json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    $entry['hash'] = hash('sha256', $entryJson);
+    // v5.0.0 P7（审计链加固）：PHP 不再计算 hash——只写"原始条目"，hash/prev_hash 置空字符串；
+    // 由 root 守护进程 ysm-guard.py 读取母密钥后按 rowid 顺序用
+    // HMAC-SHA256(audit_key, prev_hash + entry_json) 加封回填。www-data（PHP）拿不到密钥，
+    // 故即使有库写权限也伪造不出合法 hash。审计内容/字段/查询接口（loadAuditLogs 等）保持不变。
+    $entry['prev_hash'] = '';
+    $entry['hash'] = '';
 
     db_exec('INSERT INTO audit (id,ts,user_id,user_name,role,ip,action,target,detail,result,hash,prev_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [
         $entry['id'], $entry['ts'], $entry['user_id'], $entry['user_name'], $entry['role'],
         $entry['ip'], $entry['action'], $entry['target'], $entry['detail'], $entry['result'],
-        $entry['hash'], $prevHash,
+        $entry['hash'], $entry['prev_hash'],
     ]);
     // 上限 10000 条
     $cnt = db_one('SELECT COUNT(*) AS c FROM audit')['c'] ?? 0;
     if ($cnt > 10000) {
         db_exec('DELETE FROM audit WHERE rowid IN (SELECT rowid FROM audit ORDER BY rowid ASC LIMIT ?)', [$cnt - 10000]);
     }
-    file_put_contents(AUDIT_CHAIN_FILE, $entry['hash'], LOCK_EX);
-    if (is_dir(AUDIT_MIRROR_DIR)) {
-        file_put_contents(AUDIT_MIRROR_DIR . 'audit_chain', $entry['hash'], LOCK_EX);
-    }
+    // 链尾文件（data/.audit_chain 与 root 镜像 audit_chain）改由守护进程加封/背书时写入；
+    // PHP 已不持有 hash，此处不再写链尾（否则会以空串覆盖有效链尾）。
     return $entry;
+}
+
+// ------------------------------------------------------------------
+// v5.0.0 P7：审计条目规范化（链计算的唯一事实来源）。
+// 与 ysm-guard.py::audit_entry_json() 必须逐字节一致——两处必须同步（字段顺序、compact 无空格、
+// 不转义 Unicode/斜杠）。字段顺序沿用旧 auditLog() 的 $entryJson（去掉 hash；prev_hash 参与计算置于末位）。
+// ------------------------------------------------------------------
+function auditEntryJson($entry, $prevHash) {
+    $data = [
+        'id' => $entry['id'], 'ts' => $entry['ts'], 'user_id' => $entry['user_id'],
+        'user_name' => $entry['user_name'], 'role' => $entry['role'], 'ip' => $entry['ip'],
+        'action' => $entry['action'], 'target' => $entry['target'], 'detail' => $entry['detail'],
+        'result' => $entry['result'],
+        'prev_hash' => $prevHash,
+    ];
+    return json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
 function loadAuditLogs() {
@@ -707,28 +713,65 @@ function clearAuditLogs() {
     }
 }
 
+// v5.0.0 P7：读取审计母密钥（root 0600）。以 root/CLI 运行时才可读 → 可本地完整校验；
+// www-data（Web 仪表盘）读不到 → 仅能校验旧段并做结构性校验，其余交由 root（guard / audit-report）校验。
+function readAuditKey() {
+    if (!is_readable(AUDIT_KEY_FILE)) return '';
+    $k = trim((string)@file_get_contents(AUDIT_KEY_FILE));
+    return $k;
+}
+
+// v5.0.0 P7：epoch 分段校验（行为/返回兼容旧接口，新增 delegated/pending 字段）——
+//   epoch 1 = 旧 sha256 链（历史段）：hash = sha256(entry_json)，genesis 为空串；
+//   epoch 2 = 新 HMAC 链：hash = HMAC-SHA256(audit_key, prev_hash + entry_json)。
+// 链形态为"旧段(sha256) 前缀 + 新段(HMAC) 后缀"：按行推进，旧段用 sha256 校验，
+// 进入新段后仅用 HMAC 校验（不可回退）。尾部 hash='' 的行视为"待 guard 加封"，跳过不计入校验。
+// 无密钥时（www-data）无法本地校验新段 → 置 delegated=true，仅做 prev_hash 链连续性结构校验。
 function verifyAuditChain() {
     $logs = db_all('SELECT * FROM audit ORDER BY rowid ASC');
-    if (empty($logs)) return ['valid' => true, 'count' => 0];
+    if (empty($logs)) return ['valid' => true, 'count' => 0, 'delegated' => false, 'pending' => 0];
+    $key = readAuditKey();
     $prevHash = '';
-    for ($i = 0; $i < count($logs); $i++) {
+    $phase = 'legacy';    // legacy(旧段 sha256) → sealed(新段 HMAC)
+    $delegated = false;   // 无密钥、无法本地校验新段
+    $pending = 0;
+    $n = count($logs);
+    for ($i = 0; $i < $n; $i++) {
         $entry = $logs[$i];
         $expectedHash = $entry['hash'] ?? '';
-        $checkData = [
-            'id' => $entry['id'], 'ts' => $entry['ts'], 'user_id' => $entry['user_id'],
-            'user_name' => $entry['user_name'], 'role' => $entry['role'], 'ip' => $entry['ip'],
-            'action' => $entry['action'], 'target' => $entry['target'], 'detail' => $entry['detail'],
-            'result' => $entry['result'],
-        ];
-        $checkData['prev_hash'] = $prevHash;
-        $checkJson = json_encode($checkData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $computedHash = hash('sha256', $checkJson);
-        if (!hash_equals($computedHash, $expectedHash)) {
-            return ['valid' => false, 'broken_at' => $i, 'count' => count($logs)];
+        if ($expectedHash === '') { $pending = $n - $i; break; }   // 尾部待加封
+        $entryJson = auditEntryJson($entry, $prevHash);
+        if ($phase === 'legacy') {
+            if (hash_equals(hash('sha256', $entryJson), $expectedHash)) { $prevHash = $expectedHash; continue; }  // 旧段
+            // 旧段结束 → 尝试新段（HMAC）
+            if ($key !== '') {
+                if (!hash_equals(hash_hmac('sha256', $prevHash . $entryJson, $key), $expectedHash)) {
+                    return ['valid' => false, 'broken_at' => $i, 'count' => $n, 'delegated' => $delegated, 'pending' => $pending];
+                }
+            } else {
+                // 无密钥：无法本地校验，仅结构校验
+                if (($entry['prev_hash'] ?? '') !== $prevHash) {
+                    return ['valid' => false, 'broken_at' => $i, 'count' => $n, 'delegated' => $delegated, 'pending' => $pending];
+                }
+                $delegated = true;
+            }
+            $phase = 'sealed';
+        } else {
+            // 新段（HMAC）
+            if ($key !== '') {
+                if (!hash_equals(hash_hmac('sha256', $prevHash . $entryJson, $key), $expectedHash)) {
+                    return ['valid' => false, 'broken_at' => $i, 'count' => $n, 'delegated' => $delegated, 'pending' => $pending];
+                }
+            } else {
+                $delegated = true;
+                if (($entry['prev_hash'] ?? '') !== $prevHash) {
+                    return ['valid' => false, 'broken_at' => $i, 'count' => $n, 'delegated' => $delegated, 'pending' => $pending];
+                }
+            }
         }
         $prevHash = $expectedHash;
     }
-    return ['valid' => true, 'count' => count($logs)];
+    return ['valid' => true, 'count' => $n, 'delegated' => $delegated, 'pending' => $pending];
 }
 
 function recoverAuditFromMirror() {
@@ -754,10 +797,12 @@ function recoverAuditFromMirror() {
         return false;
     }
     // v2.8.1 修复（踩坑 #25）：恢复后必须把链尾文件校正为恢复后表尾 hash，
-    // 不可 copy 镜像 audit_chain——镜像 ym.db 与 audit_chain 文件由不同时机更新（背书/写日志）可能错位，
+    // 不可 copy 镜像 audit_chain——镜像 ysm.db 与 audit_chain 文件由不同时机更新（背书/写日志）可能错位，
     // 残留旧链尾会导致下一条记录断链。
     try {
-        $last = $pdo->query('SELECT hash FROM audit ORDER BY rowid DESC LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+        // v5.0.0 P7：链尾取"最后一条已加封（hash 非空）"的 hash——未加封行 hash 为空，
+        // 直接取表尾会以空串覆盖有效链尾。
+        $last = $pdo->query("SELECT hash FROM audit WHERE hash IS NOT NULL AND hash != '' ORDER BY rowid DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
         $tail = ($last && !empty($last['hash'])) ? $last['hash'] : '';
         file_put_contents(AUDIT_CHAIN_FILE, $tail, LOCK_EX);
         if (is_dir(AUDIT_MIRROR_DIR)) {
@@ -859,15 +904,15 @@ function validateImageBuffer($content) {
     $mime = (string)$finfo->buffer($content);
     return in_array($mime, ['image/jpeg', 'image/png', 'image/gif', 'image/webp'], true);
 }
-// SMTP 密码来源：环境变量注入（YM_SMTP_PASS，php-fpm pool env，root 只读、Web 不可见）优先；
+// SMTP 密码来源：环境变量注入（YSM_SMTP_PASS，php-fpm pool env，root 只读、Web 不可见）优先；
 // 未注入时回退 config 表密文（AES-GCM 同机加密兜底，兼容旧部署）
 // v3.2.2：SMTP 密码三级来源（env → config 密文 → CLI root 密钥文件），
-// 修复 CLI（ym-admin/守护进程）场景拿不到密码导致告警邮件发不出的问题
+// 修复 CLI（ysm-admin/守护进程）场景拿不到密码导致告警邮件发不出的问题
 function smtpSecretFile() {
-    return '/opt/you-markdown/secrets/smtp_pass';
+    return '/opt/you-super-markdown/secrets/smtp_pass';
 }
 function smtpPassSource() {
-    $env = getenv('YM_SMTP_PASS');
+    $env = getenv('YSM_SMTP_PASS');
     if ($env !== false && $env !== '') return 'env';
     $cfg = loadSiteConfig();
     $stored = (string)($cfg['smtp_pass'] ?? '');
@@ -877,7 +922,7 @@ function smtpPassSource() {
 }
 function getSmtpConfig() {
     $c = loadSiteConfig();
-    $env = getenv('YM_SMTP_PASS');
+    $env = getenv('YSM_SMTP_PASS');
     $pass = '';
     if ($env !== false && $env !== '') {
         $pass = $env;
@@ -902,9 +947,9 @@ function saveSmtpConfig($host, $port, $user, $pass, $from, $enc) {
     $cfg['smtp_host'] = trim($host);
     $cfg['smtp_port'] = max(1, (int)$port);
     $cfg['smtp_user'] = trim($user);
-    // v3.0.9：密码优先走环境变量注入（YM_SMTP_PASS），后台不再直接设置；
+    // v3.0.9：密码优先走环境变量注入（YSM_SMTP_PASS），后台不再直接设置；
     // 仅当环境未注入时才允许写入 config 表密文兜底（供旧部署平滑过渡）
-    $env = getenv('YM_SMTP_PASS');
+    $env = getenv('YSM_SMTP_PASS');
     if ($env === false || $env === '') {
         $pass = (string)$pass;
         if ($pass === '') {
@@ -1146,10 +1191,10 @@ function sendAlert($type, $detail) {
         logAlertFail("SMTP 发送失败({$type}): {$err}");
         return;
     }
-    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ym-alert 不存在({$type})"); return; }
+    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ysm-alert 不存在({$type})"); return; }
     $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($adminEmail) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
     exec($cmd . ' > /dev/null 2>&1 &');
-    // mail 命令为异步后台，其内部失败由 ym-alert 落盘 alert.log（见 v2.8.0 ym-alert 改造）
+    // mail 命令为异步后台，其内部失败由 ysm-alert 落盘 alert.log（见 v2.8.0 ysm-alert 改造）
 }
 
 /**
@@ -1183,7 +1228,7 @@ function notifyLoginEvent($u, $clientIP) {
         logAlertFail("SMTP 发送失败({$subject}): {$err}");
         return;
     }
-    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ym-alert 不存在({$subject})"); return; }
+    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ysm-alert 不存在({$subject})"); return; }
     $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($adminEmail) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
     exec($cmd . ' > /dev/null 2>&1 &');
 }
@@ -1215,7 +1260,7 @@ function notifyPasswordReset($u, $clientIP, $mode) {
         logAlertFail("SMTP 发送失败({$subject}): {$err}");
         return;
     }
-    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ym-alert 不存在({$subject})"); return; }
+    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ysm-alert 不存在({$subject})"); return; }
     $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($adminEmail) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
     exec($cmd . ' > /dev/null 2>&1 &');
 }
@@ -1259,7 +1304,7 @@ function notifyComment($article, $nickname, $content, $isReply = false, $parentN
         logAlertFail("SMTP 发送失败({$subject}): {$err}");
         return;
     }
-    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ym-alert 不存在({$subject})"); return; }
+    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ysm-alert 不存在({$subject})"); return; }
     $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($to) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
     exec($cmd . ' > /dev/null 2>&1 &');
 }
@@ -1444,7 +1489,7 @@ function issueRefreshToken($uid, $sessionFp, $tv) {
     $token = bin2hex(random_bytes(32));
     db_exec('INSERT INTO refresh_tokens (id, user_id, token_hash, fp, tv, expires, created) VALUES (?,?,?,?,?,?,?)',
         [bin2hex(random_bytes(8)), $uid, hash('sha256', $token), (string)$sessionFp, (int)$tv, time() + REFRESH_TTL, time()]);
-    setcookie('ym_rt', $token, [
+    setcookie('ysm_rt', $token, [
         'expires' => time() + REFRESH_TTL,
         'path' => '/',
         'secure' => !empty($_SERVER['HTTPS']) || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https'),
@@ -1472,8 +1517,8 @@ function revokeUserRefreshTokens($uid) {
     db_exec('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', [$uid]);
 }
 function clearRefreshCookie() {
-    if (isset($_COOKIE['ym_rt'])) {
-        setcookie('ym_rt', '', ['expires' => time() - 42000, 'path' => '/', 'httponly' => true, 'samesite' => 'Strict']);
+    if (isset($_COOKIE['ysm_rt'])) {
+        setcookie('ysm_rt', '', ['expires' => time() - 42000, 'path' => '/', 'httponly' => true, 'samesite' => 'Strict']);
     }
 }
 /** v4.5.0：JWT payload 携带 token_version，校验时比对（超管 OTP 会话同样被踢旧） */
@@ -1784,7 +1829,7 @@ function maybeAlertLock($dimType, $dimKey, $score, $level) {
     foreach ($rows as $r) $summary .= $r['reason'] . '×' . $r['c'] . '；';
     notifyThreatAlert($dimType, $dimKey, $score, $level, rtrim($summary, '；'));
 }
-/** 联动封锁邮件告警（发往 admin_email；SMTP 未配置回退 ym-alert 脚本；统一 HTML 模板红色告警系） */
+/** 联动封锁邮件告警（发往 admin_email；SMTP 未配置回退 ysm-alert 脚本；统一 HTML 模板红色告警系） */
 function notifyThreatAlert($dimType, $dimKey, $score, $level, $summary) {
     $config = loadSiteConfig();
     $adminEmail = trim($config['admin_email'] ?? '');
@@ -1810,7 +1855,7 @@ function notifyThreatAlert($dimType, $dimKey, $score, $level, $summary) {
         logAlertFail("SMTP 发送失败({$subject}): {$err}");
         return;
     }
-    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ym-alert 不存在({$subject})"); return; }
+    if (!file_exists(EMAIL_ALERT)) { logAlertFail("ysm-alert 不存在({$subject})"); return; }
     $cmd = escapeshellcmd(EMAIL_ALERT) . ' ' . escapeshellarg($adminEmail) . ' ' . escapeshellarg($subject) . ' ' . escapeshellarg($body);
     exec($cmd . ' > /dev/null 2>&1 &');
 }
@@ -2015,14 +2060,14 @@ function sendAdminConfirmMail($pendingId, $token, $nick, $account, $email) {
 // ============================================================
 // v2.2 在线更新辅助函数
 // ============================================================
-define('UPDATE_REQUEST_FILE', '/tmp/ym-update-request.json');
-define('UPDATE_LOCK_FILE', '/tmp/ym-update.lock');
-define('BACKUP_DIR', '/opt/you-markdown/backups');
-define('BACKUP_CONF', '/opt/you-markdown/backup.conf');           // 自动备份配置（root:www-data 664）
+define('UPDATE_REQUEST_FILE', '/tmp/ysm-update-request.json');
+define('UPDATE_LOCK_FILE', '/tmp/ysm-update.lock');
+define('BACKUP_DIR', '/opt/you-super-markdown/backups');
+define('BACKUP_CONF', '/opt/you-super-markdown/backup.conf');           // 自动备份配置（root:www-data 664）
 define('BACKUP_DB_DIR', BACKUP_DIR . '/db');                        // 数据库 30 分钟备份（固定 1 份）
 define('BACKUP_ARTICLES_DIR', BACKUP_DIR . '/articles');            // 文章每日备份（保留 N 份）
-define('GUARD_STATE_FILE', '/opt/you-markdown/guard-state.json');   // 守护进程状态（含备份状态）
-define('ALERT_LOG', '/opt/you-markdown/alert.log');                  // 告警发送失败日志（可追溯）
+define('GUARD_STATE_FILE', '/opt/you-super-markdown/guard-state.json');   // 守护进程状态（含备份状态）
+define('ALERT_LOG', '/opt/you-super-markdown/alert.log');                  // 告警发送失败日志（可追溯）
 
 // 服务器挑战码校验（300 秒、单次）：匹配 code + 未过期 + 未使用，通过则原子消费
 function verifyChallenge($code) {
@@ -2424,10 +2469,10 @@ function getBackupList() {
                 ];
             }
         }
-        foreach (glob(BACKUP_DIR . '/ym-backup-*.tar.gz') ?: [] as $f) {
+        foreach (glob(BACKUP_DIR . '/ysm-backup-*.tar.gz') ?: [] as $f) {
             $basename = basename($f);
-            // 手动备份格式: ym-backup-{yyyyMMdd}-{HHmmss}.tar.gz
-            if (preg_match('/^ym-backup-(\d{8})-(\d{6})\.tar\.gz$/', $basename, $m2)) {
+            // 手动备份格式: ysm-backup-{yyyyMMdd}-{HHmmss}.tar.gz
+            if (preg_match('/^ysm-backup-(\d{8})-(\d{6})\.tar\.gz$/', $basename, $m2)) {
                 $backups[] = [
                     'file' => $basename, 'path' => $f, 'version' => '手动备份',
                     'timestamp' => (int)strtotime($m2[1] . ' ' . $m2[2]), 'size' => filesize($f), 'type' => 'manual',
@@ -2435,15 +2480,15 @@ function getBackupList() {
             }
         }
         // 数据库 30 分钟自动备份（固定 1 份滚动）
-        foreach (glob(BACKUP_DB_DIR . '/ym-db-latest.tar.gz') ?: [] as $f) {
+        foreach (glob(BACKUP_DB_DIR . '/ysm-db-latest.tar.gz') ?: [] as $f) {
             $backups[] = [
                 'file' => basename($f), 'path' => $f, 'version' => '数据库自动备份',
                 'timestamp' => (int)filemtime($f), 'size' => filesize($f), 'type' => 'db',
             ];
         }
         // 文章每日自动备份
-        foreach (glob(BACKUP_ARTICLES_DIR . '/ym-articles-*.tar.gz') ?: [] as $f) {
-            if (preg_match('/^ym-articles-(\d{8})\.tar\.gz$/', basename($f), $m3)) {
+        foreach (glob(BACKUP_ARTICLES_DIR . '/ysm-articles-*.tar.gz') ?: [] as $f) {
+            if (preg_match('/^ysm-articles-(\d{8})\.tar\.gz$/', basename($f), $m3)) {
                 $backups[] = [
                     'file' => basename($f), 'path' => $f, 'version' => '文章每日备份',
                     'timestamp' => (int)strtotime($m3[1]), 'size' => filesize($f), 'type' => 'articles',
@@ -2457,7 +2502,7 @@ function getBackupList() {
 }
 
 // ============================================================
-// 自动备份配置（backup.conf，与守护进程 ym-guard.py 同源）
+// 自动备份配置（backup.conf，与守护进程 ysm-guard.py 同源）
 // ============================================================
 function getBackupConfig() {
     $cfg = ['interval_min' => 30, 'article_keep' => 7, 'manual_keep' => 5, 'trigger_backup' => true, 'single_restore' => true];
@@ -2491,7 +2536,7 @@ function saveBackupConfig($intervalMin, $articleKeep, $manualKeep, $triggerBacku
     // v3.3.5：上传触发备份 / 单篇篡改还原 开关（守护进程读取）
     $triggerBackup = !empty($triggerBackup) ? 1 : 0;
     $singleRestore = !empty($singleRestore) ? 1 : 0;
-    $content = "# 自动备份配置（守护进程 ym-guard.py 读取；超管后台/SSH 可改）\n"
+    $content = "# 自动备份配置（守护进程 ysm-guard.py 读取；超管后台/SSH 可改）\n"
         . "DB_BACKUP_INTERVAL_MIN={$intervalMin}\n"
         . "ARTICLE_BACKUP_KEEP={$articleKeep}\n"
         . "MANUAL_BACKUP_KEEP={$manualKeep}\n"

@@ -16,6 +16,7 @@ import glob
 import tarfile
 import tempfile
 import hashlib
+import hmac
 import shutil
 import sqlite3
 import time
@@ -25,23 +26,26 @@ import threading
 from pathlib import Path
 
 # === 配置 ===
-WEB_ROOT = os.environ.get('YM_WEB_ROOT', '/var/www/you-markdown')
-INSTALL_BASE = '/opt/you-markdown/install-base'
-DB_FILE = os.path.join(WEB_ROOT, 'data', 'ym.db')
+WEB_ROOT = os.environ.get('YSM_WEB_ROOT', '/var/www/you-super-markdown')
+INSTALL_BASE = '/opt/you-super-markdown/install-base'
+DB_FILE = os.path.join(WEB_ROOT, 'data', 'ysm.db')
 AUDIT_CHAIN = os.path.join(WEB_ROOT, 'data', '.audit_chain')
-AUDIT_MIRROR_DB = '/opt/you-markdown/logs/ym.db'
-AUDIT_MIRROR_CHAIN = '/opt/you-markdown/logs/audit_chain'
-GUARD_STATE = '/opt/you-markdown/guard-state.json'
-EMAIL_ALERT_BIN = '/usr/local/bin/ym-alert'
-ALERT_LOG = '/opt/you-markdown/alert.log'  # 告警发送失败日志（v2.8.0 可追溯）
+AUDIT_MIRROR_DB = '/opt/you-super-markdown/logs/ysm.db'
+AUDIT_MIRROR_CHAIN = '/opt/you-super-markdown/logs/audit_chain'
+# v5.0.0 P7（审计链加固）：审计母密钥（安装期生成，root 0600，webroot 外）。
+# 仅 root/守护进程可读 → 由本守护进程加封/校验链，PHP(www-data) 读不到、伪造不出 hash。
+AUDIT_KEY_FILE = '/opt/you-super-markdown/secrets/audit_key'
+GUARD_STATE = '/opt/you-super-markdown/guard-state.json'
+EMAIL_ALERT_BIN = '/usr/local/bin/ysm-alert'
+ALERT_LOG = '/opt/you-super-markdown/alert.log'  # 告警发送失败日志（v2.8.0 可追溯）
 WATCHDOG_USEC = int(os.environ.get('WATCHDOG_USEC', 0)) / 1_000_000  # systemd watchdog 间隔（秒）
 
 # === 自动备份配置（backup.conf，root:www-data 664；守护进程读取）===
-BACKUP_DIR = '/opt/you-markdown/backups'
+BACKUP_DIR = '/opt/you-super-markdown/backups'
 BACKUP_DB_DIR = os.path.join(BACKUP_DIR, 'db')
 BACKUP_ARTICLES_DIR = os.path.join(BACKUP_DIR, 'articles')
-BACKUP_CONF = '/opt/you-markdown/backup.conf'
-DB_BACKUP_FILE = os.path.join(BACKUP_DB_DIR, 'ym-db-latest.tar.gz')  # 数据库备份：固定 1 份滚动
+BACKUP_CONF = '/opt/you-super-markdown/backup.conf'
+DB_BACKUP_FILE = os.path.join(BACKUP_DB_DIR, 'ysm-db-latest.tar.gz')  # 数据库备份：固定 1 份滚动
 ARTICLES_DIR = os.path.join(WEB_ROOT, 'data', 'articles')
 # v3.3.5：PHP 上传文章成功后写该标记 → 守护进程检测到立即备份文章（写在此处因备份目录 root 锁定不可写）
 UPLOAD_TRIGGER = os.path.join(WEB_ROOT, 'data', '.backup_trigger')
@@ -67,7 +71,7 @@ WATCH_FILES = [
 ]
 
 # 更新锁文件
-UPDATE_LOCK = '/tmp/ym-update.lock'
+UPDATE_LOCK = '/tmp/ysm-update.lock'
 
 # 校验间隔（秒）
 AUDIT_CHECK_INTERVAL = 300  # 5分钟
@@ -130,7 +134,7 @@ def load_version() -> str:
 
 def load_smtp_config() -> dict:
     """读取 SMTP 配置（config 表，与 PHP getSmtpConfig 同源）
-    v3.1.3：密码优先取 root 密钥文件 /opt/you-markdown/secrets/smtp_pass（v3.0.9「密钥不落盘」模型，
+    v3.1.3：密码优先取 root 密钥文件 /opt/you-super-markdown/secrets/smtp_pass（v3.0.9「密钥不落盘」模型，
     config 表已不再存密码）——否则守护进程 SMTP 认证拿不到密码，告警会回落 mail 命令而发送失败"""
     cfg = {'host': '', 'port': 465, 'user': '', 'pass': '', 'from': '', 'enc': 'ssl'}
     try:
@@ -151,7 +155,7 @@ def load_smtp_config() -> dict:
         pass
     # v3.1.3：密码优先读 root 密钥文件（root:root 0600，Web 进程不可读）
     try:
-        with open('/opt/you-markdown/secrets/smtp_pass', 'r', encoding='utf-8') as f:
+        with open('/opt/you-super-markdown/secrets/smtp_pass', 'r', encoding='utf-8') as f:
             _p = f.read().strip()
         if _p:
             cfg['pass'] = _p
@@ -262,7 +266,7 @@ def smtp_send(to: str, subject: str, body: str, smtp: dict, html: str = None) ->
 
 
 def log_alert_fail(detail: str):
-    """告警发送失败落盘（/opt/you-markdown/alert.log，可追溯）"""
+    """告警发送失败落盘（/opt/you-super-markdown/alert.log，可追溯）"""
     try:
         with open(ALERT_LOG, 'a', encoding='utf-8') as f:
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [FAIL] {detail}\n")
@@ -271,7 +275,7 @@ def log_alert_fail(detail: str):
 
 
 def send_alert(alert_type: str, detail: str):
-    """发送邮件告警：优先 SMTP 直连（v2.8.0，无 MTA 依赖）；未配置退回 ym-alert(mail)；失败落盘 alert.log"""
+    """发送邮件告警：优先 SMTP 直连（v2.8.0，无 MTA 依赖）；未配置退回 ysm-alert(mail)；失败落盘 alert.log"""
     email = load_admin_email()
     if not email:
         return
@@ -287,12 +291,12 @@ def send_alert(alert_type: str, detail: str):
         log_alert_fail(f"SMTP 发送失败({alert_type})")
         return
     if not os.path.exists(EMAIL_ALERT_BIN):
-        log_alert_fail(f"ym-alert 不存在({alert_type})")
+        log_alert_fail(f"ysm-alert 不存在({alert_type})")
         return
     try:
         subprocess.run([EMAIL_ALERT_BIN, email, subject, body], capture_output=True, timeout=15)
     except Exception as e:
-        log_alert_fail(f"ym-alert 调用失败({alert_type}): {e}")
+        log_alert_fail(f"ysm-alert 调用失败({alert_type}): {e}")
 
 
 def is_update_in_progress() -> bool:
@@ -356,60 +360,182 @@ def verify_all_files():
         log(f"批量校验完成，恢复 {restored} 个文件")
 
 
+def load_audit_key():
+    """读取审计母密钥（root 0600）。非 root（读不到）或为空返回 None。"""
+    try:
+        with open(AUDIT_KEY_FILE, 'r', encoding='utf-8') as f:
+            k = f.read().strip()
+        return k or None
+    except Exception:
+        return None
+
+
+def sha256_hex(msg: str) -> str:
+    """旧段（epoch1）：hash = sha256(entry_json)"""
+    return hashlib.sha256(msg.encode('utf-8')).hexdigest()
+
+
+def hmac_sha256_hex(key: str, msg: str) -> str:
+    """新段（epoch2）：hash = HMAC-SHA256(audit_key, prev_hash + entry_json)"""
+    return hmac.new(key.encode('utf-8'), msg.encode('utf-8'), hashlib.sha256).hexdigest()
+
+
+def audit_entry_json(entry, prev_hash: str) -> str:
+    """审计条目规范化（链计算的唯一事实来源）。
+    与 utils.php::auditEntryJson() 必须逐字节一致——两处必须同步（字段顺序、compact 无空格、
+    不转义 Unicode/斜杠）。字段顺序沿用旧 auditLog() 的 entryJson（去掉 hash；prev_hash 参与计算置于末位）。"""
+    data = {
+        'id': entry['id'],
+        'ts': entry['ts'],
+        'user_id': entry['user_id'],
+        'user_name': entry['user_name'],
+        'role': entry['role'],
+        'ip': entry['ip'],
+        'action': entry['action'],
+        'target': entry['target'],
+        'detail': entry['detail'],
+        'result': entry['result'],
+        'prev_hash': prev_hash,
+    }
+    return json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+
+
+def _audit_chain_break(i: int) -> bool:
+    """链断裂：告警 + 从镜像恢复，返回 False。"""
+    log(f"审计日志哈希链断裂于第 {i} 条")
+    send_alert("日志哈希链断裂", f"审计日志哈希链在第 {i} 条处断裂，尝试从镜像恢复")
+    recover_audit()
+    return False
+
+
+def seal_audit_chain() -> int:
+    """加封（v5.0.0 P7）：为 audit 表中 hash='' 的原始条目按 rowid 顺序计算
+    HMAC-SHA256(audit_key, prev_hash + entry_json) 并回写 hash 与 prev_hash，随后刷新链尾文件。
+    幂等：仅处理 hash='' 的行，重复运行不会重复加封（只处理未加封条目）。
+    仅 root（可读密钥）有效；非 root/密钥缺失时跳过（返回 0）。"""
+    key = load_audit_key()
+    if key is None or not os.path.exists(DB_FILE):
+        return 0
+    try:
+        con = sqlite3.connect(DB_FILE)
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT rowid AS _rid, id, ts, user_id, user_name, role, ip, action, target, detail, result, hash, prev_hash "
+            "FROM audit ORDER BY rowid"
+        ).fetchall()
+    except Exception:
+        return 0
+    prev = ''
+    updates = []
+    tail = ''
+    for r in rows:
+        h = r['hash'] or ''
+        if h != '':
+            prev = h
+            tail = h
+            continue
+        entry_json = audit_entry_json(r, prev)
+        new_hash = hmac_sha256_hex(key, prev + entry_json)
+        updates.append((new_hash, prev, r['_rid']))
+        prev = new_hash
+        tail = new_hash
+    if updates:
+        try:
+            con.executemany("UPDATE audit SET hash=?, prev_hash=? WHERE rowid=?", updates)
+            con.commit()
+        except Exception as e:
+            con.close()
+            log(f"审计加封回写失败: {e}")
+            return 0
+    con.close()
+    # 链尾文件（data/.audit_chain；root 镜像链尾由 mirror_db 背书时同步）
+    if tail:
+        try:
+            with open(AUDIT_CHAIN, 'w') as f:
+                f.write(tail)
+        except Exception as e:
+            log(f"审计链尾刷新失败: {e}")
+    return len(updates)
+
+
+def audit_anchor():
+    """截断/回滚锚点：返回 (条数, 链头(最新/链尾) hash)。
+    hash 取最后一条已加封条目（hash 非空）；未加封行不计入 hash。"""
+    try:
+        con = sqlite3.connect(DB_FILE)
+        cnt = con.execute("SELECT COUNT(*) FROM audit").fetchone()[0]
+        row = con.execute("SELECT hash FROM audit WHERE hash IS NOT NULL AND hash != '' ORDER BY rowid DESC LIMIT 1").fetchone()
+        con.close()
+        return int(cnt), (row[0] if row else '')
+    except Exception:
+        return 0, ''
+
+
 def verify_audit_chain() -> bool:
-    """校验审计日志哈希链（读 SQLite audit 表）"""
+    """校验审计日志哈希链（读 SQLite audit 表；epoch 分段）：
+    epoch1 旧段：hash = sha256(entry_json)，genesis 为空串；
+    epoch2 新段：hash = HMAC-SHA256(audit_key, prev_hash + entry_json)。
+    链为"旧段(sha256) 前缀 + 新段(HMAC) 后缀"：按行推进，旧段用 sha256，进入新段后仅用 HMAC（不可回退）。
+    尾部 hash='' 的行视为"待加封"，跳过不计入校验。"""
     if is_update_in_progress():
         return True  # 更新中，跳过哈希链校验
 
     if not os.path.exists(DB_FILE):
         return True
 
+    key = load_audit_key()
     try:
         con = sqlite3.connect(DB_FILE)
         con.row_factory = sqlite3.Row
         cur = con.cursor()
-        cur.execute("SELECT id, ts, user_id, user_name, role, ip, action, target, detail, result, hash FROM audit ORDER BY rowid")
+        cur.execute("SELECT id, ts, user_id, user_name, role, ip, action, target, detail, result, hash, prev_hash FROM audit ORDER BY rowid")
         rows = cur.fetchall()
         con.close()
     except Exception:
         return False
 
     prev_hash = ''
+    phase = 'legacy'  # legacy(旧段 sha256) → sealed(新段 HMAC)
     for i, entry in enumerate(rows):
         expected = entry['hash'] or ''
-        check_data = {
-            'id': entry['id'],
-            'ts': entry['ts'],
-            'user_id': entry['user_id'],
-            'user_name': entry['user_name'],
-            'role': entry['role'],
-            'ip': entry['ip'],
-            'action': entry['action'],
-            'target': entry['target'],
-            'detail': entry['detail'],
-            'result': entry['result'],
-            'prev_hash': prev_hash,
-        }
-        check_json = json.dumps(check_data, ensure_ascii=False, separators=(',', ':'))
-        computed = hashlib.sha256(check_json.encode()).hexdigest()
-        if computed != expected:
-            log(f"审计日志哈希链断裂于第 {i} 条")
-            send_alert("日志哈希链断裂", f"审计日志哈希链在第 {i} 条处断裂，尝试从镜像恢复")
-            recover_audit()
-            return False
+        if expected == '':
+            break  # 尾部待加封（pending），不参与校验
+        entry_json = audit_entry_json(entry, prev_hash)
+        if phase == 'legacy':
+            if sha256_hex(entry_json) == expected:
+                prev_hash = expected
+                continue  # 旧段
+            # 旧段结束 → 新段
+            if key is not None:
+                if hmac_sha256_hex(key, prev_hash + entry_json) != expected:
+                    return _audit_chain_break(i)
+            else:
+                # 无密钥：仅结构校验
+                if (entry['prev_hash'] or '') != prev_hash:
+                    return _audit_chain_break(i)
+            phase = 'sealed'
+        else:
+            # 新段（HMAC）
+            if key is not None:
+                if hmac_sha256_hex(key, prev_hash + entry_json) != expected:
+                    return _audit_chain_break(i)
+            else:
+                if (entry['prev_hash'] or '') != prev_hash:
+                    return _audit_chain_break(i)
         prev_hash = expected
 
     return True
 
 
 def mirror_db():
-    """背书：将 data/ym.db 落盘（checkpoint）后拷贝到镜像目录（root 只读，chattr +i 锁定）"""
+    """背书：将 data/ysm.db 落盘（checkpoint）后拷贝到镜像目录（root 只读，chattr +i 锁定）"""
     try:
         con = sqlite3.connect(DB_FILE)
         con.execute('PRAGMA wal_checkpoint(TRUNCATE)')
         # v2.8.1（踩坑 #25）：背书前校正主库链尾文件=主库表尾 hash，避免错位链尾被传播到镜像
+        # v5.0.0 P7：取"最后一条已加封（hash 非空）"的 hash——未加封行 hash 为空，直接取表尾会写入空串
         try:
-            last = con.execute("SELECT hash FROM audit ORDER BY rowid DESC LIMIT 1").fetchone()
+            last = con.execute("SELECT hash FROM audit WHERE hash IS NOT NULL AND hash != '' ORDER BY rowid DESC LIMIT 1").fetchone()
             if last:
                 with open(AUDIT_CHAIN, 'w') as f:
                     f.write(last[0])
@@ -436,7 +562,7 @@ def recover_audit():
     if not os.path.exists(AUDIT_MIRROR_DB):
         return
     mdir = os.path.dirname(AUDIT_MIRROR_DB)
-    # v2.8.0 修复：镜像目录 chattr +i 且 ym.db 为 WAL 模式——sqlite 打开需在目录内创建 -wal/-shm 侧车文件，
+    # v2.8.0 修复：镜像目录 chattr +i 且 ysm.db 为 WAL 模式——sqlite 打开需在目录内创建 -wal/-shm 侧车文件，
     # immutable 目录禁止创建 → SQLITE_CANTOPEN（实测「从镜像恢复审计失败: unable to open database file」）。
     # 与 mirror_db() 同模式：先解锁 → 操作 → 重锁（见踩坑 #23）
     _chattr(mdir, '-i')
@@ -461,9 +587,10 @@ def recover_audit():
             [(r['id'], r['ts'], r['user_id'], r['user_name'], r['role'], r['ip'], r['action'], r['target'], r['detail'], r['result'], r['hash'], r['prev_hash']) for r in rows]
         )
         # v2.8.1 修复（踩坑 #25）：恢复后链尾文件必须以恢复后表尾 hash 为准，
-        # 不可 copy 镜像 audit_chain——镜像 ym.db 与 audit_chain 由不同时机独立更新可能错位，
+        # 不可 copy 镜像 audit_chain——镜像 ysm.db 与 audit_chain 由不同时机独立更新可能错位，
         # 残留旧链尾会导致下一条记录断链。校验表内容后写表尾 hash 到主库+镜像链尾文件。
-        last_row = con.execute("SELECT hash FROM audit ORDER BY rowid DESC LIMIT 1").fetchone()
+        # v5.0.0 P7：链尾取"最后一条已加封（hash 非空）"的 hash——未加封行 hash 为空。
+        last_row = con.execute("SELECT hash FROM audit WHERE hash IS NOT NULL AND hash != '' ORDER BY rowid DESC LIMIT 1").fetchone()
         tail_hash = last_row[0] if last_row else ''
         con.commit()
         con.close()
@@ -500,7 +627,7 @@ def _chattr(path, flag):
 
 
 def load_backup_conf() -> dict:
-    """读取备份配置（/opt/you-markdown/backup.conf），缺失/非法回落默认值
+    """读取备份配置（/opt/you-super-markdown/backup.conf），缺失/非法回落默认值
     v3.3.5：新增 trigger_backup（上传触发立即备份）与 single_restore（单篇篡改还原）开关"""
     cfg = {
         'interval_min': 30,   # 数据库备份间隔（5~1440 分钟）
@@ -537,7 +664,7 @@ def load_backup_conf() -> dict:
 
 
 def backup_db() -> bool:
-    """数据库自动备份：WAL checkpoint 后打包 ym.db+.audit_chain → ym-db-latest.tar.gz（固定 1 份滚动）
+    """数据库自动备份：WAL checkpoint 后打包 ysm.db+.audit_chain → ysm-db-latest.tar.gz（固定 1 份滚动）
     备份目录 chattr +i 锁定，写入时临时解锁、完成后立即重锁（与母本锁定同理念）"""
     try:
         con = sqlite3.connect(DB_FILE)
@@ -547,7 +674,7 @@ def backup_db() -> bool:
         _chattr(BACKUP_DB_DIR, '-i')
         try:
             with tarfile.open(DB_BACKUP_FILE, 'w:gz') as t:
-                t.add(DB_FILE, arcname='ym.db')
+                t.add(DB_FILE, arcname='ysm.db')
                 if os.path.exists(AUDIT_CHAIN):
                     t.add(AUDIT_CHAIN, arcname='.audit_chain')
         finally:
@@ -562,12 +689,12 @@ def backup_db() -> bool:
 
 
 def backup_articles() -> bool:
-    """文章备份：打包 data/articles/ → ym-articles-YYYYMMDD-HHMMSS.tar.gz（保留 N 份，超时清除）
+    """文章备份：打包 data/articles/ → ysm-articles-YYYYMMDD-HHMMSS.tar.gz（保留 N 份，超时清除）
     v3.3.5：命名从日期改为时间戳——支持一天内多次备份（上传触发），按 article_keep 轮换"""
     if not os.path.isdir(ARTICLES_DIR):
         return False
     os.makedirs(BACKUP_ARTICLES_DIR, exist_ok=True)
-    pkg = os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-' + time.strftime('%Y%m%d-%H%M%S') + '.tar.gz')
+    pkg = os.path.join(BACKUP_ARTICLES_DIR, 'ysm-articles-' + time.strftime('%Y%m%d-%H%M%S') + '.tar.gz')
     _chattr(BACKUP_ARTICLES_DIR, '-i')
     try:
         with tarfile.open(pkg, 'w:gz') as t:
@@ -579,7 +706,7 @@ def backup_articles() -> bool:
         _chattr(BACKUP_ARTICLES_DIR, '+i')
     # 轮换：保留最近 N 份
     keep = load_backup_conf()['article_keep']
-    files = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-*.tar.gz')))
+    files = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ysm-articles-*.tar.gz')))
     for f in files[:-keep]:
         try:
             os.remove(f)
@@ -639,14 +766,14 @@ def _find_hidden_in_backup(pkg: str, rel_name: str) -> bool:
 def _find_hidden_in_backups(rel_name: str):
     """在所有备份包中从新到旧查找同名文件，返回第一个「META 标记 hidden=true」的备份包路径；无则 None。
     v3.3.5：必须遍历全部备份——当日最早备份可能不含后上传的文章，只查最新包会漏源"""
-    for pkg in sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-*.tar.gz')), reverse=True):
+    for pkg in sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ysm-articles-*.tar.gz')), reverse=True):
         if _find_hidden_in_backup(pkg, rel_name):
             return pkg
     return None
 
 
 # v3.3.5：单篇篡改还原——仅还原「当前 META 无法解析 且 备份中标记 hidden（系统文章）」的单篇。
-# 过滤：正常编辑（sc.php/api.php/ym-admin 注入）总会生成合法 META，解析成功即永不触发；
+# 过滤：正常编辑（sc.php/api.php/ysm-admin 注入）总会生成合法 META，解析成功即永不触发；
 # 只有 META 被破坏（攻击者直接改文件/抹掉 META 头）才符合还原条件。
 def restore_single_hidden_articles():
     global last_single_restore_info
@@ -656,7 +783,7 @@ def restore_single_hidden_articles():
         return  # 超管后台关闭了「单篇篡改还原」
     if not os.path.isdir(ARTICLES_DIR):
         return
-    backups = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-*.tar.gz')))
+    backups = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ysm-articles-*.tar.gz')))
     if not backups:
         return
     now = time.time()
@@ -701,15 +828,15 @@ def cleanup_backups():
     """统一清除过时备份：文章保留 N 份、手动备份保留 M 份、删除损坏库残留 .corrupt-*"""
     cfg = load_backup_conf()
     # 文章每日备份
-    arts = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-*.tar.gz')))
+    arts = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ysm-articles-*.tar.gz')))
     for f in arts[:-cfg['article_keep']]:
         try:
             os.remove(f)
             log(f"清除过时文章备份: {f}")
         except Exception:
             pass
-    # 手动整站备份 ym-backup-*
-    man = sorted(glob.glob(os.path.join(BACKUP_DIR, 'ym-backup-*.tar.gz')))
+    # 手动整站备份 ysm-backup-*
+    man = sorted(glob.glob(os.path.join(BACKUP_DIR, 'ysm-backup-*.tar.gz')))
     for f in man[:-cfg['manual_keep']]:
         try:
             os.remove(f)
@@ -757,12 +884,12 @@ def restore_db_from_file(src) -> bool:
             return False
         last_restore_info = f"{time.strftime('%Y-%m-%d %H:%M:%S')} 从 {os.path.basename(src)} 恢复"
         log(f"数据库已从 {src} 恢复")
-        send_alert("数据库恢复", f"主库 ym.db 已从备份恢复: {src}")
+        send_alert("数据库恢复", f"主库 ysm.db 已从备份恢复: {src}")
         return True
     except Exception as e:
         log(f"数据库恢复失败: {e}")
         # v2.8.0：恢复失败需告警兜底（db_health_check 全失败时另有"数据库损坏"告警）
-        send_alert("数据库恢复失败", f"主库 ym.db 从备份恢复失败，请立即人工介入: {e}")
+        send_alert("数据库恢复失败", f"主库 ysm.db 从备份恢复失败，请立即人工介入: {e}")
         return False
 
 
@@ -770,10 +897,10 @@ def restore_db_from_package(pkg) -> bool:
     """从 tar.gz 备份包恢复：解压到临时目录 → 校验完整性 → 恢复主库 + 链尾文件"""
     tmpdir = None
     try:
-        tmpdir = tempfile.mkdtemp(prefix='ym-restore-')
+        tmpdir = tempfile.mkdtemp(prefix='ysm-restore-')
         with tarfile.open(pkg, 'r:gz') as t:
             t.extractall(tmpdir)
-        src = os.path.join(tmpdir, 'ym.db')
+        src = os.path.join(tmpdir, 'ysm.db')
         ok = restore_db_from_file(src)
         if ok:
             chain = os.path.join(tmpdir, '.audit_chain')
@@ -804,7 +931,7 @@ def db_health_check() -> bool:
     if os.path.exists(AUDIT_MIRROR_DB) and restore_db_from_file(AUDIT_MIRROR_DB):
         return True
     log("主库损坏且无可用备份，请手动处理")
-    send_alert("数据库损坏", "主库 ym.db 损坏/缺失且无可用备份，请手动处理")
+    send_alert("数据库损坏", "主库 ysm.db 损坏/缺失且无可用备份，请手动处理")
     return False
 
 
@@ -816,7 +943,7 @@ def articles_health_check():
         return True
     if [f for f in os.listdir(ARTICLES_DIR) if f.endswith('.md')]:
         return True  # 有文章，正常
-    backups = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-*.tar.gz')), reverse=True)
+    backups = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ysm-articles-*.tar.gz')), reverse=True)
     if not backups:
         return False
     try:
@@ -850,7 +977,7 @@ def periodic_backup_thread():
         if db_health_check():
             backup_db()
         # 2. 文章每日兜底备份（当天已有任意备份则跳过；v3.3.5 时间戳命名后，上传触发会产生当天备份，此处即跳过）
-        today_prefix = os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-' + time.strftime('%Y%m%d'))
+        today_prefix = os.path.join(BACKUP_ARTICLES_DIR, 'ysm-articles-' + time.strftime('%Y%m%d'))
         if not glob.glob(today_prefix + '-*.tar.gz'):
             backup_articles()
             cleanup_backups()
@@ -904,13 +1031,19 @@ def save_guard_state():
         state['db_backup_size'] = st.st_size
     state['next_db_backup'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + cfg['interval_min'] * 60))
     # 每日文章备份
-    arts = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ym-articles-*.tar.gz')))
+    arts = sorted(glob.glob(os.path.join(BACKUP_ARTICLES_DIR, 'ysm-articles-*.tar.gz')))
     state['articles_backup_count'] = len(arts)
     if arts:
         st = os.stat(arts[-1])
         state['last_articles_backup'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(st.st_mtime))
     # 镜像目录锁定状态（chattr +i 是否生效）
     state['mirror_locked'] = os.path.isdir(os.path.dirname(AUDIT_MIRROR_DB))
+    # v5.0.0 P7：截断/回滚锚点——(条数, 链头(最新) hash, 更新时间)
+    # 供每日审计报告邮件携带（邮件发出即在服务器之外，事后难以追溯抹除）
+    a_count, a_head = audit_anchor()
+    state['audit_count'] = a_count
+    state['audit_head_hash'] = a_head
+    state['audit_updated_ts'] = time.strftime('%Y-%m-%d %H:%M:%S')
     os.makedirs(os.path.dirname(GUARD_STATE), exist_ok=True)
     with open(GUARD_STATE, 'w') as f:
         json.dump(state, f, ensure_ascii=False)
@@ -945,10 +1078,13 @@ def signal_handler(signum, frame):
 
 
 def periodic_audit_thread():
-    """定时审计日志校验线程（每5分钟执行一次）：校验哈希链 + 背书镜像"""
+    """定时审计日志校验线程（每5分钟执行一次）：加封新条目 + 校验哈希链 + 背书镜像"""
     global last_audit_check
     while running:
         time.sleep(AUDIT_CHECK_INTERVAL)
+        sealed = seal_audit_chain()  # v5.0.0 P7：先由 root 加封 PHP 写入的原始条目
+        if sealed:
+            log(f"审计加封完成：{sealed} 条新条目已加封")
         if not verify_audit_chain():
             log("审计日志哈希链校验失败，已尝试恢复")
         else:
@@ -962,7 +1098,7 @@ def periodic_hfish_thread():
     while running:
         time.sleep(AUDIT_CHECK_INTERVAL)
         try:
-            sync = os.path.join(WEB_ROOT, 'ym-hfish-sync.py')
+            sync = os.path.join(WEB_ROOT, 'ysm-hfish-sync.py')
             if os.path.exists(sync):
                 result = subprocess.run(
                     [sys.executable, sync],
@@ -1077,6 +1213,9 @@ def run_polling_mode():
         now = time.time()
         if now - last_audit_check >= AUDIT_CHECK_INTERVAL:
             last_audit_check = now
+            sealed = seal_audit_chain()  # v5.0.0 P7：先由 root 加封 PHP 写入的原始条目
+            if sealed:
+                log(f"审计加封完成：{sealed} 条新条目已加封")
             if not verify_audit_chain():
                 log("审计日志哈希链校验失败，已尝试恢复")
             else:

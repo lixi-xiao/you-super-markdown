@@ -6,9 +6,9 @@ secureSessionStart();
 runRequestSecurityCheck();
 
 // 守护进程 MD5 校验钩子：每次请求检查 index.php 自身完整性
-$guardStateFile = '/opt/you-markdown/guard-state.json';
+$guardStateFile = '/opt/you-super-markdown/guard-state.json';
 $indexMd5 = md5_file(__FILE__);
-$baseMd5File = '/opt/you-markdown/install-base/index.php';
+$baseMd5File = '/opt/you-super-markdown/install-base/index.php';
 if (file_exists($baseMd5File)) {
     $baseMd5 = md5_file($baseMd5File);
     if ($baseMd5 && $indexMd5 !== $baseMd5) {
@@ -32,7 +32,7 @@ if (!is_dir('./data/articles')) {
     mkdir('./data/articles', 0755, true);
 }
 $siteConf = loadSiteConfig();
-$siteHeading = $siteConf['site_title'] ?? 'You Markdown';
+$siteHeading = $siteConf['site_title'] ?? 'You Super Markdown';
 // v3.1.6：首页公告卡片数据（公告表 + 关联文章提取封面图/标签/字数；纯文字公告无关联文章）
 function collectAnnouncementCardMeta($article) {
     $cover = ''; $tags = []; $words = 0; $meta = [];

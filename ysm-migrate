@@ -8,7 +8,7 @@
 #   2. 备份到 <db>.pre-5.0.bak（已存在则加时间戳，绝不覆盖旧备份）；
 #   3. 在单个事务内，把每张表按 5.0 干净结构重建
 #      （SQLite 改列名/改结构 = 建新表 → 拷贝数据 → 删旧表 → 改名）；
-#   4. 写入 schema_meta（schema_version=5.0.0，epoch=1）；
+#   4. 写入 schema_meta（schema_version=5.0.0，epoch=2；epoch1=旧 sha256 链，epoch2=新 HMAC 链）；
 #   5. 成功后把数据库文件名 ym.db 改为 ysm.db（若仍是旧名）；
 #   6. 任一步失败自动回滚到第 2 步备份；
 #   7. 打印结果摘要。
@@ -30,7 +30,11 @@ import sys
 import time
 
 SCHEMA_VERSION = "5.0.0"
-SCHEMA_EPOCH = "1"
+# v5.0.0 P7（审计链加固）：epoch 标记链格式——
+#   epoch 1 = 旧 sha256 链（历史段，保留归档，按旧法从空串 sha256 校验）；
+#   epoch 2 = 新 HMAC 链（hash = HMAC-SHA256(audit_key, prev_hash + entry_json)，由 root 守护加封）。
+# 迁移器把新库标记为 epoch=2（旧链条目保留，校验时按 epoch 分段处理：旧段 sha256 / 新段 HMAC）。
+SCHEMA_EPOCH = "2"
 
 # ------------------------------------------------------------
 # 5.0 目标结构：与 db.php 的 db_init_schema() 完全对齐。

@@ -1,7 +1,5 @@
 #!/bin/bash
-WEB_ROOT="${YM_WEB_ROOT:-/var/www/you-markdown}"
-ENTRIES_FILE="$WEB_ROOT/data/.entries.json"
-USERS_FILE="$WEB_ROOT/data/.users.json"
+WEB_ROOT="${YSM_WEB_ROOT:-/var/www/you-super-markdown}"
 
 # 自动获取站点域名（v2.10.2 修复：禁止硬编码域名——优先 app-config.json 的 site_url，否则从 Nginx server_name 解析）
 # v2.11.2：剥离 scheme 与路径（site_url 可能带 https://，避免拼接出 https://https:// 双前缀）
@@ -18,17 +16,17 @@ get_domain() {
     echo "$d"
 }
 
-# v3.1.0：更新完成收尾（必须定义为顶部函数——apply-update 会覆盖 /usr/local/bin/ym-admin 自身，
+# v3.1.0：更新完成收尾（必须定义为顶部函数——apply-update 会覆盖 /usr/local/bin/ysm-admin 自身，
 # bash 惰性解析时仅对已读入内存的函数体免疫「新旧文件混合」语法错误，case 内联代码会在覆盖后解析失败）
 # v3.1.7：新增第 4 参 CHANGELOG_B64——更新通知邮件自动附带本次更新内容（changelog 脱敏文案）
-# v3.1.15：新增第 5 参 UPDATE_METHOD——邮件附带更新方式（外部上传更新包 / 服务器命令更新）
+# v3.1.15：新增第 5 参 UPDATE_METHOD——邮件附带更新方式（外部上传更新包 / 在线包更新）
 post_update_finish() {
     local TO_VER="$1" CHANNEL="$2" FROM_VER="$3" CHANGELOG_B64="$4" UPDATE_METHOD="$5"
     # 请求文件 root 可删，避免以 php 回写时 /tmp 属主权限拒绝
-    rm -f /tmp/ym-update-request.json
+    rm -f /tmp/ysm-update-request.json
     # 清理旧备份（保留最近2次）
     echo "  清理旧备份..."
-    ls -t "/opt/you-markdown/backups"/pre-update-*.tar.gz 2>/dev/null | tail -n +3 | xargs rm -f 2>/dev/null || true
+    ls -t "/opt/you-super-markdown/backups"/pre-update-*.tar.gz 2>/dev/null | tail -n +3 | xargs rm -f 2>/dev/null || true
     echo ""
     echo "============================================"
     echo "  更新完成！"
@@ -38,7 +36,7 @@ post_update_finish() {
     # v4.6.0：同时检测 ffmpeg（背景音乐转码依赖）
     if ! php -m 2>/dev/null | grep -qi '^gd$' || ! command -v ffmpeg >/dev/null 2>&1; then
         echo ""
-        echo "  提示：未检测到全部功能依赖（php-gd/ffmpeg），运行 sudo ym-admin deps 一键补装"
+        echo "  提示：未检测到全部功能依赖（php-gd/ffmpeg），运行 sudo ysm-admin deps 一键补装"
     fi
     # v3.1.0：更新完成自动发送通知邮件到管理员（失败不阻断）
     # v3.1.7：邮件正文附带本次更新内容（changelog），管理者无需再翻公告即可知道本次改了什么
@@ -52,21 +50,21 @@ post_update_finish() {
 $CL_TEXT"
         fi
     fi
-    # v3.1.15：邮件附带本次更新方式（区分后台外部上传更新包 / 服务器命令触发仓库下载更新）
+    # v3.1.15：邮件附带本次更新方式（区分后台外部上传更新包 / 在线更新选中的仓库包）
     if [ -n "$UPDATE_METHOD" ]; then
         NOTIFY_MSG="$NOTIFY_MSG
 
 【更新方式】$UPDATE_METHOD"
     fi
-    /usr/local/bin/ym-admin notify "$NOTIFY_MSG" 2>/dev/null || true
+    /usr/local/bin/ysm-admin notify "$NOTIFY_MSG" 2>/dev/null || true
 }
 
 # ============================================================
 # v4.5.0：声明式依赖清单——以后更新包新增功能要装依赖，只需在包的 version.json
 # 声明 "deps": ["<包名>", ...]，走正常更新通道（apply-update [4.9/6]）即自动安装，
-# 无需再改更新路径 / ym-admin 代码。内置兜底清单兼容旧包（无 deps 字段）。
+# 无需再改更新路径 / ysm-admin 代码。内置兜底清单兼容旧包（无 deps 字段）。
 # 依赖安装失败 → 中断更新并自动回滚（保证功能完整）。
-# v4.6.0：兜底清单补 ffmpeg（背景音乐转码依赖，与 ym-install.sh 全新安装一致）
+# v4.6.0：兜底清单补 ffmpeg（背景音乐转码依赖，与 ysm-install.sh 全新安装一致）
 # ============================================================
 REQUIRED_DEPS_FALLBACK="php-gd ffmpeg"
 
@@ -185,16 +183,23 @@ ensure_env_deps() {
     [ "$ok" -eq 0 ]
 }
 
-# v3.2.0：更新包签名验证（RSA 非对称）——服务器内置公钥 /opt/you-markdown/update_signing_public.pem，
+# v3.2.0：更新包签名验证（RSA 非对称）——服务器内置公钥 /opt/you-super-markdown/update_signing_public.pem，
 # 正式更新包在包根内置 manifest.json（全文件 SHA256）+ manifest.json.sig（私钥签名）。
-# 返回 0 通过；非 0 失败（失败封闭）。未部署公钥 → 跳过验证（旧环境兼容）。
+# v5.0.0：失败封闭——未部署公钥一律拒绝更新；仅当显式传入 --allow-unsigned（一次性受控引导，
+# 供首包上线的无签名场景）时放行并写审计日志，不作为常规更新通道。
 verify_package_signature() {
     local tmp_root="$1"
-    local pubkey="/opt/you-markdown/update_signing_public.pem"
+    local pubkey="/opt/you-super-markdown/update_signing_public.pem"
     local mf sig bad root
     if [ ! -f "$pubkey" ]; then
-        echo "  [签名] 未部署公钥，跳过签名验证（旧环境兼容）"
-        return 0
+        if [ "${ALLOW_UNSIGNED:-0}" = "1" ]; then
+            echo "  [签名] 警告：未部署公钥，因显式 --allow-unsigned 引导开关而放行（已写审计日志）"
+            php -r "require_once '$WEB_ROOT/utils.php'; auditLog('update_unsigned_allowed', 'update', '未部署签名公钥，凭 --allow-unsigned 引导开关放行更新包（一次性受控引导）');" 2>/dev/null || true
+            return 0
+        fi
+        echo "  [签名] 错误：未部署签名公钥 $pubkey，拒绝更新（失败封闭）"
+        echo "        如确为首包上线的受控引导，请显式执行：sudo ysm-admin apply-update --allow-unsigned"
+        return 1
     fi
     mf=$(find "$tmp_root" -maxdepth 3 -name manifest.json 2>/dev/null | head -1)
     if [ -z "$mf" ] || [ ! -f "$mf" ]; then
@@ -237,7 +242,7 @@ verify_package_signature() {
 # v3.2.0-fix：回退完成自动向管理员发送通知邮件（$1 = 失败原因）
 auto_rollback() {
     local reason="${1:-}"
-    local BACKUP_DIR="/opt/you-markdown/backups"
+    local BACKUP_DIR="/opt/you-super-markdown/backups"
     local LATEST
     LATEST=$(ls -t "$BACKUP_DIR"/pre-update-*.tar.gz 2>/dev/null | head -1)
     if [ -z "$LATEST" ]; then
@@ -245,17 +250,17 @@ auto_rollback() {
         return 1
     fi
     echo "  [回退] 检测到更新失败，自动回退到备份: $(basename "$LATEST")"
-    systemctl stop ym-guard 2>/dev/null || true
+    systemctl stop ysm-guard 2>/dev/null || true
     sleep 1
-    chattr -R -i /opt/you-markdown/install-base/ 2>/dev/null || true
+    chattr -R -i /opt/you-super-markdown/install-base/ 2>/dev/null || true
     tar -xzf "$LATEST" -C "$WEB_ROOT" 2>/dev/null
-    rsync -a --delete --exclude='data/' "$WEB_ROOT/" "/opt/you-markdown/install-base/" 2>/dev/null
-    chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
-    systemctl start ym-guard 2>/dev/null || true
-    rm -f /tmp/ym-update.lock
+    rsync -a --delete --exclude='data/' "$WEB_ROOT/" "/opt/you-super-markdown/install-base/" 2>/dev/null
+    chattr -R +i /opt/you-super-markdown/install-base/ 2>/dev/null || true
+    systemctl start ysm-guard 2>/dev/null || true
+    rm -f /tmp/ysm-update.lock
     echo "  [回退] 自动回退完成，系统已恢复至更新前状态"
     # 回退完成自动通知管理员（失败不阻断）
-    /usr/local/bin/ym-admin notify "系统更新失败，已自动回退并恢复正常。${reason:+失败原因：${reason}。}系统已恢复至更新前状态，请登录后台查看更新状态。" 2>/dev/null || true
+    /usr/local/bin/ysm-admin notify "系统更新失败，已自动回退并恢复正常。${reason:+失败原因：${reason}。}系统已恢复至更新前状态，请登录后台查看更新状态。" 2>/dev/null || true
     return 0
 }
 
@@ -283,7 +288,7 @@ case "${1:-}" in
 
     create-station)
         NAME="${2:-}"
-        if [ -z "$NAME" ]; then echo "用法: ym-admin create-station <站长名称>"; exit 1; fi
+        if [ -z "$NAME" ]; then echo "用法: ysm-admin create-station <站长名称>"; exit 1; fi
         QQ="station_$(openssl rand -hex 4)"
         # v2.6.4：生成满足密码策略（≥8 位 + 大写 + 小写 + 数字）的随机密码
         for i in 1 2 3 4 5; do
@@ -294,9 +299,9 @@ case "${1:-}" in
         done
         php -r "
             require_once '$WEB_ROOT/utils.php';
-            \$u = loadUsers();
-            \$u[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'station_admin','created'=>date('Y-m-d H:i:s')];
-            saveUsers(\$u);
+            \$u = fetchAllUsers();
+            \$u[] = ['id'=>bin2hex(random_bytes(8)),'account'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'station_admin','created'=>date('Y-m-d H:i:s')];
+            replaceAllUsers(\$u);
         " 2>/dev/null
         echo "站长账号已创建: $NAME (QQ: $QQ, 密码: $PWD)"
         ;;
@@ -304,7 +309,7 @@ case "${1:-}" in
     create-author)
         NAME="${2:-}"
         STATION_ID="${3:-}"
-        if [ -z "$NAME" ]; then echo "用法: ym-admin create-author <写作者名称> [站长ID]"; exit 1; fi
+        if [ -z "$NAME" ]; then echo "用法: ysm-admin create-author <写作者名称> [站长ID]"; exit 1; fi
         QQ="author_$(openssl rand -hex 4)"
         # v2.6.4：生成满足密码策略（≥8 位 + 大写 + 小写 + 数字）的随机密码
         for i in 1 2 3 4 5; do
@@ -315,33 +320,33 @@ case "${1:-}" in
         done
         php -r "
             require_once '$WEB_ROOT/utils.php';
-            \$u = loadUsers();
-            \$u[] = ['id'=>bin2hex(random_bytes(8)),'qq'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'author','station_id'=>'$STATION_ID','created'=>date('Y-m-d H:i:s')];
-            saveUsers(\$u);
+            \$u = fetchAllUsers();
+            \$u[] = ['id'=>bin2hex(random_bytes(8)),'account'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'author','station_id'=>'$STATION_ID','created'=>date('Y-m-d H:i:s')];
+            replaceAllUsers(\$u);
         " 2>/dev/null
         echo "写作者账号已创建: $NAME (QQ: $QQ, 密码: $PWD)"
         ;;
 
     revoke-user)
         USER_ID="${2:-}"
-        if [ -z "$USER_ID" ]; then echo "用法: ym-admin revoke-user <用户ID>"; exit 1; fi
+        if [ -z "$USER_ID" ]; then echo "用法: ysm-admin revoke-user <用户ID>"; exit 1; fi
         php -r "require_once '$WEB_ROOT/utils.php'; db_exec('DELETE FROM users WHERE id = ?', ['$USER_ID']);" 2>/dev/null
         echo "用户已吊销: $USER_ID"
         ;;
 
     backup)
-        BACKUP_DIR="/opt/you-markdown/backups"
+        BACKUP_DIR="/opt/you-super-markdown/backups"
         mkdir -p "$BACKUP_DIR"
-        tar -czf "$BACKUP_DIR/ym-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$WEB_ROOT" data/ 2>/dev/null
+        tar -czf "$BACKUP_DIR/ysm-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$WEB_ROOT" data/ 2>/dev/null
         echo "备份完成: $BACKUP_DIR"
         ;;
 
     status)
-        echo "守护进程: $(systemctl is-active ym-guard 2>/dev/null || echo 'unknown')"
+        echo "守护进程: $(systemctl is-active ysm-guard 2>/dev/null || echo 'unknown')"
         echo "Nginx: $(systemctl is-active nginx 2>/dev/null || echo 'unknown')"
         PHP_FPM_SVC="php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm"
         echo "PHP-FPM: $(systemctl is-active $PHP_FPM_SVC 2>/dev/null || systemctl is-active php-fpm 2>/dev/null || echo 'unknown')"
-        echo "用户数: $(php -r "require_once '$WEB_ROOT/utils.php'; echo count(loadUsers());" 2>/dev/null)"
+        echo "用户数: $(php -r "require_once '$WEB_ROOT/utils.php'; echo count(fetchAllUsers());" 2>/dev/null)"
         ;;
 
     log-verify)
@@ -354,14 +359,17 @@ case "${1:-}" in
 
     audit-report)
         # 每日审计报告（v2.8.0 同次更新）：log-verify 结果经 sendAlert 走 SMTP 直连发送给 admin_email，
-        # 无 SMTP 配置时兜底 ym-alert(mail)，失败落盘 alert.log——不再依赖 cron | mail（无 MTA 静默失败）
-        # v3.0.9：SMTP 授权码经环境变量注入（CLI 读 root 密钥文件 /opt/you-markdown/secrets/smtp_pass）
-        SMTP_PASS_FILE="/opt/you-markdown/secrets/smtp_pass"
+        # 无 SMTP 配置时兜底 ysm-alert(mail)，失败落盘 alert.log——不再依赖 cron | mail（无 MTA 静默失败）
+        # v3.0.9：SMTP 授权码经环境变量注入（CLI 读 root 密钥文件 /opt/you-super-markdown/secrets/smtp_pass）
+        SMTP_PASS_FILE="/opt/you-super-markdown/secrets/smtp_pass"
         if [ -f "$SMTP_PASS_FILE" ]; then
-            YM_SMTP_PASS="$(cat "$SMTP_PASS_FILE")" php -r "
+            YSM_SMTP_PASS="$(cat "$SMTP_PASS_FILE")" php -r "
                 require_once '$WEB_ROOT/utils.php';
                 \$r = verifyAuditChain();
                 \$result = \$r['valid'] ? '审计日志哈希链校验通过 ('.\$r['count'].' 条)' : '校验失败！断裂于第 '.\$r['broken_at'].' 条';
+                // v5.0.0 P7：附截断/回滚锚点（链尾条数 + 最新 hash），邮件发出即在服务器之外，事后难以追溯抹除
+                \$s = @json_decode(@file_get_contents('/opt/you-super-markdown/guard-state.json'), true);
+                \$result .= PHP_EOL.'截断锚点：共 '.((int)(\$s['audit_count'] ?? 0)).' 条，链头 '.( (\$s['audit_head_hash'] ?? '') ?: '(空)' ).'（锚点更新于 '.((\$s['audit_updated_ts'] ?? '') ?: '未知').'）';
                 echo \$result . PHP_EOL;
                 sendAlert('每日审计报告', \$result);
             "
@@ -370,6 +378,9 @@ case "${1:-}" in
                 require_once '$WEB_ROOT/utils.php';
                 \$r = verifyAuditChain();
                 \$result = \$r['valid'] ? '审计日志哈希链校验通过 ('.\$r['count'].' 条)' : '校验失败！断裂于第 '.\$r['broken_at'].' 条';
+                // v5.0.0 P7：附截断/回滚锚点（链尾条数 + 最新 hash），邮件发出即在服务器之外，事后难以追溯抹除
+                \$s = @json_decode(@file_get_contents('/opt/you-super-markdown/guard-state.json'), true);
+                \$result .= PHP_EOL.'截断锚点：共 '.((int)(\$s['audit_count'] ?? 0)).' 条，链头 '.( (\$s['audit_head_hash'] ?? '') ?: '(空)' ).'（锚点更新于 '.((\$s['audit_updated_ts'] ?? '') ?: '未知').'）';
                 echo \$result . PHP_EOL;
                 sendAlert('每日审计报告', \$result);
             "
@@ -379,12 +390,12 @@ case "${1:-}" in
     notify)
         # v3.1.0：发送通知邮件到管理员邮箱（测试/更新/运维消息均可用）
         # v3.1.1：复用 renderMailHtml 统一邮件模板（HTML 布局 + 纯文本双版本 multipart），修复纯文本无布局
-        # 用法: ym-admin notify "<消息>"；CLI 发信注入 YM_SMTP_PASS（root 密钥文件）
+        # 用法: ysm-admin notify "<消息>"；CLI 发信注入 YSM_SMTP_PASS（root 密钥文件）
         MSG="${2:-}"
-        if [ -z "$MSG" ]; then echo "用法: ym-admin notify <消息>"; exit 1; fi
-        SMTP_PASS_FILE="/opt/you-markdown/secrets/smtp_pass"
+        if [ -z "$MSG" ]; then echo "用法: ysm-admin notify <消息>"; exit 1; fi
+        SMTP_PASS_FILE="/opt/you-super-markdown/secrets/smtp_pass"
         if [ -f "$SMTP_PASS_FILE" ]; then
-            YM_SMTP_PASS="$(cat "$SMTP_PASS_FILE")" MSG_B64=$(printf '%s' "$MSG" | base64 -w0 2>/dev/null || printf '%s' "$MSG" | base64) \
+            YSM_SMTP_PASS="$(cat "$SMTP_PASS_FILE")" MSG_B64=$(printf '%s' "$MSG" | base64 -w0 2>/dev/null || printf '%s' "$MSG" | base64) \
             php -r "
                 require_once '$WEB_ROOT/utils.php';
                 \$cfg = loadSiteConfig();
@@ -411,9 +422,9 @@ case "${1:-}" in
 
     set-smtp-pass)
         # v3.3.7：快捷修改 SMTP 授权码（密钥不落盘：root 密钥文件 + php-fpm 环境变量双写 + reload + 测试邮件）
-        # 用法: sudo ym-admin set-smtp-pass [--pass=新授权码]   （不带参数则交互输入，不回显）
+        # 用法: sudo ysm-admin set-smtp-pass [--pass=新授权码]   （不带参数则交互输入，不回显）
         if [ "$(id -u)" -ne 0 ]; then
-            echo "错误：修改 SMTP 授权码需 root 权限（sudo ym-admin set-smtp-pass）"
+            echo "错误：修改 SMTP 授权码需 root 权限（sudo ysm-admin set-smtp-pass）"
             exit 1
         fi
         SMTP_PASS=""
@@ -426,7 +437,7 @@ case "${1:-}" in
                 SMTP_PASS="${2#--pass=}"
                 ;;
             *)
-                echo "用法: ym-admin set-smtp-pass [--pass=新授权码]"
+                echo "用法: ysm-admin set-smtp-pass [--pass=新授权码]"
                 echo "  不带参数时交互输入（不回显）；--pass= 用于脚本化场景"
                 exit 1
                 ;;
@@ -436,7 +447,7 @@ case "${1:-}" in
             exit 1
         fi
         # ① root 密钥文件（CLI/守护进程发信用，0600）
-        SECRETS_DIR="/opt/you-markdown/secrets"
+        SECRETS_DIR="/opt/you-super-markdown/secrets"
         mkdir -p "$SECRETS_DIR"
         printf '%s' "$SMTP_PASS" > "$SECRETS_DIR/smtp_pass"
         chmod 600 "$SECRETS_DIR/smtp_pass"
@@ -445,9 +456,9 @@ case "${1:-}" in
         PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)
         POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/www.conf"
         if [ -f "$POOL_CONF" ]; then
-            sed -i '/env\[YM_SMTP_PASS\]/d' "$POOL_CONF" 2>/dev/null || true
+            sed -i '/env\[YSM_SMTP_PASS\]/d' "$POOL_CONF" 2>/dev/null || true
             ESC_PASS=$(printf '%s' "$SMTP_PASS" | sed 's/[\\"]/\\&/g')
-            printf '\nenv[YM_SMTP_PASS] = "%s"\n' "$ESC_PASS" >> "$POOL_CONF"
+            printf '\nenv[YSM_SMTP_PASS] = "%s"\n' "$ESC_PASS" >> "$POOL_CONF"
             systemctl reload "php${PHP_VER}-fpm" 2>/dev/null || true
             echo "[2/3] 已更新 Web 端 php-fpm 环境变量并 reload ($POOL_CONF)"
         else
@@ -455,9 +466,9 @@ case "${1:-}" in
         fi
         # ③ 写审计日志（不记录授权码明文）
         php -r "require_once '$WEB_ROOT/utils.php'; auditLog('smtp_pass_update', 'smtp', 'CLI 更新 SMTP 授权码（密钥不落盘，未记录明文）');" 2>/dev/null || true
-        # ④ 自动发送测试邮件验证新授权码（注入 YM_SMTP_PASS 走新值；复用统一 HTML 邮件模板）
+        # ④ 自动发送测试邮件验证新授权码（注入 YSM_SMTP_PASS 走新值；复用统一 HTML 邮件模板）
         echo "[3/3] 发送测试邮件..."
-        TEST_RESULT=$(YM_SMTP_PASS="$SMTP_PASS" php -r "
+        TEST_RESULT=$(YSM_SMTP_PASS="$SMTP_PASS" php -r "
             require_once '$WEB_ROOT/utils.php';
             \$cfg = loadSiteConfig();
             \$to = \$cfg['admin_email'] ?? '';
@@ -485,13 +496,16 @@ case "${1:-}" in
     deps)
         # v3.3.14/v4.5.0：一键补装功能依赖（内置兜底清单 php-gd + 缩略图缓存目录）；
         # 与 apply-update [4.9/6] 共用 ensure_env_deps（更新时按包内 deps 声明自动装）
-        [ "$(id -u)" -ne 0 ] && { echo "错误：deps 需 root 权限（sudo ym-admin deps）"; exit 1; }
+        [ "$(id -u)" -ne 0 ] && { echo "错误：deps 需 root 权限（sudo ysm-admin deps）"; exit 1; }
         echo "=== 环境依赖检查与补装（内置兜底清单：$REQUIRED_DEPS_FALLBACK） ==="
         ensure_env_deps
         ;;
 
     apply-update)
-        REQUEST_FILE="/tmp/ym-update-request.json"
+        # v5.0.0：--allow-unsigned 一次性受控引导开关（未部署签名公钥时放行首包，写审计日志）
+        ALLOW_UNSIGNED=0
+        for _a in "$@"; do [ "$_a" = "--allow-unsigned" ] && ALLOW_UNSIGNED=1; done
+        REQUEST_FILE="/tmp/ysm-update-request.json"
         if [ ! -f "$REQUEST_FILE" ]; then
             echo "错误：未找到更新请求文件"
             echo "请先在后台管理页面触发更新。"
@@ -523,9 +537,9 @@ case "${1:-}" in
             printf '{"status":"failed","from_version":"%s","to_version":"%s","channel":"%s","error":"%s","completed_at":%d}\n' \
                 "$FROM_VER" "$TO_VER" "$CHANNEL" "$reason_esc" "$now_ts" > "$REQUEST_FILE" 2>/dev/null || true
             chmod 666 "$REQUEST_FILE" 2>/dev/null || true
-            chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
-            rm -f /tmp/ym-update.lock
-            systemctl start ym-guard 2>/dev/null || true
+            chattr -R +i /opt/you-super-markdown/install-base/ 2>/dev/null || true
+            rm -f /tmp/ysm-update.lock
+            systemctl start ysm-guard 2>/dev/null || true
         }
 
         FROM_VER=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['from_version'] ?? '';")
@@ -534,14 +548,17 @@ case "${1:-}" in
         PKG_PATH=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['package_path'] ?? '';")
         PKG_URL=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['package_url'] ?? '';")
 
-        # v3.1.15：判定更新方式——PKG_PATH 非空且文件存在 → 后台外部上传更新包；否则 → 服务器命令更新（仓库下载）
-        # v3.2.0：在线更新选中的仓库包（package_url）单独判定为「在线包更新（仓库下载）」
+        # v3.1.15：判定更新方式——PKG_PATH 非空且文件存在 → 后台外部上传更新包；
+        # v3.2.0：在线更新选中的仓库包（package_url）→ 在线包更新（仓库下载）
+        # v5.0.0：仓库 archive 全量兼容通道已移除，必须由上传包或在线包提供更新源
         if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
             UPDATE_METHOD="外部上传更新包"
         elif [ -n "$PKG_URL" ]; then
             UPDATE_METHOD="在线包更新（仓库下载）"
         else
-            UPDATE_METHOD="服务器命令更新（仓库下载）"
+            echo "错误：更新请求未提供更新包（package_path / package_url 均为空）"
+            mark_failed "更新请求未提供更新包"
+            exit 1
         fi
 
         echo "  当前版本: v$FROM_VER"
@@ -567,7 +584,7 @@ case "${1:-}" in
 
         # 1. 备份
         echo "[1/6] 创建备份..."
-        BACKUP_DIR="/opt/you-markdown/backups"
+        BACKUP_DIR="/opt/you-super-markdown/backups"
         mkdir -p "$BACKUP_DIR"
         BACKUP_FILE="$BACKUP_DIR/pre-update-v${FROM_VER}-$(date +%s).tar.gz"
         tar -czf "$BACKUP_FILE" -C "$WEB_ROOT" --exclude='data' --exclude='.git' . 2>/dev/null
@@ -575,12 +592,12 @@ case "${1:-}" in
 
         # 2. 停守护
         echo "[2/6] 停止守护进程..."
-        systemctl stop ym-guard 2>/dev/null || true
+        systemctl stop ysm-guard 2>/dev/null || true
         sleep 1
 
         # 3. 解锁母本
         echo "[3/6] 解锁母本目录..."
-        chattr -R -i /opt/you-markdown/install-base/ 2>/dev/null || true
+        chattr -R -i /opt/you-super-markdown/install-base/ 2>/dev/null || true
 
         # 4. 应用更新
         echo "[4/6] 应用更新文件..."
@@ -589,13 +606,13 @@ case "${1:-}" in
         PKG_FILE=""
         PKG_TYPE="full"
         FILES_APPLIED=""
-        # v3.2.0：三种来源——后台上传包（PKG_PATH）/ 在线更新选中的仓库包（PKG_URL）/ 仓库 archive 全量（兼容）
+        # v5.0.0：两种来源——后台上传包（PKG_PATH）/ 在线更新选中的仓库包（PKG_URL）；仓库 archive 全量通道已移除
         if [ -n "$PKG_PATH" ] && [ -f "$PKG_PATH" ]; then
             echo "  使用上传的更新包: $PKG_PATH"
             PKG_FILE="$PKG_PATH"
         elif [ -n "$PKG_URL" ]; then
             echo "  下载在线更新包（全量/增量包）..."
-            PKG_FILE="/tmp/ym-update-download.tar.gz"
+            PKG_FILE="/tmp/ysm-update-download.tar.gz"
             HTTP_CODE=$(curl -sL -o "$PKG_FILE" -w '%{http_code}' "$PKG_URL" 2>/dev/null)
             if [ "$HTTP_CODE" != "200" ] || [ ! -s "$PKG_FILE" ]; then
                 echo "错误：下载失败 (HTTP ${HTTP_CODE:-无响应})"
@@ -640,42 +657,13 @@ case "${1:-}" in
                     fi
                 fi
             fi
-            # v3.2.0：非对称密钥签名验证（服务器部署公钥后强制，失败封闭；未部署公钥跳过兼容旧环境）
+            # v3.2.0：非对称密钥签名验证（v5.0.0 起失败封闭：未部署公钥即拒绝，除显式 --allow-unsigned 引导）
             if [ -n "$STAGE_DIR" ]; then
                 if ! verify_package_signature "$TMP_DIR"; then
                     rm -rf "$TMP_DIR"
                     mark_failed "更新包签名验证失败，已拒绝（可能被篡改）"
                     exit 1
                 fi
-            fi
-        else
-            REPO_URL=$(php -r "\$c = json_decode(@file_get_contents('$WEB_ROOT/app-config.json'), true); echo \$c['repo_url'] ?? '';" 2>/dev/null)
-            if [ -z "$REPO_URL" ]; then
-                echo "错误：未配置仓库地址（app-config.json 的 repo_url 为空）"
-                systemctl start ym-guard 2>/dev/null || true
-                exit 1
-            fi
-            echo "  从仓库下载更新包（archive 全量）..."
-            DOWNLOAD_URL="${REPO_URL%/}/archive/refs/tags/v${TO_VER}.tar.gz"
-            PKG_FILE="/tmp/ym-update-download.tar.gz"
-            HTTP_CODE=$(curl -sL -o "$PKG_FILE" -w '%{http_code}' "$DOWNLOAD_URL" 2>/dev/null)
-            if [ "$HTTP_CODE" != "200" ] || [ ! -s "$PKG_FILE" ]; then
-                echo "错误：下载失败 (HTTP ${HTTP_CODE:-无响应})"
-                rm -f "$PKG_FILE"
-                mark_failed "下载失败 (HTTP ${HTTP_CODE:-无响应})"
-                exit 1
-            fi
-            TMP_DIR=$(mktemp -d)
-            tar -xzf "$PKG_FILE" -C "$TMP_DIR" 2>/dev/null || {
-                echo "错误：更新包解压失败"
-                rm -rf "$TMP_DIR" "$PKG_FILE"
-                mark_failed "更新包解压失败"
-                exit 1
-            }
-            # 定位包含核心文件的顶层目录
-            SRC_DIR=$(find "$TMP_DIR" -mindepth 1 -maxdepth 2 \( -name index.php -o -name utils.php \) -exec dirname {} \; 2>/dev/null | head -1)
-            if [ -n "$SRC_DIR" ]; then
-                STAGE_DIR="$SRC_DIR"
             fi
         fi
         # 双保险：全量包必须含核心文件；增量包必须含 version.json（绝不使用 --delete 清空目标）
@@ -697,7 +685,7 @@ case "${1:-}" in
             # 导致 nginx（www-data）无法遍历目录 → 主页 403；统一先固定为 755 再同步
             chmod 755 "$STAGE_DIR" 2>/dev/null || true
             rsync -a --exclude='data/' --exclude='version.json' --exclude='manifest.json*' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
-            rsync -a --exclude='data/' --exclude='version.json' --exclude='manifest.json*' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
+            rsync -a --exclude='data/' --exclude='version.json' --exclude='manifest.json*' "$STAGE_DIR/" "/opt/you-super-markdown/install-base/" 2>/dev/null
         else
             if [ ! -f "$STAGE_DIR/index.php" ] && [ ! -f "$STAGE_DIR/utils.php" ]; then
                 echo "错误：全量更新源无效（缺少 index.php/utils.php），已中止，未修改任何文件"
@@ -710,7 +698,7 @@ case "${1:-}" in
             # v3.3.1-fix：同增量——先固定 STAGE_DIR 目录权限 755，防 rsync -a 覆盖目标目录为 700
             chmod 755 "$STAGE_DIR" 2>/dev/null || true
             rsync -a --delete --exclude='data/' --exclude='app-config.json' --exclude='manifest.json*' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
-            rsync -a --delete --exclude='data/' --exclude='app-config.json' --exclude='manifest.json*' "$STAGE_DIR/" "/opt/you-markdown/install-base/" 2>/dev/null
+            rsync -a --delete --exclude='data/' --exclude='app-config.json' --exclude='manifest.json*' "$STAGE_DIR/" "/opt/you-super-markdown/install-base/" 2>/dev/null
         fi
         # v3.2.0：文件已实际应用，此后失败触发自动回退（此前失败仅标记，文件未被修改）
         FILES_APPLIED="1"
@@ -726,29 +714,20 @@ case "${1:-}" in
         echo "  文件更新完成"
 
         # 4.4 同步运行中的守护进程与 CLI（安装时复制到 /opt 与 /usr/local/bin，更新时需一并覆盖）
-        if [ -f "$WEB_ROOT/ym-guard.py" ]; then
-            cp "$WEB_ROOT/ym-guard.py" /opt/you-markdown/ym-guard.py 2>/dev/null || true
-            chmod 700 /opt/you-markdown/ym-guard.py 2>/dev/null || true
+        if [ -f "$WEB_ROOT/ysm-guard.py" ]; then
+            cp "$WEB_ROOT/ysm-guard.py" /opt/you-super-markdown/ysm-guard.py 2>/dev/null || true
+            chmod 700 /opt/you-super-markdown/ysm-guard.py 2>/dev/null || true
         fi
-        if [ -f "$WEB_ROOT/ym-admin" ]; then
-            cp "$WEB_ROOT/ym-admin" /usr/local/bin/ym-admin 2>/dev/null || true
-            chmod +x /usr/local/bin/ym-admin 2>/dev/null || true
+        if [ -f "$WEB_ROOT/ysm-admin" ]; then
+            cp "$WEB_ROOT/ysm-admin" /usr/local/bin/ysm-admin 2>/dev/null || true
+            chmod +x /usr/local/bin/ysm-admin 2>/dev/null || true
         fi
 
-        # 4.5 JSON → SQLite 迁移（v2.5.0；幂等，有标记则跳过）
-        if [ -f "$WEB_ROOT/ym-migrate" ]; then
-            php "$WEB_ROOT/ym-migrate" 2>&1 || {
-                echo "错误：数据迁移失败，已中止"
-                rm -rf "$TMP_DIR" 2>/dev/null || true
-                mark_failed "数据迁移失败"
-                exit 1
-            }
-            # 确保 PHP-FPM（www-data）可写 SQLite 及 WAL/SHM 文件；data 目录组可写供 CLI 只读命令无 sudo 读取
-            chown -R www-data:www-data "$WEB_ROOT/data" 2>/dev/null || true
-            chmod 775 "$WEB_ROOT/data" 2>/dev/null || true
-            chmod 660 "$WEB_ROOT/data/ym.db" 2>/dev/null || true
-            echo "  数据迁移完成"
-        fi
+        # 确保 PHP-FPM（www-data）可写 SQLite 及 WAL/SHM 文件；data 目录组可写供 CLI 只读命令无 sudo 读取
+        # （v5.0.0：不再执行一次性 JSON→SQLite 迁移脚本；4.x 老库结构迁移请用 python3 ysm-migrate）
+        chown -R www-data:www-data "$WEB_ROOT/data" 2>/dev/null || true
+        chmod 775 "$WEB_ROOT/data" 2>/dev/null || true
+        chmod 660 "$WEB_ROOT/data/ysm.db" 2>/dev/null || true
 
         # 4.6 更新版本号到 web 并同步母本（v3.1.2：必须在 [5/6] 锁定母本前执行——
         # 否则 chattr +i 只读会导致 @copy 失败，母本 app-config.json 停留在旧版本，web↔母本 MD5 不一致）
@@ -758,7 +737,7 @@ case "${1:-}" in
                 \$c = json_decode(file_get_contents(\$cfgFile), true) ?: [];
                 \$c['version'] = '$TO_VER';
                 file_put_contents(\$cfgFile, json_encode(\$c, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
-                @copy(\$cfgFile, '/opt/you-markdown/install-base/app-config.json');
+                @copy(\$cfgFile, '/opt/you-super-markdown/install-base/app-config.json');
             }
         " 2>/dev/null
 
@@ -775,9 +754,9 @@ case "${1:-}" in
         fi
         # 核心文件 MD5 校验：web 与母本必须逐字节一致（排除 data/ 与签名元数据）
         HC_BAD=""
-        for HC_F in index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ym-admin ym-guard.py; do
+        for HC_F in index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ysm-admin ysm-guard.py; do
             HC_A=$(md5sum "$WEB_ROOT/$HC_F" 2>/dev/null | awk '{print $1}')
-            HC_B=$(md5sum "/opt/you-markdown/install-base/$HC_F" 2>/dev/null | awk '{print $1}')
+            HC_B=$(md5sum "/opt/you-super-markdown/install-base/$HC_F" 2>/dev/null | awk '{print $1}')
             if [ -z "$HC_A" ] || [ "$HC_A" != "$HC_B" ]; then
                 HC_BAD="$HC_BAD $HC_F"
             fi
@@ -839,7 +818,7 @@ case "${1:-}" in
 
         # 5. 锁定母本（更新包可能已覆盖 install-base；锁定防篡改）
         echo "[5/6] 锁定母本目录..."
-        chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
+        chattr -R +i /opt/you-super-markdown/install-base/ 2>/dev/null || true
 
         # 6. 重启全部服务 + 重启后复检（v4.6.0：更新完成 → 重启 nginx/php-fpm/守护全部服务 → 重启后验证主页可访问与功能正常 → 才标记完成并邮件）
         echo "[6/6] 重启全部服务并复检..."
@@ -854,18 +833,18 @@ case "${1:-}" in
         if systemctl list-unit-files nginx.service 2>/dev/null | grep -q nginx; then
             systemctl restart nginx 2>/dev/null && echo "  已重启 Nginx" || echo "  警告：Nginx 重启失败"
         fi
-        # 6.2 重启守护进程（更新包可能已更新 ym-guard.py，重启使新代码生效）
-        systemctl restart ym-guard 2>/dev/null && echo "  已重启守护进程" || echo "  警告：守护进程重启失败"
-        rm -f /tmp/ym-update.lock
+        # 6.2 重启守护进程（更新包可能已更新 ysm-guard.py，重启使新代码生效）
+        systemctl restart ysm-guard 2>/dev/null && echo "  已重启守护进程" || echo "  警告：守护进程重启失败"
+        rm -f /tmp/ysm-update.lock
         # 6.3 重启后复检：主页 200 + api 存活 + web↔母本 MD5 一致（任一失败 → 自动回滚 + 告警邮件）
         sleep 2
         RC_DOMAIN=$(get_domain)
         RC_HOME=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YM-HealthCheck/1.0' "https://$RC_DOMAIN/" 2>/dev/null || echo 000)
         RC_API=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YM-HealthCheck/1.0' "https://$RC_DOMAIN/api.php?action=csrf" 2>/dev/null || echo 000)
         RC_BAD=""
-        for RC_F in index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ym-admin ym-guard.py; do
+        for RC_F in index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ysm-admin ysm-guard.py; do
             RC_A=$(md5sum "$WEB_ROOT/$RC_F" 2>/dev/null | awk '{print $1}')
-            RC_B=$(md5sum "/opt/you-markdown/install-base/$RC_F" 2>/dev/null | awk '{print $1}')
+            RC_B=$(md5sum "/opt/you-super-markdown/install-base/$RC_F" 2>/dev/null | awk '{print $1}')
             if [ -z "$RC_A" ] || [ "$RC_A" != "$RC_B" ]; then
                 RC_BAD="$RC_BAD $RC_F"
             fi
@@ -883,14 +862,14 @@ case "${1:-}" in
         " 2>/dev/null
         # v3.1.0：收尾逻辑抽到顶部函数（自更新后 case 内联代码会混合解析失败）
         # v3.1.7：把 changelog（4.7a 已读取）传给收尾函数，更新通知邮件附带本次更新内容
-        # v3.1.15：把更新方式（外部上传更新包 / 服务器命令更新）传给收尾函数，邮件展示更新通道
+        # v3.1.15：把更新方式（外部上传更新包 / 在线包更新）传给收尾函数，邮件展示更新通道
         post_update_finish "$TO_VER" "$CHANNEL" "$FROM_VER" "$CHANGELOG_B64" "$UPDATE_METHOD"
         # 自更新已覆盖本脚本文件：立即退出，避免 bash 继续解析磁盘上的新内容导致混合语法错误
         exit 0
         ;;
 
     rollback)
-        BACKUP_DIR="/opt/you-markdown/backups"
+        BACKUP_DIR="/opt/you-super-markdown/backups"
         if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A "$BACKUP_DIR"/pre-update-*.tar.gz 2>/dev/null)" ]; then
             echo "错误：没有可用的备份"
             exit 1
@@ -925,21 +904,21 @@ case "${1:-}" in
         echo ""
 
         echo "[1/3] 停止守护进程..."
-        systemctl stop ym-guard 2>/dev/null || true
+        systemctl stop ysm-guard 2>/dev/null || true
         sleep 1
 
         # 解锁母本，恢复完成后重新锁定（避免 +i 只读导致 rsync 失败/母本与 web 不一致）
-        chattr -R -i /opt/you-markdown/install-base/ 2>/dev/null || true
+        chattr -R -i /opt/you-super-markdown/install-base/ 2>/dev/null || true
 
         echo "[2/3] 恢复文件..."
         tar -xzf "$SELECTED" -C "$WEB_ROOT" 2>/dev/null
-        rsync -a --delete --exclude='data/' "$WEB_ROOT/" "/opt/you-markdown/install-base/" 2>/dev/null
-        chattr -R +i /opt/you-markdown/install-base/ 2>/dev/null || true
+        rsync -a --delete --exclude='data/' "$WEB_ROOT/" "/opt/you-super-markdown/install-base/" 2>/dev/null
+        chattr -R +i /opt/you-super-markdown/install-base/ 2>/dev/null || true
         echo "  文件恢复完成"
 
         echo "[3/3] 重启守护进程..."
-        systemctl start ym-guard 2>/dev/null || true
-        rm -f /tmp/ym-update.lock
+        systemctl start ysm-guard 2>/dev/null || true
+        rm -f /tmp/ysm-update.lock
 
         echo ""
         echo "============================================"
@@ -948,7 +927,7 @@ case "${1:-}" in
         ;;
 
     hfish-panel)
-        PORTS_FILE="/opt/you-markdown/hfish-ports.conf"
+        PORTS_FILE="/opt/you-super-markdown/hfish-ports.conf"
         if [ ! -f "$PORTS_FILE" ]; then
             echo "Hfish 未安装或配置文件不存在"
             exit 1
@@ -972,7 +951,7 @@ case "${1:-}" in
     hfish-status)
         echo "=== Hfish 蜜罐状态 ==="
         echo ""
-        PORTS_FILE="/opt/you-markdown/hfish-ports.conf"
+        PORTS_FILE="/opt/you-super-markdown/hfish-ports.conf"
         if [ -f "$PORTS_FILE" ]; then
             source "$PORTS_FILE"
             echo "配置端口:"
@@ -994,7 +973,7 @@ case "${1:-}" in
     *)
         echo "You Super Markdown CLI 管理工具"
         echo ""
-        echo "用法: ym-admin <命令> [参数]"
+        echo "用法: ysm-admin <命令> [参数]"
         echo ""
         echo "命令:"
         echo "  login                    生成 OTP 管理入口"
@@ -1008,13 +987,13 @@ case "${1:-}" in
         echo "  challenge                 生成挑战码"
         echo "  notify <消息>              发送通知邮件到管理员（测试/更新/运维消息）"
         echo "  set-smtp-pass [--pass=授权码] 修改 SMTP 授权码（需 sudo；密钥文件 + php-fpm 环境变量双写，自动发测试邮件）"
-        echo "  apply-update              执行系统更新（完成后自动发通知邮件）"
+        echo "  apply-update [--allow-unsigned] 执行系统更新（完成后自动发通知邮件；--allow-unsigned 为一次性受控引导，未部署签名公钥时慎用）"
         echo "  deps                      检查并一键补装功能依赖（内置兜底清单，需 sudo；更新时自动按包内 deps 声明安装）"
         echo "  rollback                  回滚到备份版本"
         echo "  hfish-panel               建立 SSH 隧道访问 Hfish 管理面板"
         echo "  hfish-status              查看 Hfish 蜜罐状态"
         echo ""
         echo "环境变量:"
-        echo "  YM_WEB_ROOT               Web 根目录 (默认 /var/www/you-markdown)"
+        echo "  YSM_WEB_ROOT               Web 根目录 (默认 /var/www/you-super-markdown)"
         ;;
 esac

@@ -61,7 +61,7 @@ if (!empty($config['hide_default_paths'])) {
 
 $users = fetchAllUsers();
 $config = loadSiteConfig();
-$siteTitle = $config['site_title'] ?? 'You Markdown';
+$siteTitle = $config['site_title'] ?? 'You Super Markdown';
 $currentUser = $_SESSION['cmt_user'] ?? [];
 $myId = $currentUser['id'] ?? '';
 $msg = $_GET['msg'] ?? '';

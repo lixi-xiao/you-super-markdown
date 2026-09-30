@@ -459,7 +459,7 @@ $richZipErrMsg = [
     'file_too_large' => 'ZIP 内单个文件超过 40MB，已拒绝导入',
     'aborted' => '导入中止（解压超限）',
 ][$richZipErr] ?? '';
-$siteTitle = loadSiteConfig()['site_title'] ?? 'You Markdown';
+$siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 ?>
 <!DOCTYPE html>
 <html lang="zh-CN" data-admin="station">

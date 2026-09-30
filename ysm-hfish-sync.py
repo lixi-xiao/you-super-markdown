@@ -6,8 +6,8 @@
   3. 攻击总次数(attack_cnt)达到阈值(默认10)的 IP 自动封禁（登录/注册/评论）
      - 内网/私有 IP 默认豁免（hfish_ban_skip_private）
 用法：
-  python3 ym-hfish-sync.py            # 同步快照 + 执行封禁检查
-  python3 ym-hfish-sync.py --check    # 仅检查（输出状态）
+  python3 ysm-hfish-sync.py            # 同步快照 + 执行封禁检查
+  python3 ysm-hfish-sync.py --check    # 仅检查（输出状态）
 """
 import json
 import os
@@ -17,10 +17,10 @@ import datetime
 import subprocess
 import time
 
-WEB_ROOT = os.environ.get('YM_WEB_ROOT', '/var/www/you-markdown')
+WEB_ROOT = os.environ.get('YSM_WEB_ROOT', '/var/www/you-super-markdown')
 APP_CONFIG = os.path.join(WEB_ROOT, 'app-config.json')
 SNAPSHOT_FILE = os.path.join(WEB_ROOT, 'data', '.hfish_snapshot.json')
-DB_FILE = os.path.join(WEB_ROOT, 'data', 'ym.db')
+DB_FILE = os.path.join(WEB_ROOT, 'data', 'ysm.db')
 
 
 def load_config():

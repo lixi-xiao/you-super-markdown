@@ -238,9 +238,10 @@ function db_init_schema($pdo) {
         PRIMARY KEY (article, ip, day)
     )');
     // v4.0.0：评论邮件订阅设置（key 复用 config 表，无需新表）
-    // v5.0.0：写入 schema 版本标记（s=5.0.0，epoch=1；迁移器据此判断是否需要升级）
+    // v5.0.0：写入 schema 版本标记（s=5.0.0，epoch=2；迁移器据此判断是否需要升级）
+    // v5.0.0 P7（审计链加固）：全新安装即使用新 HMAC 链，故 epoch=2（epoch1=旧 sha256 链，epoch2=新 HMAC 链）
     $pdo->exec("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '5.0.0')");
-    $pdo->exec("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('epoch', '1')");
+    $pdo->exec("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('epoch', '2')");
 }
 
 /**

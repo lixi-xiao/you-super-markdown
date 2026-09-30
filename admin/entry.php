@@ -82,7 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['cmt_fp'] = computeSessionFp($pending['fp'] ?? $reqFp);
                     $_SESSION['cmt_tv'] = $newTV;
                     $_SESSION['cmt_login_ts'] = time();
-                    clearRefreshCookie(); // v4.6.0：超管无 refresh——清掉旧 ym_rt，杜绝续期绕过 30 分钟限制
+                    clearRefreshCookie(); // v4.6.0：超管无 refresh——清掉旧 ysm_rt，杜绝续期绕过 30 分钟限制
                     $_SESSION['cmt_user'] = [
                         'id' => $superAdmin['id'],
                         'account' => $superAdmin['account'] ?? '',
@@ -156,7 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
                     $_SESSION['cmt_tv'] = $newTV;
                     $_SESSION['cmt_login_ts'] = time();
-                    clearRefreshCookie(); // v4.6.0：超管无 refresh——清掉旧 ym_rt，杜绝续期绕过 30 分钟限制
+                    clearRefreshCookie(); // v4.6.0：超管无 refresh——清掉旧 ysm_rt，杜绝续期绕过 30 分钟限制
                     $_SESSION['cmt_user'] = [
                         'id' => $superAdmin['id'],
                         'account' => $superAdmin['account'] ?? '',
@@ -196,7 +196,7 @@ if (!$needDeviceVerify && is_array($pendingNow)
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>管理员验证 - You Markdown</title>
+<title>管理员验证 - You Super Markdown</title>
 <link rel="stylesheet" href="/css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
 </head>
 <body class="entry-page">

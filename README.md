@@ -4,7 +4,7 @@
 
 ## 这个项目是怎么来的
 
-它从 You Markdown 重新开发而来。You Markdown 本身是个很顺手的博客程序，但用久了就会发现一些问题：权限只有管理员和普通用户两级，一个人又当站长又当作者，管起来很别扭；更新要靠手工覆盖文件，出错了也没个回头路。我们把这个项目拿过来，按照自己跑站的实际需求重新做了一遍——权限拆细、后台分开、更新做成一条完整的流程，这才有了 You Super Markdown。可以说它是站在 You Markdown 肩膀上长大的，但里里外外已经是另一套东西了。
+本项目脱胎于原项目 **You Markdown** 并重新开发而来；**You Super Markdown 与原项目（You Markdown）相互独立**，两者不共享代码、不共享发布通道，各自独立演进。You Markdown 本身是个很顺手的博客程序，但用久了就会发现一些问题：权限只有管理员和普通用户两级，一个人又当站长又当作者，管起来很别扭；更新要靠手工覆盖文件，出错了也没个回头路。我们按照自己跑站的实际需求把它重新做了一遍——权限拆细、后台分开、更新做成一条完整的流程，这才有了 You Super Markdown。它借鉴了 You Markdown 的设计思路，但里里外外已经是另一套东西了。
 
 ## 它能干什么
 
@@ -62,7 +62,7 @@
 把源码放到服务器上（比如 `/root/you-super-markdown`），然后以 root 执行：
 
 ```bash
-sudo bash ym-install.sh
+sudo bash ysm-install.sh
 ```
 
 脚本会**自动**完成：装依赖 → 部署文件 → 创建管理员 → 配置 Nginx → 申请 HTTPS 证书 → 部署守护进程 → 配置防火墙 → 安装命令行管理工具。中途会**交互问你几个问题**：
@@ -70,7 +70,7 @@ sudo bash ym-install.sh
 | 提问 | 说明 | 示例 |
 |---|---|---|
 | 域名 | 必填，证书和访问地址都靠它 | `yousupermarkdown.example.com` |
-| Web 根目录 | 网站文件放哪 | 默认 `/var/www/you-markdown`，回车即可 |
+| Web 根目录 | 网站文件放哪 | 默认 `/var/www/you-super-markdown`，回车即可 |
 | 管理员邮箱 | 告警/通知邮件收件人 | 可留空，之后在后台补 |
 | 注册验证模式 | production（默认，注册需验证）/ test | 回车即可 |
 | 是否安装 Hfish 蜜罐 | 可选的安全诱饵组件 | 建议 Y |
@@ -84,14 +84,14 @@ sudo bash ym-install.sh
 一次性密码: 一串随机密码
 ```
 
-这几行也会存到服务器 `/root/ym-credentials.txt`（root 才能读），丢了随时能找回。
+这几行也会存到服务器 `/root/ysm-credentials.txt`（root 才能读），丢了随时能找回。
 
 ### 首次登录
 
 超管没有固定密码，登录入口是动态生成的。进后台前先在 SSH 里生成：
 
 ```bash
-sudo ym-admin login
+sudo ysm-admin login
 ```
 
 会输出一个入口 URL 和一个一次性密码（10 分钟有效、只能用一次）。浏览器打开 URL、输入密码，就进超管后台了。以后每次登录都这样，用完再生成，随用随拿。
@@ -99,34 +99,34 @@ sudo ym-admin login
 ### 部署后自检
 
 ```bash
-sudo systemctl status ym-guard    # 守护进程状态（应为 active）
-ym-admin status                   # 服务整体状态
-ym-admin log-verify               # 审计日志校验（应为通过）
+sudo systemctl status ysm-guard    # 守护进程状态（应为 active）
+ysm-admin status                   # 服务整体状态
+ysm-admin log-verify               # 审计日志校验（应为通过）
 ```
 
-## 命令行工具（ym-admin）
+## 命令行工具（ysm-admin）
 
-装完系统后，服务器上多了一个 `ym-admin` 命令，所有日常维护都能在 SSH 里搞定。记住一条规则：**读操作用 `ym-admin xxx`，写操作前面加 `sudo`**。
+装完系统后，服务器上多了一个 `ysm-admin` 命令，所有日常维护都能在 SSH 里搞定。记住一条规则：**读操作用 `ysm-admin xxx`，写操作前面加 `sudo`**。
 
 | 命令 | 作用 | 例子 |
 |---|---|---|
-| `sudo ym-admin login` | 生成超管登录入口 + 一次性密码 | 每次登录前跑 |
-| `sudo ym-admin create-station <名称>` | 创建站长账号 | `sudo ym-admin create-station 张三` |
-| `sudo ym-admin create-author <名称>` | 创建写作者账号 | `sudo ym-admin create-author 李四` |
-| `sudo ym-admin revoke-user <用户ID>` | 吊销某个用户 | 后台「人员管理」可查 ID |
-| `sudo ym-admin backup` | 手动备份数据 | 出大事前先备一份 |
-| `ym-admin status` | 查看服务/守护状态 | 只读 |
-| `ym-admin log-verify` | 校验审计日志有没有被动手脚 | 只读 |
-| `sudo ym-admin audit-report` | 发送每日审计报告邮件 | 服务器每天凌晨自动跑 |
-| `sudo ym-admin challenge` | 生成敏感操作确认码 | 更新前用 |
-| `sudo ym-admin apply-update` | 执行更新（最后一步） | 见下方更新流程 |
-| `sudo ym-admin rollback` | 回滚到上一个备份 | 更新翻车时用 |
+| `sudo ysm-admin login` | 生成超管登录入口 + 一次性密码 | 每次登录前跑 |
+| `sudo ysm-admin create-station <名称>` | 创建站长账号 | `sudo ysm-admin create-station 张三` |
+| `sudo ysm-admin create-author <名称>` | 创建写作者账号 | `sudo ysm-admin create-author 李四` |
+| `sudo ysm-admin revoke-user <用户ID>` | 吊销某个用户 | 后台「人员管理」可查 ID |
+| `sudo ysm-admin backup` | 手动备份数据 | 出大事前先备一份 |
+| `ysm-admin status` | 查看服务/守护状态 | 只读 |
+| `ysm-admin log-verify` | 校验审计日志有没有被动手脚 | 只读 |
+| `sudo ysm-admin audit-report` | 发送每日审计报告邮件 | 服务器每天凌晨自动跑 |
+| `sudo ysm-admin challenge` | 生成敏感操作确认码 | 更新前用 |
+| `sudo ysm-admin apply-update` | 执行更新（最后一步） | 见下方更新流程 |
+| `sudo ysm-admin rollback` | 回滚到上一个备份 | 更新翻车时用 |
 
 ## 更新与回滚
 
 系统更新有两条路：
 
-1. **在线更新**：后台「在线更新」点检查更新，如果仓库发布了新版本，会展示**全量包 / 增量包**两种选择（全量适合大版本，增量小且快）；选定后 SSH 里执行 `sudo ym-admin apply-update` 完成升级。
+1. **在线更新**：后台「在线更新」点检查更新，如果仓库发布了新版本，会展示**全量包 / 增量包**两种选择（全量适合大版本，增量小且快）；选定后 SSH 里执行 `sudo ysm-admin apply-update` 完成升级。
 2. **手动上传**：后台「手动更新」上传更新包（zip 或 tar.gz），同样用 `apply-update` 执行。
 
 不管哪条路，流程都是：**备份 → 停守护 → 应用文件 → 重启守护 → 记日志**，全程自动。
@@ -135,7 +135,7 @@ ym-admin log-verify               # 审计日志校验（应为通过）
 
 **⚠️ 关于密钥：没有私钥（密码）无法自行更新**（v3.2.4 起明确）：
 - 更新包签名的**私钥只有发包人持有**，本仓库、GitHub Releases、服务器上都**不包含私钥**；仓库里没有任何 `.pem` / `.key` 密钥文件。
-- 初次部署请使用官方发布的**初始化安装包**（`*-install.tar.gz`），解压后执行 `sudo bash ym-install.sh` 完成安装。
+- 初次部署请使用官方发布的**初始化安装包**（`*-install.tar.gz`），解压后执行 `sudo bash ysm-install.sh` 完成安装。
 - 部署后的**每次升级**只能使用**官方签名包**（`*-full.tar.gz` / `*-inc.tar.gz`）：通过后台「在线更新」从 GitHub Releases 拉取，或「手动更新」上传官方包。
 - 自行改动源码、拼装自制 zip 包想自己更新？**不行**——没有私钥签名的包会被服务器**拒绝应用**（签名校验失败，失败封闭），这是签名防篡改体系的预期行为，不是故障。
 
@@ -151,13 +151,13 @@ ym-admin log-verify               # 审计日志校验（应为通过）
 - **公告筛选取消 + 更新健康检查（v3.3.4）**：首页公告区块下方筛选条取消（公告数量少、筛公告意义不大，顶部分类栏即可筛文章；公告标签改纯展示）；更新完成后自动健康检查——主页必须返回 200 且 web↔母本核心文件 MD5 一致，否则自动回滚并通知管理员（修复此前「文件应用成功但站点实际不可用」不触发回滚的问题）。
 - **上传触发备份 + 单篇篡改还原（v3.3.5）**：①上传新文章（纯 MD / 富媒体压缩包 / 新建编辑）成功后，守护进程 **10 秒内自动备份文章**（时间戳命名、按超管配置保留 N 份轮换，不再「当天已有包就跳过」导致备份缺新文章）；②**单篇篡改自动还原**——仅当文章首行 `<!--META-->` 解析失败（被直接改文件/抹掉 META 头）**且**该文章在备份中标记 hidden（系统文章）时，从最新备份还原该单篇；正常编辑总是生成合法 META，永不触发，不会误伤站长正常更新文章；③超管后台「自动备份配置」新增两个开关（上传触发立即备份 / 单篇篡改还原），状态区展示最近触发与还原记录。
 - **公告变更即时备份（v3.3.6）**：站长后台发布/编辑公告（含 `.md` 上传导入的正文，正文存数据库）后，守护进程 **10 秒内同时备份数据库 + 文章**——公告正文此前只靠 30 分钟周期 DB 备份，现与文章变更走同一即时备份标记，篡改/误删后随时有最新还原点；全新安装的配置模板同步补全两个备份开关，开箱即完整。
-- **CLI 快捷修改 SMTP 授权码（v3.3.7）**：`sudo ym-admin set-smtp-pass`（或 `--pass=授权码`）一条命令完成——同时更新 root 密钥文件与 php-fpm 环境变量并 reload，改完自动发测试邮件验证，无需再手动改两处；写审计日志且不落盘授权码明文。**v3.3.8 修复**：测试邮件复用统一 HTML 邮件模板（与通知/告警同款设计）。
+- **CLI 快捷修改 SMTP 授权码（v3.3.7）**：`sudo ysm-admin set-smtp-pass`（或 `--pass=授权码`）一条命令完成——同时更新 root 密钥文件与 php-fpm 环境变量并 reload，改完自动发测试邮件验证，无需再手动改两处；写审计日志且不落盘授权码明文。**v3.3.8 修复**：测试邮件复用统一 HTML 邮件模板（与通知/告警同款设计）。
 - **站长后台日志分页 + 搜索（v3.3.9）**：站长后台「封禁日志」三个只读列表（封禁/登录/越权）与超管后台一致支持**分页 + 关键词搜索**；全部分页默认**每页 10 条**（可切 20/50/100）；`renderPager` 抽为 utils.php 公用函数供两后台复用。
 - **手机版后台背景类型按钮优化（v3.3.10）**：站长/超管后台「网站背景」的三个类型按钮（无背景/上传图片/API 获取）在手机端改为与「公告可视范围」同款的**单列紧凑横向布局**（图标左 + 文字右，整行可点），不再 3 卡 2 列竖排挤压；桌面端布局不变。
 - **公告评论彻底关闭（v3.3.11）**：公告（更新历史）作为单向通知，阅读页**不再显示评论区、也不能发表评论**（前端隐藏 + 后端双重拦截），已存在的公告评论一并清除。
 - **首页加载加速（v3.3.12）**：首页文章卡片封面改为**缩略图**（宽 640px 自动压缩 + 磁盘缓存 + 一年强缓存），不再加载 MB 级原图——图片多时首页打开明显变快；点击进入文章仍显示原始高清图。图片未变时缩略图自动复用，无需清理。
 - **更新自动补环境（v3.3.13）**：系统更新完成后**自动检测并补装缩略图依赖**（php-gd 扩展 + 缓存目录），缺什么装什么、装完即生效——其他部署者走更新包后功能无需手动配置，不再出现"装上了但没生效"。
-- **一键补依赖命令（v3.3.14）**：新增 `sudo ym-admin deps`——随时检查并补装功能依赖（php-gd + 缓存目录，装完自动重启生效）；更新完成时如检测到缺失会自动提示该命令，任何场景都能快速启用功能。
+- **一键补依赖命令（v3.3.14）**：新增 `sudo ysm-admin deps`——随时检查并补装功能依赖（php-gd + 缓存目录，装完自动重启生效）；更新完成时如检测到缺失会自动提示该命令，任何场景都能快速启用功能。
 - **评论区根评论分页（v3.3.15）**：文章评论区默认**每页 20 条**根评论分页展示——上一页/页码/下一页 + 总数信息，回复随根评论整棵展示；发新评论/回复后自动回到第 1 页。评论再多页面也保持流畅。
 - **公告字数显示修复（v3.3.15 紧急修复公告）**：首页公告卡片显示字数、但点进公告（关联文章详情显示 "0 字" / 纯文字公告弹窗不显示）的问题修复——公告关联文章与弹窗均正常展示真实字数。
 - **回复前 5 条预览（v3.3.16）**：评论区回复展开后默认只显示前 5 条，更多点「查看全部」按需加载——大量回复也不刷屏。
@@ -171,7 +171,7 @@ ym-admin log-verify               # 审计日志校验（应为通过）
 
 ## 常见问题
 
-**忘了管理入口？** 跑 `sudo ym-admin login` 重新生成，10 分钟有效，用完再生成。
+**忘了管理入口？** 跑 `sudo ysm-admin login` 重新生成，10 分钟有效，用完再生成。
 
 **升级后网站标题没变？** 正常。标题存在数据库里，更新包不碰数据。去超管后台「系统配置」改一下就好。
 
@@ -185,24 +185,24 @@ ym-admin log-verify               # 审计日志校验（应为通过）
 
 | 来源 | 位置 | 说明 |
 |---|---|---|
-| ① 环境变量（推荐） | php-fpm pool 配置 `env[YM_SMTP_PASS]` | root 只读、Web 端不可见，Web 发信优先读它 |
-| ② config 表密文（兜底） | `data/ym.db` config 表 `smtp_pass` | AES-256-GCM 加密存储（`gcm:` 前缀，密钥由独立应用密钥派生），仅未配置环境变量时生效，供旧部署平滑过渡 |
-| ③ 服务器密钥文件 | `/opt/you-markdown/secrets/smtp_pass` | root 0600，CLI（ym-admin）与守护进程告警场景使用 |
+| ① 环境变量（推荐） | php-fpm pool 配置 `env[YSM_SMTP_PASS]` | root 只读、Web 端不可见，Web 发信优先读它 |
+| ② config 表密文（兜底） | `data/ysm.db` config 表 `smtp_pass` | AES-256-GCM 加密存储（`gcm:` 前缀，密钥由独立应用密钥派生），仅未配置环境变量时生效，供旧部署平滑过渡 |
+| ③ 服务器密钥文件 | `/opt/you-super-markdown/secrets/smtp_pass` | root 0600，CLI（ysm-admin）与守护进程告警场景使用 |
 
 后台「邮件设置」只允许修改 **SMTP 服务器 / 端口 / 发信账号 / 发件人 / 加密方式**，并显示当前授权码来源状态（环境变量 ✅ / config 密文 ⚠️ / 密钥文件 ✅ / 未配置 ❌）；**授权码本身不可见、不可在后台修改**。
 
 **修改授权码**需在服务器上操作（推荐方式）：
 
 ```bash
-# 方式一：改 php-fpm pool 配置中的 env[YM_SMTP_PASS] 后重载（Web 发信立即生效）
-sudo nano /etc/php/8.3/fpm/pool.d/www.conf   # 找到 env[YM_SMTP_PASS] = "旧码"，换成新码
+# 方式一：改 php-fpm pool 配置中的 env[YSM_SMTP_PASS] 后重载（Web 发信立即生效）
+sudo nano /etc/php/8.3/fpm/pool.d/www.conf   # 找到 env[YSM_SMTP_PASS] = "旧码"，换成新码
 sudo systemctl reload php8.3-fpm
 
 # 方式二：写 root 密钥文件（CLI/守护进程告警场景；Web 端仍优先环境变量）
-sudo tee /opt/you-markdown/secrets/smtp_pass <<< "新授权码"
+sudo tee /opt/you-super-markdown/secrets/smtp_pass <<< "新授权码"
 ```
 
-安装时（`ym-install.sh`）交互填写的发信账号 + 授权码会自动写入 php-fpm 环境变量与密钥文件，后台无需再填。
+安装时（`ysm-install.sh`）交互填写的发信账号 + 授权码会自动写入 php-fpm 环境变量与密钥文件，后台无需再填。
 
 ## 关于代码仓库
 

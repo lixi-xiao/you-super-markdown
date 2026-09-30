@@ -12,3 +12,139 @@
   html { -webkit-text-size-adjust: 100%; }
   body { background: var(--bg); color: var(--text); }
 }
+
+/* ============================================================================
+   P2-1：首页外壳（杂志式主副栏气质 · 大圆角 / 柔阴影 / 清晰层级）
+   做法：只在此追加"新外壳"组件类，不改任何 fetch 契约、不改旧 ID/类名。
+   生效原理：本文件在 index.php 中先于 style.css 加载；为在（后加载的）style.css
+   旧规则之上生效，新规则统一以「壳容器 ID」作前缀（ID 权重 > 类权重），
+   因此无需改写 style.css，也无需触碰 js/main.js 的 JS 钩子。
+   保持原样：卡片背景、背景图机制、封面水墨渐隐遮罩(.doc-cover / .ann-card-cover)、
+   弹窗、音乐播放器外观；本次不新增任何 backdrop-filter（玻璃拟态）。
+   ============================================================================ */
+@layer components {
+  /* ── 顶部栏（品牌 / 右侧图标） ───────────────────────────── */
+  #topBar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  #topBar .brand {
+    color: var(--text);
+    font-size: 1.02rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  #topBar .header-right { gap: 4px; }
+  #topBar .icon-btn { border-radius: 12px; }
+
+  /* ── 首页区块节奏（公告区与下方内容的主副栏间距） ────────── */
+  #announcementSection { margin-bottom: 26px; }
+
+  /* ── 分类栏 / 标签云 ─────────────────────────────────────── */
+  #categoryBar.category-bar {
+    padding: 10px 12px;
+    border-radius: 18px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+  #categoryBar .category-bar-left { gap: 8px; }
+  #categoryBar .category-bar-right { gap: 8px; }
+  #categoryBar .category-bar-item {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  #categoryBar .category-bar-item.active {
+    box-shadow: 0 6px 16px -6px hsla(var(--accent-hue), var(--accent-sat), 50%, 0.55);
+  }
+  #categoryBar .category-bar-count { font-weight: 700; }
+  #categoryBar .tag-cloud-row { padding-top: 10px; }
+  #categoryBar .tag-cloud-item { padding: 4px 12px; border-radius: 999px; }
+
+  /* ── 卡片网格 ───────────────────────────────────────────── */
+  #cardsGrid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 22px;
+  }
+  #cardsGrid .doc-card {
+    padding: 18px 20px;
+    gap: 8px;
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+  }
+  #cardsGrid .doc-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 18px 40px -14px rgba(0, 0, 0, 0.22);
+  }
+  #cardsGrid .doc-card .card-title {
+    font-size: 1.22em;
+    font-weight: 800;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+  #cardsGrid .doc-card .card-meta { gap: 10px; font-size: 0.8em; }
+  #cardsGrid .doc-card .card-excerpt {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    font-size: 0.92em;
+    line-height: 1.65;
+  }
+  #cardsGrid .doc-card .tag {
+    padding: 3px 10px;
+    @apply rounded-full font-semibold;
+  }
+
+  /* ── 公告区（外框；封面遮罩/衬底保持原样，不动 .ann-card-media 与 .ann-card-cover） ── */
+  #announcementSection .ann-header {
+    padding: 10px 16px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  #announcementSection .ann-header-icon { background: var(--accent); color: #fff; }
+  #announcementSection .ann-list { gap: 16px; }
+  #announcementSection .ann-card { border-radius: 20px; box-shadow: var(--shadow); }
+  #announcementSection .ann-card[data-file]:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-md);
+  }
+  #announcementSection .ann-card-left { padding: 22px 24px; gap: 12px; }
+  #announcementSection .ann-card-title {
+    font-size: 1.24em;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+  }
+  #announcementSection .ann-card-summary { font-size: 0.94em; line-height: 1.75; }
+
+  /* ── 归档视图 ───────────────────────────────────────────── */
+  #archiveView .archive-group { margin-bottom: 26px; }
+  #archiveView .archive-year {
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    font-size: 1.15em;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+  }
+  #archiveView .archive-items { border-radius: 18px; box-shadow: var(--shadow); }
+  #archiveView .archive-item { padding: 14px 18px; }
+  #archiveView .archive-item-title { font-size: 0.95em; font-weight: 600; }
+
+  /* ── 移动端：单列 + 紧凑，杜绝横向溢出 ──────────────────── */
+  @media (max-width: 640px) {
+    #cardsGrid { grid-template-columns: 1fr; gap: 16px; }
+    #cardsGrid .doc-card { padding: 16px; border-radius: 16px; }
+    #categoryBar.category-bar { padding: 8px 10px; border-radius: 14px; }
+    #announcementSection .ann-card-left { padding: 16px; }
+    #announcementSection .ann-card-title { font-size: 1.08em; }
+    #archiveView .archive-item { padding: 12px 14px; }
+  }
+}

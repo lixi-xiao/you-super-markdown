@@ -876,6 +876,8 @@ if ($action === 'rss_guide') {
     <link rel="stylesheet" href="vendor/highlight-atom-one-light.min.css" id="hljsTheme">
     <script src="vendor/highlight.min.js" defer></script>
     <script src="vendor/qrcode.min.js" defer></script>
+    <!-- v5.1.0 P2-1：Tailwind 外壳样式（先于 style.css 加载，旧样式仍作兜底覆盖） -->
+    <link rel="stylesheet" href="/css/tw.min.css?v=<?= @filemtime(__DIR__ . '/css/tw.min.css') ?>">
     <link rel="stylesheet" href="css/style.css?v=<?= filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
 <?php
@@ -886,7 +888,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
 ?>
 <body data-guest-comments="<?= !empty($siteConf['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($siteConf['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($siteConf['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($bgApi) ?>" data-bg-blur="<?= !empty($siteConf['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($siteConf['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($siteConf['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($siteConf['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($siteConf['music_auto_play'] ?? '') ?>" data-bg-music="<?= (!empty($siteConf['bg_music_enabled']) && is_file(__DIR__ . '/data/bgm/background.mp3')) ? '1' : '0' ?>">
 <header class="top-bar" id="topBar">
-    <div class="header-left"><a href="./" class="brand" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($siteHeading) ?></a></div>
+    <div class="header-left"><a href="./" class="brand truncate max-w-[40vw] sm:max-w-none" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($siteHeading) ?></a></div>
     <div class="header-right">
         <!-- v4.1.0：RSS 订阅入口（点击进友好引导页，不再直接弹 XML；阅读器自动发现仍走 ?action=rss） -->
         <a class="icon-btn rss-btn" id="btnRss" title="RSS 订阅" href="/index.php?action=rss_guide" target="_blank" rel="noopener" aria-label="RSS 订阅">
@@ -992,7 +994,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
     <div class="color-panel-content"><div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-weight:600;">选择主题色</span><button class="color-reset-btn" id="colorResetBtn">重置</button></div><input type="range" min="0" max="360" value="220" class="hue-slider" id="hueSlider"></div>
 </div>
 <main class="main-container" id="mainContainer">
-    <div id="homeView"><div class="category-bar" id="categoryBar"></div><!-- v3.1.6：公告卡片区块（有公告才显示） --><div class="announcement-section" id="announcementSection"></div><div class="cards-grid" id="cardsGrid"></div><!-- v4.0.0：归档视图（按年月分组；默认隐藏，点分类栏「归档」切换） --><div class="archive-view" id="archiveView" style="display:none"></div><div class="empty-state" id="emptyHome" style="display:none;">📭 暂无文档</div></div>
+    <div id="homeView"><div class="category-bar" id="categoryBar"></div><!-- v3.1.6：公告卡片区块（有公告才显示） --><div class="announcement-section" id="announcementSection"></div><div class="cards-grid" id="cardsGrid"></div><!-- v4.0.0：归档视图（按年月分组；默认隐藏，点分类栏「归档」切换） --><div class="archive-view" id="archiveView" style="display:none"></div><div class="empty-state py-16 text-center text-ink-3" id="emptyHome" style="display:none;">📭 暂无文档</div></div>
     <div class="reading-view" id="readingView">
         <div class="markdown-body" id="markdownBody"></div>
         <div class="cmt-capsule-section" id="commentSection" style="display:none;">

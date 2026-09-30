@@ -178,7 +178,15 @@ function ysmShareRenderMeta($m) {
     echo '    <meta property="og:site_name" content="' . $e($m['site']) . '">' . "\n";
     echo '    <meta property="og:description" content="' . $e($m['desc']) . '">' . "\n";
     echo '    <meta property="og:url" content="' . $e($m['url']) . '">' . "\n";
-    if (!empty($m['image'])) echo '    <meta property="og:image" content="' . $e($m['image']) . '">' . "\n";
+    if (!empty($m['image'])) {
+        echo '    <meta property="og:image" content="' . $e($m['image']) . '">' . "\n";
+        // v5.1.0：社交平台（QQ 等）卡片渲染提示；封面池图固定 960×540，另有 alt 提升可读性
+        if (strpos((string)$m['image'], '/cover.php') !== false) {
+            echo '    <meta property="og:image:width" content="960">' . "\n";
+            echo '    <meta property="og:image:height" content="540">' . "\n";
+        }
+        echo '    <meta property="og:image:alt" content="' . $e($m['title']) . '">' . "\n";
+    }
     echo '    <meta name="twitter:card" content="summary_large_image">' . "\n";
     echo '    <meta name="twitter:title" content="' . $e($m['title']) . '">' . "\n";
     echo '    <meta name="twitter:description" content="' . $e($m['desc']) . '">' . "\n";
@@ -854,10 +862,11 @@ if ($action === 'rss_guide') {
     </script>
     <!-- v4.0.0：RSS 订阅（浏览器可发现） -->
     <link rel="alternate" type="application/rss+xml" title="<?= htmlspecialchars($siteHeading) ?> RSS" href="/index.php?action=rss">
-    <title><?= htmlspecialchars($siteHeading) ?></title>
+    <?php $__ysmCtx = ysmShareContext(); /* v5.1.0：一次取值，<title> 与 og 复用 */ ?>
+    <title><?= htmlspecialchars($__ysmCtx['type'] === 'article' && $__ysmCtx['title'] !== '' ? $__ysmCtx['title'] : $siteHeading) ?></title>
     <!-- v3.1.4：链接解析/分享预览卡片使用自定义站名（微信/QQ/Telegram 等读取 og 标签） -->
     <!-- v5.0.0：按请求服务端渲染分享卡片（站点模式 / 文章模式），补齐 og:image/og:url 与 Twitter Card -->
-    <?php ysmShareRenderMeta(ysmShareContext()); ?>
+    <?php ysmShareRenderMeta($__ysmCtx); ?>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>" type="image/svg+xml">
     <meta name="description" content="一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器">
     <!-- v4.2.2：mermaid 3.3MB 不再放 <head> 阻塞首屏（render-blocking），改为正文/公告出现 ```mermaid 时按需动态加载（见 js/main.js ensureMermaid）；marked/highlight/qrcode 加 defer 不阻塞首屏渲染 -->

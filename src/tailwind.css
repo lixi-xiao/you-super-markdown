@@ -28,8 +28,16 @@
     background: var(--surface);
     border-bottom: 1px solid var(--border);
     box-shadow: var(--shadow-sm);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
+  }
+  /* ── P3：顶栏滚动边界（js/ui.js 滚动时给 #topBar 加 is-scrolled） ── */
+  #topBar.is-scrolled {
+    box-shadow: var(--shadow-md);
+    border-bottom-color: var(--border);
+  }
+  /* ── P3：键盘焦点环（js/ui.js 在 Tab 导航时给 <html> 加 ys-kbd-nav） ── */
+  .ys-kbd-nav :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   #topBar .brand {
     color: var(--text);
@@ -107,8 +115,6 @@
     color: var(--accent);
     font-weight: 800;
     letter-spacing: 0.02em;
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
   }
   #announcementSection .ann-header-icon { background: var(--accent); color: #fff; }
   #announcementSection .ann-list { gap: 16px; }

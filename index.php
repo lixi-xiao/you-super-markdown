@@ -1288,6 +1288,8 @@ window.YSM_FILE = <?= json_encode($_GET['file'] ?? '', JSON_UNESCAPED_UNICODE) ?
 // v5.0.0 P1-2：加 JSON_HEX_* 标志，防标题/摘要中的闭合脚本标签或引号逃逸（XSS）
 window.YSM_ANNOUNCEMENTS = <?= json_encode($announcementCards, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
 <script src="js/main.js?v=<?= filemtime(__DIR__ . '/js/main.js') ?>" defer></script>
+<!-- v5.1.0 P3：外壳增强（滚动边界 / 键盘焦点环）；纯增量，与 main.js 无重叠 -->
+<script src="js/ui.js?v=<?= @filemtime(__DIR__ . '/js/ui.js') ?>" defer></script>
 <script>
 // 背景图片应用
 (function() {

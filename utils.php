@@ -460,6 +460,10 @@ function getClientIP() {
     // v5.0.0：仅当直连方为本机/私有网段（受控代理）时，才考虑采信代理头；
     // 且代理头值本身必须是合法公网 IP 才采用——否则一律回落 REMOTE_ADDR，
     // 防伪造 X-Real-IP / X-Forwarded-For 绕过限流与封禁。
+    // v5.0.0 第6轮 M3（部署约束，暂不引入 trusted_proxies 配置以免扩大改动面）：
+    //   本策略依赖「反向代理位于本机或私网」。若反代部署在公网 IP（REMOTE_ADDR 为公网），
+    //   则不会采信 XFF，getClientIP() 将一直返回反代自身 IP，导致限流/封禁按反代聚合。
+    //   此类部署需在反代侧透传真实 IP，或后续引入「受信代理 IP/网段」白名单后才可安全采信 XFF。
     if ($remote !== '' && isPrivateIp($remote)) {
         foreach (['HTTP_X_REAL_IP', 'HTTP_X_FORWARDED_FOR'] as $hdr) {
             $val = trim((string)($_SERVER[$hdr] ?? ''));

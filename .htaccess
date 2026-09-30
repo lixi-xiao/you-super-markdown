@@ -1,11 +1,19 @@
 # Apache 配置（Nginx 用户请参考 nginx-site.conf）
+# v5.0.0 第6轮 M1：防目录列举（需 AllowOverride 含 Indexes；不含时该指令会被忽略或报 500，按需保留）
+<IfModule mod_autoindex.c>
+    Options -Indexes
+</IfModule>
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteBase /
 
     # v5.0.0：data/ 目录安全兜底（Apache 部署）——拒绝 Web 访问数据库/密钥/JSON 等敏感文件
     # （与 nginx-site.conf 的 data/ 规则等价；data/images、data/videos 仍可公开访问）
-    RewriteRule (^|/)data/.*\.(db|db-wal|db-shm|sqlite|sqlite3|json)$ - [F,L,NC]
+    # 第6轮 M1：补 *.db-journal（SQLite 回滚日志）
+    RewriteRule (^|/)data/.*\.(db|db-wal|db-shm|db-journal|sqlite|sqlite3|json)$ - [F,L,NC]
+
+    # v5.0.0 第6轮 M1：显式拒绝应用配置（含 repo/hfish 信息；与 nginx-site.conf 的 app-config.json deny 对齐）
+    RewriteRule (^|/)app-config\.json$ - [F,L,NC]
 
     # v5.0.0：拒绝所有点文件（.env/.git/.jwt_secret/.app_secret/.fp_hmac/.audit_chain/.htaccess 等）；
     # 放行 ACME 验证目录 .well-known（Let's Encrypt 续期依赖）

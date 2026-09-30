@@ -147,7 +147,7 @@ install_one_dep() {
 # v3.3.13/v4.5.0：环境自检与依赖补装——参数为空格分隔的依赖清单（缺省用内置兜底清单），
 # 自动检测缺失项并 apt/yum 安装；任一失败返回非 0（apply-update 据此中断并回滚）。
 ensure_env_deps() {
-    local deps_all deps_uniq d ok=0 cache_sub cache_dir
+    local deps_all deps_uniq d ok=0 cache_sub cache_di
     # ① 缓存目录可写自愈（v4.8.4 起 covers + thumbs 全覆盖）：
     #    目录缺失则创建；已存在但属主非 www-data（如发布流程曾以 root 重建 data/cache/covers）则统一 chown，
     #    避免 cover.php/img.php 后台补图静默失败、池永远为空（主页卡片无封面且无日志，见踩坑 #43）。
@@ -226,31 +226,33 @@ verify_package_signature() {
     fi
     # 逐文件 SHA256 与 manifest 比对（manifest.json / manifest.json.sig 自身不校验）
     # v5.0.0 P0-3：文件集合完整性——STAGE_DIR 内不得存在 manifest 未列出的多余文件（防夹带未签名文件）
-    bad=$(php -r "
-        \$mf = '$mf';
-        \$root = '$root';
-        \$m = json_decode(@file_get_contents(\$mf), true);
-        \$files = \$m['files'] ?? [];
-        \$listed = [];
-        foreach (\$files as \$rel => \$expect) {
-            \$rel = ltrim(\$rel, '/');
-            \$listed[\$rel] = true;
-            \$p = rtrim(\$root, '/') . '/' . \$rel;
-            if (!is_file(\$p)) { echo \"missing:\$rel\n\"; continue; }
-            if (hash_file('sha256', \$p) !== \$expect) { echo \"mismatch:\$rel\n\"; }
+    # v5.0.0 第6轮 C1/H2：manifest/落地目录路径经环境变量传入，PHP 侧 getenv() 取值——
+    # 杜绝把「包内容派生」的路径插值进 php -r 代码字符串（原 $mf/$root 插值可被恶意包目录名注入 RCE）
+    bad=$(YSM_MF="$mf" YSM_ROOT="$root" php -r '
+        $mf = getenv("YSM_MF");
+        $root = getenv("YSM_ROOT");
+        $m = json_decode(@file_get_contents($mf), true);
+        $files = $m["files"] ?? [];
+        $listed = [];
+        foreach ($files as $rel => $expect) {
+            $rel = ltrim($rel, "/");
+            $listed[$rel] = true;
+            $p = rtrim($root, "/") . "/" . $rel;
+            if (!is_file($p)) { echo "missing:$rel\n"; continue; }
+            if (hash_file("sha256", $p) !== $expect) { echo "mismatch:$rel\n"; }
         }
-        \$base = rtrim(\$root, '/') . '/';
-        \$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(rtrim(\$root, '/'), FilesystemIterator::SKIP_DOTS));
-        foreach (\$it as \$f) {
-            \$rel = ltrim(substr(\$f->getPathname(), strlen(\$base)), '/');
-            if (\$rel === 'manifest.json' || \$rel === 'manifest.json.sig') continue;
+        $base = rtrim($root, "/") . "/";
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(rtrim($root, "/"), FilesystemIterator::SKIP_DOTS));
+        foreach ($it as $f) {
+            $rel = ltrim(substr($f->getPathname(), strlen($base)), "/");
+            if ($rel === "manifest.json" || $rel === "manifest.json.sig") continue;
             // v5.0.0：符号链接一律拒绝——防用软链文件/软链目录夹带未签名内容（isLink 须先于 isFile，
             // 因 isFile() 会跟随软链、软链目录默认不被递归遍历而漏检）
-            if (\$f->isLink()) { echo \"extra:\$rel\n\"; continue; }
-            if (!\$f->isFile()) continue;
-            if (!isset(\$listed[\$rel])) { echo \"extra:\$rel\n\"; }
+            if ($f->isLink()) { echo "extra:$rel\n"; continue; }
+            if (!$f->isFile()) continue;
+            if (!isset($listed[$rel])) { echo "extra:$rel\n"; }
         }
-    " 2>&1)
+    ' 2>&1)
     php_rc=$?
     # v5.0.0：失败封闭——PHP 校验命令非 0 退出（如转义/引号致解析错误被吞）一律拒绝更新，
     # 不得因校验被跳过而静默放行
@@ -300,26 +302,55 @@ auto_rollback() {
     return 0
 }
 
-# v5.0.0：校验 URL 主机为合法公网主机（scheme 仅 http/https；复用 utils.php 的 isPrivateHost 判定内网/未识别）
-assert_public_url_host() {
-    local u="$1" scheme host
-    scheme=$(printf '%s' "$u" | sed -E 's#^([a-zA-Z]+)://.*#\1#' | tr 'A-Z' 'a-z')
-    case "$scheme" in http|https) ;; *) return 1 ;; esac
-    host=$(printf '%s' "$u" | sed -E 's#^[a-zA-Z]+://##; s#^[^/@]*@##; s#[/:?].*$##')
-    printf '%s' "$host" | grep -Eq '^[A-Za-z0-9.-]+$' || return 1
-    [ "$(YSM_DL_HOST="$host" php -r "require_once '$WEB_ROOT/utils.php'; echo isPrivateHost(getenv('YSM_DL_HOST')) ? '1' : '0';" 2>/dev/null)" = "0" ]
+# v5.0.0 第6轮 H1：解析下载 URL 并输出「钉死目标」<ip> <host> <port>（成功）/ 空（失败）。
+# 关键修复——原实现用 sed 手写解析 host，与 curl 实际连接目标不一致（`#`/`?` 可致
+#   「校验看到公网域名、curl 实际连内网 IP」的盲 SSRF）。现改为：
+#   ① 全程用 php parse_url() 做与连接逻辑一致的解析（URL 经环境变量传入，杜绝字符串插值）；
+#   ② 拒绝非 http(s)、userinfo（user@）、fragment（#）、内网/未识别主机、非法端口；
+#   ③ 返回的公网 IP 供 curl --resolve 钉死连接，消除 DNS rebinding TOCTOU。
+resolve_dl_target() {
+    YSM_DL_URL="$1" YSM_UTILS="$WEB_ROOT/utils.php" php -r '
+        $u = (string)getenv("YSM_DL_URL");
+        if ($u === "") { exit; }
+        // 仅允许可见 ASCII（拒绝空白/控制字符/反斜杠等解析歧义）
+        if (!preg_match("#^[!-~]+$#", $u)) { exit; }
+        $p = parse_url($u);
+        if (!is_array($p)) { exit; }
+        $scheme = strtolower($p["scheme"] ?? "");
+        if ($scheme !== "http" && $scheme !== "https") { exit; }
+        // 拒绝 userinfo 与 fragment——二者正是「sed 解析」与「curl 解析」产生分歧的根源
+        if (isset($p["user"]) || isset($p["pass"]) || isset($p["fragment"])) { exit; }
+        $host = strtolower(trim((string)($p["host"] ?? ""), "[]"));
+        if ($host === "") { exit; }
+        if (!preg_match("#^[a-z0-9._-]+$#", $host) && filter_var($host, FILTER_VALIDATE_IP) === false) { exit; }
+        $port = isset($p["port"]) ? (int)$p["port"] : ($scheme === "https" ? 443 : 80);
+        if ($port < 1 || $port > 65535) { exit; }
+        require_once getenv("YSM_UTILS");
+        if (isPrivateHost($host)) { exit; }   // 内网/未识别 → 拒绝
+        $ip = resolvePublicIp($host);         // 与 isPrivateHost 同源，取首个公网 IP
+        if ($ip === null) { exit; }
+        echo $ip . " " . $host . " " . $port;
+    ' 2>/dev/null
 }
 
-# v5.0.0：在线更新包安全下载——逐跳跟随重定向（最多 3 跳），每一跳目标主机都必须为公网（复用 isPrivateHost）；
-# 非 http/https、跳数超限、目标内网/未识别 → 失败（防下载被 302 重定向到内网）。
+# v5.0.0：在线更新包安全下载——逐跳跟随重定向（最多 3 跳），每一跳目标主机都必须为公网；
+# 每一跳解析出公网 IP 后用 curl --resolve 把连接钉死到该 IP（防 DNS rebinding / #·? 盲 SSRF）；
+# 非 http/https、跳数超限、目标内网/未识别/含歧义成分 → 失败。
 # 用法: safe_download <url> <outfile>；返回 0 成功，非 0 失败
 safe_download() {
     local url="$1" out="$2" hop=0 max_hops=3
-    local hdr code loc base_authority
-    assert_public_url_host "$url" || { echo "  [下载] 初始地址主机非法或为内网，拒绝"; return 1; }
+    local hdr code loc base_authority target t_ip t_host t_port
     while :; do
+        target=$(resolve_dl_target "$url")
+        if [ -z "$target" ]; then
+            echo "  [下载] 目标地址非法/内网/含歧义成分（userinfo 或 #），拒绝: $url"; return 1
+        fi
+        read -r t_ip t_host t_port <<< "$target"
+        case "$t_ip" in *:*) t_ip="[$t_ip]";; esac       # IPv6 地址加方括号（curl --resolve 要求）
+        case "$t_host" in *:*) t_host="[$t_host]";; esac # IPv6 字面量主机同理
         hdr=$(mktemp)
-        code=$(curl -s -o "$out" -D "$hdr" -w '%{http_code}' -A 'YSM-Update/1.0' "$url" 2>/dev/null)
+        code=$(curl -s -o "$out" -D "$hdr" -w '%{http_code}' -A 'YSM-Update/1.0' \
+                     --proto '=http,https' --resolve "$t_host:$t_port:$t_ip" "$url" 2>/dev/null)
         case "$code" in
             200)
                 rm -f "$hdr"
@@ -336,7 +367,7 @@ safe_download() {
                     /*)  base_authority=$(printf '%s' "$url" | sed -E 's#^([a-zA-Z]+://[^/]+).*#\1#'); loc="${base_authority}${loc}" ;;
                     *)   loc="$(printf '%s' "$url" | sed -E 's#/[^/]*$#/')${loc}" ;;
                 esac
-                if ! assert_public_url_host "$loc"; then echo "  [下载] 跳转目标非法或为内网，拒绝: $loc"; return 1; fi
+                # 下一跳会重新经 resolve_dl_target 校验（内网/歧义成分在此被拒）
                 url="$loc"; hop=$((hop+1)); continue
                 ;;
             *)
@@ -347,27 +378,46 @@ safe_download() {
     done
 }
 
-# v5.0.0：解包前成员名校验——拒绝绝对路径、含 .. 的路径穿越成员，以及（tar）软链/硬链成员；
-# 防恶意更新包在解压阶段写到 TMP_DIR 之外。通过后再解压，随后仍走签名验证。
+# v5.0.0：解包前成员名校验——拒绝绝对路径、含 .. 的路径穿越成员、（tar）软链/硬链成员、
+# （zip）符号链接条目，以及含控制字符/危险字符（引号 反引号 ; # $ | & < > 括号 通配符 反斜杠）的成员名；
+# 从源头切断「包内容派生路径 → 注入 php -r / shell」的可利用链，并防恶意包在解压阶段写到 TMP_DIR 之外。
+# 通过后再解压（仅进 tmp），随后仍走签名验证。
 archive_members_safe() {
-    local pkg="$1" names n
-    names=$(tar -tf "$pkg" 2>/dev/null)
-    if [ -n "$names" ]; then
+    local pkg="$1" names n c
+    if tar -tf "$pkg" >/dev/null 2>&1; then
         # tar：拒绝软链/硬链成员（首字符 l/h）
         if tar -tvf "$pkg" 2>/dev/null | awk 'NF{print $1}' | grep -Eq '^[lh]'; then
             echo "  [校验] 更新包含软链/硬链成员，已拒绝"; return 1
         fi
+        names=$(tar -tf "$pkg" 2>/dev/null)
     else
+        # v5.0.0 第6轮 M2：zip——拒绝含符号链接的条目
+        # （zipinfo -v 的 "Unix file attributes" 权限串以 l 开头即 symlink；unzip 缺失/不可解析 → names 空 → 拒绝）
+        if unzip -Z -v "$pkg" 2>/dev/null | grep -Eq ':[[:space:]]+l[rwxstST-]{9}([[:space:]]|$)'; then
+            echo "  [校验] 更新包 zip 含符号链接条目，已拒绝"; return 1
+        fi
         names=$(unzip -Z1 "$pkg" 2>/dev/null)
     fi
     if [ -z "$names" ]; then
         echo "  [校验] 无法读取更新包成员列表，已拒绝"; return 1
     fi
+    # 危险字符黑名单（可用于跳出 shell/PHP 单双引号字符串、或造成 glob/重定向歧义）
+    local bad_chars="'\"\`;&#\$|&<>(){}[]*?\\"
     while IFS= read -r n; do
         [ -z "$n" ] && continue
         case "$n" in
             /*|..|../*|*/../*|*/..) echo "  [校验] 更新包含路径穿越成员，已拒绝: $n"; return 1 ;;
         esac
+        # 控制字符（含 CR/TAB/NUL）一律拒绝
+        case "$n" in
+            *[[:cntrl:]]*) echo "  [校验] 更新包成员名含控制字符，已拒绝: $n"; return 1 ;;
+        esac
+        # 危险字符（逐字符精确匹配，避免 case 字符类的引号歧义）
+        for (( c=0; c<${#bad_chars}; c++ )); do
+            case "$n" in
+                *"${bad_chars:c:1}"*) echo "  [校验] 更新包成员名含危险字符，已拒绝: $n"; return 1 ;;
+            esac
+        done
     done <<< "$names"
     return 0
 }
@@ -691,6 +741,12 @@ case "${1:-}" in
         CHANNEL=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['channel'] ?? 'stable';")
         PKG_PATH=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['package_path'] ?? '';")
         PKG_URL=$(php -r "\$r = json_decode(file_get_contents('$REQUEST_FILE'), true); echo \$r['package_url'] ?? '';")
+        # v5.0.0：请求文件字段来自外部，先做字符白名单（防注入/防路径穿越）
+        FROM_VER=$(printf '%s' "$FROM_VER" | tr -cd '0-9A-Za-z._-')
+        TO_VER=$(printf '%s' "$TO_VER" | tr -cd '0-9A-Za-z._-')
+        CHANNEL=$(printf '%s' "$CHANNEL" | tr -cd '0-9A-Za-z._-')
+        [ -n "$FROM_VER" ] || FROM_VER="0.0.0"
+        if [ -z "$TO_VER" ]; then echo "错误：更新请求缺少合法目标版本号"; exit 1; fi
 
         # v3.1.15：判定更新方式——PKG_PATH 非空且文件存在 → 后台外部上传更新包；
         # v3.2.0：在线更新选中的仓库包（package_url）→ 在线包更新（仓库下载）
@@ -792,7 +848,8 @@ case "${1:-}" in
             #   触发 rsync --delete 清空 WEB_ROOT/母本中包外文件，导致站点文件大面积丢失的严重故障）
             VFILE=$(find "$TMP_DIR" -maxdepth 3 -name version.json 2>/dev/null | head -1)
             if [ -n "$VFILE" ]; then
-                PTYPE=$(php -r "\$v = json_decode(@file_get_contents('$VFILE'), true); echo \$v['type'] ?? '';" 2>/dev/null)
+                # v5.0.0 第6轮 C1：包内 version.json 路径经环境变量传入（getenv），不插值进 php -r 代码
+                PTYPE=$(YSM_VFILE="$VFILE" php -r '$v = json_decode(@file_get_contents(getenv("YSM_VFILE")), true); echo $v["type"] ?? "";' 2>/dev/null)
                 if [ "$PTYPE" = "incremental" ]; then
                     PKG_TYPE="incremental"
                     STAGE_DIR=$(dirname "$VFILE")
@@ -856,12 +913,12 @@ case "${1:-}" in
         FILES_APPLIED="1"
         # 4.7a 提前读取更新包 changelog（v3.1.6：必须在清理 TMP_DIR 前读取，否则 version.json 已不存在；
         # base64 传参规避引号/特殊字符；无 changelog 字段 → 空，后续跳过）
-        CHANGELOG_B64=$(php -r "
-            \$vf = '$STAGE_DIR/version.json';
-            if (!file_exists(\$vf)) { exit; }
-            \$v = json_decode(@file_get_contents(\$vf), true) ?: [];
-            echo base64_encode(trim((string)(\$v['changelog'] ?? '')));
-        " 2>/dev/null)
+        CHANGELOG_B64=$(YSM_STAGE_DIR="$STAGE_DIR" php -r '
+            $vf = rtrim(getenv("YSM_STAGE_DIR"), "/") . "/version.json";
+            if (!file_exists($vf)) { exit; }
+            $v = json_decode(@file_get_contents($vf), true) ?: [];
+            echo base64_encode(trim((string)($v["changelog"] ?? "")));
+        ' 2>/dev/null)
         rm -rf "$TMP_DIR" 2>/dev/null || true
         echo "  文件更新完成"
 
@@ -898,7 +955,9 @@ case "${1:-}" in
         #  不触发回滚，导致主页 403 等故障未自动恢复）
         echo "[4.8/6] 健康检查..."
         HC_DOMAIN=$(get_domain)
-        HC_CODE=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$HC_DOMAIN/" 2>/dev/null || echo 000)
+        # v5.0.0 第6轮 H1：健康检查目标域名取自本地可信配置（app-config.json site_url / nginx server_name），
+        # 请求即 https，无需盲跟随重定向——关闭 -L，避免被 3xx 引导到非预期目标
+        HC_CODE=$(curl -sk -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$HC_DOMAIN/" 2>/dev/null || echo 000)
         if [ "$HC_CODE" != "200" ]; then
             echo "错误：更新后健康检查失败——主页返回 HTTP $HC_CODE，触发自动回滚"
             mark_failed "更新后健康检查失败（主页 HTTP $HC_CODE）"
@@ -991,8 +1050,9 @@ case "${1:-}" in
         # 6.3 重启后复检：主页 200 + api 存活 + web↔母本 MD5 一致（任一失败 → 自动回滚 + 告警邮件）
         sleep 2
         RC_DOMAIN=$(get_domain)
-        RC_HOME=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$RC_DOMAIN/" 2>/dev/null || echo 000)
-        RC_API=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$RC_DOMAIN/api.php?action=csrf" 2>/dev/null || echo 000)
+        # v5.0.0 第6轮 H1：同上——目标取自本地可信配置，关闭 -L 盲跟随
+        RC_HOME=$(curl -sk -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$RC_DOMAIN/" 2>/dev/null || echo 000)
+        RC_API=$(curl -sk -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$RC_DOMAIN/api.php?action=csrf" 2>/dev/null || echo 000)
         RC_BAD=""
         for RC_F in index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ysm-admin ysm-guard.py; do
             RC_A=$(md5sum "$WEB_ROOT/$RC_F" 2>/dev/null | awk '{print $1}')
@@ -1008,10 +1068,10 @@ case "${1:-}" in
         fi
         echo "  重启后复检通过：主页 HTTP $RC_HOME，API HTTP $RC_API，web↔母本 MD5 一致"
         # 6.4 写审计日志 + 标记完成 + 更新通知邮件（含本次更新内容/更新方式）
-        php -r "
-            require_once '$WEB_ROOT/utils.php';
-            auditLog('system_update', '', '系统更新: v${FROM_VER} → v${TO_VER}');
-        " 2>/dev/null
+        YSM_UTILS="$WEB_ROOT/utils.php" YSM_FROM_VER="$FROM_VER" YSM_TO_VER="$TO_VER" php -r '
+            require_once getenv("YSM_UTILS");
+            auditLog("system_update", "", "系统更新: v" . getenv("YSM_FROM_VER") . " → v" . getenv("YSM_TO_VER"));
+        ' 2>/dev/null
         # v3.1.0：收尾逻辑抽到顶部函数（自更新后 case 内联代码会混合解析失败）
         # v3.1.7：把 changelog（4.7a 已读取）传给收尾函数，更新通知邮件附带本次更新内容
         # v3.1.15：把更新方式（外部上传更新包 / 在线包更新）传给收尾函数，邮件展示更新通道

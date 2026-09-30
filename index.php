@@ -1214,7 +1214,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
 </div>
 <script>window.YSM_SITE_TITLE = <?= json_encode($siteHeading, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 // v3.1.6：公告卡片数据（服务端已转义标题/摘要，tags/cover 由文章提取）
-// v5.0.0 P1-2：加 JSON_HEX_* 标志，防标题/摘要中的 </script> 或引号逃逸内联脚本（XSS）
+// v5.0.0 P1-2：加 JSON_HEX_* 标志，防标题/摘要中的闭合脚本标签或引号逃逸（XSS）
 window.YSM_ANNOUNCEMENTS = <?= json_encode($announcementCards, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
 <script src="js/main.js?v=<?= filemtime(__DIR__ . '/js/main.js') ?>" defer></script>
 <script>

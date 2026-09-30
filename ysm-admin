@@ -307,9 +307,13 @@ auto_rollback() {
 #   「校验看到公网域名、curl 实际连内网 IP」的盲 SSRF）。现改为：
 #   ① 全程用 php parse_url() 做与连接逻辑一致的解析（URL 经环境变量传入，杜绝字符串插值）；
 #   ② 拒绝非 http(s)、userinfo（user@）、fragment（#）、内网/未识别主机、非法端口；
-#   ③ 返回的公网 IP 供 curl --resolve 钉死连接，消除 DNS rebinding TOCTOU。
+#   ③ 返回的公网 IP 供 curl --resolve 钉死连接，消除 DNS rebinding TOCTOU；
+#   ④ v5.0.0 第7轮 FIX-3：PHP DNS（gethostbynamel/dns_get_record）不可用（disable_functions）/无记录时，
+#      回退 getent 解析，再对解析出的 IP 做公网校验；仍失败则拒绝（fail-closed）。
 resolve_dl_target() {
-    YSM_DL_URL="$1" YSM_UTILS="$WEB_ROOT/utils.php" php -r '
+    local url="$1" host port ips ip
+    # ① URL 解析（parse_url，与 curl 一致；此步不做 DNS）→ "host port"
+    read -r host port <<< "$(YSM_DL_URL="$url" php -r '
         $u = (string)getenv("YSM_DL_URL");
         if ($u === "") { exit; }
         // 仅允许可见 ASCII（拒绝空白/控制字符/反斜杠等解析歧义）
@@ -323,14 +327,49 @@ resolve_dl_target() {
         $host = strtolower(trim((string)($p["host"] ?? ""), "[]"));
         if ($host === "") { exit; }
         if (!preg_match("#^[a-z0-9._-]+$#", $host) && filter_var($host, FILTER_VALIDATE_IP) === false) { exit; }
+        // 首字符不得为 -/.（防 getent 等外部命令把 host 当作选项/畸形名）
+        if ($host[0] === "-" || $host[0] === ".") { exit; }
+        // 域名不得含空标签（如 a..b）
+        if (filter_var($host, FILTER_VALIDATE_IP) === false) {
+            foreach (explode(".", $host) as $lbl) { if ($lbl === "") { exit; } }
+        }
         $port = isset($p["port"]) ? (int)$p["port"] : ($scheme === "https" ? 443 : 80);
         if ($port < 1 || $port > 65535) { exit; }
+        echo $host . " " . $port;
+    ' 2>/dev/null)"
+    if [ -z "$host" ] || [ -z "$port" ]; then return 0; fi
+    # ② 解析主机全部 IP：优先 PHP DNS；为空（disable_functions / 无 DNS / 无记录）则回退 getent
+    ips=$(YSM_HOST="$host" YSM_UTILS="$WEB_ROOT/utils.php" php -r '
         require_once getenv("YSM_UTILS");
-        if (isPrivateHost($host)) { exit; }   // 内网/未识别 → 拒绝
-        $ip = resolvePublicIp($host);         // 与 isPrivateHost 同源，取首个公网 IP
-        if ($ip === null) { exit; }
-        echo $ip . " " . $host . " " . $port;
-    ' 2>/dev/null
+        foreach (resolveAllHostIps((string)getenv("YSM_HOST")) as $x) { echo $x . "\n"; }
+    ' 2>/dev/null)
+    if [ -z "$ips" ]; then
+        if command -v getent >/dev/null 2>&1; then
+            ips=$(getent ahosts "$host" 2>/dev/null | awk '{print $1}')
+            if [ -z "$ips" ]; then ips=$(getent hosts "$host" 2>/dev/null | awk '{print $1}'); fi
+        fi
+    fi
+    ips=$(printf '%s\n' "$ips" | awk 'NF && !seen[$0]++')
+    if [ -z "$ips" ]; then return 0; fi
+    # ③ 逐 IP 公网校验（isPrivateIp 不依赖 DNS）：任一内网即拒；取首个公网 IP（fail-closed）
+    ip=$(YSM_IPS="$ips" YSM_UTILS="$WEB_ROOT/utils.php" php -r '
+        require_once getenv("YSM_UTILS");
+        $raw = trim((string)getenv("YSM_IPS"));
+        if ($raw === "") { exit; }
+        $out = "";
+        $any = false;
+        foreach (preg_split("#\s+#", $raw) as $x) {
+            $x = trim($x);
+            if ($x === "" || filter_var($x, FILTER_VALIDATE_IP) === false) { continue; }
+            $any = true;
+            if (isPrivateIp($x)) { exit; }   // 仍保持「任一内网即拒绝」的多 A/AAAA 记录防护
+            if ($out === "") { $out = $x; }
+        }
+        if (!$any || $out === "") { exit; }
+        echo $out;
+    ' 2>/dev/null)
+    if [ -z "$ip" ]; then return 0; fi
+    echo "$ip $host $port"
 }
 
 # v5.0.0：在线更新包安全下载——逐跳跟随重定向（最多 3 跳），每一跳目标主机都必须为公网；
@@ -378,26 +417,48 @@ safe_download() {
     done
 }
 
+# v5.0.0 第7轮 FIX-1：只判定一次包类型——用 magic 字节（而非试探命令）确定唯一格式，
+# 保证「校验方式」与「解压方式」同源同格式，杜绝 [未压缩tar]+[追加zip] 之类 polyglot 包
+#   「校验走 tar 分支、解压回退 unzip」从而绕过成员校验。
+#   gzip(1f 8b) → tgz；zip(50 4b 03 04) → zip；其余（含未压缩 tar 的 ustar/无法识别）→ 空（调用方直接拒绝）。
+pkg_detect_type() {
+    local pkg="$1" magic
+    [ -f "$pkg" ] || { echo ""; return 0; }
+    magic=$(head -c 4 "$pkg" 2>/dev/null | od -An -tx1 | tr -d ' \n')
+    case "$magic" in
+        1f8b*)     echo "tgz" ;;
+        504b0304*) echo "zip" ;;
+        *)         echo "" ;;
+    esac
+}
+
 # v5.0.0：解包前成员名校验——拒绝绝对路径、含 .. 的路径穿越成员、（tar）软链/硬链成员、
 # （zip）符号链接条目，以及含控制字符/危险字符（引号 反引号 ; # $ | & < > 括号 通配符 反斜杠）的成员名；
 # 从源头切断「包内容派生路径 → 注入 php -r / shell」的可利用链，并防恶意包在解压阶段写到 TMP_DIR 之外。
 # 通过后再解压（仅进 tmp），随后仍走签名验证。
+# v5.0.0 第7轮 FIX-1：新增 $2 = pkg_detect_type 判定出的唯一格式（tgz|zip），校验严格走该格式，绝不跨格式试探。
 archive_members_safe() {
-    local pkg="$1" names n c
-    if tar -tf "$pkg" >/dev/null 2>&1; then
-        # tar：拒绝软链/硬链成员（首字符 l/h）
-        if tar -tvf "$pkg" 2>/dev/null | awk 'NF{print $1}' | grep -Eq '^[lh]'; then
-            echo "  [校验] 更新包含软链/硬链成员，已拒绝"; return 1
-        fi
-        names=$(tar -tf "$pkg" 2>/dev/null)
-    else
-        # v5.0.0 第6轮 M2：zip——拒绝含符号链接的条目
-        # （zipinfo -v 的 "Unix file attributes" 权限串以 l 开头即 symlink；unzip 缺失/不可解析 → names 空 → 拒绝）
-        if unzip -Z -v "$pkg" 2>/dev/null | grep -Eq ':[[:space:]]+l[rwxstST-]{9}([[:space:]]|$)'; then
-            echo "  [校验] 更新包 zip 含符号链接条目，已拒绝"; return 1
-        fi
-        names=$(unzip -Z1 "$pkg" 2>/dev/null)
-    fi
+    local pkg="$1" pkgfmt="$2" names n c
+    case "$pkgfmt" in
+        tgz)
+            # tar：拒绝软链/硬链成员（首字符 l/h）——校验命令与解压命令同用 gzip 流
+            if tar -tvzf "$pkg" 2>/dev/null | awk 'NF{print $1}' | grep -Eq '^[lh]'; then
+                echo "  [校验] 更新包含软链/硬链成员，已拒绝"; return 1
+            fi
+            names=$(tar -tzf "$pkg" 2>/dev/null)
+            ;;
+        zip)
+            # v5.0.0 第6轮 M2：zip——拒绝含符号链接的条目
+            # （zipinfo -v 的 "Unix file attributes" 权限串以 l 开头即 symlink；unzip 缺失/不可解析 → names 空 → 拒绝）
+            if unzip -Z -v "$pkg" 2>/dev/null | grep -Eq ':[[:space:]]+l[rwxstST-]{9}([[:space:]]|$)'; then
+                echo "  [校验] 更新包 zip 含符号链接条目，已拒绝"; return 1
+            fi
+            names=$(unzip -Z1 "$pkg" 2>/dev/null)
+            ;;
+        *)
+            echo "  [校验] 无法识别的更新包格式，已拒绝"; return 1
+            ;;
+    esac
     if [ -z "$names" ]; then
         echo "  [校验] 无法读取更新包成员列表，已拒绝"; return 1
     fi
@@ -420,6 +481,15 @@ archive_members_safe() {
         done
     done <<< "$names"
     return 0
+}
+
+# v5.0.0 第7轮 FIX-2：健康检查「可达」判定——放行 2xx 与 3xx（视为可达），
+# 避免 apex→www 等正常跳转被误判为失败从而误触发回滚；仍不恢复无限制 -L 盲跟随（只按状态码判定）。
+http_reachable() {
+    case "$1" in
+        2[0-9][0-9]|3[0-9][0-9]) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 case "${1:-}" in
@@ -694,13 +764,15 @@ case "${1:-}" in
             root|www-data) ;;
             *)
                 echo "错误：更新请求文件属主异常（$REQ_OWNER），已拒绝"
-                php -r "require_once '$WEB_ROOT/utils.php'; auditLog('update_request_rejected', 'update', '更新请求文件属主异常($REQ_OWNER)，已拒绝');" 2>/dev/null || true
+                # v5.0.0 第7轮 FIX-4：详情经环境变量 + getenv() 传入，不把 $REQ_OWNER 插值进 php -r 代码
+                YSM_DETAIL="更新请求文件属主异常($REQ_OWNER)，已拒绝" php -r "require_once '$WEB_ROOT/utils.php'; auditLog('update_request_rejected', 'update', getenv('YSM_DETAIL'));" 2>/dev/null || true
                 exit 1
                 ;;
         esac
         if [ -n "$REQ_MODE" ] && [ $(( 8#$REQ_MODE & 2 )) -ne 0 ]; then
             echo "错误：更新请求文件对其他用户可写（mode $REQ_MODE），已拒绝"
-            php -r "require_once '$WEB_ROOT/utils.php'; auditLog('update_request_rejected', 'update', '更新请求文件 world-writable(mode $REQ_MODE)，已拒绝');" 2>/dev/null || true
+            # v5.0.0 第7轮 FIX-4：详情经环境变量 + getenv() 传入，不把 $REQ_MODE 插值进 php -r 代码
+            YSM_DETAIL="更新请求文件 world-writable(mode $REQ_MODE)，已拒绝" php -r "require_once '$WEB_ROOT/utils.php'; auditLog('update_request_rejected', 'update', getenv('YSM_DETAIL'));" 2>/dev/null || true
             exit 1
         fi
 
@@ -824,25 +896,43 @@ case "${1:-}" in
 
         # 本地包 / 在线包统一：解压 → 定位 STAGE_DIR → 识别全量/增量 → 签名验证
         if [ -n "$PKG_FILE" ]; then
+            # v5.0.0 第7轮 FIX-1：先按 magic 字节判定唯一包类型，再「同类型」校验 + 解压（严格成对），
+            # 杜绝 polyglot/类型歧义包「校验走一种格式、解压回退另一种格式」绕过成员校验；无法识别即拒绝。
+            PKG_FORMAT=$(pkg_detect_type "$PKG_FILE")
+            if [ -z "$PKG_FORMAT" ]; then
+                echo "错误：更新包格式不受支持（非 gzip/zip），已拒绝"
+                rm -f "$PKG_FILE" 2>/dev/null || true
+                mark_failed "更新包格式不受支持（非 gzip/zip）"
+                exit 1
+            fi
             # v5.0.0：解包前先做成员名校验（拒绝 ../绝对路径/软链·硬链），再解压，随后仍走签名验证；
             # 尽量做到「签名通过才落地」：解压仅进 TMP_DIR（未落地 WEB_ROOT），签名通过后才 rsync 落地
-            if ! archive_members_safe "$PKG_FILE"; then
+            if ! archive_members_safe "$PKG_FILE" "$PKG_FORMAT"; then
                 echo "错误：更新包成员名校验失败，已拒绝"
                 rm -f "$PKG_FILE" 2>/dev/null || true
                 mark_failed "更新包成员名校验失败，已拒绝（可能存在路径穿越/软链）"
                 exit 1
             fi
             TMP_DIR=$(mktemp -d)
-            tar -xzf "$PKG_FILE" -C "$TMP_DIR" 2>/dev/null
-            if [ $? -ne 0 ]; then
-                echo "  解压失败，尝试 unzip..."
-                unzip -o "$PKG_FILE" -d "$TMP_DIR" 2>/dev/null || {
-                    echo "错误：无法解压更新包"
-                    rm -rf "$TMP_DIR"
-                    mark_failed "无法解压更新包"
-                    exit 1
-                }
-            fi
+            # 解压方式与上面的校验方式严格一致（同一 PKG_FORMAT）；失败即封闭，绝不回退到另一种解压器
+            case "$PKG_FORMAT" in
+                tgz)
+                    if ! tar -xzf "$PKG_FILE" -C "$TMP_DIR" 2>/dev/null; then
+                        echo "错误：无法解压更新包（tar）"
+                        rm -rf "$TMP_DIR"
+                        mark_failed "无法解压更新包（tar）"
+                        exit 1
+                    fi
+                    ;;
+                zip)
+                    if ! unzip -o "$PKG_FILE" -d "$TMP_DIR" >/dev/null 2>&1; then
+                        echo "错误：无法解压更新包（unzip）"
+                        rm -rf "$TMP_DIR"
+                        mark_failed "无法解压更新包（unzip）"
+                        exit 1
+                    fi
+                    ;;
+            esac
             # v3.3.0-fix：增量包识别优先——只要 version.json 声明 type=incremental 即按增量包处理
             # （修复：增量包若含核心文件（utils.php/index.php 等）会被下方「含核心文件=全量包」逻辑误判，
             #   触发 rsync --delete 清空 WEB_ROOT/母本中包外文件，导致站点文件大面积丢失的严重故障）
@@ -950,15 +1040,16 @@ case "${1:-}" in
             }
         " 2>/dev/null
 
-        # v3.3.4：更新后健康检查——主页必须 200 且 web↔母本核心文件 MD5 一致，否则自动回滚
+        # v3.3.4：更新后健康检查——主页必须可达（2xx/3xx，仅按状态码判定、不盲跟随跳转）且 web↔母本核心文件 MD5 一致，否则自动回滚
         # （修复：此前仅在脚本步骤失败时回滚；「文件应用成功但站点实际不可用」（如目录权限 700 / rsync 同步异常）
         #  不触发回滚，导致主页 403 等故障未自动恢复）
         echo "[4.8/6] 健康检查..."
         HC_DOMAIN=$(get_domain)
         # v5.0.0 第6轮 H1：健康检查目标域名取自本地可信配置（app-config.json site_url / nginx server_name），
         # 请求即 https，无需盲跟随重定向——关闭 -L，避免被 3xx 引导到非预期目标
+        # v5.0.0 第7轮 FIX-2：改为「可达」判定（2xx/3xx 均通过），避免 apex→www 跳转被误判失败而误回滚
         HC_CODE=$(curl -sk -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$HC_DOMAIN/" 2>/dev/null || echo 000)
-        if [ "$HC_CODE" != "200" ]; then
+        if ! http_reachable "$HC_CODE"; then
             echo "错误：更新后健康检查失败——主页返回 HTTP $HC_CODE，触发自动回滚"
             mark_failed "更新后健康检查失败（主页 HTTP $HC_CODE）"
             exit 1
@@ -1047,10 +1138,11 @@ case "${1:-}" in
         # 6.2 重启守护进程（更新包可能已更新 ysm-guard.py，重启使新代码生效）
         systemctl restart ysm-guard 2>/dev/null && echo "  已重启守护进程" || echo "  警告：守护进程重启失败"
         rm -f /opt/you-super-markdown/run/ysm-update.lock
-        # 6.3 重启后复检：主页 200 + api 存活 + web↔母本 MD5 一致（任一失败 → 自动回滚 + 告警邮件）
+        # 6.3 重启后复检：主页/API 可达（2xx/3xx）+ web↔母本 MD5 一致（任一失败 → 自动回滚 + 告警邮件）
         sleep 2
         RC_DOMAIN=$(get_domain)
         # v5.0.0 第6轮 H1：同上——目标取自本地可信配置，关闭 -L 盲跟随
+        # v5.0.0 第7轮 FIX-2：主页/API 均按「可达」判定（2xx/3xx 通过），避免跳转误判触发误回滚
         RC_HOME=$(curl -sk -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$RC_DOMAIN/" 2>/dev/null || echo 000)
         RC_API=$(curl -sk -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$RC_DOMAIN/api.php?action=csrf" 2>/dev/null || echo 000)
         RC_BAD=""
@@ -1061,7 +1153,7 @@ case "${1:-}" in
                 RC_BAD="$RC_BAD $RC_F"
             fi
         done
-        if [ "$RC_HOME" != "200" ] || [ "$RC_API" != "200" ] || [ -n "$RC_BAD" ]; then
+        if ! http_reachable "$RC_HOME" || ! http_reachable "$RC_API" || [ -n "$RC_BAD" ]; then
             echo "错误：重启后复检失败（主页 HTTP $RC_HOME / API HTTP $RC_API / MD5 差异:$RC_BAD），触发自动回滚"
             mark_failed "重启后复检失败（主页 HTTP $RC_HOME / API HTTP $RC_API）"
             exit 1

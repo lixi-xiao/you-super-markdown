@@ -529,7 +529,7 @@ server {
     }
 
     # 禁止访问 CLI/安装/迁移/调试文件（无后缀脚本显式封禁）
-    location ~ ^/(ysm-admin|ysm-install\.sh|ysm-guard\.py|ysm-hfish-sync\.py|_hfish_bridge\.php|test\.php|debug\.php|entry_debug\.php|entry_fixed\.php)\$ {
+    location ~ ^/(ysm-admin|ysm-install\.sh|ysm-guard\.py|ysm-hfish-sync\.py|ysm-migrate|_hfish_bridge\.php|test\.php|debug\.php|entry_debug\.php|entry_fixed\.php)\$ {
         deny all;
         return 403;
     }
@@ -720,6 +720,12 @@ mkdir -p /opt/you-super-markdown/logs
 chown www-data:www-data /opt/you-super-markdown/logs
 chmod 750 /opt/you-super-markdown/logs
 
+# v5.0.0 P1-4：更新请求共享目录（root 与 www-data 共享、其他用户不可写）——
+# 更新请求文件从世界可写的 /tmp 迁至此处（目录 root:www-data 0770，文件 0660）
+mkdir -p /opt/you-super-markdown/run
+chown root:www-data /opt/you-super-markdown/run
+chmod 770 /opt/you-super-markdown/run
+
 # 创建自动备份目录（数据库 30 分钟备份 / 文章每日备份）并 chattr +i 锁定
 # 备份目录与母本同理念：root 锁定，守护进程写入时临时解锁→重锁，PHP 权限不可篡改
 mkdir -p /opt/you-super-markdown/backups/db /opt/you-super-markdown/backups/articles
@@ -748,6 +754,12 @@ if [ ! -s "$AUDIT_KEY_FILE" ]; then
 else
     log "审计链母密钥已存在，保留原密钥（不覆盖）"
 fi
+# v5.0.0 P0-4：写入预期审计链 epoch（root 0600，webroot 外）——校验器据此拒绝「纯 legacy(sha256) 链」；
+# 全新安装即 epoch=2（链由 root 守护进程 HMAC 加封）；4.x 老库经 ysm-migrate 迁移后同样应置 2。
+AUDIT_EPOCH_FILE="$AUDIT_SECRETS_DIR/audit_epoch"
+printf '2\n' > "$AUDIT_EPOCH_FILE"
+chown root:root "$AUDIT_EPOCH_FILE"
+chmod 600 "$AUDIT_EPOCH_FILE"
 # 记录密钥 SHA256 指纹进安装审计（与 trust_root_replaced 同级；绝不记录密钥本体）
 AUDIT_KEY_FPR=$(sha256sum "$AUDIT_KEY_FILE" | awk '{print $1}')
 php -r "require_once '$WEB_ROOT/utils.php'; auditLog('audit_key_created', 'audit', 'v5.0.0 安装时生成审计链母密钥（HMAC-SHA256，root 0600，webroot 外 secrets/audit_key；SHA256 指纹: $AUDIT_KEY_FPR）');" 2>/dev/null || true

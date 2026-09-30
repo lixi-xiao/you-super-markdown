@@ -537,6 +537,20 @@ def main():
     # 第 5 步：文件改名 ym.db → ysm.db
     final_path = rename_to_ysm(db_path)
 
+    # v5.0.0 P0-4：同步预期审计链 epoch 到 root 只读记录（webroot 外 secrets/audit_epoch），
+    # 供校验器（PHP/守护进程）拒绝「纯 legacy(sha256) 链」。仅当系统已安装（secrets 目录存在）时写入；
+    # 失败不阻断迁移（该记录权威于 DB，DB 内 schema_meta.epoch 可被库写入者篡改，须另存一份 root 只读）。
+    try:
+        secrets_dir = "/opt/you-super-markdown/secrets"
+        if os.path.isdir(secrets_dir):
+            epoch_file = os.path.join(secrets_dir, "audit_epoch")
+            with open(epoch_file, "w", encoding="utf-8") as f:
+                f.write(SCHEMA_EPOCH + "\n")
+            os.chmod(epoch_file, 0o600)
+            print("[ok]   已写入预期审计链 epoch：{}".format(epoch_file))
+    except Exception as e:
+        print("[warn] 写入预期审计链 epoch 失败（不影响迁移）：{}".format(e))
+
     # 第 7 步：结果摘要
     print("-" * 56)
     print("[done] 迁移完成。")

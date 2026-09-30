@@ -35,6 +35,9 @@ AUDIT_MIRROR_CHAIN = '/opt/you-super-markdown/logs/audit_chain'
 # v5.0.0 P7（审计链加固）：审计母密钥（安装期生成，root 0600，webroot 外）。
 # 仅 root/守护进程可读 → 由本守护进程加封/校验链，PHP(www-data) 读不到、伪造不出 hash。
 AUDIT_KEY_FILE = '/opt/you-super-markdown/secrets/audit_key'
+# v5.0.0 P0-4：预期审计链 epoch（安装/迁移写入 secrets/audit_epoch，root 0600）。
+# 预期 >=2 时链必须至少进入 sealed(HMAC) 段；整条链停在 legacy(sha256) 判无效（防纯 legacy 链整体伪造）。
+AUDIT_EPOCH_FILE = '/opt/you-super-markdown/secrets/audit_epoch'
 GUARD_STATE = '/opt/you-super-markdown/guard-state.json'
 EMAIL_ALERT_BIN = '/usr/local/bin/ysm-alert'
 ALERT_LOG = '/opt/you-super-markdown/alert.log'  # 告警发送失败日志（v2.8.0 可追溯）
@@ -370,6 +373,15 @@ def load_audit_key():
         return None
 
 
+def load_audit_epoch() -> int:
+    """读取预期审计链 epoch（root 0600）。缺失/不可读返回 0（未知 → 不启用 epoch 边界强制）。"""
+    try:
+        with open(AUDIT_EPOCH_FILE, 'r', encoding='utf-8') as f:
+            return int(f.read().strip() or '0')
+    except Exception:
+        return 0
+
+
 def sha256_hex(msg: str) -> str:
     """旧段（epoch1）：hash = sha256(entry_json)"""
     return hashlib.sha256(msg.encode('utf-8')).hexdigest()
@@ -400,11 +412,13 @@ def audit_entry_json(entry, prev_hash: str) -> str:
     return json.dumps(data, ensure_ascii=False, separators=(',', ':'))
 
 
-def _audit_chain_break(i: int) -> bool:
-    """链断裂：告警 + 从镜像恢复，返回 False。"""
+def _audit_chain_break(i: int, recover: bool = True) -> bool:
+    """链断裂：告警 (+可选从镜像恢复)，返回 False。
+    recover=False 时仅告警不改动数据（供 mirror_db 预校验等只读场景调用，避免触发反向恢复）。"""
     log(f"审计日志哈希链断裂于第 {i} 条")
     send_alert("日志哈希链断裂", f"审计日志哈希链在第 {i} 条处断裂，尝试从镜像恢复")
-    recover_audit()
+    if recover:
+        recover_audit()
     return False
 
 
@@ -471,7 +485,7 @@ def audit_anchor():
         return 0, ''
 
 
-def verify_audit_chain() -> bool:
+def verify_audit_chain(recover: bool = True) -> bool:
     """校验审计日志哈希链（读 SQLite audit 表；epoch 分段）：
     epoch1 旧段：hash = sha256(entry_json)，genesis 为空串；
     epoch2 新段：hash = HMAC-SHA256(audit_key, prev_hash + entry_json)。
@@ -496,10 +510,12 @@ def verify_audit_chain() -> bool:
 
     prev_hash = ''
     phase = 'legacy'  # legacy(旧段 sha256) → sealed(新段 HMAC)
+    hashed = 0        # P0-4：已加封（hash 非空）参与校验的条目数（区分「空链」与「纯 legacy 链」）
     for i, entry in enumerate(rows):
         expected = entry['hash'] or ''
         if expected == '':
             break  # 尾部待加封（pending），不参与校验
+        hashed += 1
         entry_json = audit_entry_json(entry, prev_hash)
         if phase == 'legacy':
             if sha256_hex(entry_json) == expected:
@@ -508,27 +524,42 @@ def verify_audit_chain() -> bool:
             # 旧段结束 → 新段
             if key is not None:
                 if hmac_sha256_hex(key, prev_hash + entry_json) != expected:
-                    return _audit_chain_break(i)
+                    return _audit_chain_break(i, recover)
             else:
                 # 无密钥：仅结构校验
                 if (entry['prev_hash'] or '') != prev_hash:
-                    return _audit_chain_break(i)
+                    return _audit_chain_break(i, recover)
             phase = 'sealed'
         else:
             # 新段（HMAC）
             if key is not None:
                 if hmac_sha256_hex(key, prev_hash + entry_json) != expected:
-                    return _audit_chain_break(i)
+                    return _audit_chain_break(i, recover)
             else:
                 if (entry['prev_hash'] or '') != prev_hash:
-                    return _audit_chain_break(i)
+                    return _audit_chain_break(i, recover)
         prev_hash = expected
+
+    # v5.0.0 P0-4：预期 epoch>=2 时，链必须至少进入 sealed(HMAC) 段；
+    # 有已加封条目却整条停在 legacy(sha256) → 判无效（防纯 legacy 链整体伪造）。
+    if load_audit_epoch() >= 2 and hashed > 0 and phase != 'sealed':
+        log("审计链未进入 HMAC 段（仍为 legacy/sha256），与预期 epoch>=2 不符，判定无效")
+        send_alert("审计链降级", "审计链仅含 legacy(sha256) 段、未进入 HMAC 段（预期 epoch>=2），判定无效")
+        if recover:
+            recover_audit()
+        return False
 
     return True
 
 
 def mirror_db():
     """背书：将 data/ysm.db 落盘（checkpoint）后拷贝到镜像目录（root 只读，chattr +i 锁定）"""
+    # v5.0.0 P0-4：覆盖镜像前先校验主库链（只读 recover=False，避免反向恢复）；不通过则拒绝覆盖并告警，
+    # 保持上一份可信镜像——防「主库被伪造链污染 → 覆盖镜像 → 伪造链被背书」。
+    if not verify_audit_chain(recover=False):
+        log("主库审计链校验未通过，拒绝覆盖镜像（保持上一份可信镜像）")
+        send_alert("审计镜像背书已拒绝", "主库审计链校验未通过，已拒绝覆盖镜像（防伪造链污染可信镜像）")
+        return False
     try:
         con = sqlite3.connect(DB_FILE)
         con.execute('PRAGMA wal_checkpoint(TRUNCATE)')

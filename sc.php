@@ -8,6 +8,19 @@ if (!checkRole(ROLE_STATION_ADMIN) && !checkRole(ROLE_AUTHOR)) {
     header('Location: /?admin_login=1');
     exit;
 }
+// v5.0.0 P2：与后台一致的后台会话纵深校验——账号被删/吊销立即失效，后台会话 24h 显式过期
+if (!validateBackendUser()) {
+    session_unset();
+    session_destroy();
+    header('Location: /?admin_login=1&expired=1');
+    exit;
+}
+if (backendSessionExpired()) {
+    session_unset();
+    session_destroy();
+    header('Location: /?admin_login=1&expired=1');
+    exit;
+}
 $isStationAdmin = checkRole(ROLE_STATION_ADMIN);
 // v2.6.4：写作者进入编辑器后侧边栏提供返回「写作者后台」入口（与站长一致）
 // 注意：checkRole 是层级匹配（站长也会命中 author），此处用精确角色匹配，入口各归各
@@ -710,8 +723,8 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                     <button class="btn-link pin-btn <?= $f['pinned'] ? 'pinned' : '' ?>" data-name="<?= htmlspecialchars($f['name']) ?>" data-pinned="<?= $f['pinned'] ? '1' : '0' ?>"><?= $f['pinned'] ? '已置顶' : '置顶' ?></button>
                 </td>
                 <td><a class="btn-link" href="index.php?file=<?= urlencode($f['name']) ?>" target="_blank">查看</a></td>
-                <td><button class="btn-link" onclick="openArticleEditor('<?= htmlspecialchars($f['name']) ?>')">编辑</button></td>
-                <td><button class="btn-link danger" onclick="openDeleteConfirmModal('<?= htmlspecialchars($f['name']) ?>', '<?= htmlspecialchars($f['displayName']) ?>')">删除</button></td>
+                <td><button class="btn-link edit-article-btn" data-name="<?= htmlspecialchars($f['name']) ?>">编辑</button></td>
+                <td><button class="btn-link danger delete-article-btn" data-name="<?= htmlspecialchars($f['name']) ?>" data-display="<?= htmlspecialchars($f['displayName']) ?>">删除</button></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -1115,6 +1128,13 @@ document.querySelectorAll('.pin-btn').forEach(function(btn) {
             if (d.success) location.reload();
         });
     });
+});
+// v5.0.0 P1-1：编辑/删除按钮改用 data-* 传值，不再把文章标题/文件名拼进内联 onclick（防存储型 XSS）
+document.querySelectorAll('.edit-article-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() { openArticleEditor(this.dataset.name); });
+});
+document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() { openDeleteConfirmModal(this.dataset.name, this.dataset.display); });
 });
 </script>
 </body>

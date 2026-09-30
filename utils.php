@@ -21,6 +21,8 @@ define('FIXED_IMG_API', 'https://uapis.cn/api/v1/random/image?category=acg');
 // v4.6.0：统一会话启动——PHPSESSID 加 HttpOnly + SameSite=Strict + Secure（修复「无 HttpOnly + 无 SameSite」薄弱点）。
 // 所有入口文件在 session_start() 前调用本函数（参数必须在 session 启动前设置才生效）。
 function secureSessionStart() {
+    // v5.0.0 P2：已在会话中则直接返回（防入口重复调用触发 session_start() 二次启动警告）
+    if (session_status() === PHP_SESSION_ACTIVE) return;
     $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
     if (PHP_VERSION_ID >= 70300) {
         session_set_cookie_params([
@@ -175,6 +177,8 @@ function fetchHttpContent($url, $ua = null) {
             'header' => $header,
             'timeout' => 10,
             'ignore_errors' => false,
+            // v5.0.0 P0-2：禁止跟随重定向——防 302 跳到内网绕过 pin-IP（单次解析+GethostByName 校验只对首跳生效）
+            'follow_location' => 0,
         ],
     ];
     if ($scheme === 'https') {
@@ -659,6 +663,11 @@ define('EMAIL_ALERT', '/usr/local/bin/ysm-alert');
 // 存放于 webroot 外 /opt/you-super-markdown/secrets/audit_key（root 0600）。仅 root/守护进程可读；
 // www-data（PHP）读不到，故 PHP 无法计算合法 hash（链由 root 守护进程加封）。
 define('AUDIT_KEY_FILE', '/opt/you-super-markdown/secrets/audit_key');
+// v5.0.0 P0-4：预期审计链 epoch（安装/迁移写入 secrets/audit_epoch，root 0600）。
+// 预期 >=2 时，链必须至少进入 sealed(HMAC) 段；整条链停在 legacy(sha256) 视为 invalid
+// ——防止「纯 legacy(sha256) 链」被整体伪造（sha256 无密钥，任何写入者都能重算）。
+// www-data 读不到 secrets 目录（0700 root）→ readAuditEpoch() 返回 0（未知），保持既有 delegated 语义。
+define('AUDIT_EPOCH_FILE', '/opt/you-super-markdown/secrets/audit_epoch');
 
 function auditLog($action, $target = '', $detail = '', $result = 'success') {
     $user = $_SESSION['cmt_user'] ?? null;
@@ -732,6 +741,12 @@ function readAuditKey() {
     return $k;
 }
 
+// v5.0.0 P0-4：读取预期审计链 epoch（root 0600，webroot 外）。非 root/www-data 读不到 → 返回 0（未知）。
+function readAuditEpoch() {
+    if (!is_readable(AUDIT_EPOCH_FILE)) return 0;
+    return (int)trim((string)@file_get_contents(AUDIT_EPOCH_FILE));
+}
+
 // v5.0.0 P7：epoch 分段校验（行为/返回兼容旧接口，新增 delegated/pending 字段）——
 //   epoch 1 = 旧 sha256 链（历史段）：hash = sha256(entry_json)，genesis 为空串；
 //   epoch 2 = 新 HMAC 链：hash = HMAC-SHA256(audit_key, prev_hash + entry_json)。
@@ -746,11 +761,13 @@ function verifyAuditChain() {
     $phase = 'legacy';    // legacy(旧段 sha256) → sealed(新段 HMAC)
     $delegated = false;   // 无密钥、无法本地校验新段
     $pending = 0;
+    $hashed = 0;          // P0-4：已加封（hash 非空）参与校验的条目数（用于区分「空链」与「纯 legacy 链」）
     $n = count($logs);
     for ($i = 0; $i < $n; $i++) {
         $entry = $logs[$i];
         $expectedHash = $entry['hash'] ?? '';
         if ($expectedHash === '') { $pending = $n - $i; break; }   // 尾部待加封
+        $hashed++;
         $entryJson = auditEntryJson($entry, $prevHash);
         if ($phase === 'legacy') {
             if (hash_equals(hash('sha256', $entryJson), $expectedHash)) { $prevHash = $expectedHash; continue; }  // 旧段
@@ -781,6 +798,12 @@ function verifyAuditChain() {
             }
         }
         $prevHash = $expectedHash;
+    }
+    // v5.0.0 P0-4：预期 epoch>=2 时，链必须至少进入 sealed(HMAC) 段；
+    // 整条链停在 legacy(sha256)（有已加封条目却从未进入 HMAC）→ 判 invalid（防纯 legacy 链整体伪造）。
+    // 仅在能读到预期 epoch（root/CLI）时生效；www-data 读不到返回 0 → 跳过（既有 delegated 语义不变）。
+    if (readAuditEpoch() >= 2 && $hashed > 0 && $phase !== 'sealed') {
+        return ['valid' => false, 'broken_at' => -1, 'count' => $n, 'delegated' => $delegated, 'pending' => $pending];
     }
     return ['valid' => true, 'count' => $n, 'delegated' => $delegated, 'pending' => $pending];
 }
@@ -1103,6 +1126,14 @@ function mailFoldHtml($html) {
     return str_replace('><', ">\n<", (string)$html);
 }
 
+// v5.0.0 P2：请求 Host 净化（与 index.php 的 og/rss 同一白名单正则）——用于 SMTP EHLO / 邮件正文等；
+// Host 头可被客户端伪造，未经净化写入邮件头/正文存在头部注入风险，非法一律回落 localhost。
+function safeRequestHost() {
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    if ($host === '' || !preg_match('/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/', $host)) $host = 'localhost';
+    return $host;
+}
+
 // 轻量 SMTP 客户端（AUTH LOGIN + MAIL/RCPT/DATA），返回 [success, error]
 function sendSmtpMail($to, $subject, $body, $htmlBody = '') {
     $s = getSmtpConfig();
@@ -1116,7 +1147,7 @@ function sendSmtpMail($to, $subject, $body, $htmlBody = '') {
     if (!$fp) return [false, "连接失败: {$errstr}"];
     $resp = fgets($fp, 512);
     if (substr($resp, 0, 3) !== '220') { fclose($fp); return [false, 'SMTP 握手失败: ' . trim($resp)]; }
-    $ehlo = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $ehlo = safeRequestHost();
     // 多行响应读取：3 位码 + '-' 为续行，读到非续行（3 位码 + 空格）为止（修复 EHLO 多行响应残留导致 AUTH 读取错位）
     $readResp = function () use ($fp) {
         $lines = '';
@@ -1186,7 +1217,7 @@ function sendAlert($type, $detail) {
     $adminEmail = $config['admin_email'] ?? '';
     if (!$adminEmail) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $host = safeRequestHost();
     $subject = "[{$site} 告警] {$type}";
     $now = date('Y-m-d H:i:s');
     $body = "时间：{$now}\n"
@@ -1223,7 +1254,7 @@ function notifyLoginEvent($u, $clientIP) {
     // v4.1.11：超管登录同样发邮件通知（此前仅站长/写作者）
     if (!in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $host = safeRequestHost();
     $subject = "[{$site} 通知] {$roleName}登录";
     $now = date('Y-m-d H:i:s');
     $body = "时间：{$now}\n"
@@ -1253,7 +1284,7 @@ function notifyPasswordReset($u, $clientIP, $mode) {
     $adminEmail = trim($config['admin_email'] ?? '');
     if ($adminEmail === '' || !email_valid($adminEmail)) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $host = safeRequestHost();
     $modeLabel = $mode === 'admin_reset' ? '超管协助重置码' : '邮箱验证码自助找回';
     $now = date('Y-m-d H:i:s');
     $subject = "[{$site} 通知] 账号密码已重置";
@@ -1287,7 +1318,7 @@ function notifyComment($article, $nickname, $content, $isReply = false, $parentN
     if ($to === '') $to = trim($config['admin_email'] ?? '');
     if ($to === '' || !email_valid($to)) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $host = safeRequestHost();
     $kind = $isReply ? '新回复' : '新评论';
     $subject = "[{$site} 通知] {$kind}：{$nickname}";
     $articleTitle = $article;
@@ -1651,7 +1682,7 @@ function email_code_send($email, $purpose, $target = '', $operatorRole = '', $li
     ];
     $purposeLabel = $purposeLabels[$purpose] ?? '邮箱验证';
     $html = renderMailCode($site, $purposeLabel, $code, intdiv($ttl, 60), [
-        'server' => $_SERVER['HTTP_HOST'] ?? 'localhost',
+        'server' => safeRequestHost(),
         'time' => $now,
         'link' => $link,
     ]);
@@ -1846,7 +1877,7 @@ function notifyThreatAlert($dimType, $dimKey, $score, $level, $summary) {
     $adminEmail = trim($config['admin_email'] ?? '');
     if ($adminEmail === '' || !email_valid($adminEmail)) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $host = safeRequestHost();
     $levelNames = ['L1' => '15 分钟', 'L2' => '24 小时', 'L3' => '永久'];
     $dimLabel = $dimType === 'ip' ? 'IP：' . $dimKey : '浏览器指纹：' . substr($dimKey, 0, 16) . '…';
     $levelName = $levelNames[$level] ?? $level;
@@ -2035,7 +2066,7 @@ function sendAdminConfirmMail($pendingId, $token, $nick, $account, $email) {
     $adminEmail = $cfg['admin_email'] ?? '';
     if (!$adminEmail) return false;
     $ttl = max(300, (int)($cfg['confirm_link_ttl'] ?? 86400));
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $host = safeRequestHost();
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     $link = "{$scheme}://{$host}/verify-confirm.php?token={$token}";
     $site = $cfg['site_title'] ?? 'You Super Markdown';
@@ -2071,7 +2102,10 @@ function sendAdminConfirmMail($pendingId, $token, $nick, $account, $email) {
 // ============================================================
 // v2.2 在线更新辅助函数
 // ============================================================
-define('UPDATE_REQUEST_FILE', '/tmp/ysm-update-request.json');
+// v5.0.0 P1-4：更新请求文件移至 root 与 www-data 共享、其他用户不可写的位置
+// （/opt/you-super-markdown/run/ root:www-data 0770，文件 0660）；旧 /tmp 路径保留为只读兼容回退。
+define('UPDATE_REQUEST_FILE', '/opt/you-super-markdown/run/ysm-update-request.json');
+define('UPDATE_REQUEST_FILE_LEGACY', '/tmp/ysm-update-request.json');
 define('UPDATE_LOCK_FILE', '/tmp/ysm-update.lock');
 define('BACKUP_DIR', '/opt/you-super-markdown/backups');
 define('BACKUP_CONF', '/opt/you-super-markdown/backup.conf');           // 自动备份配置（root:www-data 664）
@@ -2286,15 +2320,27 @@ function db_rate_clear_ip($table, $ip) {
 }
 
 function getUpdateRequest() {
-    if (!file_exists(UPDATE_REQUEST_FILE)) return null;
-    $data = json_decode(file_get_contents(UPDATE_REQUEST_FILE), true);
+    // v5.0.0 P1-4：优先新共享目录，兼容回退旧 /tmp（过渡期旧后台仍写 /tmp）
+    $file = is_file(UPDATE_REQUEST_FILE) ? UPDATE_REQUEST_FILE
+          : (is_file(UPDATE_REQUEST_FILE_LEGACY) ? UPDATE_REQUEST_FILE_LEGACY : '');
+    if ($file === '') return null;
+    $data = json_decode(file_get_contents($file), true);
     return is_array($data) ? $data : null;
 }
 
 function saveUpdateRequest($data) {
-    $dir = dirname(UPDATE_REQUEST_FILE);
-    if (!is_dir($dir)) mkdir($dir, 0755, true);
-    return file_put_contents(UPDATE_REQUEST_FILE, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+    // v5.0.0 P1-4：写入共享目录（0660，非世界可写）；目录不存在或不可写时回退旧 /tmp（一次性过渡）
+    $path = UPDATE_REQUEST_FILE;
+    $dir = dirname($path);
+    if (!is_dir($dir)) @mkdir($dir, 0770, true);
+    if (!is_dir($dir) || !is_writable($dir)) $path = UPDATE_REQUEST_FILE_LEGACY;
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    $n = @file_put_contents($path, $json, LOCK_EX);
+    if ($n !== false) {
+        @chmod($path, 0660);
+        @unlink($path === UPDATE_REQUEST_FILE ? UPDATE_REQUEST_FILE_LEGACY : UPDATE_REQUEST_FILE);
+    }
+    return $n;
 }
 
 function isUpdateInProgress() {
@@ -2335,7 +2381,7 @@ function getUpdateStatus() {
         $req['error'] = '请求超时';
         $req['completed_at'] = time();
         saveUpdateRequest($req);
-        @chmod(UPDATE_REQUEST_FILE, 0666);
+        @chmod(UPDATE_REQUEST_FILE, 0660);
         clearUpdateLock();
         $st = 'failed';
     }

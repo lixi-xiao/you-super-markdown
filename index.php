@@ -102,6 +102,16 @@ function ysmShareContext() {
         $raw = (string)@file_get_contents($path);
     }
     $meta = $raw !== '' ? readArticleMeta($path) : [];        // 复用仓库既有 front-matter 解析
+    // v5.0.0 P1-3：与 list/read 一致的可见性过滤——草稿/未到期定时/hidden 文章不得作为文章卡片对外泄漏
+    //（否则分享链接的 OG/Twitter 预览会暴露未发布文章的标题与摘要）；此类一律降级为站点卡片。
+    $shareStatus = $meta['status'] ?? 'published';
+    $sharePublishAt = $meta['publish_at'] ?? '';
+    if (!empty($meta['hidden'])
+        || $shareStatus === 'draft'
+        || ($shareStatus === 'scheduled' && $sharePublishAt !== '' && $sharePublishAt > date('Y-m-d H:i'))) {
+        return ['type' => 'website', 'site' => $siteName, 'title' => $siteName,
+                'desc' => YSM_SHARE_SITE_DESC, 'image' => ysmSharePoolCover(), 'url' => $origin . '/'];
+    }
     $body = $raw !== '' ? preg_replace('/^<!--META.*?-->\n?/s', '', $raw) : '';
 
     // 标题：META title → 正文首个一级标题(H1) → 文件名（去扩展名）
@@ -1191,9 +1201,10 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         </div>
     </div>
 </div>
-<script>window.YSM_SITE_TITLE = <?= json_encode($siteHeading, JSON_UNESCAPED_UNICODE) ?>;
+<script>window.YSM_SITE_TITLE = <?= json_encode($siteHeading, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 // v3.1.6：公告卡片数据（服务端已转义标题/摘要，tags/cover 由文章提取）
-window.YSM_ANNOUNCEMENTS = <?= json_encode($announcementCards, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;</script>
+// v5.0.0 P1-2：加 JSON_HEX_* 标志，防标题/摘要中的 </script> 或引号逃逸内联脚本（XSS）
+window.YSM_ANNOUNCEMENTS = <?= json_encode($announcementCards, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
 <script src="js/main.js?v=<?= filemtime(__DIR__ . '/js/main.js') ?>" defer></script>
 <script>
 // 背景图片应用

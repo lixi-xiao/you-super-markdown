@@ -22,8 +22,8 @@ get_domain() {
 # v3.1.15：新增第 5 参 UPDATE_METHOD——邮件附带更新方式（外部上传更新包 / 在线包更新）
 post_update_finish() {
     local TO_VER="$1" CHANNEL="$2" FROM_VER="$3" CHANGELOG_B64="$4" UPDATE_METHOD="$5"
-    # 请求文件 root 可删，避免以 php 回写时 /tmp 属主权限拒绝
-    rm -f /tmp/ysm-update-request.json
+    # 请求文件 root 可删，避免以 php 回写时属主权限拒绝（v5.0.0 P1-4：新共享目录 + 旧 /tmp 一并清理）
+    rm -f /opt/you-super-markdown/run/ysm-update-request.json /tmp/ysm-update-request.json
     # 清理旧备份（保留最近2次）
     echo "  清理旧备份..."
     ls -t "/opt/you-super-markdown/backups"/pre-update-*.tar.gz 2>/dev/null | tail -n +3 | xargs rm -f 2>/dev/null || true
@@ -189,6 +189,7 @@ ensure_env_deps() {
 # 供首包上线的无签名场景）时放行并写审计日志，不作为常规更新通道。
 verify_package_signature() {
     local tmp_root="$1"
+    local stage_dir="${2:-}"
     local pubkey="/opt/you-super-markdown/update_signing_public.pem"
     local mf sig bad root
     if [ ! -f "$pubkey" ]; then
@@ -216,25 +217,43 @@ verify_package_signature() {
         return 1
     fi
     echo "  [签名] manifest 签名验证通过"
-    # 逐文件 SHA256 与 manifest 比对（manifest.json / manifest.json.sig 自身不校验）
+    # v5.0.0 P0-3：验签对象与落地内容强绑定——manifest.json 必须与 STAGE_DIR 同目录
+    # （否则 manifest 可置于 tmp 顶层、实际落地文件来自其它子目录，签名形同虚设）
     root=$(dirname "$mf")
+    if [ -n "$stage_dir" ] && [ "$root" != "$stage_dir" ]; then
+        echo "  [签名] 错误：manifest.json 不在更新落地目录（$root ≠ $stage_dir），拒绝更新"
+        return 1
+    fi
+    # 逐文件 SHA256 与 manifest 比对（manifest.json / manifest.json.sig 自身不校验）
+    # v5.0.0 P0-3：文件集合完整性——STAGE_DIR 内不得存在 manifest 未列出的多余文件（防夹带未签名文件）
     bad=$(php -r "
         \$mf = '$mf';
         \$root = '$root';
         \$m = json_decode(@file_get_contents(\$mf), true);
         \$files = \$m['files'] ?? [];
+        \$listed = [];
         foreach (\$files as \$rel => \$expect) {
-            \$p = rtrim(\$root, '/') . '/' . ltrim(\$rel, '/');
+            \$rel = ltrim(\$rel, '/');
+            \$listed[\$rel] = true;
+            \$p = rtrim(\$root, '/') . '/' . \$rel;
             if (!is_file(\$p)) { echo \"missing:\$rel\n\"; continue; }
             if (hash_file('sha256', \$p) !== \$expect) { echo \"mismatch:\$rel\n\"; }
         }
+        \$base = rtrim(\$root, '/') . '/';
+        \$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(rtrim(\$root, '/'), FilesystemIterator::SKIP_DOTS));
+        foreach (\$it as \$f) {
+            if (!\$f->isFile()) continue;
+            \$rel = ltrim(substr(\$f->getPathname(), strlen(\$base)), '/');
+            if (\$rel === 'manifest.json' || \$rel === 'manifest.json.sig') continue;
+            if (!isset(\$listed[\$rel])) { echo \"extra:\$rel\n\"; }
+        }
     " 2>/dev/null)
     if [ -n "$bad" ]; then
-        echo "  [签名] 错误：文件哈希校验失败："
+        echo "  [签名] 错误：文件哈希/集合校验失败："
         echo "$bad" | head -5
         return 1
     fi
-    echo "  [签名] 全部文件哈希校验通过"
+    echo "  [签名] 全部文件哈希与集合校验通过"
     return 0
 }
 
@@ -505,10 +524,35 @@ case "${1:-}" in
         # v5.0.0：--allow-unsigned 一次性受控引导开关（未部署签名公钥时放行首包，写审计日志）
         ALLOW_UNSIGNED=0
         for _a in "$@"; do [ "$_a" = "--allow-unsigned" ] && ALLOW_UNSIGNED=1; done
-        REQUEST_FILE="/tmp/ysm-update-request.json"
+        REQUEST_FILE="/opt/you-super-markdown/run/ysm-update-request.json"
+        LEGACY_REQUEST_FILE="/tmp/ysm-update-request.json"
+        # v5.0.0 P1-4：共享目录自愈——root 创建 root:www-data 0770（www-data 对 /opt/you-super-markdown 无写权限，须由 root 建）
+        mkdir -p "$(dirname "$REQUEST_FILE")" 2>/dev/null || true
+        chown root:www-data "$(dirname "$REQUEST_FILE")" 2>/dev/null || true
+        chmod 770 "$(dirname "$REQUEST_FILE")" 2>/dev/null || true
+        # 过渡兼容：旧后台仍写 /tmp；新目录无文件时回退读取旧路径
+        if [ ! -f "$REQUEST_FILE" ] && [ -f "$LEGACY_REQUEST_FILE" ]; then
+            REQUEST_FILE="$LEGACY_REQUEST_FILE"
+        fi
         if [ ! -f "$REQUEST_FILE" ]; then
             echo "错误：未找到更新请求文件"
             echo "请先在后台管理页面触发更新。"
+            exit 1
+        fi
+        # v5.0.0 P1-4：属主/权限校验——属主须为 root/www-data，且不得对其他用户可写（防本地低权用户篡改更新请求）
+        REQ_OWNER=$(stat -c '%U' "$REQUEST_FILE" 2>/dev/null)
+        REQ_MODE=$(stat -c '%a' "$REQUEST_FILE" 2>/dev/null)
+        case "$REQ_OWNER" in
+            root|www-data) ;;
+            *)
+                echo "错误：更新请求文件属主异常（$REQ_OWNER），已拒绝"
+                php -r "require_once '$WEB_ROOT/utils.php'; auditLog('update_request_rejected', 'update', '更新请求文件属主异常($REQ_OWNER)，已拒绝');" 2>/dev/null || true
+                exit 1
+                ;;
+        esac
+        if [ -n "$REQ_MODE" ] && [ $(( 8#$REQ_MODE & 2 )) -ne 0 ]; then
+            echo "错误：更新请求文件对其他用户可写（mode $REQ_MODE），已拒绝"
+            php -r "require_once '$WEB_ROOT/utils.php'; auditLog('update_request_rejected', 'update', '更新请求文件 world-writable(mode $REQ_MODE)，已拒绝');" 2>/dev/null || true
             exit 1
         fi
 
@@ -536,7 +580,9 @@ case "${1:-}" in
             rm -f "$REQUEST_FILE" 2>/dev/null || true
             printf '{"status":"failed","from_version":"%s","to_version":"%s","channel":"%s","error":"%s","completed_at":%d}\n' \
                 "$FROM_VER" "$TO_VER" "$CHANNEL" "$reason_esc" "$now_ts" > "$REQUEST_FILE" 2>/dev/null || true
-            chmod 666 "$REQUEST_FILE" 2>/dev/null || true
+            # v5.0.0 P1-4：failed 状态文件 root:www-data 0660（www-data 后台可读，其他用户不可写）
+            chown root:www-data "$REQUEST_FILE" 2>/dev/null || true
+            chmod 660 "$REQUEST_FILE" 2>/dev/null || true
             chattr -R +i /opt/you-super-markdown/install-base/ 2>/dev/null || true
             rm -f /tmp/ysm-update.lock
             systemctl start ysm-guard 2>/dev/null || true
@@ -659,7 +705,7 @@ case "${1:-}" in
             fi
             # v3.2.0：非对称密钥签名验证（v5.0.0 起失败封闭：未部署公钥即拒绝，除显式 --allow-unsigned 引导）
             if [ -n "$STAGE_DIR" ]; then
-                if ! verify_package_signature "$TMP_DIR"; then
+                if ! verify_package_signature "$TMP_DIR" "$STAGE_DIR"; then
                     rm -rf "$TMP_DIR"
                     mark_failed "更新包签名验证失败，已拒绝（可能被篡改）"
                     exit 1
@@ -746,7 +792,7 @@ case "${1:-}" in
         #  不触发回滚，导致主页 403 等故障未自动恢复）
         echo "[4.8/6] 健康检查..."
         HC_DOMAIN=$(get_domain)
-        HC_CODE=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YM-HealthCheck/1.0' "https://$HC_DOMAIN/" 2>/dev/null || echo 000)
+        HC_CODE=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$HC_DOMAIN/" 2>/dev/null || echo 000)
         if [ "$HC_CODE" != "200" ]; then
             echo "错误：更新后健康检查失败——主页返回 HTTP $HC_CODE，触发自动回滚"
             mark_failed "更新后健康检查失败（主页 HTTP $HC_CODE）"
@@ -839,8 +885,8 @@ case "${1:-}" in
         # 6.3 重启后复检：主页 200 + api 存活 + web↔母本 MD5 一致（任一失败 → 自动回滚 + 告警邮件）
         sleep 2
         RC_DOMAIN=$(get_domain)
-        RC_HOME=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YM-HealthCheck/1.0' "https://$RC_DOMAIN/" 2>/dev/null || echo 000)
-        RC_API=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YM-HealthCheck/1.0' "https://$RC_DOMAIN/api.php?action=csrf" 2>/dev/null || echo 000)
+        RC_HOME=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$RC_DOMAIN/" 2>/dev/null || echo 000)
+        RC_API=$(curl -skL -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$RC_DOMAIN/api.php?action=csrf" 2>/dev/null || echo 000)
         RC_BAD=""
         for RC_F in index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ysm-admin ysm-guard.py; do
             RC_A=$(md5sum "$WEB_ROOT/$RC_F" 2>/dev/null | awk '{print $1}')

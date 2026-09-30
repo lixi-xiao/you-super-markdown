@@ -280,7 +280,8 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'trigger_update') {
         'error' => '',
     ];
     saveUpdateRequest($updateRequest);
-    @chmod(UPDATE_REQUEST_FILE, 0666);
+    // v5.0.0 P1-4：更新请求文件不再世界可写（0666→0660；目录 /opt/you-super-markdown/run root:www-data 0770）
+    @chmod(UPDATE_REQUEST_FILE, 0660);
     // 写入守护进程休眠标志
     setUpdateLock($updateToken, 600);
     auditLog('system_update_triggered', '', "触发系统更新: v" . APP_VERSION . " → v{$targetVersion}");
@@ -899,6 +900,8 @@ $banMsg = $_GET['bmsg'] ?? '';
 
     <?php
     $tab = $_GET['tab'] ?? 'overview';
+    // v5.0.0 P2：tab 白名单校验（对齐 station/author 后台），非法值回落 overview
+    if (!in_array($tab, ['overview', 'users', 'logs', 'config', 'security', 'ui', 'update', 'guard', 'data', 'hfish', 'mail', 'verify', 'threat'], true)) $tab = 'overview';
     $superCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_SUPER_ADMIN));
     $stationCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_STATION_ADMIN));
     $authorCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_AUTHOR));

@@ -36,6 +36,8 @@ $initial = mb_substr($u['nickname'] ?: '?', 0, 1, 'UTF-8');
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars($u['nickname']) ?> - 个人主页 - <?= htmlspecialchars($siteTitle) ?></title>
     <link rel="stylesheet" href="css/style.css?v=<?= @filemtime(__DIR__ . '/css/style.css') ?>">
+    <!-- v5.1.0 P2-5：新外壳样式（先于内联样式加载，仅追加，不改既有选择器） -->
+    <link rel="stylesheet" href="css/tw.min.css?v=<?= @filemtime(__DIR__ . '/css/tw.min.css') ?>">
     <style>
         body { background: var(--bg); }
         .up-wrap { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
@@ -80,7 +82,7 @@ $initial = mb_substr($u['nickname'] ?: '?', 0, 1, 'UTF-8');
         .up-back:hover { text-decoration: underline; }
     </style>
 </head>
-<body>
+<body id="userProfilePage">
 <div class="up-wrap">
     <div class="up-card">
         <div class="up-avatar">

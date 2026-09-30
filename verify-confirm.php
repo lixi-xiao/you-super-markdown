@@ -82,7 +82,7 @@ if (!$row) {
     .back:hover { background: #2a4a75; }
 </style>
 </head>
-<body>
+<body id="verifyConfirmPage">
 <div class="card">
     <div class="icon <?= $okResult ? 'ok' : 'fail' ?>"><?= $okResult ? '✓' : '!' ?></div>
     <div class="brand"><?= htmlspecialchars($title) ?></div>

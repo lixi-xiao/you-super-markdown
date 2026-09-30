@@ -291,3 +291,429 @@
     #readingView .comment-section { padding: 16px; border-radius: 16px; }
   }
 }
+
+/* ============================================================================
+   P2-3：站内搜索 / 分类 / 标签 / 归档 —— 交互态外壳
+   做法同前：仅以「壳容器 ID」(#searchPanel / #categoryBar / #archiveView) 作前缀提权，
+   不改 style.css、不改 js/main.js（.dropdown-item / .category-bar-item / .tag-cloud-item /
+   .archive-item 等均为 JS 既有钩子，一律保留）。
+   范围：搜索面板与结果项排版、分类 chips / 标签云 / 归档项 的 hover·active·聚焦态。
+   （首页区块的静态外观已由 P2-1 完成，此处只补交互态与结果项排版）
+   ============================================================================ */
+@layer components {
+  /* ── 站内搜索面板（#searchPanel 外壳） ─────────────────── */
+  #searchPanel.dropdown-panel {
+    border-radius: 20px;
+    box-shadow: var(--shadow-md);
+  }
+  #searchPanel .dropdown-search { padding: 14px 16px; }
+  #searchPanel .dropdown-search input {
+    padding: 11px 15px;
+    border-radius: 12px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  #searchPanel .dropdown-search input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-light);
+  }
+  #searchPanel .dropdown-list { padding: 10px; }
+  #searchPanel .dropdown-item {
+    padding: 10px 12px;
+    border-radius: 12px;
+    transition: background 0.15s ease;
+  }
+  #searchPanel .dropdown-item:hover { background: var(--accent-light); }
+  #searchPanel .dropdown-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  #searchPanel .dropdown-item .file-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+  #searchPanel .dropdown-item .file-name {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  /* 结果摘要行：由 main.js 内联 style 输出，用壳前缀 + !important 提权覆盖，避免改动 JS 钩子 */
+  #searchPanel .dropdown-item .file-info > div:not(.file-name) {
+    font-size: 12px !important;
+    line-height: 1.5 !important;
+    margin-top: 3px !important;
+    color: var(--text-muted) !important;
+  }
+
+  /* ── 分类 chips / 标签云：交互态 ───────────────────────── */
+  #searchPanel .dropdown-item,
+  #categoryBar .category-bar-item,
+  #categoryBar .tag-cloud-item { -webkit-tap-highlight-color: transparent; }
+  #categoryBar .category-bar-item {
+    transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease,
+      transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  #categoryBar .category-bar-item:active { transform: translateY(0) scale(0.97); }
+  #categoryBar .category-bar-item:focus-visible,
+  #categoryBar .tag-cloud-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  #categoryBar .tag-cloud-item {
+    transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease,
+      transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  #categoryBar .tag-cloud-item:hover { transform: translateY(-1px); }
+  #categoryBar .tag-cloud-item.active {
+    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 6px 16px -6px hsla(var(--accent-hue), var(--accent-sat), 50%, 0.55);
+  }
+
+  /* ── 归档项：交互态 + 排版收紧 ────────────────────────── */
+  #archiveView .archive-item {
+    transition: background 0.15s ease, padding-left 0.15s ease;
+  }
+  #archiveView .archive-item:hover { padding-left: 20px; }
+  #archiveView .archive-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  #archiveView .archive-item-title { font-weight: 600; }
+  #archiveView .archive-year-count { font-weight: 600; }
+
+  /* ── 移动端：紧凑且不横向溢出 ─────────────────────────── */
+  @media (max-width: 640px) {
+    #searchPanel .dropdown-list { padding: 8px; }
+    #searchPanel .dropdown-item { padding: 9px 10px; border-radius: 10px; }
+    #searchPanel .dropdown-item .file-icon { width: 32px; height: 32px; border-radius: 9px; }
+    #archiveView .archive-item:hover { padding-left: 14px; }
+  }
+}
+
+/* ============================================================================
+   P2-4：评论 / 公告 —— 交互层外壳（**不含弹窗**）
+   前缀：#readingView（评论区均位于其内）/ #announcementSection（公告卡片内容）。
+   保持原样：.ann-card-media / .ann-card-cover / .ann-card-cover-ink（封面水墨渐隐遮罩）、
+   全部弹窗（.ann-modal 系列 / .cmt-modal 系列 / .cmt-confirm 系列）一律不动。
+   JS 钩子（.cmt-item / .cmt-act / .cmt-pg-btn / .cmt-reply-input-wrap 等）一律保留。
+   ============================================================================ */
+@layer components {
+  /* ── 评论列表容器与列表项 ─────────────────────────────── */
+  #readingView .cmt-list { gap: 2px; }
+  #readingView .cmt-item {
+    padding: 16px;
+    margin: 0;
+    border-radius: 14px;
+    transition: background 0.2s ease;
+  }
+  #readingView .cmt-item + .cmt-item { border-top: 1px solid var(--border); }
+  #readingView .cmt-item:first-child { padding-top: 16px; margin-top: 0; }
+  #readingView .cmt-item:hover { background: var(--accent-light); }
+  #readingView .cmt-top { gap: 12px; }
+  #readingView .cmt-top .cmt-avatar,
+  #readingView .cmt-top .cmt-avatar-img,
+  #readingView .cmt-top .cmt-avatar-text {
+    width: 36px;
+    height: 36px;
+  }
+  #readingView .cmt-top .cmt-avatar-text { font-size: 14px; }
+  #readingView .cmt-name { font-size: 0.92em; font-weight: 700; }
+  #readingView .cmt-time { font-size: 0.78em; }
+  #readingView .cmt-sign { font-size: 0.82em; max-width: 100%; }
+  #readingView .cmt-text {
+    font-size: 0.95em;
+    line-height: 1.75;
+    margin-top: 8px;
+  }
+
+  /* ── 操作条（点赞 / 回复 / 删除 / 展开回复） ──────────── */
+  #readingView .cmt-actions { gap: 18px; margin-top: 10px; }
+  #readingView .cmt-act { font-size: 0.8em; font-weight: 600; gap: 5px; }
+  #readingView .cmt-act svg { width: 14px; height: 14px; }
+  #readingView .cmt-reply-expand { font-weight: 600; }
+
+  /* ── 回复区（缩进层级 / 输入条） ──────────────────────── */
+  #readingView .cmt-reply-list {
+    margin-top: 12px;
+    padding: 4px 14px;
+    border-radius: 14px;
+    background: var(--accent-light);
+  }
+  #readingView .cmt-reply-item {
+    padding: 12px 0;
+    margin: 0;
+    border-radius: 10px;
+  }
+  #readingView .cmt-reply-item + .cmt-reply-item { border-top: 1px solid var(--border); }
+  #readingView .cmt-reply-name { font-weight: 700; }
+  #readingView .cmt-more-replies { border-radius: 10px; }
+  #readingView .cmt-reply-input-wrap {
+    border-radius: 14px;
+    margin-top: 10px;
+  }
+  #readingView .cmt-reply-send-btn {
+    border-radius: 999px;
+    padding: 6px 16px;
+  }
+
+  /* ── 空态 / 分页器 ────────────────────────────────────── */
+  #readingView .cmt-empty { padding: 34px 0; }
+  #readingView .cmt-pager { padding-top: 16px; margin-top: 16px; }
+  #readingView .cmt-pg-btn { border-radius: 10px; }
+  #readingView .cmt-pg-btn.active {
+    box-shadow: 0 6px 14px -6px hsla(var(--accent-hue), var(--accent-sat), 50%, 0.55);
+  }
+
+  /* ── 评论输入区（容器外形已在 P2-2；此处补聚焦态与发送按钮） ── */
+  #readingView .cmt-input-box {
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  #readingView .cmt-input-box:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-light);
+  }
+  #readingView .cmt-send-btn { border-radius: 999px; padding: 8px 20px; }
+
+  /* ── 公告卡片内容排版（不触碰右侧封面与水墨遮隐） ─────── */
+  #announcementSection .ann-card-title-row { gap: 10px; }
+  #announcementSection .ann-card-type {
+    padding: 3px 12px;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+  }
+  #announcementSection .ann-card-meta { gap: 16px; font-size: 0.8em; }
+  #announcementSection .ann-card-tags { gap: 6px; margin-top: 4px; }
+  #announcementSection .ann-card-tag {
+    padding: 3px 12px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  #announcementSection .ann-card-more { font-weight: 700; }
+  #announcementSection .ann-empty { padding: 32px; }
+
+  /* ── 移动端：紧凑化，杜绝横向溢出 ─────────────────────── */
+  @media (max-width: 640px) {
+    #readingView .cmt-item { padding: 14px 12px; border-radius: 12px; }
+    #readingView .cmt-item:first-child { padding-top: 14px; }
+    #readingView .cmt-actions { gap: 14px; }
+    #readingView .cmt-reply-list { padding: 2px 12px; }
+    #announcementSection .ann-card-meta { gap: 12px; }
+  }
+}
+
+/* ============================================================================
+   P2-5：独立页外壳（账号与入口）—— admin/entry.php · verify-author.php ·
+   verify-confirm.php · user.php
+   做法：为每个独立页的 <body> 增加唯一壳 ID（仅新增，不改任何既有 ID/类/JS 钩子），
+   并让页面在原有样式表之前加载 tw.min.css；本文件以该壳 ID 作前缀提权覆盖。
+   说明：verify-author / verify-confirm 两页不加载 style.css（无 :root 令牌），
+   故其规则使用自包含的浅色字面值；user.php 走 var() 令牌以跟随主题色与深浅色。
+   不新增玻璃拟态；不改动任何后端逻辑与接口。
+   ============================================================================ */
+@layer components {
+  /* ── 个人资料页 user.php ─────────────────────────────── */
+  #userProfilePage .up-wrap { padding: 32px 20px; }
+  #userProfilePage .up-card {
+    border-radius: 22px;
+    padding: 40px 34px;
+    box-shadow: var(--shadow-md);
+  }
+  #userProfilePage .up-avatar {
+    width: 104px;
+    height: 104px;
+    border: 4px solid var(--accent-light);
+    box-shadow: var(--shadow-sm);
+  }
+  #userProfilePage .up-avatar img { border-radius: 50%; }
+  #userProfilePage .up-name {
+    font-size: 1.5em;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    gap: 10px;
+  }
+  #userProfilePage .up-badge {
+    padding: 4px 12px;
+    font-size: 0.72em;
+    border-radius: 999px;
+  }
+  #userProfilePage .up-sign {
+    margin: 16px 0 22px;
+    font-size: 0.95em;
+    line-height: 1.7;
+  }
+  #userProfilePage .up-meta {
+    border-top: 1px solid var(--border);
+    padding-top: 20px;
+    gap: 40px;
+    font-size: 0.85em;
+  }
+  #userProfilePage .up-meta b { font-size: 1.05em; }
+  #userProfilePage .up-back {
+    margin-top: 24px;
+    padding: 10px 22px;
+    border-radius: 999px;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+  #userProfilePage .up-back:hover { background: var(--accent); color: #fff; }
+
+  /* ── 写作者邮箱验证页 verify-author.php（自包含浅色） ── */
+  #verifyAuthorPage .card {
+    border-radius: 22px;
+    padding: 40px 34px;
+    box-shadow: 0 20px 52px -24px rgba(31, 58, 95, 0.55), 0 6px 18px rgba(31, 58, 95, 0.08);
+  }
+  #verifyAuthorPage .icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 18px;
+    background: #eaf0ff;
+    color: #3352cc;
+  }
+  #verifyAuthorPage h1 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  #verifyAuthorPage .email-tag {
+    padding: 6px 16px;
+    border-radius: 999px;
+    background: #eaf0ff;
+    color: #3352cc;
+    font-weight: 600;
+  }
+  #verifyAuthorPage input[type="text"] {
+    height: 50px;
+    border-radius: 14px;
+    border: 1.5px solid #dce7f5;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  #verifyAuthorPage input[type="text"]:focus {
+    border-color: #3352cc;
+    box-shadow: 0 0 0 3px rgba(51, 82, 204, 0.15);
+  }
+  #verifyAuthorPage button {
+    height: 50px;
+    border-radius: 14px;
+    background: #3352cc;
+    font-weight: 600;
+    box-shadow: 0 14px 26px -14px rgba(51, 82, 204, 0.9);
+    transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  #verifyAuthorPage button:hover {
+    background: #2a44ad;
+    transform: translateY(-1px);
+  }
+  #verifyAuthorPage .back {
+    margin-top: 20px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    color: #3352cc;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  /* ── 超管确认页 verify-confirm.php（自包含浅色） ──────── */
+  #verifyConfirmPage .card {
+    border-radius: 22px;
+    padding: 40px 34px;
+    box-shadow: 0 20px 52px -24px rgba(31, 58, 95, 0.55), 0 6px 18px rgba(31, 58, 95, 0.08);
+  }
+  #verifyConfirmPage .icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 20px;
+    font-size: 30px;
+  }
+  #verifyConfirmPage .icon.ok { background: #e7f6ee; color: #1e8449; }
+  #verifyConfirmPage .icon.fail { background: #fdecec; color: #c0392b; }
+  #verifyConfirmPage .brand { letter-spacing: -0.01em; }
+  #verifyConfirmPage .result { font-size: 0.95rem; line-height: 1.7; }
+  #verifyConfirmPage .back {
+    padding: 12px 28px;
+    border-radius: 14px;
+    background: #3352cc;
+    font-weight: 600;
+    box-shadow: 0 14px 26px -14px rgba(51, 82, 204, 0.9);
+    transition: background 0.2s ease, transform 0.2s ease;
+  }
+  #verifyConfirmPage .back:hover { background: #2a44ad; transform: translateY(-1px); }
+
+  /* ── 管理员 OTP 入口页 admin/entry.php ────────────────── */
+  #adminEntryPage .entry-card-inner {
+    border-radius: 22px;
+    box-shadow: var(--shadow-lg);
+    padding: 42px 34px 34px;
+  }
+  #adminEntryPage .entry-icon { border-radius: 18px; }
+  #adminEntryPage .entry-title { font-size: 1.45em; letter-spacing: -0.01em; }
+  #adminEntryPage .entry-error { border-radius: 12px; }
+  #adminEntryPage .entry-input { border-radius: 14px; }
+  #adminEntryPage .entry-input:focus { box-shadow: 0 0 0 3px var(--accent-glass); }
+  #adminEntryPage .entry-btn { border-radius: 14px; }
+  #adminEntryPage .entry-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 28px var(--accent-glow); }
+
+  /* ── 移动端 ───────────────────────────────────────────── */
+  @media (max-width: 480px) {
+    #userProfilePage .up-card { padding: 30px 22px; border-radius: 18px; }
+    #userProfilePage .up-meta { gap: 24px; }
+    #verifyAuthorPage .card,
+    #verifyConfirmPage .card { padding: 32px 22px; border-radius: 18px; }
+    #adminEntryPage .entry-card-inner { padding: 34px 22px 28px; border-radius: 18px; }
+  }
+}
+
+/* ============================================================================
+   P2-6：404 页外壳（404.php）—— 与新前端风格统一
+   前缀：#notFoundPage（新增的 body 壳 ID）。
+   原有 .nf-page / .nf-card / .nf-code / .nf-icon 结构保留，仅统一圆角·阴影·按钮；
+   同时补齐此前缺失的 .btn / .btn-primary / .btn-outline 外观（style.css 未定义）。
+   ============================================================================ */
+@layer components {
+  #notFoundPage .nf-page { padding: 32px 20px; }
+  #notFoundPage .nf-card { border-radius: 26px; box-shadow: var(--shadow-md); }
+  #notFoundPage .nf-actions { gap: 14px; }
+  #notFoundPage .nf-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 26px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-size: 0.95em;
+    font-weight: 600;
+    font-family: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease,
+      color 0.2s ease, border-color 0.2s ease;
+  }
+  #notFoundPage .nf-actions .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 14px 26px -14px hsla(var(--accent-hue), var(--accent-sat), 50%, 0.95);
+  }
+  #notFoundPage .nf-actions .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 32px -14px hsla(var(--accent-hue), var(--accent-sat), 50%, 0.95);
+  }
+  #notFoundPage .nf-actions .btn-outline {
+    background: var(--surface);
+    color: var(--text-secondary);
+    border-color: var(--border);
+  }
+  #notFoundPage .nf-actions .btn-outline:hover {
+    transform: translateY(-2px);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  @media (max-width: 480px) {
+    #notFoundPage .nf-actions { flex-direction: column; }
+    #notFoundPage .nf-actions .btn { width: 100%; }
+  }
+}

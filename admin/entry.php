@@ -200,9 +200,11 @@ if (!$needDeviceVerify && is_array($pendingNow)
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>管理员验证 - You Super Markdown</title>
+<!-- v5.1.0 P2-5：新外壳样式（先于 admin.css 加载，旧样式仍作兜底；仅追加，不改既有选择器） -->
+<link rel="stylesheet" href="/css/tw.min.css?v=<?= @filemtime(__DIR__ . '/../css/tw.min.css') ?>">
 <link rel="stylesheet" href="/css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
 </head>
-<body class="entry-page">
+<body id="adminEntryPage" class="entry-page">
     <div class="entry-card">
         <div class="entry-card-inner">
             <!-- 图标 — 盾牌锁 -->

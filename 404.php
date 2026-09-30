@@ -27,9 +27,11 @@ $bgCardOpacity = intval($siteCfg['bg_card_opacity'] ?? 100);?>
     </script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>" type="image/svg+xml">
     <!-- v4.1.0：资源使用绝对路径——未知路径（如 /xxx/yyy/）下相对路径会解析到错误位置导致样式加载失败 -->
+    <!-- v5.1.0 P2-6：新外壳样式（先于 style.css 加载，旧样式仍作兜底覆盖） -->
+    <link rel="stylesheet" href="/css/tw.min.css?v=<?= @filemtime(__DIR__ . '/css/tw.min.css') ?>">
     <link rel="stylesheet" href="/css/style.css?v=<?= @filemtime(__DIR__ . '/css/style.css') ?>">
 </head>
-<body data-bg-type="<?= htmlspecialchars($bgType) ?>" data-bg-image="<?= htmlspecialchars($bgImage) ?>" data-bg-api-url="<?= htmlspecialchars($bgApi) ?>" data-bg-blur="<?= htmlspecialchars($bgBlur) ?>" data-bg-blur-level="<?= $bgBlurLevel ?>" data-bg-card-opacity="<?= $bgCardOpacity ?>" style="padding-left:0">
+<body id="notFoundPage" data-bg-type="<?= htmlspecialchars($bgType) ?>" data-bg-image="<?= htmlspecialchars($bgImage) ?>" data-bg-api-url="<?= htmlspecialchars($bgApi) ?>" data-bg-blur="<?= htmlspecialchars($bgBlur) ?>" data-bg-blur-level="<?= $bgBlurLevel ?>" data-bg-card-opacity="<?= $bgCardOpacity ?>" style="padding-left:0">
 <script>
     // v4.1.0：404 页无侧边栏，覆盖 style.css 宽屏 body{padding-left:280px}（否则整页右移 280px 不居中）
     // v4.0.0：背景应用（与 js/main.js applyBg 同一逻辑，404 页不加载 main.js 故内联）

@@ -118,7 +118,7 @@ if (!$row || $row['status'] !== 'verify_pending' || ($row['email'] ?? '') !== $e
     .back { display: inline-block; margin-top: 18px; color: #64748b; font-size: 13px; text-decoration: none; }
 </style>
 </head>
-<body>
+<body id="verifyAuthorPage">
 <div class="card">
     <div class="icon">✉</div>
     <div class="brand"><?= htmlspecialchars($title) ?></div>

@@ -488,14 +488,72 @@ def migrate(db_path):
     return summary
 
 
+def db_is_empty_shell(path):
+    """判定 path 是否为「空壳库」（可安全让位给 ym.db 的真数据）。
+
+    背景（FIX-A）：文件落地后、迁移执行前，某个 Web 请求可能触发新版 db.php 先建出一个
+    空的 ysm.db（无 schema_meta 表 / 无任何数据）。若此时直接跳过改名，站点会读写这个空库，
+    而真实数据滞留在 ym.db —— 数据虽未丢失却不可见。
+
+    判定依据（任一成立即视为空壳）：
+      * 文件不存在，或大小为 0（≈0，无有效内容）；
+      * 打开后没有 schema_meta 表（未完成 5.0 初始化）；
+      * users 表不存在或为空（无任何真实业务数据）。
+    反之（已含 schema_meta 且 users 非空）视为「真库」，绝不清除/覆盖，交由人工确认。
+    """
+    if not os.path.exists(path):
+        return True
+    try:
+        if os.path.getsize(path) == 0:
+            return True
+    except OSError:
+        return True
+    try:
+        con = sqlite3.connect(path)
+    except sqlite3.Error:
+        return True
+    try:
+        if not table_columns(con, "schema_meta"):
+            return True
+        if not table_columns(con, "users"):
+            return True
+        return con.execute('SELECT COUNT(*) FROM "users"').fetchone()[0] == 0
+    except sqlite3.Error:
+        return True
+    finally:
+        con.close()
+
+
 def rename_to_ysm(db_path):
-    """若文件名仍为 ym.db，则改名为 ysm.db（含 WAL 侧车文件）。返回最终路径。"""
+    """若文件名仍为 ym.db，则改名为 ysm.db（含 WAL 侧车文件）。返回最终路径。
+
+    FIX-A 迁移竞态：目标 ysm.db 可能已被「新版 db.php 抢先建出的空壳库」占用。
+    此时若照旧跳过改名，站点会读写空 ysm.db 而真数据滞留在 ym.db。故：
+      * 目标为空壳 → 将其移开备份（ysm.db.ysm-empty.<ts>.bak，含 -wal/-shm）后，
+        照常执行 ym.db → ysm.db 改名（消除数据滞留窗口）；
+      * 目标非空壳（已含真实数据）→ 保持「跳过改名」并显式告警，绝不覆盖真数据。
+    全过程幂等（空壳判定 + 唯一时间戳备份名），被移开的空壳仍可人工找回（可回滚）。
+    """
     if os.path.basename(db_path) != "ym.db":
         return db_path
     target = os.path.join(os.path.dirname(db_path), "ysm.db")
     if os.path.exists(target):
-        print("[warn] 目标 ysm.db 已存在，跳过改名（请人工确认）")
-        return db_path
+        if not db_is_empty_shell(target):
+            print("[warn] 目标 ysm.db 已存在且含真实数据，跳过改名以避免覆盖（请人工确认 ym.db / ysm.db）")
+            return db_path
+        stash = "{}.ysm-empty.{}.bak".format(target, time.strftime("%Y%m%d-%H%M%S"))
+        try:
+            os.rename(target, stash)
+        except OSError as e:
+            print("[error] 目标 ysm.db 为空壳但移开失败（{}），跳过改名以避免误覆盖，请人工处理".format(e))
+            return db_path
+        for suffix in ("-wal", "-shm"):
+            if os.path.exists(target + suffix):
+                try:
+                    os.rename(target + suffix, stash + suffix)
+                except OSError:
+                    pass
+        print("[ok]   目标 ysm.db 为空壳，已移开备份：{}（随后执行 ym.db → ysm.db 改名）".format(stash))
     os.rename(db_path, target)
     for suffix in ("-wal", "-shm"):
         if os.path.exists(db_path + suffix):

@@ -27,6 +27,8 @@ post_update_finish() {
     # 清理旧备份（保留最近2次）
     echo "  清理旧备份..."
     ls -t "/opt/you-super-markdown/backups"/pre-update-*.tar.gz 2>/dev/null | tail -n +3 | xargs rm -f 2>/dev/null || true
+    # FIX-B：与站点备份同步清理配套数据库快照（保留最近2次），避免 pre-update-db-*.tar.gz 无界增长
+    ls -t "/opt/you-super-markdown/backups"/db/pre-update-db-*.tar.gz 2>/dev/null | tail -n +3 | xargs rm -f 2>/dev/null || true
     echo ""
     echo "============================================"
     echo "  更新完成！"
@@ -281,18 +283,44 @@ verify_package_signature() {
 auto_rollback() {
     local reason="${1:-}"
     local BACKUP_DIR="/opt/you-super-markdown/backups"
-    local LATEST
+    local LATEST base db_snap db_ts db_cu
     LATEST=$(ls -t "$BACKUP_DIR"/pre-update-*.tar.gz 2>/dev/null | head -1)
     if [ -z "$LATEST" ]; then
         echo "  [回退] 错误：没有可用备份，无法自动回退，请人工介入"
         return 1
     fi
     echo "  [回退] 检测到更新失败，自动回退到备份: $(basename "$LATEST")"
+    # FIX-B：定位与站点备份「同版本+同时间戳」的数据库快照（backups/db/pre-update-db-v<ver>-<ts>.tar.gz）。
+    # 由 apply-update [1/6] 生成；未找到则仅回退文件、不动数据目录（向后兼容旧备份）。
+    db_snap=""
+    base=$(basename "$LATEST")
+    if [[ "$base" =~ pre-update-v([0-9.]+)-([0-9]+)\.tar\.gz ]]; then
+        db_snap="$BACKUP_DIR/db/pre-update-db-v${BASH_REMATCH[1]}-${BASH_REMATCH[2]}.tar.gz"
+        [ -f "$db_snap" ] || db_snap=""
+    fi
     systemctl stop ysm-guard 2>/dev/null || true
     sleep 1
     chattr -R -i /opt/you-super-markdown/install-base/ 2>/dev/null || true
     tar -xzf "$LATEST" -C "$WEB_ROOT" 2>/dev/null
     rsync -a --delete --exclude='data/' "$WEB_ROOT/" "/opt/you-super-markdown/install-base/" 2>/dev/null
+    # FIX-B：同步还原数据库——「迁移成功但后续步骤失败」时，若只回退代码会把库留在 5.0（代码 4.x、库 5.0）导致不一致。
+    # 做法：守护已停（上方），先把当前库（5.0 形态）移开并保留为 *.failed.<ts>（供人工取证），
+    # 再从更新前快照恢复（4.x 形态即 ym.db），最后修正属主为 www-data——使代码与库版本一致、可正常读写。
+    if [ -n "$db_snap" ]; then
+        db_ts=$(date +%s)
+        for db_cur in "$WEB_ROOT/data/ym.db" "$WEB_ROOT/data/ym.db-wal" "$WEB_ROOT/data/ym.db-shm" \
+                      "$WEB_ROOT/data/ysm.db" "$WEB_ROOT/data/ysm.db-wal" "$WEB_ROOT/data/ysm.db-shm"; do
+            [ -e "$db_cur" ] && mv -f "$db_cur" "${db_cur}.failed.${db_ts}" 2>/dev/null
+        done
+        if tar -xzf "$db_snap" -C "$WEB_ROOT/data" 2>/dev/null; then
+            chown www-data:www-data "$WEB_ROOT/data"/*.db* 2>/dev/null || true
+            echo "  [回退] 已还原数据库快照: $(basename "$db_snap")（代码与库已同为更新前版本）"
+        else
+            echo "  [回退] 警告：数据库快照还原失败，请人工处理（失败库已保留为 *.failed.${db_ts}）"
+        fi
+    else
+        echo "  [回退] 提示：未找到配套数据库快照，数据目录保持原样（未回退数据库）"
+    fi
     chattr -R +i /opt/you-super-markdown/install-base/ 2>/dev/null || true
     systemctl start ysm-guard 2>/dev/null || true
     rm -f /opt/you-super-markdown/run/ysm-update.lock
@@ -490,6 +518,52 @@ http_reachable() {
         2[0-9][0-9]|3[0-9][0-9]) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+# v5.0.0：4.x→5.0 数据库结构迁移——调用 webroot 内 ysm-migrate（Python 实现）。
+# 定义于顶部函数区：apply-update 自更新会覆盖 /usr/local/bin/ysm-admin 自身，
+# 顶部函数体已读入内存，避免「新旧文件混合」解析失败（同 post_update_finish）。
+# 用法: run_migration [--db <路径>]；直接流式打印迁移器输出，并返回迁移器退出码
+#       （非 0=失败；未找到迁移器 / Python → 返回 127）。
+#       外部参数经 "$@" 原样传递，不做字符串插值。
+run_migration() {
+    local migrator="$WEB_ROOT/ysm-migrate" py=""
+    if [ ! -f "$migrator" ]; then
+        echo "  [迁移] 错误：未找到迁移器 $migrator" >&2
+        return 127
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        py="python3"
+    elif command -v python >/dev/null 2>&1; then
+        py="python"
+    else
+        echo "  [迁移] 错误：未找到 python3（或 python），无法执行迁移" >&2
+        return 127
+    fi
+    "$py" "$migrator" "$@"
+    return $?
+}
+
+# 判断是否需要执行 4.x→5.0 迁移（幂等）：返回 0=需要，1=无需（已迁移过 / 无库文件）。
+#   需要 = 存在旧库 $WEB_ROOT/data/ym.db；或现存库 schema_meta.schema_version ≠ 5.0.0。
+#   schema_version 经环境变量传入 php（PHP 侧 getenv 取值），不把库路径插值进 php -r 代码。
+schema_needs_migration() {
+    local old_db="$WEB_ROOT/data/ym.db" cur_db="$WEB_ROOT/data/ysm.db" ve
+    [ -f "$old_db" ] && return 0
+    [ -f "$cur_db" ] || return 1           # 无库文件 → 无可迁移对象，跳过
+    ver=$(YSM_DB_PATH="$cur_db" php -r '
+        $p = getenv("YSM_DB_PATH");
+        if ($p === false || $p === "" || !is_file($p)) { exit(0); }
+        try {
+            $db = new PDO("sqlite:" . $p);
+            $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $st = $db->prepare("SELECT value FROM schema_meta WHERE key = ?");
+            $st->execute(array("schema_version"));
+            $v = $st->fetchColumn();
+            echo is_string($v) ? $v : "";
+        } catch (Exception $e) { exit(0); }
+    ' 2>/dev/null)
+    [ "$ver" != "5.0.0" ]
 }
 
 case "${1:-}" in
@@ -738,6 +812,44 @@ case "${1:-}" in
         ensure_env_deps
         ;;
 
+    migrate)
+        # v5.0.0：独立数据库结构迁移子命令（4.x → 5.0）。
+        # 用法: sudo ysm-admin migrate [--db <路径>]
+        # 说明：本命令不重启任何服务（迁移完成后仅打印提示，请自行重启守护进程）；
+        #       迁移器自身会先备份、失败自动回滚，并以其退出码作为本命令结果。
+        [ "$(id -u)" -ne 0 ] && { echo "错误：migrate 需 root 权限（sudo ysm-admin migrate）"; exit 1; }
+        DB_OPT=""
+        shift || true
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --db)
+                    [ -n "${2:-}" ] || { echo "错误：--db 需要路径参数"; exit 1; }
+                    DB_OPT="$2"; shift 2 ;;
+                --db=*)
+                    DB_OPT="${1#--db=}"; shift ;;
+                *)
+                    echo "错误：未知参数 $1"
+                    echo "用法: ysm-admin migrate [--db <路径>]"
+                    exit 1 ;;
+            esac
+        done
+        echo "=== 数据库结构迁移（4.x → 5.0） ==="
+        MIG_ARGS=()
+        [ -n "$DB_OPT" ] && MIG_ARGS=(--db "$DB_OPT")
+        MIG_RC=0
+        run_migration "${MIG_ARGS[@]}" || MIG_RC=$?
+        if [ "$MIG_RC" -eq 0 ]; then
+            echo ""
+            echo "============================================"
+            echo "  迁移完成，请重启守护进程"
+            echo "  sudo systemctl restart ysm-guard"
+            echo "============================================"
+        else
+            echo "错误：数据库迁移失败（退出码 $MIG_RC）" >&2
+            exit 1
+        fi
+        ;;
+
     apply-update)
         # v5.0.0：--allow-unsigned 一次性受控引导开关（未部署签名公钥时放行首包，写审计日志）
         ALLOW_UNSIGNED=0
@@ -858,9 +970,26 @@ case "${1:-}" in
         echo "[1/6] 创建备份..."
         BACKUP_DIR="/opt/you-super-markdown/backups"
         mkdir -p "$BACKUP_DIR"
-        BACKUP_FILE="$BACKUP_DIR/pre-update-v${FROM_VER}-$(date +%s).tar.gz"
+        BK_TS="$(date +%s)"
+        BACKUP_FILE="$BACKUP_DIR/pre-update-v${FROM_VER}-${BK_TS}.tar.gz"
         tar -czf "$BACKUP_FILE" -C "$WEB_ROOT" --exclude='data' --exclude='.git' . 2>/dev/null
+        # FIX-B：数据库快照——把 data/ 下 ym.db*/ysm.db*（含 -wal/-shm）单独打进「同时间戳」的 DB 备份，
+        # 使「更新失败自动回滚」能把库一并回到更新前形态（避免「代码回 4.x、库已是 5.0」的不一致）。
+        # 存放于独立子目录 backups/db/，避免被 auto_rollback / 清理里的 pre-update-*.tar.gz 通配误捕。
+        DB_BACKUP_DIR="$BACKUP_DIR/db"
+        DB_BACKUP_FILE=""
+        mkdir -p "$DB_BACKUP_DIR"
+        db_files=()
+        for db_p in "$WEB_ROOT/data/ym.db" "$WEB_ROOT/data/ym.db-wal" "$WEB_ROOT/data/ym.db-shm" \
+                    "$WEB_ROOT/data/ysm.db" "$WEB_ROOT/data/ysm.db-wal" "$WEB_ROOT/data/ysm.db-shm"; do
+            [ -e "$db_p" ] && db_files+=("$(basename "$db_p")")
+        done
+        if [ "${#db_files[@]}" -gt 0 ]; then
+            DB_BACKUP_FILE="$DB_BACKUP_DIR/pre-update-db-v${FROM_VER}-${BK_TS}.tar.gz"
+            tar -czf "$DB_BACKUP_FILE" -C "$WEB_ROOT/data" "${db_files[@]}" 2>/dev/null || DB_BACKUP_FILE=""
+        fi
         echo "  备份: $BACKUP_FILE"
+        [ -n "$DB_BACKUP_FILE" ] && echo "  数据库快照: $DB_BACKUP_FILE"
 
         # 2. 停守护
         echo "[2/6] 停止守护进程..."
@@ -1022,8 +1151,32 @@ case "${1:-}" in
             chmod +x /usr/local/bin/ysm-admin 2>/dev/null || true
         fi
 
+        # 4.5 数据库结构迁移（4.x→5.0，按需、幂等）——必须在文件 rsync 落地之后、健康检查/重启服务之前，
+        # 且在下方 data 目录 chown 之前执行（迁移会新建/改名 ysm.db，随后的 chown 归位属主）。
+        # 时序：守护进程已停（[2/6]）、更新锁生效期间执行，避免与业务写入并发。
+        # 失败即 mark_failed → 走既有自动回滚（此刻 FILES_APPLIED 已置位）；已迁移过则跳过。
+        if schema_needs_migration; then
+            echo "[4.5/6] 数据库结构迁移（4.x → 5.0）..."
+            if [ ! -f "$WEB_ROOT/ysm-migrate" ]; then
+                echo "错误：需要迁移但未找到迁移器 $WEB_ROOT/ysm-migrate，拒绝继续（失败封闭）"
+                mark_failed "需要数据库迁移但缺少 ysm-migrate"
+                exit 1
+            fi
+            MIG_DB="$WEB_ROOT/data/ym.db"
+            [ -f "$MIG_DB" ] || MIG_DB="$WEB_ROOT/data/ysm.db"
+            if run_migration --db "$MIG_DB"; then
+                echo "  数据库迁移完成"
+            else
+                echo "错误：数据库迁移失败，触发自动回滚"
+                mark_failed "数据库结构迁移失败（ysm-migrate）"
+                exit 1
+            fi
+        else
+            echo "[4.5/6] 数据库结构已是最新（schema_version=5.0.0），跳过迁移"
+        fi
+
         # 确保 PHP-FPM（www-data）可写 SQLite 及 WAL/SHM 文件；data 目录组可写供 CLI 只读命令无 sudo 读取
-        # （v5.0.0：不再执行一次性 JSON→SQLite 迁移脚本；4.x 老库结构迁移请用 python3 ysm-migrate）
+        # （v5.0.0：不再执行一次性 JSON→SQLite 迁移脚本；4.x 老库结构迁移见上方 [4.5/6] 自动调用 ysm-migrate）
         chown -R www-data:www-data "$WEB_ROOT/data" 2>/dev/null || true
         chmod 775 "$WEB_ROOT/data" 2>/dev/null || true
         chmod 660 "$WEB_ROOT/data/ysm.db" 2>/dev/null || true
@@ -1293,6 +1446,7 @@ case "${1:-}" in
         echo "  set-smtp-pass [--pass=授权码] 修改 SMTP 授权码（需 sudo；密钥文件 + php-fpm 环境变量双写，自动发测试邮件）"
         echo "  apply-update [--allow-unsigned] 执行系统更新（完成后自动发通知邮件；--allow-unsigned 为一次性受控引导，未部署签名公钥时慎用）"
         echo "  deps                      检查并一键补装功能依赖（内置兜底清单，需 sudo；更新时自动按包内 deps 声明安装）"
+        echo "  migrate [--db <路径>]      迁移 4.x 数据库结构到 5.0（需 sudo；不重启服务，完成后请重启守护进程）"
         echo "  rollback                  回滚到备份版本"
         echo "  hfish-panel               建立 SSH 隧道访问 Hfish 管理面板"
         echo "  hfish-status              查看 Hfish 蜜罐状态"

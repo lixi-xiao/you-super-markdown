@@ -3,6 +3,15 @@
 *{margin:0;padding:0;box-sizing:border-box;}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;}
 body{font-family:'ChineseFont','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:var(--base-font-size);background:var(--bg);color:var(--text);line-height:1.6;min-height:100vh;-webkit-font-smoothing:antialiased;letter-spacing:-0.01em;transition:font-size 0.2s,background 0.35s ease,color 0.35s ease;}
+/* v5.0.2：移动端彻底消除「页面级横向溢出」（可往右划到空白）。用 overflow-x:clip 而非 hidden，
+   以免把 body 变成滚动容器而破坏 position:sticky（顶栏）。内层宽元素仍各自内部滚动。 */
+html,body{max-width:100%;}
+body{overflow-x:clip;}
+@supports not (overflow-x: clip){html{overflow-x:hidden;}}
+.main-container,.reading-view,.reading-view .markdown-body,#cardsGrid,#archiveView,.empty-state{max-width:100%;min-width:0;}
+.markdown-body{overflow-wrap:anywhere;word-break:break-word;}
+.markdown-body table,.markdown-body pre,.table-wrapper,.markdown-body img,.markdown-body video,.markdown-body svg,.markdown-body .mermaid,.markdown-body iframe{max-width:100%;}
+.markdown-body pre,.markdown-body .mermaid,.table-wrapper{overflow-x:auto;}
 ::selection{background:hsl(var(--accent-hue),var(--accent-sat),85%);color:var(--text);}
 [data-theme="dark"] ::selection{background:hsl(var(--accent-hue),var(--accent-sat),25%);color:#e6edf3;}
 /* 自定义滚动条 */ ::-webkit-scrollbar{width:6px;height:6px;}

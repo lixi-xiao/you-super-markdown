@@ -37,12 +37,23 @@ if (!defined('YSM_SHARE_SITE_DESC')) {
     define('YSM_SHARE_SITE_DESC', '一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器');
 }
 
-/** scheme + host（绝对 URL 基址）；兼容反代后的 X-Forwarded-Proto / HTTPS，Host 头做白名单加固（防 Host 注入） */
+/** scheme + host（绝对 URL 基址）；兼容反代后的 X-Forwarded-Proto / HTTPS，Host 头做白名单加固（防 Host 注入）
+ *  v5.0.0：若 app-config.json 配置了站点域名（site_url），则请求 Host 与配置域名不一致时回落到配置域名
+ *  （防伪造 Host 头污染 og:url/og:image 指向攻击者域名）；site_url 为空则保持原行为（仅格式校验 + 取请求 Host）。 */
 function ysmShareOrigin() {
     $host = $_SERVER['HTTP_HOST'] ?? '';
     if (!preg_match('/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/', $host) || $host === '') $host = 'localhost';
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
           || (strtolower($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    $siteUrl = trim((string)appConfig('site_url', ''));
+    if ($siteUrl !== '') {
+        $pu = parse_url($siteUrl);
+        $cfgHost = is_array($pu) ? trim((string)($pu['host'] ?? '')) : '';
+        if ($cfgHost !== '') {
+            $cfgHostPort = $cfgHost . (isset($pu['port']) ? ':' . $pu['port'] : '');
+            if (strcasecmp($host, $cfgHostPort) !== 0) $host = $cfgHostPort; // 请求 Host 与配置域名不一致 → 回落配置域名
+        }
+    }
     return ($https ? 'https' : 'http') . '://' . $host;
 }
 

@@ -77,7 +77,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     recordDevice($superAdmin['id'], $pending['fp_hash'], $_SERVER['HTTP_USER_AGENT'] ?? '');
                     unset($_SESSION['cmt_pending_dev']);
-                    $_SESSION['otp_fails'] = 0;
                     $newTV = bumpUserTV($superAdmin['id']);
                     $_SESSION['cmt_fp'] = computeSessionFp($pending['fp'] ?? $reqFp);
                     $_SESSION['cmt_tv'] = $newTV;
@@ -110,14 +109,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($found) {
         $otp = $_POST['otp'] ?? '';
         // OTP 尝试限次：连续 3 次失败即销毁入口（防暴力枚举）
-        $otpFails = (int)($_SESSION['otp_fails'] ?? 0);
+        // v5.0.0：失败计数落库（meta 表，按入口 token 键）——不再用 $_SESSION，
+        // 避免攻击者丢弃 Cookie 重置会话计数绕过限次（原实现可直接重发请求无限枚举）
+        $otpFailKey = 'otp_fails:' . $entryToken;
+        $otpFails = (int)(db_one('SELECT value FROM meta WHERE key = ?', [$otpFailKey])['value'] ?? 0);
         if ($otpFails >= 3) {
             db_exec('UPDATE entries SET used = 1 WHERE token = ?', [$entryToken]);
+            db_exec('DELETE FROM meta WHERE key = ?', [$otpFailKey]);
             http_response_code(404);
             exit('Not Found');
         }
         if (password_verify($otp, $found['otp_hash'])) {
-            $_SESSION['otp_fails'] = 0;
+            db_exec('DELETE FROM meta WHERE key = ?', [$otpFailKey]);
             // 原子消费：标记 used=1
             db_exec('UPDATE entries SET used = 1 WHERE token = ?', [$entryToken]);
 
@@ -174,7 +177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         } else {
-            $_SESSION['otp_fails'] = $otpFails + 1;
+            db_exec('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [$otpFailKey, (string)($otpFails + 1)]);
             $error = '密码错误';
             auditLog('login_otp_failed', '', 'OTP 验证失败');
         }

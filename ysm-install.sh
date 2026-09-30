@@ -314,7 +314,7 @@ fi
 
 # 创建必要的子目录
 # v3.3.12：data/cache/thumbs 为缩略图缓存目录（img.php 写入，需 www-data 可写）
-mkdir -p "$WEB_ROOT/data/articles" "$WEB_ROOT/data/comments" "$WEB_ROOT/data/bg" "$WEB_ROOT/data/avatars" "$WEB_ROOT/data/cache/thumbs"
+mkdir -p "$WEB_ROOT/data/articles" "$WEB_ROOT/data/bg" "$WEB_ROOT/data/avatars" "$WEB_ROOT/data/cache/thumbs"
 chown -R www-data:www-data "$WEB_ROOT/data"
 
 # 将调用本脚本的管理员加入 www-data 组（CLI 只读命令无需 sudo 即可读取 SQLite）
@@ -325,11 +325,13 @@ fi
 log "文件部署完成"
 
 # 写入站点域名到 app-config.json（供 ysm-admin 生成管理入口 URL；v2.10.2 起禁止 ysm-admin 硬编码域名）
-php -r "
+# v5.0.0：域名经 base64 环境变量传入，避免直接拼进 php -r 代码字符串（防引号/特殊字符注入）
+DOMAIN_B64=$(printf '%s' "$DOMAIN" | base64 -w0 2>/dev/null || printf '%s' "$DOMAIN" | base64)
+DOMAIN_B64="$DOMAIN_B64" php -r "
     \$p = '$WEB_ROOT/app-config.json';
     if (file_exists(\$p)) {
         \$c = json_decode(file_get_contents(\$p), true) ?: [];
-        \$c['site_url'] = '$DOMAIN';
+        \$c['site_url'] = base64_decode(getenv('DOMAIN_B64'));
         file_put_contents(\$p, json_encode(\$c, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), LOCK_EX);
     }
 " 2>/dev/null
@@ -1120,7 +1122,8 @@ configure_mail() {
         echo ""
         log "SMTP 双向验证：发送确认码邮件到 $ADMIN_EMAIL ..."
         VERIFY_CODE=$(php -r "echo str_pad((string)random_int(0,999999),6,'0',STR_PAD_LEFT);")
-        php -r "require '$WEB_ROOT/utils.php'; db_exec('INSERT INTO email_codes (id,email,code,purpose,expires,used,created,ip,operator_role) VALUES (?,?,?,?,?,0,?,?,?)', [bin2hex(random_bytes(8)), '$ADMIN_EMAIL', '$VERIFY_CODE', 'install_verify', time()+300, time(), 'install', 'install']);" 2>/dev/null || true
+        ADMIN_EMAIL_B64=$(printf '%s' "$ADMIN_EMAIL" | base64 -w0 2>/dev/null || printf '%s' "$ADMIN_EMAIL" | base64) \
+        php -r "require '$WEB_ROOT/utils.php'; db_exec('INSERT INTO email_codes (id,email,code,purpose,expires,used,created,ip,operator_role) VALUES (?,?,?,?,?,0,?,?,?)', [bin2hex(random_bytes(8)), base64_decode(getenv('ADMIN_EMAIL_B64')), '$VERIFY_CODE', 'install_verify', time()+300, time(), 'install', 'install']);" 2>/dev/null || true
         SEND_RESULT=$(YSM_SMTP_PASS="$(cat "$SECRETS_DIR/smtp_pass" 2>/dev/null)" \
         ADMIN_EMAIL_B64=$(printf '%s' "$ADMIN_EMAIL" | base64 -w0 2>/dev/null || printf '%s' "$ADMIN_EMAIL" | base64) \
         CODE_B64=$(printf '%s' "$VERIFY_CODE" | base64 -w0 2>/dev/null || printf '%s' "$VERIFY_CODE" | base64) \

@@ -153,9 +153,11 @@ function resolvePublicIp($host) {
     }
     return null;
 }
-// SSRF 安全抓取：一次解析 + 固定解析后的 IP 直连（Host/SNI 保留原域名），消除 DNS rebinding TOCTOU
-function fetchHttpContent($url, $ua = null) {
+// SSRF 安全抓取：单跳实现——一次解析 + 固定解析后的 IP 直连（Host/SNI 保留原域名），消除 DNS rebinding TOCTOU
+// 返回 ['code'=>int,'location'=>string,'body'=>string]；非 http/https、内网/未识别主机、请求失败 → false
+function fetchHttpOnce($url, $ua) {
     $parts = parse_url($url);
+    if (!is_array($parts)) return false;
     $scheme = strtolower($parts['scheme'] ?? '');
     $host = strtolower(trim($parts['host'] ?? ''));
     if (!in_array($scheme, ['http', 'https'], true) || $host === '') return false;
@@ -166,8 +168,6 @@ function fetchHttpContent($url, $ua = null) {
     $port = $parts['port'] ?? ($scheme === 'https' ? 443 : 80);
     $path = ($parts['path'] ?? '/') . (isset($parts['query']) ? '?' . $parts['query'] : '');
     $targetUrl = $scheme . '://' . $ip . ':' . $port . $path;
-    // v4.1.15：支持自定义 UA（封面图片池用桌面 UA 拉取横屏壁纸）
-    $ua = $ua !== null ? $ua : (appConfig('app_name', 'You Super Markdown') . "/" . APP_VERSION);
     $header = "Host: " . $host . "\r\n"
         . "User-Agent: " . $ua . "\r\n"
         . "Connection: close\r\n";
@@ -176,9 +176,8 @@ function fetchHttpContent($url, $ua = null) {
             'method' => 'GET',
             'header' => $header,
             'timeout' => 10,
-            'ignore_errors' => false,
-            // v5.0.0 P0-2：禁止跟随重定向——防 302 跳到内网绕过 pin-IP（单次解析+GethostByName 校验只对首跳生效）
-            'follow_location' => 0,
+            'ignore_errors' => true, // 取回 3xx/4xx 响应头以便自行处理重定向
+            'follow_location' => 0,  // 由 fetchHttpContent 逐跳校验后跟随，禁用底层自动跟随
         ],
     ];
     if ($scheme === 'https') {
@@ -190,7 +189,50 @@ function fetchHttpContent($url, $ua = null) {
             'capture_peer_cert' => false,
         ];
     }
-    return @file_get_contents($targetUrl, false, stream_context_create($opts));
+    $body = @file_get_contents($targetUrl, false, stream_context_create($opts));
+    if ($body === false) return false;
+    $code = 0;
+    $location = '';
+    foreach ($http_response_header ?? [] as $h) {
+        if (preg_match('#^HTTP/\S+\s+(\d{3})#', $h, $m)) { $code = (int)$m[1]; }
+        elseif (stripos($h, 'Location:') === 0) { $location = trim(substr($h, 9)); }
+    }
+    return ['code' => $code, 'location' => $location, 'body' => $body];
+}
+// 相对 Location → 绝对 URL（爬取跳转用）
+function resolveRedirectUrl($base, $loc) {
+    $loc = trim((string)$loc);
+    if ($loc === '') return '';
+    if (preg_match('#^https?://#i', $loc)) return $loc;
+    $bp = parse_url($base);
+    if (!is_array($bp) || empty($bp['scheme']) || empty($bp['host'])) return '';
+    $authority = $bp['host'] . (isset($bp['port']) ? ':' . $bp['port'] : '');
+    if (strpos($loc, '//') === 0) return $bp['scheme'] . ':' . $loc;
+    if ($loc[0] === '/') return $bp['scheme'] . '://' . $authority . $loc;
+    $dir = isset($bp['path']) ? preg_replace('#/[^/]*$#', '/', $bp['path']) : '/';
+    return $bp['scheme'] . '://' . $authority . $dir . $loc;
+}
+// SSRF 安全抓取（对外）：最多跟随 3 跳，每一跳目标都必须为公网且非内网（复用 isPrivateHost/resolvePublicIp）；
+// 非 http/https、跳数超限、目标内网 → 失败。返回响应体字符串或 false（对既有调用方保持兼容）。
+function fetchHttpContent($url, $ua = null) {
+    // v4.1.15：支持自定义 UA（封面图片池用桌面 UA 拉取横屏壁纸）
+    $ua = $ua !== null ? $ua : (appConfig('app_name', 'You Super Markdown') . "/" . APP_VERSION);
+    $maxHops = 3;
+    for ($hop = 0; $hop <= $maxHops; $hop++) {
+        $res = fetchHttpOnce($url, $ua);
+        if ($res === false) return false;
+        $code = (int)($res['code'] ?? 0);
+        if (in_array($code, [301, 302, 303, 307, 308], true)) {
+            if ($hop === $maxHops) return false; // 超过最大跳数
+            $next = resolveRedirectUrl($url, $res['location'] ?? '');
+            if ($next === '') return false;
+            $url = $next; // 下一跳仍会经 fetchHttpOnce 做公网/内网校验（含 scheme 白名单）
+            continue;
+        }
+        if ($code >= 200 && $code < 300) return $res['body'];
+        return false; // 其他状态码（含无 Location 的 3xx、4xx/5xx）→ 失败
+    }
+    return false;
 }
 function fetchAllUsers() {
     return db_all('SELECT * FROM users ORDER BY rowid');
@@ -414,10 +456,21 @@ function isIPBanned($ip, $type) {
     return in_array($type, $types, true);
 }
 function getClientIP() {
-    if (!empty($_SERVER['HTTP_X_REAL_IP']) && ($_SERVER['REMOTE_ADDR'] ?? '') === '127.0.0.1') {
-        return $_SERVER['HTTP_X_REAL_IP'];
+    $remote = $_SERVER['REMOTE_ADDR'] ?? '';
+    // v5.0.0：仅当直连方为本机/私有网段（受控代理）时，才考虑采信代理头；
+    // 且代理头值本身必须是合法公网 IP 才采用——否则一律回落 REMOTE_ADDR，
+    // 防伪造 X-Real-IP / X-Forwarded-For 绕过限流与封禁。
+    if ($remote !== '' && isPrivateIp($remote)) {
+        foreach (['HTTP_X_REAL_IP', 'HTTP_X_FORWARDED_FOR'] as $hdr) {
+            $val = trim((string)($_SERVER[$hdr] ?? ''));
+            if ($val === '') continue;
+            $candidate = trim(explode(',', $val)[0]); // XFF 可能是列表，取首个（原始客户端）
+            if (filter_var($candidate, FILTER_VALIDATE_IP) && !isPrivateIp($candidate)) {
+                return $candidate;
+            }
+        }
     }
-    return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    return $remote !== '' ? $remote : '0.0.0.0';
 }
 // ============================================================
 // v3.0.8 统一安全入口（detectScannerUA：扫描器 UA 黑名单检测）
@@ -517,23 +570,6 @@ define('ROLE_HIERARCHY', [
     ROLE_GUEST => 10,
     'admin' => 40,  // 向后兼容旧版 admin 角色
 ]);
-
-function getRoleDefinitions() {
-    // 角色定义基本静态，从 meta 表读取覆盖（若无则用默认值）
-    $defaults = [
-        ROLE_SUPER_ADMIN => ['label' => '高级管理员', 'can' => ['*']],
-        ROLE_STATION_ADMIN => ['label' => '站长', 'can' => ['article.create','article.edit','article.delete','article.edit_any','article.delete_any','author.create','author.delete','user.view']],
-        ROLE_AUTHOR => ['label' => '写作者', 'can' => ['article.create','article.edit_own','article.delete_own']],
-        ROLE_USER => ['label' => '用户', 'can' => ['comment.create','profile.edit']],
-        ROLE_GUEST => ['label' => '访客', 'can' => ['article.read']],
-    ];
-    $row = db_one('SELECT value FROM meta WHERE key = ?', ['roles']);
-    if ($row) {
-        $d = json_decode($row['value'], true);
-        if (is_array($d)) return $d;
-    }
-    return $defaults;
-}
 
 function checkRole($requiredRole) {
     $user = $_SESSION['cmt_user'] ?? null;
@@ -2106,10 +2142,9 @@ function sendAdminConfirmMail($pendingId, $token, $nick, $account, $email) {
 // （/opt/you-super-markdown/run/ root:www-data 0770，文件 0660）；旧 /tmp 路径保留为只读兼容回退。
 define('UPDATE_REQUEST_FILE', '/opt/you-super-markdown/run/ysm-update-request.json');
 define('UPDATE_REQUEST_FILE_LEGACY', '/tmp/ysm-update-request.json');
-// v5.0.0：更新锁迁至 root:www-data 共享、其他用户不可写的 /opt 目录（目录 0770、文件 0660）；
-// 旧 /tmp 路径保留为兼容只读回退——读取前做属主/权限校验，不可信锁视为「未加锁」
+// v5.0.0：更新锁位于 root:www-data 共享、其他用户不可写的 /opt 目录（目录 0770、文件 0660）；
+// 读取前做属主/权限校验，不可信锁视为「未加锁」（不再保留旧 /tmp 回退路径）
 define('UPDATE_LOCK_FILE', '/opt/you-super-markdown/run/ysm-update.lock');
-define('UPDATE_LOCK_FILE_LEGACY', '/tmp/ysm-update.lock');
 define('BACKUP_DIR', '/opt/you-super-markdown/backups');
 define('BACKUP_CONF', '/opt/you-super-markdown/backup.conf');           // 自动备份配置（root:www-data 664）
 define('BACKUP_DB_DIR', BACKUP_DIR . '/db');                        // 数据库 30 分钟备份（固定 1 份）
@@ -2362,19 +2397,17 @@ function updateLockTrusted($path) {
 }
 
 function isUpdateInProgress() {
-    foreach ([UPDATE_LOCK_FILE, UPDATE_LOCK_FILE_LEGACY] as $path) {
-        if (!is_file($path)) continue;
-        if (!updateLockTrusted($path)) continue;   // 不可信 → 按未加锁处理
-        $data = json_decode(file_get_contents($path), true);
-        if (!is_array($data)) continue;
-        // 锁过期则清理
-        if (($data['expires'] ?? 0) < time()) {
-            @unlink($path);
-            continue;
-        }
-        return true;
+    $path = UPDATE_LOCK_FILE;
+    if (!is_file($path)) return false;
+    if (!updateLockTrusted($path)) return false;   // 不可信 → 按未加锁处理
+    $data = json_decode(file_get_contents($path), true);
+    if (!is_array($data)) return false;
+    // 锁过期则清理
+    if (($data['expires'] ?? 0) < time()) {
+        @unlink($path);
+        return false;
     }
-    return false;
+    return true;
 }
 
 function setUpdateLock($token, $ttl = 600) {
@@ -2384,22 +2417,17 @@ function setUpdateLock($token, $ttl = 600) {
         'created' => time(),
         'reason' => 'system_update',
     ];
-    // v5.0.0：优先写共享目录（0770/0660）；目录不存在或不可写时回退旧 /tmp（一次性过渡）
+    // v5.0.0：写共享目录（0770/0660）；目录不存在则创建，不可写即写入失败（不再回退旧 /tmp）
     $path = UPDATE_LOCK_FILE;
     $dir = dirname($path);
     if (!is_dir($dir)) @mkdir($dir, 0770, true);
-    if (!is_dir($dir) || !is_writable($dir)) $path = UPDATE_LOCK_FILE_LEGACY;
     $n = @file_put_contents($path, json_encode($data, JSON_UNESCAPED_UNICODE), LOCK_EX);
-    if ($n !== false) {
-        @chmod($path, 0660);
-        @unlink($path === UPDATE_LOCK_FILE ? UPDATE_LOCK_FILE_LEGACY : UPDATE_LOCK_FILE);
-    }
+    if ($n !== false) @chmod($path, 0660);
     return $n;
 }
 
 function clearUpdateLock() {
     @unlink(UPDATE_LOCK_FILE);
-    @unlink(UPDATE_LOCK_FILE_LEGACY);
 }
 
 function getUpdateStatus() {

@@ -293,10 +293,82 @@ auto_rollback() {
     rsync -a --delete --exclude='data/' "$WEB_ROOT/" "/opt/you-super-markdown/install-base/" 2>/dev/null
     chattr -R +i /opt/you-super-markdown/install-base/ 2>/dev/null || true
     systemctl start ysm-guard 2>/dev/null || true
-    rm -f /opt/you-super-markdown/run/ysm-update.lock /tmp/ysm-update.lock
+    rm -f /opt/you-super-markdown/run/ysm-update.lock
     echo "  [回退] 自动回退完成，系统已恢复至更新前状态"
     # 回退完成自动通知管理员（失败不阻断）
     /usr/local/bin/ysm-admin notify "系统更新失败，已自动回退并恢复正常。${reason:+失败原因：${reason}。}系统已恢复至更新前状态，请登录后台查看更新状态。" 2>/dev/null || true
+    return 0
+}
+
+# v5.0.0：校验 URL 主机为合法公网主机（scheme 仅 http/https；复用 utils.php 的 isPrivateHost 判定内网/未识别）
+assert_public_url_host() {
+    local u="$1" scheme host
+    scheme=$(printf '%s' "$u" | sed -E 's#^([a-zA-Z]+)://.*#\1#' | tr 'A-Z' 'a-z')
+    case "$scheme" in http|https) ;; *) return 1 ;; esac
+    host=$(printf '%s' "$u" | sed -E 's#^[a-zA-Z]+://##; s#^[^/@]*@##; s#[/:?].*$##')
+    printf '%s' "$host" | grep -Eq '^[A-Za-z0-9.-]+$' || return 1
+    [ "$(YSM_DL_HOST="$host" php -r "require_once '$WEB_ROOT/utils.php'; echo isPrivateHost(getenv('YSM_DL_HOST')) ? '1' : '0';" 2>/dev/null)" = "0" ]
+}
+
+# v5.0.0：在线更新包安全下载——逐跳跟随重定向（最多 3 跳），每一跳目标主机都必须为公网（复用 isPrivateHost）；
+# 非 http/https、跳数超限、目标内网/未识别 → 失败（防下载被 302 重定向到内网）。
+# 用法: safe_download <url> <outfile>；返回 0 成功，非 0 失败
+safe_download() {
+    local url="$1" out="$2" hop=0 max_hops=3
+    local hdr code loc base_authority
+    assert_public_url_host "$url" || { echo "  [下载] 初始地址主机非法或为内网，拒绝"; return 1; }
+    while :; do
+        hdr=$(mktemp)
+        code=$(curl -s -o "$out" -D "$hdr" -w '%{http_code}' -A 'YSM-Update/1.0' "$url" 2>/dev/null)
+        case "$code" in
+            200)
+                rm -f "$hdr"
+                [ -s "$out" ] && return 0
+                return 1
+                ;;
+            301|302|303|307|308)
+                loc=$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print; exit}' "$hdr")
+                rm -f "$hdr"
+                [ -z "$loc" ] && return 1
+                if [ "$hop" -ge "$max_hops" ]; then echo "  [下载] 重定向次数过多，拒绝"; return 1; fi
+                case "$loc" in
+                    http://*|https://*) ;;
+                    /*)  base_authority=$(printf '%s' "$url" | sed -E 's#^([a-zA-Z]+://[^/]+).*#\1#'); loc="${base_authority}${loc}" ;;
+                    *)   loc="$(printf '%s' "$url" | sed -E 's#/[^/]*$#/')${loc}" ;;
+                esac
+                if ! assert_public_url_host "$loc"; then echo "  [下载] 跳转目标非法或为内网，拒绝: $loc"; return 1; fi
+                url="$loc"; hop=$((hop+1)); continue
+                ;;
+            *)
+                rm -f "$hdr"
+                return 1
+                ;;
+        esac
+    done
+}
+
+# v5.0.0：解包前成员名校验——拒绝绝对路径、含 .. 的路径穿越成员，以及（tar）软链/硬链成员；
+# 防恶意更新包在解压阶段写到 TMP_DIR 之外。通过后再解压，随后仍走签名验证。
+archive_members_safe() {
+    local pkg="$1" names n
+    names=$(tar -tf "$pkg" 2>/dev/null)
+    if [ -n "$names" ]; then
+        # tar：拒绝软链/硬链成员（首字符 l/h）
+        if tar -tvf "$pkg" 2>/dev/null | awk 'NF{print $1}' | grep -Eq '^[lh]'; then
+            echo "  [校验] 更新包含软链/硬链成员，已拒绝"; return 1
+        fi
+    else
+        names=$(unzip -Z1 "$pkg" 2>/dev/null)
+    fi
+    if [ -z "$names" ]; then
+        echo "  [校验] 无法读取更新包成员列表，已拒绝"; return 1
+    fi
+    while IFS= read -r n; do
+        [ -z "$n" ] && continue
+        case "$n" in
+            /*|..|../*|*/../*|*/..) echo "  [校验] 更新包含路径穿越成员，已拒绝: $n"; return 1 ;;
+        esac
+    done <<< "$names"
     return 0
 }
 
@@ -333,10 +405,13 @@ case "${1:-}" in
                 break
             fi
         done
-        php -r "
+        # v5.0.0：名称/密码经 base64 环境变量传入，避免直接拼进 php -r 代码字符串
+        NAME_B64=$(printf '%s' "$NAME" | base64 -w0 2>/dev/null || printf '%s' "$NAME" | base64)
+        PWD_B64=$(printf '%s' "$PWD" | base64 -w0 2>/dev/null || printf '%s' "$PWD" | base64)
+        NAME_B64="$NAME_B64" PWD_B64="$PWD_B64" php -r "
             require_once '$WEB_ROOT/utils.php';
             \$u = fetchAllUsers();
-            \$u[] = ['id'=>bin2hex(random_bytes(8)),'account'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'station_admin','created'=>date('Y-m-d H:i:s')];
+            \$u[] = ['id'=>bin2hex(random_bytes(8)),'account'=>'$QQ','nickname'=>base64_decode(getenv('NAME_B64')),'password'=>password_hash(base64_decode(getenv('PWD_B64')),PASSWORD_DEFAULT),'role'=>'station_admin','created'=>date('Y-m-d H:i:s')];
             replaceAllUsers(\$u);
         " 2>/dev/null
         echo "站长账号已创建: $NAME (QQ: $QQ, 密码: $PWD)"
@@ -354,10 +429,14 @@ case "${1:-}" in
                 break
             fi
         done
-        php -r "
+        # v5.0.0：名称/密码/站长ID经 base64 环境变量传入，避免直接拼进 php -r 代码字符串
+        NAME_B64=$(printf '%s' "$NAME" | base64 -w0 2>/dev/null || printf '%s' "$NAME" | base64)
+        PWD_B64=$(printf '%s' "$PWD" | base64 -w0 2>/dev/null || printf '%s' "$PWD" | base64)
+        STATION_B64=$(printf '%s' "$STATION_ID" | base64 -w0 2>/dev/null || printf '%s' "$STATION_ID" | base64)
+        NAME_B64="$NAME_B64" PWD_B64="$PWD_B64" STATION_B64="$STATION_B64" php -r "
             require_once '$WEB_ROOT/utils.php';
             \$u = fetchAllUsers();
-            \$u[] = ['id'=>bin2hex(random_bytes(8)),'account'=>'$QQ','nickname'=>'$NAME','password'=>password_hash('$PWD',PASSWORD_DEFAULT),'role'=>'author','station_id'=>'$STATION_ID','created'=>date('Y-m-d H:i:s')];
+            \$u[] = ['id'=>bin2hex(random_bytes(8)),'account'=>'$QQ','nickname'=>base64_decode(getenv('NAME_B64')),'password'=>password_hash(base64_decode(getenv('PWD_B64')),PASSWORD_DEFAULT),'role'=>'author','station_id'=>base64_decode(getenv('STATION_B64')),'created'=>date('Y-m-d H:i:s')];
             replaceAllUsers(\$u);
         " 2>/dev/null
         echo "写作者账号已创建: $NAME (QQ: $QQ, 密码: $PWD)"
@@ -366,7 +445,9 @@ case "${1:-}" in
     revoke-user)
         USER_ID="${2:-}"
         if [ -z "$USER_ID" ]; then echo "用法: ysm-admin revoke-user <用户ID>"; exit 1; fi
-        php -r "require_once '$WEB_ROOT/utils.php'; db_exec('DELETE FROM users WHERE id = ?', ['$USER_ID']);" 2>/dev/null
+        # v5.0.0：用户ID经 base64 环境变量传入，避免直接拼进 php -r 代码字符串
+        USER_ID_B64=$(printf '%s' "$USER_ID" | base64 -w0 2>/dev/null || printf '%s' "$USER_ID" | base64)
+        USER_ID_B64="$USER_ID_B64" php -r "require_once '$WEB_ROOT/utils.php'; db_exec('DELETE FROM users WHERE id = ?', [base64_decode(getenv('USER_ID_B64'))]);" 2>/dev/null
         echo "用户已吊销: $USER_ID"
         ;;
 
@@ -601,7 +682,7 @@ case "${1:-}" in
             chown root:www-data "$REQUEST_FILE" 2>/dev/null || true
             chmod 660 "$REQUEST_FILE" 2>/dev/null || true
             chattr -R +i /opt/you-super-markdown/install-base/ 2>/dev/null || true
-            rm -f /opt/you-super-markdown/run/ysm-update.lock /tmp/ysm-update.lock
+            rm -f /opt/you-super-markdown/run/ysm-update.lock
             systemctl start ysm-guard 2>/dev/null || true
         }
 
@@ -676,17 +757,25 @@ case "${1:-}" in
         elif [ -n "$PKG_URL" ]; then
             echo "  下载在线更新包（全量/增量包）..."
             PKG_FILE="/tmp/ysm-update-download.tar.gz"
-            HTTP_CODE=$(curl -sL -o "$PKG_FILE" -w '%{http_code}' "$PKG_URL" 2>/dev/null)
-            if [ "$HTTP_CODE" != "200" ] || [ ! -s "$PKG_FILE" ]; then
-                echo "错误：下载失败 (HTTP ${HTTP_CODE:-无响应})"
+            # v5.0.0：安全下载——逐跳校验目标主机为公网，禁止被重定向到内网（原 -L 自动跟随已移除）
+            if ! safe_download "$PKG_URL" "$PKG_FILE"; then
+                echo "错误：下载失败，或被重定向到非 http(s)/内网目标"
                 rm -f "$PKG_FILE"
-                mark_failed "下载失败 (HTTP ${HTTP_CODE:-无响应})"
+                mark_failed "下载失败或重定向到不安全目标"
                 exit 1
             fi
         fi
 
         # 本地包 / 在线包统一：解压 → 定位 STAGE_DIR → 识别全量/增量 → 签名验证
         if [ -n "$PKG_FILE" ]; then
+            # v5.0.0：解包前先做成员名校验（拒绝 ../绝对路径/软链·硬链），再解压，随后仍走签名验证；
+            # 尽量做到「签名通过才落地」：解压仅进 TMP_DIR（未落地 WEB_ROOT），签名通过后才 rsync 落地
+            if ! archive_members_safe "$PKG_FILE"; then
+                echo "错误：更新包成员名校验失败，已拒绝"
+                rm -f "$PKG_FILE" 2>/dev/null || true
+                mark_failed "更新包成员名校验失败，已拒绝（可能存在路径穿越/软链）"
+                exit 1
+            fi
             TMP_DIR=$(mktemp -d)
             tar -xzf "$PKG_FILE" -C "$TMP_DIR" 2>/dev/null
             if [ $? -ne 0 ]; then
@@ -898,7 +987,7 @@ case "${1:-}" in
         fi
         # 6.2 重启守护进程（更新包可能已更新 ysm-guard.py，重启使新代码生效）
         systemctl restart ysm-guard 2>/dev/null && echo "  已重启守护进程" || echo "  警告：守护进程重启失败"
-        rm -f /opt/you-super-markdown/run/ysm-update.lock /tmp/ysm-update.lock
+        rm -f /opt/you-super-markdown/run/ysm-update.lock
         # 6.3 重启后复检：主页 200 + api 存活 + web↔母本 MD5 一致（任一失败 → 自动回滚 + 告警邮件）
         sleep 2
         RC_DOMAIN=$(get_domain)
@@ -981,7 +1070,7 @@ case "${1:-}" in
 
         echo "[3/3] 重启守护进程..."
         systemctl start ysm-guard 2>/dev/null || true
-        rm -f /opt/you-super-markdown/run/ysm-update.lock /tmp/ysm-update.lock
+        rm -f /opt/you-super-markdown/run/ysm-update.lock
 
         echo ""
         echo "============================================"

@@ -871,21 +871,23 @@ document.querySelectorAll('.method-tab').forEach(function(b) {
     });
 });
 
+// v5.0.0：文件选择器公共辅助（文档上传 / 富媒体 zip 两处交互共用，去重）
+function ysmShowPickedFile(f, nm, info, dz, sizeText) { nm.textContent = f.name + ' (' + sizeText + ')'; info.style.display = 'flex'; dz.style.display = 'none'; }
+function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 'none'; dz.style.display = 'block'; }
+
 // 文件上传
 (function() {
     var dz = document.getElementById('uploadZone'), fi = document.getElementById('fileInput');
     var info = document.getElementById('fileInfo'), nm = document.getElementById('fileInfoName');
     var rb = document.getElementById('fileRemoveBtn');
     if (!dz) return;
-    function showPickedFileInfo(f) { nm.textContent = f.name + ' (' + (f.size/1024).toFixed(1) + ' KB)'; info.style.display = 'flex'; dz.style.display = 'none'; }
-    function resetFilePicker() { fi.value = ''; info.style.display = 'none'; dz.style.display = 'block'; }
-    fi.addEventListener('change', function() { if (this.files.length) showPickedFileInfo(this.files[0]); });
-    if (rb) rb.addEventListener('click', resetFilePicker);
+    fi.addEventListener('change', function() { if (this.files.length) ysmShowPickedFile(this.files[0], nm, info, dz, (this.files[0].size/1024).toFixed(1) + ' KB'); });
+    if (rb) rb.addEventListener('click', function() { ysmResetFilePicker(fi, info, dz); });
     ['dragenter','dragover'].forEach(function(e) { dz.addEventListener(e, function(ev) { ev.preventDefault(); dz.classList.add('dragover'); }); });
     ['dragleave','drop'].forEach(function(e) { dz.addEventListener(e, function(ev) { ev.preventDefault(); dz.classList.remove('dragover'); }); });
     dz.addEventListener('drop', function(e) {
         var f = e.dataTransfer.files;
-        if (f.length && f[0].name.match(/\.(md|txt|markdown|zip)$/i)) { fi.files = f; showPickedFileInfo(f[0]); }
+        if (f.length && f[0].name.match(/\.(md|txt|markdown|zip)$/i)) { fi.files = f; ysmShowPickedFile(f[0], nm, info, dz, (f[0].size/1024).toFixed(1) + ' KB'); }
     });
 })();
 
@@ -895,15 +897,13 @@ document.querySelectorAll('.method-tab').forEach(function(b) {
     var info = document.getElementById('richZipInfo'), nm = document.getElementById('richZipInfoName');
     var rb = document.getElementById('richZipRemoveBtn');
     if (!dz || !fi) return;
-    function showPickedFileInfo(f) { nm.textContent = f.name + ' (' + (f.size/1024/1024).toFixed(2) + ' MB)'; info.style.display = 'flex'; dz.style.display = 'none'; }
-    function resetFilePicker() { fi.value = ''; info.style.display = 'none'; dz.style.display = 'block'; }
-    fi.addEventListener('change', function() { if (this.files.length) showPickedFileInfo(this.files[0]); });
-    if (rb) rb.addEventListener('click', resetFilePicker);
+    fi.addEventListener('change', function() { if (this.files.length) ysmShowPickedFile(this.files[0], nm, info, dz, (this.files[0].size/1024/1024).toFixed(2) + ' MB'); });
+    if (rb) rb.addEventListener('click', function() { ysmResetFilePicker(fi, info, dz); });
     ['dragenter','dragover'].forEach(function(e) { dz.addEventListener(e, function(ev) { ev.preventDefault(); dz.classList.add('dragover'); }); });
     ['dragleave','drop'].forEach(function(e) { dz.addEventListener(e, function(ev) { ev.preventDefault(); dz.classList.remove('dragover'); }); });
     dz.addEventListener('drop', function(e) {
         var f = e.dataTransfer.files;
-        if (f.length && f[0].name.match(/\.zip$/i)) { fi.files = f; showPickedFileInfo(f[0]); }
+        if (f.length && f[0].name.match(/\.zip$/i)) { fi.files = f; ysmShowPickedFile(f[0], nm, info, dz, (f[0].size/1024/1024).toFixed(2) + ' MB'); }
     });
 })();
 

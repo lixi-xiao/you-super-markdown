@@ -956,6 +956,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'post') {
     db_rate_add('comment_rates', $ipAddr, $fpToken);
     $burstCount = db_rate_count('comment_rates', $ipAddr, 60, $fpToken); // 1 分钟窗口（指纹+IP 双维）
     $rateCap = max(1, intval($cfgSnap['max_comments_per_minute'] ?? 5));
+    // 计数含本次（先 add 后 count）：用 > 才恰好放行 cap 次
     if ($burstCount > $rateCap) {
         logAbnormal($ipAddr, '频繁评论（' . $burstCount . '条/分钟）');
         logThreat('comment_flood', $ipAddr, $fpToken, 300);
@@ -1024,6 +1025,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'reply') {
     db_rate_add('comment_rates', $ipAddr, $fpToken);
     $burstCount = db_rate_count('comment_rates', $ipAddr, 60, $fpToken);
     $rateCap = max(1, intval($replyConfig['max_comments_per_minute'] ?? 5));
+    // 计数含本次（先 add 后 count）：用 > 才恰好放行 cap 次
     if ($burstCount > $rateCap) {
         logAbnormal($ipAddr, '频繁回复（' . $burstCount . '条/分钟）');
         logThreat('comment_flood', $ipAddr, $fpToken, 300);
@@ -1181,43 +1183,6 @@ if ($action === 'bg_config' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         'bg_blur_enabled' => !empty($settings['bg_blur_enabled']),
         'bg_blur_level' => $settings['bg_blur_level'] ?? 0,
         'bg_card_opacity' => $settings['bg_card_opacity'] ?? 100
-    ]);
-}
-if ($action === 'entry_path_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $u = verifySessionUser();
-    if (!$u || ($u['role'] ?? '') !== ROLE_SUPER_ADMIN) sendJson(['success' => false, 'error' => '无权限'], 403);
-    $input = json_decode(file_get_contents('php://input'), true);
-    if (!$input) sendJson(['success' => false, 'error' => '无效的请求数据'], 400);
-    $config = loadSiteConfig();
-    $newStationPath = trim($input['station_path'] ?? '');
-    $newAuthorPath = trim($input['author_path'] ?? '');
-    if ($newStationPath !== '' && $newStationPath !== 'station') {
-        $result = validateCustomPath($newStationPath);
-        if ($result !== true) sendJson(['success' => false, 'error' => '站长路径: ' . $result], 400);
-        if ($newStationPath === $newAuthorPath) sendJson(['success' => false, 'error' => '站长路径和写作者路径不能相同'], 400);
-        $config['station_path'] = $newStationPath;
-    } else {
-        $config['station_path'] = 'station';
-    }
-    if ($newAuthorPath !== '' && $newAuthorPath !== 'author') {
-        $result = validateCustomPath($newAuthorPath);
-        if ($result !== true) sendJson(['success' => false, 'error' => '写作者路径: ' . $result], 400);
-        $config['author_path'] = $newAuthorPath;
-    } else {
-        $config['author_path'] = 'author';
-    }
-    $config['hide_default_paths'] = !empty($input['hide_default_paths']);
-    saveSiteConfig($config);
-    auditLog('config_update', 'entry_paths', '修改自定义入口路径: station=' . $config['station_path'] . ', author=' . $config['author_path']);
-    sendJson(['success' => true, 'station_path' => $config['station_path'], 'author_path' => $config['author_path']]);
-}
-if ($action === 'entry_path_config' && $_SERVER['REQUEST_METHOD'] === 'GET') {
-    $config = loadSiteConfig();
-    sendJson([
-        'success' => true,
-        'station_path' => $config['station_path'] ?? 'station',
-        'author_path' => $config['author_path'] ?? 'author',
-        'hide_default_paths' => !empty($config['hide_default_paths']),
     ]);
 }
 sendJson(['success' => false, 'error' => '未知操作'], 400);

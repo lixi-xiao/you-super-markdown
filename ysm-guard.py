@@ -71,13 +71,13 @@ WATCH_FILES = [
     'verify-author.php',    # v2.9.0：写作者邮箱自助验证（创建写作者链路，防篡改）
     'verify-confirm.php',   # v2.9.0：超管邮件确认（创建写作者链路，防篡改）
     'user.php',             # v2.10.0：用户个人详情页（评论区点击头像/昵称进入，防篡改）
+    '_hfish_bridge.php',    # v5.0.0：蜜罐联动桥（ysm-hfish-sync.py 部署到站点根，防篡改）
 ]
 
-# 更新锁文件（v5.0.0：迁至 root:www-data 共享、其他用户不可写的 /opt 目录——目录 0770、文件 0660；
-# 旧 /tmp 路径保留为兼容只读回退。读取前一律做属主/权限校验，不可信锁视为「未加锁」，
-# 防本地用户凭写 /tmp 锁文件令 verify_audit_chain()/mirror_db() 前置校验被跳过）
+# 更新锁文件（v5.0.0：位于 root:www-data 共享、其他用户不可写的 /opt 目录——目录 0770、文件 0660。
+# 读取前一律做属主/权限校验，不可信锁视为「未加锁」，防本地用户伪造锁令
+# verify_audit_chain()/mirror_db() 前置校验被跳过。不再保留旧 /tmp 回退路径）
 UPDATE_LOCK = '/opt/you-super-markdown/run/ysm-update.lock'
-UPDATE_LOCK_LEGACY = '/tmp/ysm-update.lock'
 
 # 校验间隔（秒）
 AUDIT_CHECK_INTERVAL = 300  # 5分钟
@@ -327,28 +327,28 @@ def _lock_file_trusted(path: str) -> bool:
 
 def is_update_in_progress() -> bool:
     """检查系统是否正在更新中（守护进程暂停文件保护）。
-    v5.0.0：锁文件迁至 /opt/you-super-markdown/run（目录 root:www-data 0770、文件 0660）；
-    读取前校验属主/权限，不可信文件视为「未加锁」——避免本地用户写锁文件令
+    v5.0.0：锁文件位于 /opt/you-super-markdown/run（目录 root:www-data 0770、文件 0660）；
+    读取前校验属主/权限，不可信文件视为「未加锁」——避免本地用户伪造锁文件令
     verify_audit_chain() / mirror_db() 前置校验被跳过而绕过审计链保护。"""
-    for path in (UPDATE_LOCK, UPDATE_LOCK_LEGACY):
-        if not os.path.exists(path):
-            continue
-        if not _lock_file_trusted(path):
-            log(f"忽略不可信更新锁（属主/权限异常，按未加锁处理）: {path}")
-            continue
-        try:
-            with open(path, 'r') as f:
-                data = json.load(f)
-            expires = data.get('expires', 0)
-            if expires > time.time():
-                token = data.get('token', '')[:8]
-                log(f"更新进行中，暂停文件保护 (token: {token}...)")
-                return True
-            else:
-                os.remove(path)
-                log("更新锁已过期，恢复文件保护")
-        except Exception:
-            continue
+    path = UPDATE_LOCK
+    if not os.path.exists(path):
+        return False
+    if not _lock_file_trusted(path):
+        log(f"忽略不可信更新锁（属主/权限异常，按未加锁处理）: {path}")
+        return False
+    try:
+        with open(path, 'r') as f:
+            data = json.load(f)
+        expires = data.get('expires', 0)
+        if expires > time.time():
+            token = data.get('token', '')[:8]
+            log(f"更新进行中，暂停文件保护 (token: {token}...)")
+            return True
+        else:
+            os.remove(path)
+            log("更新锁已过期，恢复文件保护")
+    except Exception:
+        pass
     return False
 
 

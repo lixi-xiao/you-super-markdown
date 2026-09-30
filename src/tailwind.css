@@ -1,0 +1,14 @@
+/* You Super Markdown 5.1.0 — Tailwind 输入文件（构建入口）
+ * 产物：css/tw.min.css（入库；部署端不构建）
+ * 说明：base 层由 Tailwind preflight 提供；components/utilities 供新外壳使用。
+ *       与既有 css/style.css 并存（旧样式逐步废弃）。
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 5.1.0：为与既有 CSS 变量主题体系衔接，这里只放"令牌级"补充，不做覆盖面重置 */
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body { background: var(--bg); color: var(--text); }
+}

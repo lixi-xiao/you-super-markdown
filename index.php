@@ -445,6 +445,15 @@ if ('list' === $action) {
 if ($action === 'read') {
     header('Content-Type: application/json; charset=utf-8'); $requestedFile = isset($_GET['file']) ? $_GET['file'] : '';
     $filename = basename($requestedFile);
+    // v5.0.4：容错——双重编码回退 + 按 ID 段回退（兼容被客户端改写的旧长链）
+    if (!is_file('./data/articles/' . $filename)) {
+        $decoded = rawurldecode($requestedFile);
+        if ($decoded !== $requestedFile) $filename = basename($decoded);
+    }
+    if (!is_file('./data/articles/' . $filename) && preg_match('/^([A-Za-z0-9]{6,64})[_.\-]/', $filename, $idm)) {
+        $hits = glob('./data/articles/' . $idm[1] . '_*.md');
+        if ($hits) $filename = basename($hits[0]);
+    }
     $filepath = './data/articles/' . $filename;
     if (!file_exists($filepath) || !is_file($filepath)) {
         http_response_code(404);
@@ -486,7 +495,13 @@ if ($action === 'read') {
     $readUa = strtolower($_SERVER['HTTP_USER_AGENT'] ?? '');
     $readWantsHtml = (strpos($readAccept, 'text/html') !== false);
     $readIsCrawler = (bool)preg_match('/bot|crawler|spider|facebookexternalhit|twitterbot|whatsapp|telegrambot|slackbot|discordbot|googlebot|bingbot|baiduspider|yandex|micromessenger|qq\//i', $readUa);
-    if ($readWantsHtml || $readIsCrawler) {
+    // v5.0.4：只有"页面导航"（Sec-Fetch-Dest=document / Mode=navigate）或已知爬虫才走 OG HTML；
+    // XHR/fetch（Dest=empty、Mode=cors/same-origin）必须仍拿 JSON——否则前端解析失败会误显示 404 视图。
+    $readDest = strtolower((string)($_SERVER['HTTP_SEC_FETCH_DEST'] ?? ''));
+    $readMode = strtolower((string)($_SERVER['HTTP_SEC_FETCH_MODE'] ?? ''));
+    $readIsNav = ($readDest === 'document' || $readMode === 'navigate')
+                 || ($readDest === '' && $readMode === '');
+    if (($readWantsHtml && $readIsNav) || $readIsCrawler) {
         $shareCtx = ysmShareContext();
         $readTarget = ysmShareUrl($filename);
         header('Content-Type: text/html; charset=utf-8');

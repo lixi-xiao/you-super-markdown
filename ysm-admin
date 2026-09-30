@@ -855,15 +855,11 @@ case "${1:-}" in
         ALLOW_UNSIGNED=0
         for _a in "$@"; do [ "$_a" = "--allow-unsigned" ] && ALLOW_UNSIGNED=1; done
         REQUEST_FILE="/opt/you-super-markdown/run/ysm-update-request.json"
-        LEGACY_REQUEST_FILE="/tmp/ysm-update-request.json"
+        # v5.0.1（A4）：移除旧 /tmp 请求文件回退——方案要求"无 /tmp 回退残留"（仅认新共享目录）
         # v5.0.0 P1-4：共享目录自愈——root 创建 root:www-data 0770（www-data 对 /opt/you-super-markdown 无写权限，须由 root 建）
         mkdir -p "$(dirname "$REQUEST_FILE")" 2>/dev/null || true
         chown root:www-data "$(dirname "$REQUEST_FILE")" 2>/dev/null || true
         chmod 770 "$(dirname "$REQUEST_FILE")" 2>/dev/null || true
-        # 过渡兼容：旧后台仍写 /tmp；新目录无文件时回退读取旧路径
-        if [ ! -f "$REQUEST_FILE" ] && [ -f "$LEGACY_REQUEST_FILE" ]; then
-            REQUEST_FILE="$LEGACY_REQUEST_FILE"
-        fi
         if [ ! -f "$REQUEST_FILE" ]; then
             echo "错误：未找到更新请求文件"
             echo "请先在后台管理页面触发更新。"

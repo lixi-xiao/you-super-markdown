@@ -29,4 +29,5 @@ __pycache__/
 # docs/ 目录（含敏感运维信息，不应进入公开仓库）
 docs/
 
-_hfish_bridge.php
+# _hfish_bridge.php 为运行时依赖（ysm-hfish-sync.py 调用、ysm-guard.py 监控），
+# v5.0.1 起随包发布（此前被忽略导致更新时被 rsync --delete 删除、蜜罐联动静默失效）

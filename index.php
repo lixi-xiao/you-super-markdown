@@ -456,6 +456,24 @@ if ($action === 'read') {
             exit;
         }
     }
+    // v5.0.1（A6）：浏览器/爬虫直接访问 ?action=read&file= 时，输出文章分享卡片（OG）而非 JSON；
+    //   前端 SPA 用 fetch() 取正文（Accept 为 */*）不受影响，仍走下方 JSON 分支（契约不变）。
+    $readAccept = strtolower($_SERVER['HTTP_ACCEPT'] ?? '');
+    $readUa = strtolower($_SERVER['HTTP_USER_AGENT'] ?? '');
+    $readWantsHtml = (strpos($readAccept, 'text/html') !== false);
+    $readIsCrawler = (bool)preg_match('/bot|crawler|spider|facebookexternalhit|twitterbot|whatsapp|telegrambot|slackbot|discordbot|googlebot|bingbot|baiduspider|yandex|micromessenger|qq\//i', $readUa);
+    if ($readWantsHtml || $readIsCrawler) {
+        $shareCtx = ysmShareContext();
+        $readTarget = '/?file=' . rawurlencode($filename);
+        header('Content-Type: text/html; charset=utf-8');
+        echo "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n";
+        echo '<meta charset="utf-8">' . "\n";
+        echo '<title>' . htmlspecialchars($shareCtx['title'], ENT_QUOTES, 'UTF-8') . "</title>\n";
+        ysmShareRenderMeta($shareCtx);
+        echo '<meta http-equiv="refresh" content="0;url=' . htmlspecialchars($readTarget, ENT_QUOTES, 'UTF-8') . '">' . "\n";
+        echo "</head>\n<body><p>正在打开文章…<a href=\"" . htmlspecialchars($readTarget, ENT_QUOTES, 'UTF-8') . "\">继续</a></p></body>\n</html>";
+        exit;
+    }
     // v4.0.0：站内访问统计——同 IP 同文章同一天只计一次（views_log 去重），避免刷量
     $viewIp = getClientIP();
     $viewDay = date('Y-m-d');

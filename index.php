@@ -501,7 +501,9 @@ if ($action === 'read') {
     $readMode = strtolower((string)($_SERVER['HTTP_SEC_FETCH_MODE'] ?? ''));
     $readIsNav = ($readDest === 'document' || $readMode === 'navigate')
                  || ($readDest === '' && $readMode === '');
-    if (($readWantsHtml && $readIsNav) || $readIsCrawler) {
+    // v5.0.5：read 分支不再依据 UA 判定（微信 webview 的 UA 也含 MicroMessenger，会被误判为爬虫）；
+    // 分享卡片的爬虫抓取的是"页面 URL"（/?p= 或 /?file=），根本不走 read，故此处只看"导航 vs XHR"。
+    if ($readWantsHtml && $readIsNav) {
         $shareCtx = ysmShareContext();
         $readTarget = ysmShareUrl($filename);
         header('Content-Type: text/html; charset=utf-8');

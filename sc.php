@@ -16,14 +16,7 @@ $myId = getCurrentUserId();
 $myNick = $_SESSION['cmt_user']['nickname'] ?? '';
 
 // 文章归属辅助：写作者仅能管理自己的文章（author_id 匹配；兼容旧文章按作者昵称匹配）
-function readArticleMeta($filePath) {
-    $raw = @file_get_contents($filePath);
-    if ($raw && preg_match('/<!--META(.*?)-->/s', $raw, $m)) {
-        $meta = json_decode(trim($m[1]), true);
-        if (is_array($meta)) return $meta;
-    }
-    return [];
-}
+// v5.0.0：readArticleMeta() 已上移至 utils.php 共享（首页服务端分享卡片复用同一 front-matter 解析）
 function mayManageArticle($meta) {
     global $isStationAdmin, $myId, $myNick;
     if ($isStationAdmin) return true;

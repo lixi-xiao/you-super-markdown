@@ -312,6 +312,17 @@ function saveSiteConfig($config) {
     }
 }
 
+/** v5.0.0：解析文章 front-matter（文首 <!--META{...}--> 的 JSON）——原 sc.php 局部函数上移为共享实现，
+ *          供后台文档管理与首页服务端分享卡片（og/twitter）复用，避免再造一套解析。 */
+function readArticleMeta($filePath) {
+    $raw = @file_get_contents($filePath);
+    if ($raw && preg_match('/<!--META(.*?)-->/s', $raw, $m)) {
+        $meta = json_decode(trim($m[1]), true);
+        if (is_array($meta)) return $meta;
+    }
+    return [];
+}
+
 // ===== v4.4.2：QQ 音乐通道已移除（cookie 检测过严、服务器端申请违反用户协议），
 // qqCookieCheck() 随之删除 =====
 // v4.5.0：背景音乐上传转码见下方 v4.5.0 分区（<100MB 多格式 → ffmpeg 转 96kbps mp3）

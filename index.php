@@ -28,6 +28,119 @@ function sendJson($data, $code = 200) {
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
     exit;
 }
+
+// ===================== v5.0.0：社交分享卡片（Open Graph / Twitter Card，服务端渲染） =====================
+// 背景：微信/QQ 等抓取器只读服务端首屏 <head>、不执行 JS；本站文章由前端 fetch 渲染，故须在服务端
+//       按请求类型输出 og/twitter 元数据，否则任何文章链接分享出去都只显示站点卡片。
+// 站点默认描述（站点模式回退文案，沿用既有静态文案）
+if (!defined('YSM_SHARE_SITE_DESC')) {
+    define('YSM_SHARE_SITE_DESC', '一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器');
+}
+
+/** scheme + host（绝对 URL 基址）；兼容反代后的 X-Forwarded-Proto / HTTPS，Host 头做白名单加固（防 Host 注入） */
+function ysmShareOrigin() {
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    if (!preg_match('/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/', $host) || $host === '') $host = 'localhost';
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+          || (strtolower($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    return ($https ? 'https' : 'http') . '://' . $host;
+}
+
+/** 相对路径 → 绝对 URL（http(s):// 或 // 协议相对链接原样保留；爬虫无法解析相对路径） */
+function ysmShareAbsUrl($url) {
+    $url = trim((string)$url);
+    if ($url === '') return '';
+    if (preg_match('#^(https?:)?//#i', $url)) return $url;
+    return ysmShareOrigin() . ($url[0] === '/' ? $url : '/' . $url);
+}
+
+/** 封面池兜底：仅读 data/cache/covers/manifest.json 取 count，随机抽一槽；池空返回 ''（优雅降级，不补图/不建目录） */
+function ysmSharePoolCover() {
+    $manifest = __DIR__ . '/data/cache/covers/manifest.json';
+    if (!is_file($manifest)) return '';
+    $st = json_decode(@file_get_contents($manifest), true);
+    $count = (int)($st['count'] ?? 0);
+    if ($count < 1) return '';
+    return ysmShareOrigin() . '/cover.php?i=' . rand(0, $count - 1);
+}
+
+/** 正文 → 纯文本首段（剥离 META 注释/代码块/标题/图片与标记，链接只留文字；压缩空白后截断 ~100 字） */
+function ysmShareExcerpt($raw) {
+    $t = preg_replace('/^<!--META.*?-->\n?/s', '', $raw);    // 去 front-matter
+    $t = preg_replace('/```[\s\S]*?```/', '', $t);            // 去围栏代码块
+    $t = preg_replace('/^\s*#{1,6}\s.*$/m', '', $t);          // 去标题行
+    $t = preg_replace('/!\[[^\]]*\]\([^)]*\)/', '', $t);      // 去图片
+    $t = preg_replace('/\[([^\]]+)\]\([^)]*\)/', '$1', $t);   // 链接只留文字
+    $t = preg_replace('/[#*>`\-_\|~\[\]]/', '', $t);          // 去标记符号
+    $first = '';
+    foreach (preg_split('/\n\s*\n/', $t) as $p) {
+        $p = trim(preg_replace('/\s+/u', ' ', $p));
+        if ($p !== '') { $first = $p; break; }                // 取首段
+    }
+    if (mb_strlen($first, 'UTF-8') > 100) $first = mb_substr($first, 0, 100, 'UTF-8') . '...';
+    return $first;
+}
+
+/** 组装当前请求的分享上下文：有合法文章标识 → 文章模式；否则站点模式 */
+function ysmShareContext() {
+    $siteName = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
+    $origin = ysmShareOrigin();
+    $file = $_GET['file'] ?? '';
+    $action = $_GET['action'] ?? '';
+    // 文章标识 = file 参数（兼容 ?action=read&file= 形态）；其他 action（list/search/rss 等接口）不在此渲染、不受影响
+    $isArticle = is_string($file) && $file !== '' && ($action === '' || $action === 'read');
+
+    if (!$isArticle) {
+        return ['type' => 'website', 'site' => $siteName, 'title' => $siteName,
+                'desc' => YSM_SHARE_SITE_DESC, 'image' => ysmSharePoolCover(), 'url' => $origin . '/'];
+    }
+
+    $name = basename($file);                                  // 路径归一化：只取 basename，杜绝目录穿越
+    $path = __DIR__ . '/data/articles/' . $name;
+    $raw = '';
+    if ($name !== '' && is_file($path) && strtolower(pathinfo($name, PATHINFO_EXTENSION)) === 'md') {
+        $raw = (string)@file_get_contents($path);
+    }
+    $meta = $raw !== '' ? readArticleMeta($path) : [];        // 复用仓库既有 front-matter 解析
+    $body = $raw !== '' ? preg_replace('/^<!--META.*?-->\n?/s', '', $raw) : '';
+
+    // 标题：META title → 正文首个一级标题(H1) → 文件名（去扩展名）
+    $title = trim((string)($meta['title'] ?? ''));
+    if ($title === '' && $body !== '') {
+        $bodyNoCode = preg_replace('/```[\s\S]*?```/', '', $body);
+        if (preg_match('/^#\s+(.+)/m', $bodyNoCode, $tm)) $title = trim($tm[1]);
+    }
+    if ($title === '') $title = preg_replace('/\.md$/i', '', $name);
+
+    // 摘要：META excerpt → 正文首段
+    $desc = trim((string)($meta['excerpt'] ?? ''));
+    if ($desc === '' && $raw !== '') $desc = ysmShareExcerpt($raw);
+    if ($desc === '') $desc = YSM_SHARE_SITE_DESC;
+
+    // 封面：META 指定封面 → 正文第一张图 → 封面池随机 → 省略
+    $cover = trim((string)($meta['cover'] ?? ''));
+    if ($cover === '' && $body !== '' && preg_match('/!\[[^\]]*\]\(([^)\s]+)/', $body, $im)) $cover = $im[1];
+    $cover = $cover !== '' ? ysmShareAbsUrl($cover) : ysmSharePoolCover();
+
+    return ['type' => 'article', 'site' => $siteName, 'title' => $title, 'desc' => $desc,
+            'image' => $cover, 'url' => $origin . '/?file=' . rawurlencode($name)];
+}
+
+/** 输出 og/twitter 元标签（所有值 HTML 转义，防标题特殊字符破坏 head / 防注入） */
+function ysmShareRenderMeta($m) {
+    $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+    echo '    <meta property="og:type" content="' . $e($m['type']) . '">' . "\n";
+    echo '    <meta property="og:title" content="' . $e($m['title']) . '">' . "\n";
+    echo '    <meta property="og:site_name" content="' . $e($m['site']) . '">' . "\n";
+    echo '    <meta property="og:description" content="' . $e($m['desc']) . '">' . "\n";
+    echo '    <meta property="og:url" content="' . $e($m['url']) . '">' . "\n";
+    if (!empty($m['image'])) echo '    <meta property="og:image" content="' . $e($m['image']) . '">' . "\n";
+    echo '    <meta name="twitter:card" content="summary_large_image">' . "\n";
+    echo '    <meta name="twitter:title" content="' . $e($m['title']) . '">' . "\n";
+    echo '    <meta name="twitter:description" content="' . $e($m['desc']) . '">' . "\n";
+    if (!empty($m['image'])) echo '    <meta name="twitter:image" content="' . $e($m['image']) . '">' . "\n";
+}
+
 if (!is_dir('./data/articles')) {
     mkdir('./data/articles', 0755, true);
 }
@@ -592,6 +705,8 @@ if ($action === 'rss_guide') {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
 <title>RSS 订阅 · <?= htmlspecialchars($siteHeading) ?></title>
+<!-- v5.0.0：RSS 指引页站点级分享卡片（爬虫只读 head、不执行 JS） -->
+<?php ysmShareRenderMeta(ysmShareContext()); ?>
 <script>
 (function() {
     try {
@@ -670,10 +785,8 @@ if ($action === 'rss_guide') {
     <link rel="alternate" type="application/rss+xml" title="<?= htmlspecialchars($siteHeading) ?> RSS" href="/index.php?action=rss">
     <title><?= htmlspecialchars($siteHeading) ?></title>
     <!-- v3.1.4：链接解析/分享预览卡片使用自定义站名（微信/QQ/Telegram 等读取 og 标签） -->
-    <meta property="og:title" content="<?= htmlspecialchars($siteHeading) ?>">
-    <meta property="og:site_name" content="<?= htmlspecialchars($siteHeading) ?>">
-    <meta property="og:type" content="website">
-    <meta property="og:description" content="一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器">
+    <!-- v5.0.0：按请求服务端渲染分享卡片（站点模式 / 文章模式），补齐 og:image/og:url 与 Twitter Card -->
+    <?php ysmShareRenderMeta(ysmShareContext()); ?>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>" type="image/svg+xml">
     <meta name="description" content="一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器">
     <!-- v4.2.2：mermaid 3.3MB 不再放 <head> 阻塞首屏（render-blocking），改为正文/公告出现 ```mermaid 时按需动态加载（见 js/main.js ensureMermaid）；marked/highlight/qrcode 加 defer 不阻塞首屏渲染 -->

@@ -134,6 +134,10 @@ if ($count >= 1) {
     $idx = isset($_GET['i']) ? (int)$_GET['i'] : 0;
     $idx = (($idx % $count) + $count) % $count;
     $file = $poolDir . '/cover_' . $idx . '.jpg';
+    // v5.1.0：OG 分享图兜底——槽位文件缺失时（og=1）退用任意已有封面，避免社交平台抓到 404 导致无卡片图
+    if (!is_file($file) && ($_GET['og'] ?? '') === '1') {
+        foreach ((array)glob($poolDir . '/cover_*.jpg') as $cand) { if (is_file($cand)) { $file = $cand; break; } }
+    }
     if (is_file($file)) {
         header('Content-Type: image/jpeg');
         header('Content-Length: ' . filesize($file));

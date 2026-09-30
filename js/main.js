@@ -1303,8 +1303,14 @@
         window.history.pushState({}, "", t.toString());
     }
     function getShortUrl(e) {
+        var id = String(e).replace(/\.md$/i, "").split("_")[0];
         const t = new URL(window.location.origin + window.location.pathname);
-        t.searchParams.set("file", e);
+        if (/^[A-Za-z0-9]{6,64}$/.test(id)) {
+            t.searchParams.set("p", id);
+            t.searchParams.delete("file");
+        } else {
+            t.searchParams.set("file", e);
+        }
         return t.toString();
     }
     /** v4.8.0：复制链接降级方案（clipboard API 不可用时使用） */    function copyFallback(e) {
@@ -1615,7 +1621,7 @@
         }
     }
     window.addEventListener("popstate", () => {
-        const e = getUrlParam("file");
+        const e = getUrlParam("file") || window.YSM_FILE || "";
         if (e && Ie.some(t => t.name === e)) {
             loadFile(e, false);
         } else {
@@ -1649,7 +1655,7 @@
     }
     async function init() {
         await loadFileList();
-        const e = getUrlParam("file");
+        const e = getUrlParam("file") || window.YSM_FILE || "";
         if (e) loadFile(e, false); else {
             showHome(false);
             // v4.7.3：首页场景也检查登录态——设备验证进行中（切后台看邮箱后页面被移动端重载）时恢复验证弹窗

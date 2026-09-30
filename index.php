@@ -72,7 +72,30 @@ function ysmSharePoolCover() {
     $st = json_decode(@file_get_contents($manifest), true);
     $count = (int)($st['count'] ?? 0);
     if ($count < 1) return '';
-    return ysmShareOrigin() . '/cover.php?i=' . rand(0, $count - 1);
+    return ysmShareOrigin() . '/cover.php?i=' . rand(0, $count - 1) . '&og=1';
+}
+
+/** v5.1.0：文章短链标识（文件名首个下划线前的 ID 段；非法返回空） */
+function ysmShortId($name) {
+    $base = preg_replace('/\.md$/i', '', (string)$name);
+    $id = strstr($base, '_', true);
+    if ($id === false || $id === '') $id = $base;
+    return preg_match('/^[A-Za-z0-9]{6,64}$/', $id) ? $id : '';
+}
+/** v5.1.0：文章分享 URL —— 优先短链 ?p=<id>（纯 ASCII，规避编码/截断问题），否则回退 ?file= */
+function ysmShareUrl($name) {
+    $id = ysmShortId($name);
+    return $id !== '' ? ysmShareOrigin() . '/?p=' . $id : ysmShareOrigin() . '/?file=' . rawurlencode($name);
+}
+/** v5.1.0：把 ?p=<id> 解析为真实文章文件名并写入 $_GET['file']（供下游统一处理） */
+function ysmResolveShortParam() {
+    if (empty($_GET['p']) || !empty($_GET['file'])) return;
+    $p = (string)$_GET['p'];
+    if (!preg_match('/^[A-Za-z0-9]{6,64}$/', $p)) return;
+    foreach ((array)glob(__DIR__ . '/data/articles/*.md') as $f) {
+        $b = basename($f);
+        if (strpos($b, $p . '_') === 0 || strcasecmp($b, $p . '.md') === 0) { $_GET['file'] = $b; return; }
+    }
 }
 
 /** 正文 → 纯文本首段（剥离 META 注释/代码块/标题/图片与标记，链接只留文字；压缩空白后截断 ~100 字） */
@@ -144,7 +167,7 @@ function ysmShareContext() {
     $cover = $cover !== '' ? ysmShareAbsUrl($cover) : ysmSharePoolCover();
 
     return ['type' => 'article', 'site' => $siteName, 'title' => $title, 'desc' => $desc,
-            'image' => $cover, 'url' => $origin . '/?file=' . rawurlencode($name)];
+            'image' => $cover, 'url' => ysmShareUrl($name)];
 }
 
 /** 输出 og/twitter 元标签（所有值 HTML 转义，防标题特殊字符破坏 head / 防注入） */
@@ -163,6 +186,7 @@ function ysmShareRenderMeta($m) {
 }
 
 if (!is_dir('./data/articles')) mkdir('./data/articles', 0755, true);
+ysmResolveShortParam(); // v5.1.0：?p=<id> → $_GET['file']
 $siteConf = loadSiteConfig();
 $siteHeading = $siteConf['site_title'] ?? 'You Super Markdown';
 // v3.1.6：首页公告卡片数据（公告表 + 关联文章提取封面图/标签/字数；纯文字公告无关联文章）
@@ -464,7 +488,7 @@ if ($action === 'read') {
     $readIsCrawler = (bool)preg_match('/bot|crawler|spider|facebookexternalhit|twitterbot|whatsapp|telegrambot|slackbot|discordbot|googlebot|bingbot|baiduspider|yandex|micromessenger|qq\//i', $readUa);
     if ($readWantsHtml || $readIsCrawler) {
         $shareCtx = ysmShareContext();
-        $readTarget = '/?file=' . rawurlencode($filename);
+        $readTarget = ysmShareUrl($filename);
         header('Content-Type: text/html; charset=utf-8');
         echo "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n";
         echo '<meta charset="utf-8">' . "\n";
@@ -1231,6 +1255,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
     </div>
 </div>
 <script>window.YSM_SITE_TITLE = <?= json_encode($siteHeading, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+window.YSM_FILE = <?= json_encode($_GET['file'] ?? '', JSON_UNESCAPED_UNICODE) ?>;
 // v3.1.6：公告卡片数据（服务端已转义标题/摘要，tags/cover 由文章提取）
 // v5.0.0 P1-2：加 JSON_HEX_* 标志，防标题/摘要中的闭合脚本标签或引号逃逸（XSS）
 window.YSM_ANNOUNCEMENTS = <?= json_encode($announcementCards, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>

@@ -191,7 +191,7 @@ verify_package_signature() {
     local tmp_root="$1"
     local stage_dir="${2:-}"
     local pubkey="/opt/you-super-markdown/update_signing_public.pem"
-    local mf sig bad root
+    local mf sig bad root php_rc
     if [ ! -f "$pubkey" ]; then
         if [ "${ALLOW_UNSIGNED:-0}" = "1" ]; then
             echo "  [签名] 警告：未部署公钥，因显式 --allow-unsigned 引导开关而放行（已写审计日志）"
@@ -242,12 +242,29 @@ verify_package_signature() {
         \$base = rtrim(\$root, '/') . '/';
         \$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(rtrim(\$root, '/'), FilesystemIterator::SKIP_DOTS));
         foreach (\$it as \$f) {
-            if (!\$f->isFile()) continue;
             \$rel = ltrim(substr(\$f->getPathname(), strlen(\$base)), '/');
             if (\$rel === 'manifest.json' || \$rel === 'manifest.json.sig') continue;
+            // v5.0.0：符号链接一律拒绝——防用软链文件/软链目录夹带未签名内容（isLink 须先于 isFile，
+            // 因 isFile() 会跟随软链、软链目录默认不被递归遍历而漏检）
+            if (\$f->isLink()) { echo \"extra:\$rel\n\"; continue; }
+            if (!\$f->isFile()) continue;
             if (!isset(\$listed[\$rel])) { echo \"extra:\$rel\n\"; }
         }
-    " 2>/dev/null)
+    " 2>&1)
+    php_rc=$?
+    # v5.0.0：失败封闭——PHP 校验命令非 0 退出（如转义/引号致解析错误被吞）一律拒绝更新，
+    # 不得因校验被跳过而静默放行
+    if [ "$php_rc" -ne 0 ]; then
+        echo "  [签名] 错误：文件校验命令执行失败（exit $php_rc），拒绝更新（失败封闭）"
+        printf '%s\n' "$bad" | head -5
+        return 1
+    fi
+    # v5.0.0：输出行必须为 missing:/mismatch:/extra: 之一，否则视为不可解析 → 拒绝
+    if [ -n "$bad" ] && printf '%s\n' "$bad" | grep -vE '^(missing:|mismatch:|extra:)' | grep -q .; then
+        echo "  [签名] 错误：文件校验输出不可解析，拒绝更新（失败封闭）"
+        printf '%s\n' "$bad" | head -3
+        return 1
+    fi
     if [ -n "$bad" ]; then
         echo "  [签名] 错误：文件哈希/集合校验失败："
         echo "$bad" | head -5
@@ -276,7 +293,7 @@ auto_rollback() {
     rsync -a --delete --exclude='data/' "$WEB_ROOT/" "/opt/you-super-markdown/install-base/" 2>/dev/null
     chattr -R +i /opt/you-super-markdown/install-base/ 2>/dev/null || true
     systemctl start ysm-guard 2>/dev/null || true
-    rm -f /tmp/ysm-update.lock
+    rm -f /opt/you-super-markdown/run/ysm-update.lock /tmp/ysm-update.lock
     echo "  [回退] 自动回退完成，系统已恢复至更新前状态"
     # 回退完成自动通知管理员（失败不阻断）
     /usr/local/bin/ysm-admin notify "系统更新失败，已自动回退并恢复正常。${reason:+失败原因：${reason}。}系统已恢复至更新前状态，请登录后台查看更新状态。" 2>/dev/null || true
@@ -584,7 +601,7 @@ case "${1:-}" in
             chown root:www-data "$REQUEST_FILE" 2>/dev/null || true
             chmod 660 "$REQUEST_FILE" 2>/dev/null || true
             chattr -R +i /opt/you-super-markdown/install-base/ 2>/dev/null || true
-            rm -f /tmp/ysm-update.lock
+            rm -f /opt/you-super-markdown/run/ysm-update.lock /tmp/ysm-update.lock
             systemctl start ysm-guard 2>/dev/null || true
         }
 
@@ -881,7 +898,7 @@ case "${1:-}" in
         fi
         # 6.2 重启守护进程（更新包可能已更新 ysm-guard.py，重启使新代码生效）
         systemctl restart ysm-guard 2>/dev/null && echo "  已重启守护进程" || echo "  警告：守护进程重启失败"
-        rm -f /tmp/ysm-update.lock
+        rm -f /opt/you-super-markdown/run/ysm-update.lock /tmp/ysm-update.lock
         # 6.3 重启后复检：主页 200 + api 存活 + web↔母本 MD5 一致（任一失败 → 自动回滚 + 告警邮件）
         sleep 2
         RC_DOMAIN=$(get_domain)
@@ -964,7 +981,7 @@ case "${1:-}" in
 
         echo "[3/3] 重启守护进程..."
         systemctl start ysm-guard 2>/dev/null || true
-        rm -f /tmp/ysm-update.lock
+        rm -f /opt/you-super-markdown/run/ysm-update.lock /tmp/ysm-update.lock
 
         echo ""
         echo "============================================"

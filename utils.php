@@ -2106,7 +2106,10 @@ function sendAdminConfirmMail($pendingId, $token, $nick, $account, $email) {
 // （/opt/you-super-markdown/run/ root:www-data 0770，文件 0660）；旧 /tmp 路径保留为只读兼容回退。
 define('UPDATE_REQUEST_FILE', '/opt/you-super-markdown/run/ysm-update-request.json');
 define('UPDATE_REQUEST_FILE_LEGACY', '/tmp/ysm-update-request.json');
-define('UPDATE_LOCK_FILE', '/tmp/ysm-update.lock');
+// v5.0.0：更新锁迁至 root:www-data 共享、其他用户不可写的 /opt 目录（目录 0770、文件 0660）；
+// 旧 /tmp 路径保留为兼容只读回退——读取前做属主/权限校验，不可信锁视为「未加锁」
+define('UPDATE_LOCK_FILE', '/opt/you-super-markdown/run/ysm-update.lock');
+define('UPDATE_LOCK_FILE_LEGACY', '/tmp/ysm-update.lock');
 define('BACKUP_DIR', '/opt/you-super-markdown/backups');
 define('BACKUP_CONF', '/opt/you-super-markdown/backup.conf');           // 自动备份配置（root:www-data 664）
 define('BACKUP_DB_DIR', BACKUP_DIR . '/db');                        // 数据库 30 分钟备份（固定 1 份）
@@ -2343,16 +2346,35 @@ function saveUpdateRequest($data) {
     return $n;
 }
 
-function isUpdateInProgress() {
-    if (!file_exists(UPDATE_LOCK_FILE)) return false;
-    $data = json_decode(file_get_contents(UPDATE_LOCK_FILE), true);
-    if (!is_array($data)) return false;
-    // 锁过期则清理
-    if (($data['expires'] ?? 0) < time()) {
-        @unlink(UPDATE_LOCK_FILE);
-        return false;
+// v5.0.0：更新锁可信性校验——属主须为 root/www-data，且不得 world-writable（防普通用户伪造 /tmp 锁）。
+// 不满足视为「未加锁」，避免伪造锁令更新期校验豁免被滥用。
+function updateLockTrusted($path) {
+    if (!is_file($path) || is_link($path)) return false;
+    $st = @stat($path);
+    if (!$st) return false;
+    if ($st['mode'] & 0x0002) return false;   // 其他用户可写
+    if ((int)$st['uid'] === 0) return true;   // root
+    if (function_exists('posix_getpwnam')) {
+        $pw = @posix_getpwnam('www-data');
+        if ($pw && isset($pw['uid']) && (int)$pw['uid'] === (int)$st['uid']) return true;
     }
-    return true;
+    return false;
+}
+
+function isUpdateInProgress() {
+    foreach ([UPDATE_LOCK_FILE, UPDATE_LOCK_FILE_LEGACY] as $path) {
+        if (!is_file($path)) continue;
+        if (!updateLockTrusted($path)) continue;   // 不可信 → 按未加锁处理
+        $data = json_decode(file_get_contents($path), true);
+        if (!is_array($data)) continue;
+        // 锁过期则清理
+        if (($data['expires'] ?? 0) < time()) {
+            @unlink($path);
+            continue;
+        }
+        return true;
+    }
+    return false;
 }
 
 function setUpdateLock($token, $ttl = 600) {
@@ -2362,13 +2384,22 @@ function setUpdateLock($token, $ttl = 600) {
         'created' => time(),
         'reason' => 'system_update',
     ];
-    $dir = dirname(UPDATE_LOCK_FILE);
-    if (!is_dir($dir)) mkdir($dir, 0755, true);
-    return file_put_contents(UPDATE_LOCK_FILE, json_encode($data, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    // v5.0.0：优先写共享目录（0770/0660）；目录不存在或不可写时回退旧 /tmp（一次性过渡）
+    $path = UPDATE_LOCK_FILE;
+    $dir = dirname($path);
+    if (!is_dir($dir)) @mkdir($dir, 0770, true);
+    if (!is_dir($dir) || !is_writable($dir)) $path = UPDATE_LOCK_FILE_LEGACY;
+    $n = @file_put_contents($path, json_encode($data, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    if ($n !== false) {
+        @chmod($path, 0660);
+        @unlink($path === UPDATE_LOCK_FILE ? UPDATE_LOCK_FILE_LEGACY : UPDATE_LOCK_FILE);
+    }
+    return $n;
 }
 
 function clearUpdateLock() {
     @unlink(UPDATE_LOCK_FILE);
+    @unlink(UPDATE_LOCK_FILE_LEGACY);
 }
 
 function getUpdateStatus() {

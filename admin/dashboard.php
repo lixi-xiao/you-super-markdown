@@ -1988,7 +1988,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
         document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formSiteTitle').value = document.getElementById('siteTitleInput').value.trim(); document.getElementById('formRegEnabled').value = document.getElementById('regToggle').checked ? '1' : ''; document.getElementById('formGuestComments').value = document.getElementById('guestToggle').checked ? '1' : ''; document.getElementById('formSuperComment').value = document.getElementById('superCommentToggle').checked ? '1' : ''; document.getElementById('formNotifyEnabled').value = document.getElementById('notifyToggle').checked ? '1' : ''; document.getElementById('formNotifyEmail').value = document.getElementById('notifyEmailInput').value.trim(); document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicAutoPlay').value = document.getElementById('musicAutoPlayInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formBgMusicEnabled').value = document.getElementById('bgMusicToggle').checked ? '1' : ''; });
         <?php if ($bgType === 'api' && $bgApiUrl): ?>
-        (function() { var u=<?= json_encode($bgApiUrl) ?>; var img=new Image(); img.onload=function(){previewApiSrc=u;updatePreview();}; img.src=u; })();
+        (function() { var u=<?= json_encode($bgApiUrl, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>; var img=new Image(); img.onload=function(){previewApiSrc=u;updatePreview();}; img.src=u; })();
         <?php endif; ?>
         updatePreview();
     })();
@@ -2454,8 +2454,10 @@ $banMsg = $_GET['bmsg'] ?? '';
             .then(function(d) {
                 var hist = (d && d.history) || [];
                 var html = '';
+                // v5.0.0：搜索词拼接进 innerHTML 前转义（防 HTML 注入）
+                var __qEsc = String(backupSearchQ || '').replace(/[&<>"']/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
                 if (hist.length === 0) {
-                    html = '<p style="color:var(--text-muted);font-size:0.85em">' + (backupSearchQ ? '未找到匹配「' + backupSearchQ + '」的记录' : '暂无更新记录') + '</p>';
+                    html = '<p style="color:var(--text-muted);font-size:0.85em">' + (backupSearchQ ? '未找到匹配「' + __qEsc + '」的记录' : '暂无更新记录') + '</p>';
                 } else {
                     for (var i = 0; i < hist.length; i++) {
                         var h = hist[i];

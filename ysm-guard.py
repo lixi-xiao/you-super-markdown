@@ -73,8 +73,11 @@ WATCH_FILES = [
     'user.php',             # v2.10.0：用户个人详情页（评论区点击头像/昵称进入，防篡改）
 ]
 
-# 更新锁文件
-UPDATE_LOCK = '/tmp/ysm-update.lock'
+# 更新锁文件（v5.0.0：迁至 root:www-data 共享、其他用户不可写的 /opt 目录——目录 0770、文件 0660；
+# 旧 /tmp 路径保留为兼容只读回退。读取前一律做属主/权限校验，不可信锁视为「未加锁」，
+# 防本地用户凭写 /tmp 锁文件令 verify_audit_chain()/mirror_db() 前置校验被跳过）
+UPDATE_LOCK = '/opt/you-super-markdown/run/ysm-update.lock'
+UPDATE_LOCK_LEGACY = '/tmp/ysm-update.lock'
 
 # 校验间隔（秒）
 AUDIT_CHECK_INTERVAL = 300  # 5分钟
@@ -302,11 +305,39 @@ def send_alert(alert_type: str, detail: str):
         log_alert_fail(f"ysm-alert 调用失败({alert_type}): {e}")
 
 
-def is_update_in_progress() -> bool:
-    """检查系统是否正在更新中（守护进程暂停文件保护）"""
+def _lock_file_trusted(path: str) -> bool:
+    """更新锁文件可信性校验（v5.0.0）：属主须为 root/www-data，且不得 world-writable。
+    不满足（如在 /tmp 由普通用户伪造的锁文件）→ 返回 False，调用方按「未加锁」处理。"""
     try:
-        if os.path.exists(UPDATE_LOCK):
-            with open(UPDATE_LOCK, 'r') as f:
+        if os.path.islink(path):  # 软链锁文件不可信
+            return False
+        st = os.stat(path)
+    except Exception:
+        return False
+    if st.st_mode & 0o002:  # 其他用户可写 → 不可信
+        return False
+    if st.st_uid == 0:      # root
+        return True
+    try:
+        import pwd
+        return pwd.getpwuid(st.st_uid).pw_name == 'www-data'
+    except Exception:
+        return False
+
+
+def is_update_in_progress() -> bool:
+    """检查系统是否正在更新中（守护进程暂停文件保护）。
+    v5.0.0：锁文件迁至 /opt/you-super-markdown/run（目录 root:www-data 0770、文件 0660）；
+    读取前校验属主/权限，不可信文件视为「未加锁」——避免本地用户写锁文件令
+    verify_audit_chain() / mirror_db() 前置校验被跳过而绕过审计链保护。"""
+    for path in (UPDATE_LOCK, UPDATE_LOCK_LEGACY):
+        if not os.path.exists(path):
+            continue
+        if not _lock_file_trusted(path):
+            log(f"忽略不可信更新锁（属主/权限异常，按未加锁处理）: {path}")
+            continue
+        try:
+            with open(path, 'r') as f:
                 data = json.load(f)
             expires = data.get('expires', 0)
             if expires > time.time():
@@ -314,10 +345,10 @@ def is_update_in_progress() -> bool:
                 log(f"更新进行中，暂停文件保护 (token: {token}...)")
                 return True
             else:
-                os.remove(UPDATE_LOCK)
+                os.remove(path)
                 log("更新锁已过期，恢复文件保护")
-    except Exception:
-        pass
+        except Exception:
+            continue
     return False
 
 

@@ -606,6 +606,13 @@ def main():
                 f.write(SCHEMA_EPOCH + "\n")
             os.chmod(epoch_file, 0o600)
             print("[ok]   已写入预期审计链 epoch：{}".format(epoch_file))
+            # v5.0.0 修复：审计母密钥必须存在，否则守护无法 HMAC 加封（链永停 legacy → 误报"降级"/"恢复失败"）
+            key_file = os.path.join(secrets_dir, "audit_key")
+            if not (os.path.exists(key_file) and os.path.getsize(key_file) > 0):
+                with open(key_file, "w", encoding="utf-8") as f:
+                    f.write(os.urandom(32).hex() + "\n")
+                os.chmod(key_file, 0o600)
+                print("[ok]   已生成审计母密钥：{}".format(key_file))
     except Exception as e:
         print("[warn] 写入预期审计链 epoch 失败（不影响迁移）：{}".format(e))
 

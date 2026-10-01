@@ -14,7 +14,8 @@ if (!$row) {
     $ttl = max(300, (int)($siteCfg['confirm_link_ttl'] ?? 86400));
     if (time() - (int)$row['created'] > $ttl) {
         update_pending_author_status($row['id'], 'expired');
-        $result = '该确认链接已过期（链接自发起后 ' . intdiv($ttl, 3600) . ' 小时内有效），请联系站长重新发起。';
+        $ttlLabel = $ttl >= 3600 ? intdiv($ttl, 3600) . ' 小时' : intdiv($ttl, 60) . ' 分钟';
+        $result = '该确认链接已过期（链接自发起后 ' . $ttlLabel . '内有效），请联系站长重新发起。';
     } else {
         if (create_author_from_pending($row)) {
             update_pending_author_status($row['id'], 'confirmed');

@@ -81,6 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['cmt_fp'] = computeSessionFp($pending['fp'] ?? $reqFp);
                     $_SESSION['cmt_tv'] = $newTV;
                     $_SESSION['cmt_login_ts'] = time();
+                    establishBackendSession(); // v5.3.1：完整认证完成 → 建立独立后台会话标记
                     clearRefreshCookie(); // v4.6.0：超管无 refresh——清掉旧 ysm_rt，杜绝续期绕过 30 分钟限制
                     $_SESSION['cmt_user'] = [
                         'id' => $superAdmin['id'],
@@ -159,6 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
                     $_SESSION['cmt_tv'] = $newTV;
                     $_SESSION['cmt_login_ts'] = time();
+                    establishBackendSession(); // v5.3.1：完整认证完成 → 建立独立后台会话标记
                     clearRefreshCookie(); // v4.6.0：超管无 refresh——清掉旧 ysm_rt，杜绝续期绕过 30 分钟限制
                     $_SESSION['cmt_user'] = [
                         'id' => $superAdmin['id'],
@@ -260,10 +262,13 @@ if (!$needDeviceVerify && is_array($pendingNow)
             </form>
             <?php endif; ?>
 
+            <?php // v5.3.1：仅在确有 OTP 入口时显示过期时间（设备验证态入口已消费，$found 为空，避免展示 00:00:00 误导） ?>
+            <?php if (!empty($found)): ?>
             <div class="entry-expire">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 此入口将于 <strong><?= date('H:i:s', (int)($found['expires'] ?? 0)) ?></strong> 过期
             </div>
+            <?php endif; ?>
         </div>
     </div>
     <script>

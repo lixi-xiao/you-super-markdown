@@ -15,9 +15,11 @@ if (!validateBackendUser()) {
     header('Location: /?admin_login=1&expired=1');
     exit;
 }
+// v4.6.0：后台会话 24 小时显式过期。
+// v5.3.1：过期只失效**后台会话标记**并回退首页（可读提示），**绝不清前台登录态**（cmt_user / refresh 保持）；
+//         前台登录态不得用于直接进后台——重新进入须重新验证身份。
 if (backendSessionExpired()) {
-    session_unset();
-    session_destroy();
+    clearBackendSession();
     header('Location: /?admin_login=1&expired=1');
     exit;
 }
@@ -759,7 +761,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
     <div class="modal-box" style="max-width:720px;max-height:90vh;overflow-y:auto">
         <div class="modal-head">
             <div class="modal-title">编辑文档 <span id="editFileName" style="font-weight:400;color:var(--text-muted);font-size:0.82em"></span></div>
-            <button class="modal-close" onclick="closeModalById('editModal')">&times;</button>
+            <button class="modal-close" onclick="closeModalById('editModal')" aria-label="关闭">&times;</button>
         </div>
         <div class="modal-body">
             <form method="post" enctype="multipart/form-data">

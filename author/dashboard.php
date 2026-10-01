@@ -16,10 +16,11 @@ if (!validateBackendUser()) {
     exit;
 }
 
-// v4.6.0：后台会话 24 小时显式过期（按登录时间算）——超时回退首页重新登录（refresh 续期不绕过）
+// v4.6.0：后台会话 24 小时显式过期。
+// v5.3.1：过期只失效**后台会话标记**并回退首页（可读提示），**绝不清前台登录态**（cmt_user / refresh 保持）；
+//         前台登录态不得用于直接进后台——重新进入须重新验证身份（本页下一段环境校验同样保留）。
 if (backendSessionExpired()) {
-    session_unset();
-    session_destroy();
+    clearBackendSession();
     header('Location: /?admin_login=1&expired=1');
     exit;
 }

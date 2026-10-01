@@ -3190,7 +3190,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         <div class="modal-box" style="max-width:420px">
             <div class="modal-head">
                 <div class="modal-title">安全验证</div>
-                <button class="modal-close" onclick="closeChallengeModal()">&times;</button>
+                <button class="modal-close" onclick="closeChallengeModal()" aria-label="关闭">&times;</button>
             </div>
             <div class="modal-body">
                 <p style="color:var(--text-secondary);margin-bottom:16px">请在 SSH 中执行以下命令生成确认码：</p>
@@ -3225,7 +3225,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         <div class="modal-box user-op-modal-box">
             <div class="modal-head">
                 <div class="modal-title">用户管理</div>
-                <button class="modal-close" onclick="document.getElementById('userOpModal').style.display='none'">&times;</button>
+                <button class="modal-close" onclick="document.getElementById('userOpModal').style.display='none'" aria-label="关闭">&times;</button>
             </div>
             <div class="modal-body" id="userOpBody"></div>
         </div>

@@ -92,6 +92,8 @@ function finalizeLogin($u, $reqFp) {
     $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
     $_SESSION['cmt_tv'] = $newTV;
     $_SESSION['cmt_login_ts'] = time();
+    // v5.3.1：完整认证完成 → 建立独立的后台会话（与前台登录态解耦；过期只失效该标记）
+    establishBackendSession();
     if (($u['role'] ?? '') !== ROLE_SUPER_ADMIN) {
         issueRefreshToken($u['id'], $_SESSION['cmt_fp'], $newTV);
     }
@@ -748,7 +750,9 @@ if ($action === 'refresh' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$found) { clearRefreshCookie(); sendJson(['success' => false, 'error' => '账号不存在'], 401); }
     $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
     $_SESSION['cmt_tv'] = (int)$curTV;
-    // v4.6.0：保持原登录时间（refresh 不重置）——后台 24h 过期按登录时间算，续期不能绕过
+    // v4.6.0：保持原登录时间（refresh 不重置）。
+    // v5.3.1：前台续期**不重建后台会话**（cmt_backend_ts 仅在完整认证时写入）——站长/写作者后台
+    //         24h 到期后须重新验证身份方可再进后台，refresh 无法绕过。
     $_SESSION['cmt_login_ts'] = (int)($row['created'] ?? 0) ?: time();
     $_SESSION['cmt_user'] = [
         'id' => $found['id'], 'account' => $found['account'],
@@ -833,10 +837,9 @@ if ($action === 'user-status') {
         } elseif ($roleLevel >= $authorLevel && $roleLevel < $stationAdminLevel) {
             $adminUrl = '/' . getAuthorPath() . '/dashboard.php';
         }
-        // v4.6.0：从首页点击「快捷进入管理」→ 重新开始 24h 后台计时（登录时间刷新；回退首页再进即重新计时）
-        if ($canAccessAdmin) {
-            $_SESSION['cmt_login_ts'] = time();
-        }
+        // v5.3.1：安全不降级——**取消** v4.6.0「从首页点击快捷进入管理即重置后台计时」的行为。
+        // 该行为会让「仅凭前台登录态」重开后台会话（绕过重新验证）。此后后台会话只能由一次完整认证
+        // （登录 / OTP）重建；前台登录态可继续浏览，但进后台必须重新验证。本接口返回结构保持不变。
         sendJson([
             'success' => true,
             'loggedIn' => true,

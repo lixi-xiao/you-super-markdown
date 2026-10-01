@@ -34,13 +34,29 @@ function secureSessionStart() {
     }
     session_start();
 }
-// v4.6.0：后台会话 24 小时显式过期（站长/写作者，按登录时间算）——超时回退首页重新登录
+// v4.6.0：后台会话 24 小时显式过期（站长/写作者，按登录时间算）。
+// v5.3.1：后台会话与前台登录态（长效 30 天）**分离**——后台会话使用独立标记 cmt_backend_ts
+//         （仅由一次完整认证建立），过期时**只失效该标记**，绝不动前台登录态（cmt_user / refresh token）；
+//         前台登录态一律不得建立 / 续期后台会话（必须重新验证）。
 const BACKEND_TTL = 86400; // 24 小时
+/** 建立后台会话（登录 / OTP 完成后调用）：写独立时间戳，与前台 cmt_login_ts 解耦 */
+function establishBackendSession() {
+    $_SESSION['cmt_backend_ts'] = time();
+}
+/** 后台会话是否在有效期内（无标记一律视为无效——必须重新验证才能进后台） */
+function backendSessionValid(): bool {
+    $ts = (int)($_SESSION['cmt_backend_ts'] ?? 0);
+    return $ts > 0 && (time() - $ts) <= BACKEND_TTL;
+}
 function backendSessionExpired(): bool {
     if (empty($_SESSION['cmt_user'])) return false;
     $role = $_SESSION['cmt_user']['role'] ?? '';
     if (!in_array($role, [ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) return false;
-    return (time() - (int)($_SESSION['cmt_login_ts'] ?? 0)) > BACKEND_TTL;
+    return !backendSessionValid();
+}
+/** v5.3.1：仅失效后台会话标记（回退首页用）——不触碰前台登录态 */
+function clearBackendSession() {
+    unset($_SESSION['cmt_backend_ts'], $_SESSION['cmt_fp_ok']);
 }
 function generateCsrfToken() {
     if (empty($_SESSION['csrf_token'])) {

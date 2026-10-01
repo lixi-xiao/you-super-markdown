@@ -28,7 +28,7 @@ if (db_rate_count('music_rates', $clientIP, 60) > 40) {
     exit;
 }
 
-// v2.6.0：按平台取 Cookies（v4.4.2 起仅网易云 music_cookies）
+// v2.6.0：按平台取 Cookies（v4.4.2 移除 QQ；v4.7.4 恢复多平台，但仅网易云播放地址使用 music_cookies）
 $musicCookies = $config['music_cookies'] ?? '';
 
 // v4.2.4：带 Cookie 的外呼必须走安全跟随——禁止 CURLOPT_FOLLOWLOCATION 自动跟随

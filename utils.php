@@ -2687,10 +2687,191 @@ function normalizeUpdateChannel($channel) {
     return ($channel === 'beta') ? 'beta' : 'stable';
 }
 
+// ============================================================
+// v5.3.0：跨通道升级/降级判定的唯一真源（检查侧 pickLatestRelease/buildUpdateResult
+//   与更新器 ysm-admin apply-update 共用同一套比较与判定，杜绝两处逻辑漂移）
+// ============================================================
+
+// 把版本号拆成 [核心数字段数组, 预发布标识]：形如 "v5.3.1-beta.2" → [[5,3,1], "beta.2"]；
+//   非数字段取前导数字（缺省 0）；忽略 +build 构建元数据。
+function ysmVersionParts($v) {
+    $v = trim((string)$v);
+    if ($v !== '' && ($v[0] === 'v' || $v[0] === 'V')) $v = substr($v, 1);
+    $v = explode('+', $v, 2)[0];              // 丢弃 +build
+    $core = $v;
+    $pre = '';
+    $dash = strpos($v, '-');
+    if ($dash !== false) {
+        $core = substr($v, 0, $dash);
+        $pre  = substr($v, $dash + 1);
+    }
+    $nums = [];
+    foreach (explode('.', $core) as $seg) {
+        $nums[] = (int)preg_replace('/[^0-9].*$/s', '', $seg);
+    }
+    return [$nums, $pre];
+}
+
+// 是否为预发布版本（含 '-' 后缀，如 5.3.1-beta.2）
+function ysmIsPrerelease($v) {
+    $parts = ysmVersionParts($v);
+    return $parts[1] !== '';
+}
+
+// 预发布标识比较（semver 简化版）：数字段按数值比、非数字段按字典序；数字段高于非数字段；
+//   前缀相同时段数少者更低。返回 -1/0/1。例：beta.2 < beta.10，beta.2 < beta.2.1。
+function ysmComparePrerelease($a, $b) {
+    $ta = array_values(array_filter(preg_split('/[.\-]/', (string)$a), function ($x) { return $x !== ''; }));
+    $tb = array_values(array_filter(preg_split('/[.\-]/', (string)$b), function ($x) { return $x !== ''; }));
+    $len = max(count($ta), count($tb));
+    for ($i = 0; $i < $len; $i++) {
+        if (!isset($ta[$i])) return -1;
+        if (!isset($tb[$i])) return 1;
+        $xn = ctype_digit($ta[$i]);
+        $yn = ctype_digit($tb[$i]);
+        if ($xn && $yn) {
+            if ((int)$ta[$i] !== (int)$tb[$i]) return (int)$ta[$i] < (int)$tb[$i] ? -1 : 1;
+        } elseif ($xn !== $yn) {
+            return $xn ? 1 : -1;               // 数字段 > 非数字段
+        } else {
+            $c = strcmp($ta[$i], $tb[$i]);
+            if ($c !== 0) return $c < 0 ? -1 : 1;
+        }
+    }
+    return 0;
+}
+
+// v5.3.0：检查侧与更新器共用的唯一版本比较语义。
+//   规则：先比核心数字段（缺失按 0）；核心相同则「预发布 < 同基线正式版」；
+//        两者皆为预发布时按预发布标识比较。返回 -1/0/1。
+//   例：ysmCompareVersion('5.3.1-beta.2','5.3.1') = -1；('5.3.1','5.3.2') = -1。
+function ysmCompareVersion($a, $b) {
+    list($na, $pa) = ysmVersionParts($a);
+    list($nb, $pb) = ysmVersionParts($b);
+    $len = max(count($na), count($nb));
+    for ($i = 0; $i < $len; $i++) {
+        $x = $na[$i] ?? 0;
+        $y = $nb[$i] ?? 0;
+        if ($x !== $y) return $x < $y ? -1 : 1;
+    }
+    $aPre = ($pa !== '');
+    $bPre = ($pb !== '');
+    if ($aPre !== $bPre) return $aPre ? -1 : 1;  // 预发布 < 正式版
+    if (!$aPre) return 0;                        // 同为正式版且核心相同 → 相等
+    return ysmComparePrerelease($pa, $pb);
+}
+
+// v5.3.0：比较函数别名（任务约定名 ysmCompareVersions，等价于 ysmCompareVersion）
+function ysmCompareVersions($a, $b) {
+    return ysmCompareVersion($a, $b);
+}
+
+// v5.3.0：版本号合法性校验（语义化：可选 v 前缀 + N(.N)* + 可选 -预发布 / +构建）。
+//   非法（空 / 非数字核心 / 含非法字符）返回 false，判定函数据此拒绝。
+function ysmVersionValid($v) {
+    $v = trim((string)$v);
+    if ($v === '') return false;
+    return (bool)preg_match('/^[vV]?[0-9]+(\.[0-9]+)*(-[0-9A-Za-z][0-9A-Za-z.\-]*)?(\+[0-9A-Za-z][0-9A-Za-z.\-]*)?$/', $v);
+}
+
+// v5.3.0：仅比较「核心数字段」（忽略预发布/构建），用于区分「降级」与「同号跨通道互转」。
+//   返回 -1/0/1。例：ysmCompareCore('5.3.1-beta','5.3.1') = 0（同号）；('5.3.1','5.3.2') = -1。
+function ysmCompareCore($a, $b) {
+    $pa = ysmVersionParts($a);
+    $pb = ysmVersionParts($b);
+    $na = $pa[0];
+    $nb = $pb[0];
+    $len = max(count($na), count($nb));
+    for ($i = 0; $i < $len; $i++) {
+        $x = $na[$i] ?? 0;
+        $y = $nb[$i] ?? 0;
+        if ($x !== $y) return $x < $y ? -1 : 1;
+    }
+    return 0;
+}
+
+// 判定结果构造器
+function ysmDecision($allow, $forceFull, $code, $reason) {
+    return [
+        'decision'   => $allow ? 'allow' : 'deny',
+        'allowed'    => (bool)$allow,
+        'force_full' => (bool)$forceFull,
+        'code'       => $code,
+        'reason'     => $reason,
+    ];
+}
+
+// ============================================================
+// v5.3.0：升级/降级与跨通道判定的唯一真源（检查侧 pickLatestRelease/buildUpdateResult
+//   与更新器 ysm-admin apply-update 共用同一套规则，杜绝两处逻辑漂移）。
+//   返回 ['decision'=>'allow'|'deny', 'allowed'=>bool, 'force_full'=>bool, 'code'=>string, 'reason'=>string]
+//   规则（用户已拍板）：
+//     ① 一律禁止降级：目标核心版本 < 当前核心版本 → 拒绝；
+//     ② beta → stable：必须全量包（目标为正式版且当前为预发布 / 目标通道 stable 且当前通道 beta）→ 增量包拒绝；
+//     ③ 同号跨通道互转（如 5.3.1 ↔ 5.3.1-beta）：允许，但必须全量包，增量包拒绝；
+//     ④ stable → 更高 stable、beta → 更高 beta：按既有逻辑放行（增量或全量均可）；
+//     ⑤ 同号互转视作「版本等同」：不得因 5.3.1 < 5.3.1-beta 之类比较误判为降级/升级（同号互转走规则③）。
+//   说明：$curChannel/$targetChannel 取值 stable|beta（非法值回落 stable）；$type 取值 full|inc（兼容 incremental）。
+// ============================================================
+function ysmUpdateDecision($cur, $curChannel, $target, $targetChannel, $type = 'full') {
+    $cur         = trim((string)$cur);
+    $target      = trim((string)$target);
+    $curChannel  = normalizeUpdateChannel($curChannel);
+    $tgtChannel  = normalizeUpdateChannel($targetChannel);
+    $isInc       = ($type === 'inc' || $type === 'incremental');
+    if ($cur === '') $cur = '0.0.0';
+    if ($target === '') {
+        return ysmDecision(false, false, 'invalid', '目标版本号为空，已拒绝');
+    }
+    if (!ysmVersionValid($cur) || !ysmVersionValid($target)) {
+        return ysmDecision(false, false, 'invalid', "版本号非法（当前 v{$cur} / 目标 v{$target}），已拒绝");
+    }
+    // ① 一律禁止降级（按核心数字段判定，"高版本→低版本 beta" 同样落入此处）
+    if (ysmCompareCore($target, $cur) < 0) {
+        return ysmDecision(false, false, 'downgrade', "目标版本 v{$target} 低于当前版本 v{$cur}，已拒绝（禁止降级）");
+    }
+    $curPre = ysmIsPrerelease($cur);
+    $tgtPre = ysmIsPrerelease($target);
+    // 稳定通道不收预发布目标
+    if ($tgtChannel === 'stable' && $tgtPre) {
+        return ysmDecision(false, false, 'channel', "稳定通道不接受预发布版本 v{$target}，已拒绝（请切换到测试版通道）");
+    }
+    // ② / ③：判定是否强制全量包
+    $forceFull = false;
+    $reason = '';
+    if (ysmCompareCore($target, $cur) === 0) {
+        // ⑤ 同号互转视作「版本等同」：预发布 ↔ 正式 的跨通道互转（规则③）必须全量
+        if ($curPre !== $tgtPre) {
+            $forceFull = true;
+            $reason = "同号跨通道互转（v{$cur} ↔ v{$target}）必须使用全量包";
+        }
+    } elseif ($curPre && !$tgtPre) {
+        // ② 预发布 → 正式（beta → stable）必须全量
+        $forceFull = true;
+        $reason = "从预发布版 v{$cur} 升级到正式版 v{$target}（beta → stable）必须使用全量包";
+    } elseif ($tgtChannel === 'stable' && $curChannel === 'beta') {
+        // ② 目标通道 stable 且当前通道 beta 必须全量
+        $forceFull = true;
+        $reason = "从测试版通道切换到稳定版通道（v{$cur} → v{$target}）必须使用全量包";
+    }
+    if ($forceFull && $isInc) {
+        return ysmDecision(false, true, 'need_full', $reason . "，增量包已拒绝");
+    }
+    return ysmDecision(true, $forceFull, 'ok', '');
+}
+
+// v5.3.0：兼容旧调用点的包装（检查侧与更新器此前用 $channel 单参）——
+//   当前通道由「当前版本是否预发布」推导，目标通道取传入 $channel；判定委托 ysmUpdateDecision（唯一真源）。
+function ysmCanUpdate($from, $to, $pkgType = 'full', $channel = 'stable') {
+    $curChannel = ysmIsPrerelease($from) ? 'beta' : 'stable';
+    $d = ysmUpdateDecision($from, $curChannel, $to, $channel, $pkgType);
+    return ['allowed' => $d['allowed'], 'force_full' => $d['force_full'], 'code' => $d['code'], 'reason' => $d['reason']];
+}
+
 // v5.3.0：从 Releases 列表挑选「最新」一条——
 //   ① stable 通道：仅保留 prerelease=false 且非 draft（只认正式 Release）；
 //   ② beta 通道：包含预发布（排除 draft）；
-//   ③ 版本比较用 version_compare 处理语义化预发布号（5.3.0-beta.2 < 5.3.0 < 5.3.1）；
+//   ③ 版本比较用同一套 ysmCompareVersion 处理语义化预发布号（5.3.0-beta.2 < 5.3.0 < 5.3.1）；
 //   GitHub 列表按创建时间倒序、不保证版本最大，故按 tag 版本取最大者，而非取第 0 条。
 function pickLatestRelease(array $releases, $channel) {
     $channel = normalizeUpdateChannel($channel);
@@ -2702,7 +2883,7 @@ function pickLatestRelease(array $releases, $channel) {
         if ($channel === 'stable' && !empty($r['prerelease'])) continue;
         $ver = ltrim((string)$r['tag_name'], 'v');
         if ($ver === '') continue;
-        if ($bestVer === null || version_compare($ver, $bestVer) > 0) {
+        if ($bestVer === null || ysmCompareVersion($ver, $bestVer) > 0) {
             $best = $r;
             $bestVer = $ver;
         }
@@ -2734,7 +2915,7 @@ function buildUpdateResult($release, $channel) {
         }
     }
     return [
-        'available' => version_compare($latest, APP_VERSION) > 0,
+        'available' => ysmCompareVersion($latest, APP_VERSION) > 0,
         'latest_version' => $latest,
         'current_version' => APP_VERSION,
         'release_notes' => $release['body'] ?? '',
@@ -2745,6 +2926,9 @@ function buildUpdateResult($release, $channel) {
         // v5.3.0：仅「追加」字段（既有字段语义不变）——本次判定的通道与是否预发布
         'channel' => normalizeUpdateChannel($channel),
         'prerelease' => !empty($release['prerelease']),
+        // v5.3.0：与更新器（apply-update）同一套判定（ysmCanUpdate）——供前端默认选中全量包/展示原因。
+        //   检查阶段尚不知请求的真实包类型，故按「全量包可用」预判（force_full 只提示，最终以 apply-update 为准）。
+        'update_decision' => ysmCanUpdate(APP_VERSION, $latest, 'full', $channel),
     ];
 }
 
@@ -2809,7 +2993,7 @@ function notifyUpdateAvailable($result, $channel = 'stable') {
     if (empty($result['available'])) return false;
     $latest = trim((string)($result['latest_version'] ?? ''));
     $current = trim((string)($result['current_version'] ?? APP_VERSION));
-    if ($latest === '' || version_compare($latest, $current) <= 0) return false;
+    if ($latest === '' || ysmCompareVersion($latest, $current) <= 0) return false;
     $channel = normalizeUpdateChannel($channel);
     $config = loadSiteConfig();
     // 去重：同一新版本只通知一次

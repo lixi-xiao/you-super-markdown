@@ -159,6 +159,33 @@ ysm-admin log-verify               # 审计日志校验（应为通过）
 
 **升级失败会怎样**：更新前自动备份，中途失败会自动回滚到更新前状态，并把"已自动回退"写进更新状态、发邮件通知管理员，正常使用基本不用担心更新把站搞挂。
 
+### 跨通道升级规则（v5.3.0）
+
+版本比较与升级判定在「检查更新」与更新器（`apply-update`）两侧**共用同一套实现**（`utils.php` 的 `ysmCompareVersion` / `ysmUpdateDecision`，`ysmCanUpdate` 为其兼容包装），不存在两处逻辑各判各的。规则如下：
+
+1. **语义化版本**：`X.Y.Z-beta.N < X.Y.Z`（同基线，预发布**低于**同号正式版）、`-beta.N` 按数值递增比较（`beta.2 < beta.10`），核心号 `X.Y.Z < X.Y.(Z+1)`。所有比较都用这套语义（不使用对 `-beta` 处理含糊的裸 `version_compare`）。**非法版本号一律拒绝**。
+2. **一律禁止降级**：目标核心版本**低于**当前版本一律**拒绝**并给出可读原因（例：当前 `5.3.2` → 目标 `5.3.1` 或 `5.3.1-beta` 均拒绝；"高版本→低版本 beta" 同样拒绝）。
+3. **beta → 稳定必须全量包**：当前为预发布（如 `5.3.1-beta`）→ 正式版（如 `5.3.1` 或更高）**允许，但强制全量包**；给增量包则**拒绝**并提示"必须使用全量包"。
+4. **同号跨通道互转必须全量包**：`5.3.1 ↔ 5.3.1-beta` 视为**版本等同**（不因子版本比较误判为降级/升级），**允许互转，但必须全量包**；给增量包则**拒绝**。
+5. **稳定→更高稳定、beta→更高 beta 放行**：按既有逻辑允许（**增量或全量均可**）。
+6. **通道收口**：`stable` 只收正式版（目标为预发布即拒绝，提示切到测试版通道），`beta` 正式版/预发布皆可。
+
+| 当前 | 目标 | 通道 | 包类型 | 结果 |
+|---|---|---|---|---|
+| 5.3.0 | 5.3.1 | stable | 全量 / 增量 | 允许 |
+| 5.3.1 | 5.3.1-beta | beta | 全量 | 允许（同号跨通道互转） |
+| 5.3.1 | 5.3.1-beta | beta | 增量 | **拒绝**（同号互转必须全量包） |
+| 5.3.1-beta | 5.3.1 | beta | 全量 | 允许（beta → 稳定） |
+| 5.3.1-beta | 5.3.1 | beta | 增量 | **拒绝**（beta → 稳定必须全量包） |
+| 5.3.1 | 5.3.0 | stable | 全量 | **拒绝**（降级） |
+| 5.3.2 | 5.3.1-beta | beta | 全量 | **拒绝**（降级） |
+| 5.3.0 | 5.3.1-beta | beta | 全量 / 增量 | 允许 |
+| 5.3.1-beta | 5.3.1-beta.2 | beta | 全量 / 增量 | 允许 |
+
+> **包类型显式声明（v5.3.0）**：包内 `version.json` 新增 `type` 字段，取值 `"full"`（全量包）/ `"inc"`（增量包）；打包时必须写入。更新器读取时若 `type` 缺失，则**回退按既有目录结构判定**（含 `inc/update/` 两层即视为增量包，否则全量包），保证老包仍可安装。
+>
+> 判定在**任何文件落地之前**完成：被拒绝时不改动站点、不触发回滚，原因写入更新请求文件（`error` 字段）与审计日志。验签、备份、回滚、健康检查等既有流程不受影响。
+
 ## 批量上传与安全
 
 - **富媒体压缩包批量上传**（写作界面「上传新文档」第 4 个 tab，v3.3.0 新增、v3.3.1 并入 tab + 真实上传进度条）：一个 `.zip` 包内可同时包含 **Markdown 文档 + 图片（jpg/png/gif/webp）+ 视频（mp4/webm）**，导入时自动：文档存为文章、图片解压到 `data/images/`、视频解压到 `data/videos/`，md 里的图片/视频引用路径**自动改写**为站内地址，主页即可正常显示图片与播放视频（动图 GIF/WebP 原生播放）。压缩包解析完毕**自动删除**，不占服务器空间。上限：包 ≤80MB、单文件 ≤40MB、≤200 个文件；图片/视频均做**强制合法性校验**（图片 finfo MIME、视频 ftyp box / EBML 魔数），伪装或损坏文件会被跳过；单文件大小先按 zip 中央目录预检再解压（防内存型 DoS）。
@@ -300,7 +327,7 @@ sudo tee /opt/you-super-markdown/secrets/smtp_pass <<< "新授权码"
   - tag 形如 `vX.Y.Z`；**beta 形如 `vX.Y.Z-beta.N`，且必须在 Release 上勾选为 prerelease（预发布）**。
   - 资产命名：全量包 `you-super-markdown-vX.Y.Z-full.tar.gz`、初始化安装包 `you-super-markdown-vX.Y.Z-install.tar.gz`（增量包 `...-to-vX.Y.Z-inc.tar.gz`）。
 - **包内必需**：`version.json`（至少含 `version` 与 `changelog`）、`manifest.json`（逐文件 SHA256 清单）+ `manifest.json.sig`（对 `manifest.json` 的私钥签名）。
-  - `version.json` 字段约定：`version`（目标版本号，升级时写入目标机 `app-config.json`）、`changelog`（本版更新要点，会写入站内「更新历史」文章；同版本重复应用只覆盖该版本小节、不重复追加）、`type`（留空=全量包；`incremental`=增量包）、`deps`（可选，声明需补装的系统依赖，如 `["php-gd","ffmpeg"]`）。
+  - `version.json` 字段约定：`version`（目标版本号，升级时写入目标机 `app-config.json`）、`changelog`（本版更新要点，会写入站内「更新历史」文章；同版本重复应用只覆盖该版本小节、不重复追加）、`type`（`"full"`=全量包 / `"inc"`=增量包，打包时必须显式写入；缺失时更新器回退按目录结构判定，兼容旧包）、`deps`（可选，声明需补装的系统依赖，如 `["php-gd","ffmpeg"]`）。
 - **签名**：用**你自己的密钥**签名，并把对应**公钥部署到目标机**（`/opt/you-super-markdown/update_signing_public.pem`）——对应发包侧的签名脚本 `sign_update_package.py`（不在本仓库内）；未部署公钥或验签失败一律**拒绝安装（失败封闭）**。**私钥切勿入库**。
 - **更新请求与包定位约定**：后台触发更新时生成更新请求文件 `/opt/you-super-markdown/run/ysm-update-request.json`（`root:www-data`、0660），字段 `from_version` / `to_version` / `channel` / `package_path` / `package_url` 决定升级方式——`package_path`（后台「外部上传更新包」落地路径）优先；否则用 `package_url`（自托管仓库 Release 资产的下载直链）走「在线包更新」；两者皆空则拒绝。请求文件仅由 `sudo ysm-admin apply-update` 消费、只认该固定路径。
 - **通道**：`stable` 通道仅匹配**正式 Release**（`prerelease=false`）；`beta` 通道**包含预发布**（并正确处理 `5.3.0-beta.2 < 5.3.0` 这类语义化版本比较）。切换：`app-config.json` 无关，改的是数据库 `config.update_channel`——后台「在线更新」页切换或 `sudo ysm-admin set-channel <stable|beta>`。

@@ -304,6 +304,29 @@ SSH 执行： sudo ysm-admin apply-update
 
 > **首次上线引导**：未部署签名公钥的环境，首包可用一次性受控引导 `sudo ysm-admin apply-update --allow-unsigned`，**用后请立即部署公钥**，不要长期保留该开关。
 
+> **跨通道升级规则（v5.3.0）**：版本比较与升级判定在「检查更新」与 `apply-update` 两侧**共用同一套实现**（`utils.php` 的 `ysmCompareVersion` / `ysmUpdateDecision`，`ysmCanUpdate` 为其兼容包装）。
+> 1. **语义化版本**：`X.Y.Z-beta.N < X.Y.Z`（同基线，预发布**低于**同号正式版）、`-beta.N` 按数值递增（`beta.2 < beta.10`）、核心号 `X.Y.Z < X.Y.(Z+1)`；**非法版本号一律拒绝**。
+> 2. **一律禁止降级**：目标核心版本**低于**当前版本一律**拒绝**并给出可读原因（如当前 `5.3.2` → 目标 `5.3.1` / `5.3.1-beta` 均拒绝）。
+> 3. **beta → 稳定必须全量包**：当前预发布（如 `5.3.1-beta`）→ 正式版（如 `5.3.1` 或更高）允许，但**强制全量包**，给增量包则**拒绝**。
+> 4. **同号跨通道互转必须全量包**：`5.3.1 ↔ 5.3.1-beta` 视为**版本等同**（不误判为降级/升级），允许互转但**必须全量包**，增量包拒绝。
+> 5. **稳定→更高稳定、beta→更高 beta**：按既有逻辑放行（增量或全量均可）。`stable` 通道只收正式版（目标预发布即拒绝），`beta` 通道正式版/预发布皆可。
+>
+> | 当前 | 目标 | 通道 | 包类型 | 结果 |
+> |---|---|---|---|---|
+> | 5.3.0 | 5.3.1 | stable | 全量 / 增量 | 允许 |
+> | 5.3.1 | 5.3.1-beta | beta | 全量 | 允许（同号跨通道互转） |
+> | 5.3.1 | 5.3.1-beta | beta | 增量 | **拒绝**（同号互转必须全量包） |
+> | 5.3.1-beta | 5.3.1 | beta | 全量 | 允许（beta → 稳定） |
+> | 5.3.1-beta | 5.3.1 | beta | 增量 | **拒绝**（beta → 稳定必须全量包） |
+> | 5.3.2 | 5.3.1-beta | beta | 全量 | **拒绝**（降级） |
+> | 5.3.1 | 5.3.0 | stable | 全量 | **拒绝**（降级） |
+> | 5.3.0 | 5.3.1-beta | beta | 全量 / 增量 | 允许 |
+> | 5.3.1-beta | 5.3.1-beta.2 | beta | 全量 / 增量 | 允许 |
+>
+> **包类型显式声明**：包内 `version.json` 新增 `type` 字段（`"full"` / `"inc"`）；更新器读取时若缺失则回退按目录结构判定（含 `inc/update/` 两层即增量），保证老包可安装。
+>
+> 判定在**任何文件落地之前**完成：被拒绝时不改动站点、不触发回滚，原因写入更新请求文件（`error` 字段）与审计日志；验签、备份、回滚、健康检查等既有流程不受影响。
+
 ### 8.3 备份与回滚
 
 - **自动备份**：数据库定期滚动备份、文章每日备份；上传文章/公告后还会触发即时备份（由守护进程执行）。
@@ -462,7 +485,7 @@ A：不能。告警/更新通知/每日审计报告都走 SMTP。SMTP 授权码*
 | Release tag | `vX.Y.Z`；**beta 形如 `vX.Y.Z-beta.N`，且 Release 必须勾选为 prerelease（预发布）** |
 | 资产命名 | 全量包 `you-super-markdown-vX.Y.Z-full.tar.gz`、初始化安装包 `you-super-markdown-vX.Y.Z-install.tar.gz`（增量包 `...-to-vX.Y.Z-inc.tar.gz`） |
 | 包内必需 | `version.json`（至少含 `version` 与 `changelog`）、`manifest.json`（逐文件 SHA256 清单）+ `manifest.json.sig`（对 `manifest.json` 的私钥签名） |
-| `version.json` 字段 | `version`（目标版本号，升级时写入目标机 `app-config.json`）、`changelog`（本版更新要点，写入站内「更新历史」文章；同版本重复应用只覆盖该版本小节）、`type`（留空=全量包 / `incremental`=增量包）、`deps`（可选，需补装的系统依赖） |
+| `version.json` 字段 | `version`（目标版本号，升级时写入目标机 `app-config.json`）、`changelog`（本版更新要点，写入站内「更新历史」文章；同版本重复应用只覆盖该版本小节）、`type`（`"full"`=全量包 / `"inc"`=增量包，打包时必须显式写入；缺失时更新器回退按目录结构判定）、`deps`（可选，需补装的系统依赖） |
 | 更新请求与包定位 | 后台触发更新生成请求文件 `/opt/you-super-markdown/run/ysm-update-request.json`（`root:www-data` 0660），字段 `from_version` / `to_version` / `channel` / `package_path` / `package_url`：`package_path`（外部上传包）优先，否则 `package_url`（仓库 Release 资产直链）在线更新，两者皆空则拒绝；仅由 `sudo ysm-admin apply-update` 消费 |
 | 签名 | 用**你自己的密钥**签名，并把对应**公钥部署到目标机**（`/opt/you-super-markdown/update_signing_public.pem`）——对应发包侧签名脚本 `sign_update_package.py`（不在本仓库内）；未部署公钥或验签失败一律**拒绝安装（失败封闭）**。**私钥切勿入库** |
 | 通道 | `stable` 仅正式 Release（`prerelease=false`）；`beta` 含预发布（正确处理 `5.3.0-beta.2 < 5.3.0`）。切换：后台「在线更新」页或 `sudo ysm-admin set-channel <stable|beta>`（改数据库 `config.update_channel`，不动 `app-config.json`） |

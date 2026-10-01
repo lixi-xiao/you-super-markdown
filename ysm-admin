@@ -1225,20 +1225,31 @@ case "${1:-}" in
                     fi
                     ;;
             esac
-            # v3.3.0-fix：增量包识别优先——只要 version.json 声明 type=incremental 即按增量包处理
-            # （修复：增量包若含核心文件（utils.php/index.php 等）会被下方「含核心文件=全量包」逻辑误判，
-            #   触发 rsync --delete 清空 WEB_ROOT/母本中包外文件，导致站点文件大面积丢失的严重故障）
+            # v5.3.0：包类型识别——优先读包内 version.json 的显式 type（full / inc）；
+            #   兼容旧值 incremental；type 缺失/未知 → 回退按既有目录结构判定（增量包含 inc/update/ 两层 → inc，否则 full）。
+            #   （修复：增量包若含核心文件（utils.php/index.php 等）会被下方「含核心文件=全量包」逻辑误判，
+            #    触发 rsync --delete 清空 WEB_ROOT/母本中包外文件，导致站点文件大面积丢失的严重故障）
             VFILE=$(find "$TMP_DIR" -maxdepth 3 -name version.json 2>/dev/null | head -1)
+            PKG_TYPE=""
             if [ -n "$VFILE" ]; then
                 # v5.0.0 第6轮 C1：包内 version.json 路径经环境变量传入（getenv），不插值进 php -r 代码
-                PTYPE=$(YSM_VFILE="$VFILE" php -r '$v = json_decode(@file_get_contents(getenv("YSM_VFILE")), true); echo $v["type"] ?? "";' 2>/dev/null)
-                if [ "$PTYPE" = "incremental" ]; then
-                    PKG_TYPE="incremental"
-                    STAGE_DIR=$(dirname "$VFILE")
+                PTYPE=$(YSM_VFILE="$VFILE" php -r '$v = json_decode(@file_get_contents(getenv("YSM_VFILE")), true); echo strtolower(trim((string)($v["type"] ?? "")));' 2>/dev/null)
+                case "$PTYPE" in
+                    inc|incremental) PKG_TYPE="inc";  STAGE_DIR=$(dirname "$VFILE") ;;
+                    full)            PKG_TYPE="full" ;;
+                esac
+            fi
+            # 兼容回退：显式 type 缺失/未知 → 按目录结构判定（存在 inc/update/ 两层即视为增量包）
+            if [ -z "$PKG_TYPE" ]; then
+                if [ -d "$TMP_DIR/inc/update" ]; then
+                    PKG_TYPE="inc"
+                    STAGE_DIR="$TMP_DIR/inc/update"
+                else
+                    PKG_TYPE="full"
                 fi
             fi
             # 全量包定位（含核心文件的顶层/子目录；兼容带顶层目录的更新包）
-            if [ -z "$STAGE_DIR" ]; then
+            if [ "$PKG_TYPE" = "full" ] && [ -z "$STAGE_DIR" ]; then
                 if [ -f "$TMP_DIR/index.php" ] || [ -f "$TMP_DIR/utils.php" ]; then
                     STAGE_DIR="$TMP_DIR"
                 else
@@ -1264,7 +1275,27 @@ case "${1:-}" in
             mark_failed "更新源无效（未找到核心文件或增量清单）"
             exit 1
         fi
-        if [ "$PKG_TYPE" = "incremental" ]; then
+        # v5.3.0：跨通道升级/降级判定（禁止降级 / 预发布转正式必须全量包 / 通道收口）——
+        #   与检查侧 utils.php:ysmCanUpdate 为同一函数（唯一真源，避免两处逻辑漂移）。
+        #   PKG_TYPE 此时已按包内 version.json 识别（full/inc，缺失则回退目录结构），判定在任何文件落地之前完成，失败即拒绝且不改动站点。
+        RULE_OUT=$(YSM_FROM="$FROM_VER" YSM_TO="$TO_VER" YSM_PKG="$PKG_TYPE" YSM_CH="$CHANNEL" php -r '
+            require_once "'"$WEB_ROOT"'/utils.php";
+            $d = ysmCanUpdate(getenv("YSM_FROM"), getenv("YSM_TO"), getenv("YSM_PKG"), getenv("YSM_CH"));
+            echo (empty($d["allowed"]) ? "0" : "1") . "\n" . (!empty($d["force_full"]) ? "1" : "0") . "\n" . ($d["code"] ?? "") . "\n" . ($d["reason"] ?? "");
+        ' 2>/dev/null)
+        RULE_ALLOW=$(printf '%s\n' "$RULE_OUT" | sed -n '1p')
+        RULE_CODE=$(printf '%s\n' "$RULE_OUT" | sed -n '3p')
+        RULE_REASON=$(printf '%s\n' "$RULE_OUT" | sed -n '4p')
+        if [ "$RULE_ALLOW" != "1" ]; then
+            [ -n "$RULE_REASON" ] || RULE_REASON="更新被拒绝（跨通道规则）"
+            echo "错误：$RULE_REASON"
+            rm -rf "$TMP_DIR" "${PKG_FILE:-}" 2>/dev/null || true
+            YSM_DETAIL="更新被拒绝（跨通道规则 ${RULE_CODE:-unknown}）：$RULE_REASON" php -r "require_once '$WEB_ROOT/utils.php'; auditLog('update_request_rejected', 'update', getenv('YSM_DETAIL'));" 2>/dev/null || true
+            mark_failed "$RULE_REASON"
+            exit 1
+        fi
+        echo "  跨通道规则校验通过：$FROM_VER → $TO_VER（包类型 $PKG_TYPE，通道 $CHANNEL）"
+        if [ "$PKG_TYPE" = "inc" ]; then
             if [ ! -f "$STAGE_DIR/version.json" ]; then
                 echo "错误：增量包缺少 version.json，已中止，未修改任何文件"
                 rm -rf "$TMP_DIR" "${PKG_FILE:-}" 2>/dev/null || true

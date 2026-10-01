@@ -239,9 +239,18 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'trigger_update') {
         echo json_encode(['success' => false, 'error' => '参数不完整'], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    // 防注入：目标版本仅允许数字与点（避免写入 utils.php 时破坏/注入代码）
-    if (!preg_match('/^[\d.]+$/', $targetVersion)) {
+    // 防注入：目标版本仅允许「字母数字 . _ -」——与 apply-update 同一白名单
+    // v5.3.0：放开连字符以支持 beta 语义化版本（如 5.3.1-beta.2）；既有稳定版号不受影响
+    if (!preg_match('/^[0-9A-Za-z][0-9A-Za-z._-]*$/', $targetVersion)) {
         echo json_encode(['success' => false, 'error' => '目标版本格式非法'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    // v5.3.0：跨通道升级/降级规则早判（与 apply-update 共用 utils.php:ysmCanUpdate，唯一真源）——
+    //   此处先挡「方向性」错误（禁止降级 / 稳定通道不收预发布）；包类型（全量/增量）留待 apply-update
+    //   按真实包识别后再判（故此处按"全量可用"预判，只判方向不断言包类型）。
+    $ruleCheck = ysmCanUpdate(APP_VERSION, $targetVersion, 'full', $config['update_channel'] ?? 'stable');
+    if (empty($ruleCheck['allowed'])) {
+        echo json_encode(['success' => false, 'error' => $ruleCheck['reason']], JSON_UNESCAPED_UNICODE);
         exit;
     }
     // 读取上传的更新包路径（仅接受已上传到固定目录的路径，防止任意路径注入）
@@ -2204,16 +2213,22 @@ $banMsg = $_GET['bmsg'] ?? '';
                 var resultDiv = document.getElementById('updateCheckResult');
                 if (d.available) {
                     // v3.2.2：更新通道标识（稳定版/测试版）+ 跨版本检测（主版本号变化必须全量包）
+                    // v5.3.0：后端 update_decision.force_full（预发布→正式版）同样强制全量包（与 apply-update 同一判定）
                     var chLabel = '<?= ($config['update_channel'] ?? 'stable') === 'beta' ? '测试版通道' : '稳定版通道' ?>';
                     var cross = d.latest_version && d.current_version && String(d.latest_version).split('.')[0] !== String(d.current_version).split('.')[0];
+                    var forceFullByRule = !!(d.update_decision && d.update_decision.force_full);
+                    var forceFull = !!cross || forceFullByRule;
+                    var ruleHint = cross
+                        ? '<strong>跨版本更新</strong>：主版本号变化，必须使用<strong>全量包</strong>，已为你默认选中全量包'
+                        : (forceFullByRule ? '<strong>预发布转正式版</strong>：必须使用<strong>全量包</strong>，已为你默认选中全量包' : '');
                     resultDiv.innerHTML = '<div class="msg msg-success" style="margin:0"><svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>发现新版本 <strong>v' + d.latest_version + '</strong>（当前 v' + d.current_version + '）· ' + chLabel + '</div>' +
-                        (cross ? '<div class="msg" style="margin:8px 0 0;background:rgba(245,158,11,0.14);color:#b45309"><svg viewBox="0 0 24 24" width="16" height="16" style="vertical-align:-3px;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><strong>跨版本更新</strong>：主版本号变化，必须使用<strong>全量包</strong>，已为你默认选中全量包</div>' : '');
+                        (ruleHint ? '<div class="msg" style="margin:8px 0 0;background:rgba(245,158,11,0.14);color:#b45309"><svg viewBox="0 0 24 24" width="16" height="16" style="vertical-align:-3px;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' + ruleHint + '</div>' : '');
                     document.getElementById('updateActionCard').style.display = 'block';
                     document.getElementById('newVersionText').textContent = 'v' + d.latest_version;
                     pendingUpdateVersion = d.latest_version;
                     // v3.2.0：仓库发布含全量/增量包 → 展示选择；否则回退 archive 全量下载
                     if (d.packages && d.packages.length > 0) {
-                        renderPkgSelect(d.packages, cross);
+                        renderPkgSelect(d.packages, forceFull);
                     } else {
                         document.getElementById('pkgSelectArea').style.display = 'none';
                         document.getElementById('crossVerHint').style.display = cross ? 'block' : 'none';

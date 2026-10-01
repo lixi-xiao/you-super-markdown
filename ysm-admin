@@ -16,6 +16,45 @@ get_domain() {
     echo "$d"
 }
 
+# v5.0.0-fix：更新流程补齐告警脚本 ysm-alert（消除「更新路径缺口」）。
+# 背景：ysm-alert 仅在全新安装脚本 ysm-install.sh 中创建（ysm-install.sh:793-812）；经「更新流程」部署的
+#       站点从未生成该脚本 → SMTP 未配置时告警回退 ysm-alert 失败，alert.log 出现大量「ysm-alert 不存在」。
+# 幂等：与既有文件逐字节比对（cmp），内容一致则跳过；否则以 0755、root:root 写入，与全新安装一致。
+# 内容与 ysm-install.sh:793-812 完全相同；不含任何凭据（仅调用系统 mail 命令）。
+ensure_ysm_alert() {
+    local tgt="/usr/local/bin/ysm-alert" tmp
+    tmp=$(mktemp 2>/dev/null) || return 0
+    cat > "$tmp" << 'EOF'
+#!/bin/bash
+TO="$1"
+SUBJECT="$2"
+BODY="$3"
+if command -v mail >/dev/null 2>&1; then
+    echo "$BODY" | mail -s "$SUBJECT" "$TO" 2>/tmp/ysm-alert.err
+    RC=$?
+    if [ $RC -ne 0 ]; then
+        ERR=$(head -1 /tmp/ysm-alert.err 2>/dev/null)
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [FAIL] mail 命令失败(rc=$RC): $ERR" >> /opt/you-super-markdown/alert.log 2>/dev/null || true
+    fi
+    rm -f /tmp/ysm-alert.err
+    exit $RC
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [FAIL] mail 命令不存在，无法发送告警" >> /opt/you-super-markdown/alert.log 2>/dev/null || true
+    exit 1
+fi
+EOF
+    if [ -f "$tgt" ] && cmp -s "$tmp" "$tgt"; then
+        rm -f "$tmp"
+        return 0
+    fi
+    if install -m 0755 -o root -g root "$tmp" "$tgt" 2>/dev/null; then
+        echo "  已补齐告警脚本 ysm-alert（$tgt）"
+    else
+        echo "  警告：告警脚本 ysm-alert 写入失败（$tgt）"
+    fi
+    rm -f "$tmp"
+}
+
 # v3.1.0：更新完成收尾（必须定义为顶部函数——apply-update 会覆盖 /usr/local/bin/ysm-admin 自身，
 # bash 惰性解析时仅对已读入内存的函数体免疫「新旧文件混合」语法错误，case 内联代码会在覆盖后解析失败）
 # v3.1.7：新增第 4 参 CHANGELOG_B64——更新通知邮件自动附带本次更新内容（changelog 脱敏文案）
@@ -29,6 +68,8 @@ post_update_finish() {
     ls -t "/opt/you-super-markdown/backups"/pre-update-*.tar.gz 2>/dev/null | tail -n +3 | xargs rm -f 2>/dev/null || true
     # FIX-B：与站点备份同步清理配套数据库快照（保留最近2次），避免 pre-update-db-*.tar.gz 无界增长
     ls -t "/opt/you-super-markdown/backups"/db/pre-update-db-*.tar.gz 2>/dev/null | tail -n +3 | xargs rm -f 2>/dev/null || true
+    # v5.0.0-fix：更新收尾确保告警脚本 ysm-alert 存在（幂等；修复「更新路径缺口」致告警静默失败）
+    ensure_ysm_alert
     echo ""
     echo "============================================"
     echo "  更新完成！"

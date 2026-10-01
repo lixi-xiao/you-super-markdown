@@ -1071,7 +1071,7 @@ function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null) 
     return '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
         . '<body style="margin:0;padding:0;background:#eef1f6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;padding:32px 12px;"><tr><td align="center">'
-        . '<table role="presentation" width="660" cellpadding="0" cellspacing="0" style="max-width:660px;width:100%;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #dde3ec;box-shadow:0 16px 44px rgba(15,42,82,0.12);">'
+        . '<table role="presentation" width="660" cellpadding="0" cellspacing="0" style="table-layout:fixed;max-width:660px;width:100%;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #dde3ec;box-shadow:0 16px 44px rgba(15,42,82,0.12);">'
         // 顶部栏：按功能分色渐变
         . '<tr><td style="background:linear-gradient(135deg,' . $p['g1'] . ' 0%,' . $p['g2'] . ' 100%);padding:30px 38px;">'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
@@ -1083,12 +1083,12 @@ function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null) 
         // 主内容区（分层一：类型徽标 + 正文）
         . '<tr><td style="padding:38px 40px 26px;">'
         . '<div style="display:inline-block;background:' . $p['badge'] . ';color:#ffffff;font-size:12px;font-weight:600;padding:7px 18px;border-radius:999px;letter-spacing:0.5px;">' . $typeE . '</div>'
-        . '<div style="margin-top:22px;color:#2d3748;font-size:14.5px;line-height:2.0;">' . $detailHtml . '</div>'
+        . '<div style="margin-top:22px;color:#2d3748;font-size:14.5px;line-height:2.0;word-break:break-all;overflow-wrap:anywhere;">' . $detailHtml . '</div>'
         . '</td></tr>'
         // 分层二：元信息面板（浅色内嵌卡）
         . '<tr><td style="padding:0 40px 34px;">'
-        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f9fc;border-radius:14px;border:1px solid #eaeef4;padding:14px 20px;font-size:12.5px;color:#5b6b80;">'
-        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">服务器</td><td>' . $server . '</td></tr>'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="table-layout:fixed;background:#f7f9fc;border-radius:14px;border:1px solid #eaeef4;padding:14px 20px;font-size:12.5px;color:#5b6b80;">'
+        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">服务器</td><td style="word-break:break-all;overflow-wrap:anywhere;">' . $server . '</td></tr>'
         . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">时间</td><td>' . $time . '</td></tr>'
         . '</table>'
         . '</td></tr>'

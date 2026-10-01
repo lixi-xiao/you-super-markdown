@@ -139,9 +139,11 @@ def load_version() -> str:
 
 
 def load_smtp_config() -> dict:
-    """读取 SMTP 配置（config 表，与 PHP getSmtpConfig 同源）
+    """读取 SMTP 配置（与 PHP getSmtpConfig 同源、同键名、同优先级：
+    env YSM_SMTP_PASS → config 表（明文；AES-GCM 密文 Python 无法解密，跳过）→ root 密钥文件 secrets/smtp_pass）。
     v3.1.3：密码优先取 root 密钥文件 /opt/you-super-markdown/secrets/smtp_pass（v3.0.9「密钥不落盘」模型，
-    config 表已不再存密码）——否则守护进程 SMTP 认证拿不到密码，告警会回落 mail 命令而发送失败"""
+    config 表已不再存密码）——否则守护进程 SMTP 认证拿不到密码，告警会回落 mail 命令而发送失败。
+    v5.0.0-fix：与 PHP 端对齐——补 env 来源、拒绝把密文（gcm:）当密码发送；守护以 root 运行，可读 root 密钥文件。"""
     cfg = {'host': '', 'port': 465, 'user': '', 'pass': '', 'from': '', 'enc': 'ssl'}
     try:
         con = sqlite3.connect(DB_FILE)
@@ -155,18 +157,26 @@ def load_smtp_config() -> dict:
                 cfg['port'] = int(val) if str(val).isdigit() else 465
             elif k == 'smtp_enc':
                 cfg['enc'] = val if val in ('ssl', 'tls', 'plain') else 'ssl'
+            elif k == 'smtp_pass':
+                # config 中若为 AES-GCM 密文（gcm: 前缀）Python 无法解密 → 视为无（改由密钥文件提供），
+                # 避免把密文当密码做 SMTP 认证而静默失败
+                cfg['pass'] = '' if str(val).startswith('gcm:') else (val or '')
             else:
                 cfg[k.replace('smtp_', '')] = val or ''
     except Exception:
         pass
-    # v3.1.3：密码优先读 root 密钥文件（root:root 0600，Web 进程不可读）
-    try:
-        with open('/opt/you-super-markdown/secrets/smtp_pass', 'r', encoding='utf-8') as f:
-            _p = f.read().strip()
-        if _p:
-            cfg['pass'] = _p
-    except Exception:
-        pass
+    # 密码优先级（与 PHP getSmtpConfig 对齐）：env → config(明文) → root 密钥文件（root:root 0600，Web 进程不可读）
+    _env = os.environ.get('YSM_SMTP_PASS', '')
+    if _env:
+        cfg['pass'] = _env
+    if not cfg['pass']:
+        try:
+            with open('/opt/you-super-markdown/secrets/smtp_pass', 'r', encoding='utf-8') as f:
+                _p = f.read().strip()
+            if _p:
+                cfg['pass'] = _p
+        except Exception:
+            pass
     return cfg
 
 
@@ -195,7 +205,7 @@ def render_mail_html(site: str, alert_type: str, detail: str, server: str = 'loc
     return ('<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
             '<body style="margin:0;padding:0;background:#eef1f6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
             '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;padding:32px 12px;"><tr><td align="center">'
-            '<table role="presentation" width="660" cellpadding="0" cellspacing="0" style="max-width:660px;width:100%;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #dde3ec;box-shadow:0 16px 44px rgba(15,42,82,0.12);">'
+            '<table role="presentation" width="660" cellpadding="0" cellspacing="0" style="table-layout:fixed;max-width:660px;width:100%;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #dde3ec;box-shadow:0 16px 44px rgba(15,42,82,0.12);">'
             '<tr><td style="background:linear-gradient(135deg,' + g1 + ' 0%,' + g2 + ' 100%);padding:30px 38px;">'
             '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
             '<td style="vertical-align:middle;"><div style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:0.5px;">' + site_e + '</div>'
@@ -205,11 +215,11 @@ def render_mail_html(site: str, alert_type: str, detail: str, server: str = 'loc
             '</td></tr>'
             '<tr><td style="padding:38px 40px 26px;">'
             '<div style="display:inline-block;background:' + badge + ';color:#ffffff;font-size:12px;font-weight:600;padding:7px 18px;border-radius:999px;letter-spacing:0.5px;">' + type_e + '</div>'
-            '<div style="margin-top:22px;color:#2d3748;font-size:14.5px;line-height:2.0;">' + detail_e + '</div>'
+            '<div style="margin-top:22px;color:#2d3748;font-size:14.5px;line-height:2.0;word-break:break-all;overflow-wrap:anywhere;">' + detail_e + '</div>'
             '</td></tr>'
             '<tr><td style="padding:0 40px 34px;">'
-            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f9fc;border-radius:14px;border:1px solid #eaeef4;padding:14px 20px;font-size:12.5px;color:#5b6b80;">'
-            '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">服务器</td><td>' + server_e + '</td></tr>'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="table-layout:fixed;background:#f7f9fc;border-radius:14px;border:1px solid #eaeef4;padding:14px 20px;font-size:12.5px;color:#5b6b80;">'
+            '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">服务器</td><td style="word-break:break-all;overflow-wrap:anywhere;">' + server_e + '</td></tr>'
             '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">时间</td><td>' + e(ts) + '</td></tr>'
             '</table>'
             '</td></tr>'
@@ -296,8 +306,9 @@ def send_alert(alert_type: str, detail: str):
             return
         log_alert_fail(f"SMTP 发送失败({alert_type})")
         return
-    if not os.path.exists(EMAIL_ALERT_BIN):
-        log_alert_fail(f"ysm-alert 不存在({alert_type})")
+    if not (os.path.isfile(EMAIL_ALERT_BIN) and os.access(EMAIL_ALERT_BIN, os.X_OK)):
+        # 自诊断（v5.0.0-fix）：SMTP 未配置且 ysm-alert 缺失/不可执行 → 明确落盘，避免告警静默丢失
+        log_alert_fail(f"告警通道不可用：SMTP 未配置且 ysm-alert 缺失/不可执行({alert_type})——请配置 SMTP 或补齐 ysm-alert")
         return
     try:
         subprocess.run([EMAIL_ALERT_BIN, email, subject, body], capture_output=True, timeout=15)
@@ -1298,6 +1309,17 @@ def main():
     if not os.path.isdir(INSTALL_BASE):
         log(f"错误: 母本目录不存在 {INSTALL_BASE}")
         sys.exit(1)
+
+    # 自诊断（v5.0.0-fix）：启动即校验告警通道可用性，不可用则明确落盘 alert.log（不静默）
+    _smtp = load_smtp_config()
+    _smtp_ready = bool(_smtp['host'] and _smtp['user'] and _smtp['pass'])
+    _bin_ready = os.path.isfile(EMAIL_ALERT_BIN) and os.access(EMAIL_ALERT_BIN, os.X_OK)
+    if not _smtp_ready and not _bin_ready:
+        _msg = "告警通道不可用：SMTP 未配置且 ysm-alert 缺失/不可执行——请配置 SMTP 或补齐 ysm-alert"
+        log(_msg)
+        log_alert_fail(_msg)
+    elif not _smtp_ready:
+        log("告警通道：SMTP 未配置，回退 ysm-alert（依赖系统 mail 命令）")
 
     # 通知 systemd 启动完成
     if os.environ.get('NOTIFY_SOCKET'):

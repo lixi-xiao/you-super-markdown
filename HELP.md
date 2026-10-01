@@ -74,10 +74,10 @@ You Super Markdown 是一个**自托管（Self-hosted）** 的轻量级 Markdown
    |------|------|------|
    | 域名 | 证书与访问地址都基于它 | `<你的域名>`（如 `blog.example.com`） |
    | Web 根目录 | 网站文件放哪 | 默认 `/var/www/<站点目录>`，回车即可 |
-   | 管理员邮箱 | 告警/通知邮件收件人 | 填写后用于接收告警与更新通知 |
+   | 管理员邮箱 | **必填**（告警/更新通知收件人 + 超管设备二次验证通道） | `you@example.com`（缺失/留空即阻断安装，可用 `--email=` 预填） |
    | 注册验证模式 | `production`（需邮箱验证）/ `test` | 生产选 production |
    | 是否安装 Hfish 蜜罐 | 可选的安全诱饵组件 | 按需选择 |
-   | 是否配置 SMTP 邮件 | 告警/更新通知/每日审计报告都靠它 | 填发信账号 + 授权码 |
+   | SMTP 邮件 | **必填**（告警/更新通知/注册验证码/每日审计报告都靠它） | 填服务器 + 发信账号 + 授权码（仅强制"必须填写"，不强制"必须正确"，安装后发测试邮件验证） |
 
 3. 脚本自动完成：安装依赖 → 部署文件 → 初始化数据库 → 创建管理员 → 配置 Nginx → 申请 HTTPS 证书 → 部署守护进程 → 配置防火墙 → 安装命令行工具 `ysm-admin`。
 
@@ -269,6 +269,9 @@ ysm-admin show-paths
 | `ysm-admin challenge` | 生成敏感操作确认码（300 秒、单次） | ✅ |
 | `ysm-admin notify "<消息>"` | 发送通知邮件到管理员邮箱 | ✅ |
 | `ysm-admin set-smtp-pass [--pass=<授权码>]` | 修改 SMTP 授权码（双写密钥文件 + 环境变量并重载） | ✅ |
+| `ysm-admin set-channel <stable\|beta>`（别名 `channel`） | 切换更新通道（stable=仅正式 Release / beta=含预发布） | — |
+| `ysm-admin check [--no-mail]` | 体检：超管邮箱 / SMTP / php-fpm 是否注入 `YSM_SMTP_PASS` / 能否发测试邮件 | — |
+| `ysm-admin cleanup-history` | 一次性清理「更新历史.md」中同版本的重复小节（先备份，仅动重复节） | — |
 | `ysm-admin deps` | 检查并一键补装功能依赖（如 php-gd） | ✅ |
 | `ysm-admin migrate [--db <路径>]` | 迁移 4.x 数据库结构到 5.0（不重启服务，完成后请重启守护） | ✅ |
 | `ysm-admin apply-update [--allow-unsigned]` | 执行已发起的更新 | ✅ |
@@ -288,6 +291,14 @@ SSH 执行： sudo ysm-admin apply-update
   → 应用文件 → 按需自动执行数据库结构迁移 → 锁母本
   → 重启服务 → 健康检查 → 记录更新历史 → 邮件通知
 ```
+
+> **更新通道（v5.3.0）**：后台「在线更新」页或 `sudo ysm-admin set-channel <stable|beta>` 可切换。`stable` 仅匹配**正式 Release**（`prerelease=false`）；`beta` **包含预发布**（正确处理 `5.3.0-beta.2 < 5.3.0` 的语义化版本比较）。**无论哪个通道，更新包都必须通过 `manifest.json` + 签名校验才允许安装**。
+
+> **新版本邮件通知（v5.3.0）**：后台「检查更新」发现比当前版本更新时，会向**超管邮箱**发送通知（含当前版本 / 新版本 / 通道 / 版本说明）；**同一新版本只通知一次**。若未配置 SMTP，则**落盘告警**（`/opt/you-super-markdown/alert.log`）且后台显著提示"更新通知不可用"，不静默。
+
+> **更新历史写入（v5.3.0）**：`version.json` 的 `changelog` 写入站内「更新历史.md」文章时，**同版本以小节覆盖**（不再重复追加），新版本置顶（最新在前），重复应用结果一致（幂等）。历史遗留的重复小节用 `sudo ysm-admin cleanup-history` 一次性清理（先备份为 `.dedup-bak-<时间戳>`，仅动重复节）。
+
+> **安装强制项（v5.3.0）**：`ysm-install.sh` **强制**填写超管邮箱与 SMTP（服务器/发信账号/授权码），缺失或留空即**阻断安装**；仅强制"必须填写"，不强制"必须正确"。若 Web 端 `admin_email` 为空或 SMTP 未配置，超管后台会持续显示告警横幅，用 `sudo ysm-admin check` 可体检（含 php-fpm 是否注入 `YSM_SMTP_PASS`）。
 
 > **更新包签名**：正式包由发包人用私钥签名，服务器只保存公钥，应用前强制校验。**没有私钥无法自行制作可用的更新包**——自行拼装的包会因验签失败被拒绝，这是防篡改机制的预期行为。请只使用官方发布/提供的已签名包。
 
@@ -432,6 +443,35 @@ A：不能。告警/更新通知/每日审计报告都走 SMTP。SMTP 授权码*
 - **更新验签链路**：签名公钥与 `apply-update` 的校验步骤；移除或绕过会使防篡改失效。
 
 > 建议：把品牌、文案、主题色、背景、歌单等站点差异**收敛到配置与数据层**，把真正的新功能改动**留在本地源码分支**并按自己的流程打包发布，即可在保留二次更改能力的同时跟上官方更新。
+
+### 11.5 自托管与二次开发的限制（脱离官方更新通道）
+
+**限制（重要）**：本项目默认从**官方仓库**接收更新（`app-config.json` 的 `repo_owner` / `repo_name` / `repo_url` / `repo_api_url` 均指向官方）。一旦改为**自建 / 自托管仓库**，即等同于**脱离官方更新通道**：
+
+- 你将**收不到任何官方更新与安全修复**；官方也**不会**向你的自托管仓库推送任何内容。
+- 版本跟进、安全修复、兼容性适配**全部由你自行负责**；**官方对自托管仓库的可用性、内容与由此产生的任何后果不承担责任**。
+- 仅为本地开发/测试而指向自有仓库时，请**不要在生产站点直接替换**这些字段。
+
+**自托管仓库必须满足的格式**（否则内置更新器无法识别）：
+
+| 项 | 要求 |
+|----|------|
+| `repo_owner` / `repo_name` | 仓库所属账号 / 组织、仓库名 |
+| `repo_url` | 仓库主页地址（展示 / 链接用） |
+| `repo_api_url` | 仓库 API 基础地址：更新器据此拼接 `/releases/latest`（stable）与 `/releases?per_page=30`（beta）；**必须可公网 HTTPS 访问、且与 GitHub Releases API 结构兼容** |
+| Release tag | `vX.Y.Z`；**beta 形如 `vX.Y.Z-beta.N`，且 Release 必须勾选为 prerelease（预发布）** |
+| 资产命名 | 全量包 `you-super-markdown-vX.Y.Z-full.tar.gz`、初始化安装包 `you-super-markdown-vX.Y.Z-install.tar.gz`（增量包 `...-to-vX.Y.Z-inc.tar.gz`） |
+| 包内必需 | `version.json`（至少含 `version` 与 `changelog`）、`manifest.json`（逐文件 SHA256 清单）+ `manifest.json.sig`（对 `manifest.json` 的私钥签名） |
+| `version.json` 字段 | `version`（目标版本号，升级时写入目标机 `app-config.json`）、`changelog`（本版更新要点，写入站内「更新历史」文章；同版本重复应用只覆盖该版本小节）、`type`（留空=全量包 / `incremental`=增量包）、`deps`（可选，需补装的系统依赖） |
+| 更新请求与包定位 | 后台触发更新生成请求文件 `/opt/you-super-markdown/run/ysm-update-request.json`（`root:www-data` 0660），字段 `from_version` / `to_version` / `channel` / `package_path` / `package_url`：`package_path`（外部上传包）优先，否则 `package_url`（仓库 Release 资产直链）在线更新，两者皆空则拒绝；仅由 `sudo ysm-admin apply-update` 消费 |
+| 签名 | 用**你自己的密钥**签名，并把对应**公钥部署到目标机**（`/opt/you-super-markdown/update_signing_public.pem`）——对应发包侧签名脚本 `sign_update_package.py`（不在本仓库内）；未部署公钥或验签失败一律**拒绝安装（失败封闭）**。**私钥切勿入库** |
+| 通道 | `stable` 仅正式 Release（`prerelease=false`）；`beta` 含预发布（正确处理 `5.3.0-beta.2 < 5.3.0`）。切换：后台「在线更新」页或 `sudo ysm-admin set-channel <stable|beta>`（改数据库 `config.update_channel`，不动 `app-config.json`） |
+
+> **核心文件冲突提醒**：**移除或改写核心程序文件**（`index.php` / `utils.php` / `api.php` / `sc.php` / `db.php` / `music.php` / `js/*.js` / `admin|station|author/*.php` 等）的自托管改动，**会与下一次官方升级包的同名文件覆盖直接冲突**——要么被升级冲掉，要么被守护进程判为篡改并秒级还原（见 11.3）。要长期保留这类改动，请让它留在**你自己的源码分支**并走**你自己的发布 / 更新通道**。
+
+> **在本仓库建立 beta 发布（约定）**：① `version.json` 的 `version` 写成预发布号（如 `5.3.1-beta.1`）并填 `changelog`；② 打 tag `v5.3.1-beta.1`，资产命名 `you-super-markdown-v5.3.1-beta.1-full.tar.gz`（`-install` / `-to-...-inc` 同理）；③ **Releases 里把该 Release 勾选为 pre-release（预发布）**；④ 只有 `beta` 通道能看到它，`stable` 通道忽略预发布、只见正式版。
+
+> 无论自托管仓库如何配置，**更新包仍必须通过 `manifest.json` + 签名校验才会被应用**；签名链路不可削弱。
 
 ---
 

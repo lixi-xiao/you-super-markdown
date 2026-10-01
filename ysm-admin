@@ -853,6 +853,131 @@ case "${1:-}" in
         ensure_env_deps
         ;;
 
+    set-channel|channel)
+        # v5.3.0：切换更新通道（stable=仅正式 Release / beta=含预发布）；与超管后台「在线更新」通道选择同源
+        # 用法: ysm-admin set-channel <stable|beta>   （channel 为同义别名）
+        CH="${2:-}"
+        case "$CH" in
+            stable|beta) ;;
+            *)
+                echo "用法: ysm-admin set-channel <stable|beta>"
+                echo "  stable = 仅正式 Release（默认）；beta = 包含预发布版本"
+                exit 1
+                ;;
+        esac
+        CH="$CH" php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$c = loadSiteConfig();
+            \$c['update_channel'] = normalizeUpdateChannel(getenv('CH'));
+            saveSiteConfig(\$c);
+            echo 'OK';
+        " 2>/dev/null
+        echo "更新通道已切换为: $CH（stable=仅正式 Release / beta=含预发布；可在超管后台「在线更新」查看）"
+        ;;
+
+    cleanup-history)
+        # v5.3.0：一次性清理「更新历史.md」中同一版本的重复小节（先备份为 .dedup-bak-<时间戳>，
+        #          仅重写重复小节，其它内容原样保留）。用于清理历史遗留的「同版本多条/顶部重复」。
+        ART_PATH="$WEB_ROOT/data/articles/更新历史.md"
+        YSM_ART_PATH="$ART_PATH" php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$r = cleanupChangelogArticle(getenv('YSM_ART_PATH'));
+            if (!empty(\$r['ok'])) {
+                if (\$r['removed'] > 0) {
+                    echo '已清理重复小节 ' . \$r['removed'] . ' 个' . PHP_EOL;
+                    echo '备份文件：' . \$r['backup'] . PHP_EOL;
+                } else {
+                    echo '未发现重复小节，无需清理' . PHP_EOL;
+                }
+            } else {
+                echo '清理失败：' . (\$r['error'] ?? '未知错误') . PHP_EOL;
+                exit(1);
+            }
+        " 2>/dev/null
+        chown www-data:www-data "$ART_PATH" 2>/dev/null || true
+        ;;
+
+    check|doctor)
+        # v5.3.0：邮件 / 通知链路体检——报告 超管邮箱 / SMTP / php-fpm 是否注入 YSM_SMTP_PASS / 能否发测试邮件，
+        #          并给出修复指引。重点覆盖真实故障：php-fpm 升级（如 8.3）后 env[YSM_SMTP_PASS] 丢失 → Web 端静默发不出信。
+        # 用法: ysm-admin check [--no-mail]   （默认发一封测试邮件到超管邮箱；--no-mail 跳过发信）
+        SEND_MAIL=1
+        for _a in "$@"; do [ "$_a" = "--no-mail" ] && SEND_MAIL=0; done
+        echo "=== You Super Markdown 体检 (doctor) ==="
+        echo ""
+        HEALTH_JSON=$(php -r "require_once '$WEB_ROOT/utils.php'; echo json_encode(systemMailHealth(), JSON_UNESCAPED_UNICODE);" 2>/dev/null)
+        if [ -z "$HEALTH_JSON" ]; then
+            echo "[x] 无法读取配置（请确认站点已安装、WEB_ROOT 正确、PHP 可用）"
+            exit 1
+        fi
+        # 解析 JSON 字段（复用 php，避免依赖 jq）
+        val() { printf '%s' "$HEALTH_JSON" | php -r '$d=json_decode(stream_get_contents(STDIN),true); $k=$argv[1]; if(!is_array($d)||!array_key_exists($k,$d)){echo "";exit;} $v=$d[$k]; echo is_bool($v)?($v?"1":"0"):$v;' "$1" 2>/dev/null; }
+        ADMIN_EMAIL=$(val admin_email)
+        ADMIN_OK=$(val admin_email_set)
+        SMTP_HOST=$(val smtp_host)
+        SMTP_USER=$(val smtp_user)
+        SMTP_READY=$(val smtp_ready)
+        PASS_SRC=$(val smtp_pass_source)
+        # 1) 超管邮箱
+        if [ "$ADMIN_OK" = "1" ]; then
+            echo "[OK] 超管邮箱已设置：$ADMIN_EMAIL"
+        elif [ -n "$ADMIN_EMAIL" ]; then
+            echo "[!] 超管邮箱格式可能非法：$ADMIN_EMAIL —— 请在超管后台「系统配置」修正 admin_email"
+        else
+            echo "[x] 超管邮箱未设置 —— 告警 / 更新通知 / 超管设备二次验证均不可用"
+            echo "    修复：超管后台「系统配置」填写管理员邮箱（安装脚本默认强制必填）"
+        fi
+        # 2) SMTP 基础配置 + 授权码来源
+        case "$PASS_SRC" in
+            env)    SRC_DESC="环境变量 YSM_SMTP_PASS（php-fpm 注入 / CLI）";;
+            file)   SRC_DESC="密钥文件 /opt/you-super-markdown/secrets/smtp_pass";;
+            config) SRC_DESC="config 表密文兜底";;
+            *)      SRC_DESC="未找到授权码";;
+        esac
+        if [ "$SMTP_READY" = "1" ]; then
+            echo "[OK] SMTP 配置完整：$SMTP_HOST:$(val smtp_port)（$(val smtp_enc)），账号 $SMTP_USER"
+            echo "     授权码来源：$SRC_DESC"
+        else
+            echo "[x] SMTP 未配置完整（服务器 / 账号 / 授权码存在缺项）—— Web 端与 CLI 均发不出信"
+            echo "    修复：超管后台「邮件设置」填写 SMTP 服务器/端口/账号；授权码用 sudo ysm-admin set-smtp-pass 设置"
+        fi
+        # 3) php-fpm 是否注入 YSM_SMTP_PASS（升级 php-fpm 后该注入常丢失 → Web 端静默发不出信）
+        PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)
+        POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/www.conf"
+        if [ -f "$POOL_CONF" ] && grep -q 'env\[YSM_SMTP_PASS\]' "$POOL_CONF" 2>/dev/null; then
+            echo "[OK] php-fpm 已注入 YSM_SMTP_PASS（$POOL_CONF）—— Web 端可发信"
+        else
+            echo "[x] php-fpm 未注入 YSM_SMTP_PASS（$POOL_CONF）—— Web 端发不出信"
+            echo "    典型成因：php-fpm 升级（如 8.3）后池环境变量丢失"
+            echo "    修复：sudo ysm-admin set-smtp-pass（重写池环境变量并 reload php-fpm）"
+        fi
+        # 4) 发测试邮件
+        if [ "$SEND_MAIL" = "0" ]; then
+            echo "[--] 已跳过测试邮件（--no-mail）"
+        elif [ "$ADMIN_OK" != "1" ] || [ "$SMTP_READY" != "1" ]; then
+            echo "[--] 跳过测试邮件（超管邮箱或 SMTP 未就绪）"
+        else
+            SMTP_PASS_FILE="/opt/you-super-markdown/secrets/smtp_pass"
+            SMTP_PASS_VAL=""
+            [ -f "$SMTP_PASS_FILE" ] && SMTP_PASS_VAL="$(cat "$SMTP_PASS_FILE" 2>/dev/null)"
+            MAIL_RC=$(YSM_SMTP_PASS="$SMTP_PASS_VAL" php -r "
+                require_once '$WEB_ROOT/utils.php';
+                \$cfg = loadSiteConfig();
+                \$to = trim((string)(\$cfg['admin_email'] ?? ''));
+                \$site = \$cfg['site_title'] ?? 'You Super Markdown';
+                \$body = '体检测试邮件：若收到本邮件，说明 SMTP 与超管邮箱配置可用。';
+                \$html = renderMailHtml(\$site, '体检测试', \$body, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')]);
+                [\$ok, \$err] = sendSmtpMail(\$to, '[' . \$site . '] 体检测试邮件', \$body, \$html);
+                echo \$ok ? 'OK' : ('FAIL: ' . \$err);
+            " 2>/dev/null)
+            case "$MAIL_RC" in
+                OK) echo "[OK] 测试邮件已发送到 $ADMIN_EMAIL";;
+                *)  echo "[x] 测试邮件发送失败：${MAIL_RC#FAIL: }";;
+            esac
+        fi
+        echo ""
+        ;;
+
     migrate)
         # v5.0.0：独立数据库结构迁移子命令（4.x → 5.0）。
         # 用法: sudo ysm-admin migrate [--db <路径>]
@@ -988,8 +1113,9 @@ case "${1:-}" in
         echo "  更新方式: $UPDATE_METHOD"
         echo ""
 
-        # 防注入：目标版本仅允许数字与点（避免 preg_replace 写入 utils.php 时破坏/注入代码）
-        if ! [[ "$TO_VER" =~ ^[0-9.]+$ ]]; then
+        # 防注入：目标版本仅允许「字母数字 . _ -」（仍禁止引号/空白/斜杠等，杜绝写入 app-config.json 时注入或路径穿越）
+        # v5.3.0：放开连字符以支持 beta 语义化版本（如 5.3.1-beta / 5.3.1-beta.2），既有稳定版号不受影响
+        if ! [[ "$TO_VER" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
             echo "错误：目标版本格式非法，已中止"
             mark_failed "目标版本格式非法"
             exit 1
@@ -1273,33 +1399,22 @@ case "${1:-}" in
         fi
 
         # 4.7 更新历史注入（v3.1.9）：changelog 已在 4.7a 提前读取（TMP_DIR 已清理）。
-        # 不再逐版本生成独立公告——把本次更新内容追加到「更新历史.md」文章（首页公告只保留
+        # 不再逐版本生成独立公告——把本次更新内容写入「更新历史.md」文章（首页公告只保留
         # 一条指向该文章的公告，点进去即可查看全部历史版本更新）。
-        # CHANGELOG_B64 为空 → 跳过；文章已含该版本 → 跳过（幂等）。
+        # v5.3.0：改为「同版本小节覆盖」（不再重复追加）——已存在 ## v<版本> 则覆盖该小节内容，
+        #         不存在则置顶插入（最新在前）；写入幂等（连续执行不产生重复节）。逻辑经环境变量传参。
+        # CHANGELOG_B64 为空 → 跳过。
         if [ -n "$CHANGELOG_B64" ]; then
+            YSM_ART_PATH="$WEB_ROOT/data/articles/更新历史.md" \
+            YSM_CHANGELOG_B64="$CHANGELOG_B64" YSM_TO_VER="$TO_VER" \
             php -r "
                 require_once '$WEB_ROOT/utils.php';
-                \$cl = base64_decode('$CHANGELOG_B64');
-                \$toVer = '$TO_VER';
-                \$artPath = '$WEB_ROOT/data/articles/更新历史.md';
-                // 1) 文章不存在则创建骨架（META + 标题；v3.1.10：hidden 标记使文章不进首页列表，仅保留公告入口）
-                if (!file_exists(\$artPath)) {
-                    \$meta = json_encode(['title' => '更新历史', 'category' => '系统', 'tags' => '更新,版本,日志', 'author' => '系统', 'hidden' => true], JSON_UNESCAPED_UNICODE);
-                    file_put_contents(\$artPath, \"<!--META \$meta -->\n\n# 更新历史\n\n> 全部版本更新记录，最新在前。\n\n\", LOCK_EX);
-                }
-                \$content = file_get_contents(\$artPath);
-                // 2) 该版本已存在 → 跳过（幂等）
-                if (strpos(\$content, \"## v{\$toVer}\") !== false) { exit; }
-                // v3.2.3：更新历史段落不写日期（温馨公告只写版本号，日期由用户自行体会）
-                \$section = \"## v{\$toVer}\n\n{\$cl}\n\n\";
-                \$pos = strpos(\$content, '## ');
-                if (\$pos === false) {
-                    \$content .= \"\n{\$section}\";
-                } else {
-                    \$content = substr(\$content, 0, \$pos) . \$section . substr(\$content, \$pos);
-                }
-                file_put_contents(\$artPath, \$content, LOCK_EX);
-                // 3) 清理历史逐版本 update 公告，确保首页只保留一条指向更新历史文章的公告
+                \$artPath = getenv('YSM_ART_PATH');
+                \$cl = base64_decode(getenv('YSM_CHANGELOG_B64'));
+                \$toVer = getenv('YSM_TO_VER');
+                // 1) 同版本覆盖 / 新版本置顶（幂等），文章不存在则建骨架
+                injectChangelogIntoArticle(\$artPath, \$toVer, \$cl);
+                // 2) 清理历史逐版本 update 公告，确保首页只保留一条指向更新历史文章的公告
                 db_exec(\"DELETE FROM announcement WHERE type = 'update'\");
                 if (!db_one('SELECT 1 FROM announcement WHERE article = ? LIMIT 1', ['更新历史.md'])) {
                     addAnnouncement('manual', '更新历史.md', '', '更新历史', '全部版本更新记录整合于此，点击查看完整更新历史');
@@ -1483,6 +1598,9 @@ case "${1:-}" in
         echo "  set-smtp-pass [--pass=授权码] 修改 SMTP 授权码（需 sudo；密钥文件 + php-fpm 环境变量双写，自动发测试邮件）"
         echo "  apply-update [--allow-unsigned] 执行系统更新（完成后自动发通知邮件；--allow-unsigned 为一次性受控引导，未部署签名公钥时慎用）"
         echo "  deps                      检查并一键补装功能依赖（内置兜底清单，需 sudo；更新时自动按包内 deps 声明安装）"
+        echo "  set-channel <stable|beta> 切换更新通道（别名 channel；stable=仅正式 Release / beta=含预发布）"
+        echo "  check [--no-mail]         体检：超管邮箱 / SMTP / php-fpm 是否注入 YSM_SMTP_PASS / 能否发测试邮件"
+        echo "  cleanup-history           一次性清理「更新历史.md」中同一版本的重复小节（先备份，仅动重复节）"
         echo "  migrate [--db <路径>]      迁移 4.x 数据库结构到 5.0（需 sudo；不重启服务，完成后请重启守护进程）"
         echo "  rollback                  回滚到备份版本"
         echo "  hfish-panel               建立 SSH 隧道访问 Hfish 管理面板"

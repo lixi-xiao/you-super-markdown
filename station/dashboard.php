@@ -647,6 +647,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
             音乐播放器设置
         </div>
+        <!-- v5.3.0：音乐为「预设通道」——歌单 ID / 默认播放歌曲 / Cookies 三项已固定，后台不再展示。
+             采用 display:none 隐藏（可回退：删除本包装 <div> 的 style 即恢复显示）。输入元素保留在 DOM 中，
+             既不影响表单提交时的取值逻辑（见下方提交处理器），也不丢失既有数据（前台按预设正常工作）。 -->
+        <div style="display:none">
         <div class="form-group">
             <label class="form-label">网易云歌单 ID</label>
             <input class="form-input" type="text" id="musicNeteaseInput" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>" placeholder="3778678">
@@ -662,6 +666,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <label class="form-label">网易云 Cookies（可选）</label>
             <input class="form-input" type="text" id="musicNetCookieInput" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
             <p class="form-hint">配置后可播放网易云 VIP 歌曲</p>
+        </div>
         </div>
         <!-- v4.5.0：本地背景音乐——站长/超管后台上传单曲作默认背景音，前台只能开/关不能选曲；单曲循环，浏览器缓存不重复消耗服务器流量；<100MB 常见音频自动转码压缩 -->
         <div class="form-group">

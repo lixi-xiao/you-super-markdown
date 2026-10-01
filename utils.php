@@ -281,6 +281,10 @@ function randomPassword($len = 12) {
 function loadSiteConfig() {
     $defaults = [
         'site_title' => 'You Super Markdown',
+        // v5.3.0：更新通道（stable=仅正式 Release / beta=含预发布）；超管后台「在线更新」或 CLI 可切换
+        'update_channel' => 'stable',
+        // v5.3.0：发现新版本已邮件通知到的最新版本号（去重：同一新版本只通知一次）
+        'update_notified_version' => '',
         'reg_limit_per_ip' => 3,
         'comments_enabled' => true,
         'auto_ban' => true,
@@ -2678,67 +2682,74 @@ function getGuardState() {
     return is_array($d) ? $d : [];
 }
 
-function checkForUpdates($channel = 'stable') {
-    // 从配置读取仓库 API 地址，留空则跳过更新检查
-    $apiBase = appConfig('repo_api_url', '');
-    if ($apiBase === '') {
-        return [
-            'available' => false,
-            'latest_version' => APP_VERSION,
-            'current_version' => APP_VERSION,
-            'release_notes' => '',
-            'download_url' => '',
-            'published_at' => '',
-            'source' => 'local',
-            'packages' => [],
-        ];
-    }
-    // beta 通道查询 releases 列表（含 pre-release），stable 查询 latest
-    $url = $channel === 'beta'
-        ? rtrim($apiBase, '/') . "/releases?per_page=10"
-        : rtrim($apiBase, '/') . "/releases/latest";
-    // SSRF 安全抓取：一次解析 + pin IP 直连（消除 DNS rebinding TOCTOU；内网/未识别默认拒绝）
-    $result = fetchHttpContent($url);
-    if ($result) {
-        $release = json_decode($result, true);
-        if ($channel === 'beta' && is_array($release)) {
-            $release = $release[0] ?? null;
+// v5.3.0：更新通道规范化（仅允许 stable / beta，非法值一律回落 stable）
+function normalizeUpdateChannel($channel) {
+    return ($channel === 'beta') ? 'beta' : 'stable';
+}
+
+// v5.3.0：从 Releases 列表挑选「最新」一条——
+//   ① stable 通道：仅保留 prerelease=false 且非 draft（只认正式 Release）；
+//   ② beta 通道：包含预发布（排除 draft）；
+//   ③ 版本比较用 version_compare 处理语义化预发布号（5.3.0-beta.2 < 5.3.0 < 5.3.1）；
+//   GitHub 列表按创建时间倒序、不保证版本最大，故按 tag 版本取最大者，而非取第 0 条。
+function pickLatestRelease(array $releases, $channel) {
+    $channel = normalizeUpdateChannel($channel);
+    $best = null;
+    $bestVer = null;
+    foreach ($releases as $r) {
+        if (!is_array($r) || empty($r['tag_name'])) continue;
+        if (!empty($r['draft'])) continue;
+        if ($channel === 'stable' && !empty($r['prerelease'])) continue;
+        $ver = ltrim((string)$r['tag_name'], 'v');
+        if ($ver === '') continue;
+        if ($bestVer === null || version_compare($ver, $bestVer) > 0) {
+            $best = $r;
+            $bestVer = $ver;
         }
-        if ($release && isset($release['tag_name'])) {
-            $latest = ltrim($release['tag_name'], 'v');
-            // v3.2.0：解析 Releases assets，自动识别全量包（*-full.tar.gz）与增量包（*-inc.tar.gz）
-            $packages = [];
-            if (!empty($release['assets']) && is_array($release['assets'])) {
-                foreach ($release['assets'] as $asset) {
-                    $aname = (string)($asset['name'] ?? '');
-                    if (!preg_match('/\.(tar\.gz|zip)$/i', $aname)) continue;
-                    $atype = '';
-                    if (preg_match('/-full\.(tar\.gz|zip)$/i', $aname)) $atype = 'full';
-                    elseif (preg_match('/-inc\.(tar\.gz|zip)$/i', $aname)) $atype = 'inc';
-                    elseif (preg_match('/-to-v[\d.]+-inc\./i', $aname)) $atype = 'inc';
-                    if ($atype === '') continue;
-                    $packages[] = [
-                        'type' => $atype,
-                        'name' => $aname,
-                        'url' => $asset['browser_download_url'] ?? '',
-                        'size' => (int)($asset['size'] ?? 0),
-                        'download_count' => (int)($asset['download_count'] ?? 0),
-                    ];
-                }
-            }
-            return [
-                'available' => version_compare($latest, APP_VERSION) > 0,
-                'latest_version' => $latest,
-                'current_version' => APP_VERSION,
-                'release_notes' => $release['body'] ?? '',
-                'download_url' => $release['zipball_url'] ?? '',
-                'published_at' => $release['published_at'] ?? '',
-                'source' => 'github',
-                'packages' => $packages,
+    }
+    return $best;
+}
+
+// v5.3.0：把一条 Release 归一化为检查结果（含触发更新所需的包信息）
+function buildUpdateResult($release, $channel) {
+    $latest = ltrim((string)($release['tag_name'] ?? ''), 'v');
+    // v3.2.0：解析 Releases assets，自动识别全量包（*-full.tar.gz）与增量包（*-inc.tar.gz）
+    $packages = [];
+    if (!empty($release['assets']) && is_array($release['assets'])) {
+        foreach ($release['assets'] as $asset) {
+            $aname = (string)($asset['name'] ?? '');
+            if (!preg_match('/\.(tar\.gz|zip)$/i', $aname)) continue;
+            $atype = '';
+            if (preg_match('/-full\.(tar\.gz|zip)$/i', $aname)) $atype = 'full';
+            elseif (preg_match('/-inc\.(tar\.gz|zip)$/i', $aname)) $atype = 'inc';
+            elseif (preg_match('/-to-v[\d.]+-inc\./i', $aname)) $atype = 'inc';
+            if ($atype === '') continue;
+            $packages[] = [
+                'type' => $atype,
+                'name' => $aname,
+                'url' => $asset['browser_download_url'] ?? '',
+                'size' => (int)($asset['size'] ?? 0),
+                'download_count' => (int)($asset['download_count'] ?? 0),
             ];
         }
     }
-    // 降级：返回本地版本信息
+    return [
+        'available' => version_compare($latest, APP_VERSION) > 0,
+        'latest_version' => $latest,
+        'current_version' => APP_VERSION,
+        'release_notes' => $release['body'] ?? '',
+        'download_url' => $release['zipball_url'] ?? '',
+        'published_at' => $release['published_at'] ?? '',
+        'source' => 'github',
+        'packages' => $packages,
+        // v5.3.0：仅「追加」字段（既有字段语义不变）——本次判定的通道与是否预发布
+        'channel' => normalizeUpdateChannel($channel),
+        'prerelease' => !empty($release['prerelease']),
+    ];
+}
+
+// v5.3.0：无仓库配置 / 抓取失败时的本地降级结果（字段与既有保持一致，仅追加 channel/prerelease）
+function localUpdateResult($channel) {
     return [
         'available' => false,
         'latest_version' => APP_VERSION,
@@ -2748,6 +2759,209 @@ function checkForUpdates($channel = 'stable') {
         'published_at' => '',
         'source' => 'local',
         'packages' => [],
+        'channel' => normalizeUpdateChannel($channel),
+        'prerelease' => false,
+    ];
+}
+
+function checkForUpdates($channel = 'stable') {
+    $channel = normalizeUpdateChannel($channel);
+    // 从配置读取仓库 API 地址，留空则跳过更新检查
+    $apiBase = appConfig('repo_api_url', '');
+    if ($apiBase === '') {
+        return localUpdateResult($channel);
+    }
+    // stable：仅取正式 Release（GitHub /releases/latest 本身排除预发布与草稿）；
+    // beta：取 Releases 列表（含预发布），交由 pickLatestRelease 按语义化版本取最高者。
+    $url = $channel === 'beta'
+        ? rtrim($apiBase, '/') . "/releases?per_page=30"
+        : rtrim($apiBase, '/') . "/releases/latest";
+    // SSRF 安全抓取：一次解析 + pin IP 直连（消除 DNS rebinding TOCTOU；内网/未识别默认拒绝）
+    $result = fetchHttpContent($url);
+    if ($result) {
+        $release = json_decode($result, true);
+        if ($channel === 'beta') {
+            if (is_array($release) && isset($release['tag_name'])) {
+                $release = [$release];   // 兼容个别自托管实现只返回单个对象
+            }
+            if (is_array($release)) {
+                $release = pickLatestRelease($release, $channel);
+            }
+        }
+        // stable 走 /releases/latest：此处再兜底拒绝被误标为预发布的条目（「只认正式」失败封闭）
+        if ($release && isset($release['tag_name']) && ($channel !== 'stable' || empty($release['prerelease']))) {
+            return buildUpdateResult($release, $channel);
+        }
+    }
+    // 降级：返回本地版本信息
+    return localUpdateResult($channel);
+}
+
+/**
+ * v5.3.0：检查更新发现「比当前版本更新」时，向超管邮箱发送通知邮件。
+ *  - 复用既有 SMTP 发送函数 sendSmtpMail 与统一 HTML 邮件模板 renderMailHtml；
+ *  - 去重：config 表 update_notified_version 记录「已成功通知到」的版本，同一新版本只通知一次；
+ *  - 无超管邮箱 / 无 SMTP：不静默——写 alert.log 落盘告警（复用 logAlertFail），不记录版本（下次检查仍会告警）；
+ *  - 触发点：超管后台「在线更新」的检查更新入口（唯一人工检查入口，确定性高、无需新增常驻定时任务）。
+ * @return bool true = 本次已成功发信并记录去重
+ */
+function notifyUpdateAvailable($result, $channel = 'stable') {
+    if (empty($result['available'])) return false;
+    $latest = trim((string)($result['latest_version'] ?? ''));
+    $current = trim((string)($result['current_version'] ?? APP_VERSION));
+    if ($latest === '' || version_compare($latest, $current) <= 0) return false;
+    $channel = normalizeUpdateChannel($channel);
+    $config = loadSiteConfig();
+    // 去重：同一新版本只通知一次
+    if (trim((string)($config['update_notified_version'] ?? '')) === $latest) return false;
+    $adminEmail = trim((string)($config['admin_email'] ?? ''));
+    $smtp = getSmtpConfig();
+    $smtpReady = ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '');
+    if ($adminEmail === '' || !$smtpReady) {
+        logAlertFail("发现新版本 v{$latest}（通道 {$channel}）但更新通知邮件不可用：" . ($adminEmail === '' ? '未配置超管邮箱' : 'SMTP 未配置'));
+        return false;
+    }
+    $site = $config['site_title'] ?? 'You Super Markdown';
+    $notes = trim((string)($result['release_notes'] ?? ''));
+    if (mb_strlen($notes) > 800) $notes = mb_substr($notes, 0, 800) . '…';
+    $chLabel = $channel === 'beta' ? '测试版（含预发布）' : '正式版';
+    $now = date('Y-m-d H:i:s');
+    $subject = "[{$site} 通知] 发现新版本 v{$latest}";
+    $body = "检查更新发现新版本：\n"
+          . "当前版本：v{$current}\n"
+          . "最新版本：v{$latest}\n"
+          . "更新通道：{$chLabel}\n"
+          . ($notes !== '' ? "\n【版本说明】\n{$notes}\n" : '')
+          . "\n请登录超管后台「在线更新」查看，并在 SSH 执行 sudo ysm-admin apply-update 完成升级（升级前自动备份、强制验签）。";
+    $html = renderMailHtml($site, '版本更新', $body, ['server' => gethostname(), 'time' => $now]);
+    [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body, $html);
+    if ($ok) {
+        $config['update_notified_version'] = $latest;
+        saveSiteConfig($config);
+        return true;
+    }
+    logAlertFail("更新通知邮件发送失败(v{$latest}): {$err}");
+    return false;
+}
+
+// ============================================================
+// v5.3.0：更新历史（data/articles/更新历史.md）「同版本覆盖」写入 + 一次性去重清理
+// 背景：旧逻辑仅用松匹配（strpos "## v<ver>"）+ 前插，同一版本换包重跑会在文件顶部
+//       产生多个同名小节，出现「同一版本多条 / 顶部重复」。此处改为「按版本小节覆盖」，
+//       保持「最新在前」，写入幂等；另提供一次性去重清理（先备份、只动重复小节）。
+// ============================================================
+
+// 生成一个版本小节文本（统一换行：## v<ver>\n\n<changelog>\n\n）
+function renderChangelogSection($ver, $changelog) {
+    return "## v" . trim((string)$ver) . "\n\n" . rtrim((string)$changelog) . "\n\n";
+}
+
+// 把「更新历史」正文拆成 [前言, 小节数组]；小节 = ['ver'=>版本号(不含 v), 'text'=>含标题的整段文本]
+// 仅识别「整行即 ## v<版本>」的标题（严格匹配：避免 changelog 正文里的 ### 小标题或普通 ## 被误判）
+function splitChangelogDoc($content) {
+    $content = (string)$content;
+    if (!preg_match_all('/^##[ \t]+v?([0-9][0-9A-Za-z._-]*)[ \t]*$/m', $content, $m, PREG_OFFSET_CAPTURE)) {
+        return [$content, []];
+    }
+    $heads = $m[0];
+    $vers  = $m[1];
+    $preamble = substr($content, 0, $heads[0][1]);
+    $sections = [];
+    $n = count($heads);
+    for ($i = 0; $i < $n; $i++) {
+        $start = $heads[$i][1];
+        $end = ($i + 1 < $n) ? $heads[$i + 1][1] : strlen($content);
+        $sections[] = ['ver' => $vers[$i][0], 'text' => substr($content, $start, $end - $start)];
+    }
+    return [$preamble, $sections];
+}
+
+// 合并正文：同一版本只保留一个小节（覆盖式），其它小节原样；新版本置顶（最新在前）。
+// 幂等：同 (ver, changelog) 连续执行两次，结果完全一致（第二次命中小节 → 覆盖为相同内容）。
+function mergeChangelogSection($content, $ver, $changelog) {
+    $ver = trim((string)$ver);
+    [$preamble, $sections] = splitChangelogDoc($content);
+    $preamble = rtrim($preamble);
+    $preamble = ($preamble === '') ? '' : $preamble . "\n\n";
+    $section = renderChangelogSection($ver, $changelog);
+    $out = [];
+    $done = false;
+    foreach ($sections as $s) {
+        if ($s['ver'] === $ver) {
+            if (!$done) { $out[] = $section; $done = true; } // 首次命中 → 覆盖；后续同名 → 丢弃（顺带去重）
+            continue;
+        }
+        $out[] = $s['text'];
+    }
+    if (!$done) { array_unshift($out, $section); } // 新版本 → 置顶（最新在前）
+    return $preamble . implode('', $out);
+}
+
+// 一次性去重：同一版本只保留「最靠前」的一份（最新在前，顶部即最近一次写入），其余删除。
+// 返回 [去重后正文, 被删除的小节数]。纯函数，不触碰文件；非重复小节与前言原样保留。
+function dedupeChangelogSections($content) {
+    [$preamble, $sections] = splitChangelogDoc($content);
+    $seen = [];
+    $out = [];
+    $removed = 0;
+    foreach ($sections as $s) {
+        if (isset($seen[$s['ver']])) { $removed++; continue; }
+        $seen[$s['ver']] = true;
+        $out[] = $s['text'];
+    }
+    return [$preamble . implode('', $out), $removed];
+}
+
+// 写入「更新历史」文章（覆盖式、幂等）：文章不存在则建骨架。返回 true=内容确有变化。
+function injectChangelogIntoArticle($artPath, $ver, $changelog) {
+    $dir = dirname($artPath);
+    if (!is_dir($dir)) { @mkdir($dir, 0755, true); }
+    if (!is_file($artPath)) {
+        $meta = json_encode(['title' => '更新历史', 'category' => '系统', 'tags' => '更新,版本,日志', 'author' => '系统', 'hidden' => true], JSON_UNESCAPED_UNICODE);
+        @file_put_contents($artPath, "<!--META {$meta} -->\n\n# 更新历史\n\n> 全部版本更新记录，最新在前。\n\n", LOCK_EX);
+    }
+    $content = (string)@file_get_contents($artPath);
+    $new = mergeChangelogSection($content, $ver, $changelog);
+    if ($new === $content) return false;
+    return (bool)@file_put_contents($artPath, $new, LOCK_EX);
+}
+
+// 一次性清理：先备份（同目录 .dedup-bak-<时间戳>），仅重写重复小节，其它内容原样保留。
+// 返回 ['ok'=>bool, 'removed'=>int, 'backup'=>string, 'path'=>string, 'error'=>string]
+function cleanupChangelogArticle($artPath) {
+    if (!is_file($artPath)) {
+        return ['ok' => false, 'removed' => 0, 'backup' => '', 'path' => $artPath, 'error' => '文章不存在'];
+    }
+    $content = (string)@file_get_contents($artPath);
+    [$new, $removed] = dedupeChangelogSections($content);
+    if ($removed <= 0 || $new === $content) {
+        return ['ok' => true, 'removed' => 0, 'backup' => '', 'path' => $artPath, 'error' => ''];
+    }
+    $backup = $artPath . '.dedup-bak-' . date('YmdHis');
+    if (!@copy($artPath, $backup)) {
+        return ['ok' => false, 'removed' => 0, 'backup' => '', 'path' => $artPath, 'error' => '备份失败，已中止清理（未改动原文件）'];
+    }
+    if (!@file_put_contents($artPath, $new, LOCK_EX)) {
+        return ['ok' => false, 'removed' => 0, 'backup' => $backup, 'path' => $artPath, 'error' => '写入失败（备份已保留，可用备份还原）'];
+    }
+    return ['ok' => true, 'removed' => $removed, 'backup' => $backup, 'path' => $artPath, 'error' => ''];
+}
+
+// v5.3.0：邮件 / 通知链路体检（供 ysm-admin check|doctor 使用）。
+// 说明：php-fpm 是否注入 YSM_SMTP_PASS 属服务器环境检查，在 CLI 侧读取 php-fpm pool 配置完成。
+function systemMailHealth() {
+    $config = loadSiteConfig();
+    $adminEmail = trim((string)($config['admin_email'] ?? ''));
+    $smtp = getSmtpConfig();
+    return [
+        'admin_email' => $adminEmail,
+        'admin_email_set' => ($adminEmail !== '' && filter_var($adminEmail, FILTER_VALIDATE_EMAIL) !== false),
+        'smtp_host' => $smtp['host'],
+        'smtp_user' => $smtp['user'],
+        'smtp_port' => (int)$smtp['port'],
+        'smtp_enc' => $smtp['enc'],
+        'smtp_pass_source' => smtpPassSource(), // env / config / file / none
+        'smtp_ready' => ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== ''),
     ];
 }
 

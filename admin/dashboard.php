@@ -70,6 +70,11 @@ $config = loadSiteConfig();
 $siteTitle = $config['site_title'] ?? 'You Super Markdown';
 $msg = $_GET['msg'] ?? '';
 
+// v5.3.0：更新通知可用性（超管邮箱 + SMTP 缺一不可）——不可用时在后台显著位置持续告警
+$notifySmtp = getSmtpConfig();
+$updateNotifyReady = trim((string)($config['admin_email'] ?? '')) !== ''
+    && $notifySmtp['host'] !== '' && $notifySmtp['user'] !== '' && $notifySmtp['pass'] !== '';
+
 // AJAX 处理：更新通道切换
 if (isset($_POST['ajax']) && $_POST['ajax'] === 'save_channel' && isset($_POST['channel'])) {
     header('Content-Type: application/json; charset=utf-8');
@@ -186,8 +191,13 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'test_smtp') {
 // AJAX 处理：检查更新
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'check_update') {
     header('Content-Type: application/json; charset=utf-8');
-    $ch = $config['update_channel'] ?? 'stable';
+    $ch = normalizeUpdateChannel($config['update_channel'] ?? 'stable');
     $result = checkForUpdates($ch);
+    // v5.3.0：发现比当前版本更新 → 通知超管邮箱（复用既有 SMTP + 邮件模板；去重，同一新版本只发一次）。
+    // 通知失败不影响检查结果返回；无 SMTP/邮箱时由 notifyUpdateAvailable 落盘 alert.log 告警。
+    if (!empty($result['available'])) {
+        try { notifyUpdateAvailable($result, $ch); } catch (\Throwable $e) { /* 通知失败不阻断检查 */ }
+    }
     echo json_encode($result, JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -897,6 +907,13 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php if ($msg === 'account_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
     <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>密码至少 8 位，且必须包含大写字母、小写字母与数字</div><?php endif; ?>
     <?php if ($msg === 'challenge_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>挑战码无效或已过期，请重新生成</div><?php endif; ?>
+
+    <?php if (!$updateNotifyReady): ?>
+    <div class="msg msg-warning">
+        <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <strong>更新通知不可用</strong>：发现新版本时将无法邮件通知超管。请前往「邮件设置」配置 SMTP，并在「系统配置」填写管理员邮箱（安装时要求必填；可用 <code>sudo ysm-admin check</code> 体检）。
+    </div>
+    <?php endif; ?>
 
     <?php
     $tab = $_GET['tab'] ?? 'overview';
@@ -1803,6 +1820,10 @@ $banMsg = $_GET['bmsg'] ?? '';
             <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
             音乐播放器设置
         </div>
+        <!-- v5.3.0：音乐为「预设通道」——歌单 ID / 默认播放歌曲 / Cookies 三项已固定，后台不再展示。
+             采用 display:none 隐藏（可回退：删除本包装 <div> 的 style 即恢复显示）。输入元素保留在 DOM 中，
+             既不影响 bgForm 提交时的取值逻辑（见下方 submit 处理器），也不丢失既有数据（前台按预设正常工作）。 -->
+        <div style="display:none">
         <div class="form-group">
             <label class="form-label">网易云歌单 ID</label>
             <input class="form-input" type="text" id="musicNeteaseInput" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>" placeholder="3778678">
@@ -1818,6 +1839,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             <label class="form-label">网易云 Cookies（可选）</label>
             <input class="form-input" type="text" id="musicNetCookieInput" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
             <p class="form-hint">配置后可播放网易云 VIP 歌曲</p>
+        </div>
         </div>
         <!-- v4.5.0：本地背景音乐——超管/站长后台上传单曲作默认背景音，前台只能开/关不能选曲；单曲循环，浏览器缓存不重复消耗服务器流量；<100MB 常见音频自动转码压缩 -->
         <div class="form-group">
@@ -2047,7 +2069,7 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <div><span style="font-weight:600;color:var(--accent)">增量包</span>（<code>-to-*-inc.tar.gz</code>）：仅包含本次变更的文件，适用于<b>同版本内</b>的小版本升级，体积小、速度快。</div>
                 <div><span style="font-weight:600;color:var(--accent)">初始化安装包</span>（<code>-install.tar.gz</code>）：用于<b>全新部署</b>（首次安装），包含完整源码与一键安装脚本，不用于升级。</div>
             </div>
-            <div style="margin-top:10px;color:var(--text-muted)">当前通道：<?= htmlspecialchars($config['update_channel'] ?? 'stable') === 'beta' ? '测试版（优先拉取测试包）' : '正式版（仅拉取正式包）' ?></div>
+            <div style="margin-top:10px;color:var(--text-muted)">当前通道：<?= ($config['update_channel'] ?? 'stable') === 'beta' ? '测试版（含预发布版本）' : '正式版（仅正式 Release）' ?></div>
         </div>
     </div>
 

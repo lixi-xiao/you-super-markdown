@@ -137,7 +137,6 @@
     // v4.7.14 重写：单次 mermaid.run() 批量渲染所有节点 + _ysmInited 防重复初始化 + 错误回退逻辑
     // 安全：mermaid SVG 由库自身做 XSS 过滤；fallback 文本经 escapeHTML 转义
     // 约束：不耦合 hljs（hljs 在 loadFile / 公告中独立同步调用，两者互不依赖）
-        var t = false;
     function ensureMermaid(e) {
         if (window.mermaid) {
             e();
@@ -148,6 +147,87 @@
         t.onload = e;
         t.onerror = function() {};
         document.head.appendChild(t);
+    }
+    // v5.2.3：mermaid 渲染稳健化（用户实测「QQ 浏览器里流程图显示歪 / 被拉伸」）
+    //   根因（代码证据）：vendor/mermaid.min.js 的 y9() 用 node().getBBox() 实时测量后计算 viewBox，
+    //     Ejt()/Og() 再给 <svg> 设 width:100% + style="max-width:Npx"（useMaxWidth=true 时不写 height，
+    //     宽高比完全由 viewBox 决定）。若在节点不可见（display:none）或宽度为 0 时 run()，getBBox() 全为 0，
+    //     viewBox 退化成"仅剩 diagramPadding 的极小方框"，再被 width:100% 拉伸到容器宽 → 图形变形/拉伸。
+    //     本仓库中的典型场景：openAnnounceModal 在 .ann-modal-overlay 加 .active（变可见）之前就调用了本函数，
+    //     此时公告弹窗容器宽度为 0；文章路径同样缺少"可见/宽度"前置校验。
+    //   修法：① 渲染前等到节点已挂载且 offsetWidth>0（rAF 轮询，约 2s 兜底）；
+    //         ② 渲染后做尺寸自检（viewBox 宽/高为 0 或 svg 宽度为 0 → 复位源码重渲染一次）；
+    //         ③ initialize 显式配置（useMaxWidth / fontFamily / theme 跟随深浅色）。
+    function ysmMermaidTheme() {
+        return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "default";
+    }
+    function ysmMermaidInit() {
+        var e = ysmMermaidTheme();
+        if (window.__ysmMermaidInited && window.__ysmMermaidTheme === e) return;
+        mermaid.initialize({
+            startOnLoad: false,
+            // useMaxWidth 缺省即为 true，这里显式写出，避免库升级改变默认行为
+            useMaxWidth: true,
+            theme: e,
+            // 与站点正文字体栈一致，避免"测量用 A 字体、渲染用 B 字体"导致标签越界
+            fontFamily: '"ChineseFont","Inter",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif',
+            securityLevel: "strict",
+            flowchart: { useMaxWidth: true },
+            sequence: { useMaxWidth: true },
+            gantt: { useMaxWidth: true }
+        });
+        window.__ysmMermaidInited = true;
+        window.__ysmMermaidTheme = e;
+    }
+    // 等到节点"已挂载 + 有实际渲染宽度"再回调；最长约 2s 兜底，避免节点始终不可见时死等
+    function ysmWhenVisible(e, t) {
+        var n = 0;
+        var i = function() {
+            if (!e.isConnected || e.offsetWidth > 0) return t();
+            if (++n > 120) return t();
+            requestAnimationFrame(i);
+        };
+        i();
+    }
+    // SVG 尺寸自检：viewBox 缺失 / 宽高任一为 0 / svg 实际宽度为 0 → 判为无效渲染
+    function ysmMermaidSvgOk(e) {
+        if (!e) return false;
+        var t = e.getAttribute("viewBox");
+        if (!t) return false;
+        var n = t.split(/[\s,]+/).map(Number);
+        if (n.length !== 4 || !(n[2] > 0) || !(n[3] > 0)) return false;
+        return e.getBoundingClientRect().width > 0;
+    }
+    // 单节点渲染：等可见 → run → 尺寸自检；异常则复位源码重渲染一次，仍异常才回退源码展示
+    async function ysmMermaidRender(e) {
+        var t = e.textContent;
+        await new Promise(function(e2) {
+            ysmWhenVisible(e, e2);
+        });
+        await mermaid.run({
+            nodes: [ e ]
+        });
+        var n = e.querySelector("svg");
+        if (!n || n.textContent.indexOf("Syntax error") >= 0) {
+            e.innerHTML = '<pre style="overflow:auto">' + escapeHTML(t) + "</pre>";
+            return;
+        }
+        if (!ysmMermaidSvgOk(n)) {
+            e.removeAttribute("data-processed");
+            e.textContent = t;
+            await new Promise(function(e2) {
+                requestAnimationFrame(function() {
+                    e2();
+                });
+            });
+            await mermaid.run({
+                nodes: [ e ]
+            });
+            n = e.querySelector("svg");
+            if (!n || n.textContent.indexOf("Syntax error") >= 0) {
+                e.innerHTML = '<pre style="overflow:auto">' + escapeHTML(t) + "</pre>";
+            }
+        }
     }
     function renderMermaidBlocks(e, n) {
         n = n || function() {};
@@ -169,27 +249,23 @@
                             n.textContent = e.textContent;
                             t.replaceWith(n);
                         });
-                        // 2. 初始化 mermaid（_ysmInited 防重复初始化）
-                                                if (!t) {
-                            mermaid.initialize({
-                                startOnLoad: false
-                            });
-                            t = true;
+                        // 2. 初始化 mermaid（v5.2.3：显式配置；深浅色变化时重新初始化）
+                        ysmMermaidInit();
+                        // 2b. 等字体就绪——mermaid 用实时测量决定标签尺寸，webfont 未就绪会测量偏差
+                        if (document.fonts && document.fonts.ready) {
+                            await Promise.race([ document.fonts.ready, new Promise(function(e2) {
+                                setTimeout(e2, 1500);
+                            }) ]);
                         }
                         // 3. 串行逐个渲染（避免并发 run() 导致 mermaid 内部状态混乱）
-                                                var n = e.querySelectorAll(".mermaid");
-                        for (var a = 0; a < n.length; a++) {
-                            var s = n[a];
+                        var a = e.querySelectorAll(".mermaid");
+                        for (var s = 0; s < a.length; s++) {
+                            var o = a[s];
+                            var c = o.textContent;
                             try {
-                                await mermaid.run({
-                                    nodes: [ s ]
-                                });
-                                var o = s.querySelector("svg");
-                                if (o && o.textContent.indexOf("Syntax error") >= 0) {
-                                    s.innerHTML = '<pre style="overflow:auto">' + escapeHTML(s.textContent) + "</pre>";
-                                }
-                            } catch (e) {
-                                s.innerHTML = '<pre style="overflow:auto">' + escapeHTML(s.textContent) + "</pre>";
+                                await ysmMermaidRender(o);
+                            } catch (err) {
+                                o.innerHTML = '<pre style="overflow:auto">' + escapeHTML(c) + "</pre>";
                             }
                         }
                     } catch (e) {}

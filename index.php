@@ -87,15 +87,19 @@ function ysmShareUrl($name) {
     $id = ysmShortId($name);
     return $id !== '' ? ysmShareOrigin() . '/?p=' . $id : ysmShareOrigin() . '/?file=' . rawurlencode($name);
 }
-/** v5.1.0：把 ?p=<id> 解析为真实文章文件名并写入 $_GET['file']（供下游统一处理） */
+/** v5.1.0：把 ?p=<id> 解析为真实文章文件名并写入 $_GET['file']（供下游统一处理）
+ *  v5.2.3：返回布尔——true = 无需处理（未带 ?p= 或已带 ?file=）或已成功解析；
+ *          false = 带了 ?p=<id> 但格式非法 / 没有任何 data/articles/*.md 命中（即无效、写错的短链）。
+ *          调用方据此给出「文档不存在」的明确结果，避免静默回退成"站名 OG"的伪首页。 */
 function ysmResolveShortParam() {
-    if (empty($_GET['p']) || !empty($_GET['file'])) return;
+    if (empty($_GET['p']) || !empty($_GET['file'])) return true;
     $p = (string)$_GET['p'];
-    if (!preg_match('/^[A-Za-z0-9]{6,64}$/', $p)) return;
+    if (!preg_match('/^[A-Za-z0-9]{6,64}$/', $p)) return false;   // 格式非法 → 视为无效短链
     foreach ((array)glob(__DIR__ . '/data/articles/*.md') as $f) {
         $b = basename($f);
-        if (strpos($b, $p . '_') === 0 || strcasecmp($b, $p . '.md') === 0) { $_GET['file'] = $b; return; }
+        if (strpos($b, $p . '_') === 0 || strcasecmp($b, $p . '.md') === 0) { $_GET['file'] = $b; return true; }
     }
+    return false;   // 格式合法但无任何文件匹配 → 无效短链
 }
 
 /** 正文 → 纯文本首段（剥离 META 注释/代码块/标题/图片与标记，链接只留文字；压缩空白后截断 ~100 字） */
@@ -193,8 +197,108 @@ function ysmShareRenderMeta($m) {
     if (!empty($m['image'])) echo '    <meta name="twitter:image" content="' . $e($m['image']) . '">' . "\n";
 }
 
+/** v5.2.3：无效 / 不存在的 ?p=<id> 短链 → 输出明确的「文档不存在」页面（含显式 OG 文案）。
+ *
+ *  背景：ysmResolveShortParam() 按"文件名前缀"匹配；id 写错时无任何文件命中 → 页面被当作普通首页，
+ *        OG 退回"站名 + 默认图"，分享出去只能看到站名，无法辨识（用户反馈的"卡片标题变成站名"）。
+ *
+ *  为什么选 HTTP 200 而非 404：分享卡片的抓取器（微信 / QQ 等）只读服务端首屏 <head>、不执行 JS；
+ *        返回 404 时多数抓取器会直接放弃渲染卡片，又退化成"没有卡片 / 站名"——与本次修复目标相悖。
+ *        故返回 200 + 明确文案（og:title = "文档不存在"），同时加 noindex/nofollow 防被搜索引擎收录。
+ *  仅"整页导航"（无 action）时调用；?file=、有效 ?p=、以及各接口（list/read/search/rss…）行为完全不变。
+ *  判定位置：见上方 ysmResolveShortParam()（false 即无效短链）；调用点见本文件 `$__ysmShortMiss`。 */
+function ysmRenderShortNotFound($siteName, $siteConf = []) {
+    $esc = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+    $siteName = (string)$siteName;
+    $bgType = $siteConf['bg_type'] ?? 'none';
+    $bgImage = $siteConf['bg_image'] ?? '';
+    $bgApi = trim((string)($siteConf['bg_api_url'] ?? ''));
+    if ($bgType === 'api' && $bgApi === '' && defined('FIXED_IMG_API')) $bgApi = FIXED_IMG_API;
+    $bgBlur = !empty($siteConf['bg_blur_enabled']) ? '1' : '0';
+    $bgBlurLevel = intval($siteConf['bg_blur_level'] ?? 0);
+    $bgCardOpacity = intval($siteConf['bg_card_opacity'] ?? 100);
+    $shortTitle = '文档不存在';
+    $shareMeta = [
+        'type' => 'website', 'site' => $siteName, 'title' => $shortTitle,
+        'desc' => '该分享链接对应的文档不存在或已被移除，请检查链接是否正确。',
+        'image' => ysmSharePoolCover(), 'url' => ysmShareOrigin() . '/',
+    ];
+    header('Content-Type: text/html; charset=utf-8');
+    ?><!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <meta name="robots" content="noindex, nofollow">
+    <title><?= $esc($shortTitle) ?> · <?= $esc($siteName) ?></title>
+    <!-- v5.2.3：深色模式跟随系统（与主站 / 404 页一致，避免闪白） -->
+    <script>
+        (function() {
+            try {
+                var saved = localStorage.getItem('md-theme');
+                var dark = saved ? saved === 'dark'
+                    : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+            } catch (e) {}
+        })();
+    </script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>" type="image/svg+xml">
+    <link rel="stylesheet" href="/css/tw.min.css?v=<?= @filemtime(__DIR__ . '/css/tw.min.css') ?>">
+    <link rel="stylesheet" href="/css/style.css?v=<?= @filemtime(__DIR__ . '/css/style.css') ?>">
+    <!-- v5.2.3：显式 OG/Twitter 文案（og:title = 文档不存在），供分享卡片抓取 -->
+    <?php ysmShareRenderMeta($shareMeta); ?>
+</head>
+<body id="notFoundPage" data-bg-type="<?= $esc($bgType) ?>" data-bg-image="<?= $esc($bgImage) ?>" data-bg-api-url="<?= $esc($bgApi) ?>" data-bg-blur="<?= $esc($bgBlur) ?>" data-bg-blur-level="<?= $bgBlurLevel ?>" data-bg-card-opacity="<?= $bgCardOpacity ?>" style="padding-left:0">
+<script>
+    // v5.2.3：背景应用（本页不加载 main.js，逻辑与 404.php 内联脚本一致）
+    (function() {
+        var body = document.body;
+        var bgType = body.dataset.bgType || 'none';
+        var bgImage = body.dataset.bgImage || '';
+        var bgApiUrl = body.dataset.bgApiUrl || '';
+        var bgBlur = body.dataset.bgBlur === '1';
+        var bgBlurLevel = parseInt(body.dataset.bgBlurLevel) || 0;
+        var bgCardOpacity = body.dataset.bgCardOpacity !== undefined ? parseInt(body.dataset.bgCardOpacity) : 100;
+        body.style.setProperty('--bg-card-opacity', (bgCardOpacity / 100));
+        if (bgBlur && bgBlurLevel > 0) { body.classList.add('bg-blur'); body.style.setProperty('--bg-blur-level', bgBlurLevel + 'px'); }
+        var bgUrl = (bgType === 'image' && bgImage) ? bgImage : ((bgType === 'api' && bgApiUrl) ? bgApiUrl : '');
+        if (bgUrl) {
+            body.classList.add('bg-active');
+            bgUrl = (bgUrl.indexOf('/') === 0 || /^https?:/i.test(bgUrl)) ? bgUrl : '/' + bgUrl;
+            body.style.setProperty('--bg-url', 'url(' + bgUrl + ')');
+        }
+    })();
+</script>
+<div class="nf-page">
+    <div class="nf-card">
+        <div class="nf-code" aria-hidden="true">404</div>
+        <div class="nf-icon">
+            <svg viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M16 16s-1.5-2-4-2-4 2-4 2"/>
+                <line x1="9" y1="9" x2="9.01" y2="9"/>
+                <line x1="15" y1="9" x2="15.01" y2="9"/>
+            </svg>
+        </div>
+        <h1><?= $esc($shortTitle) ?></h1>
+        <p>你打开的分享链接对应的文档不存在或已被移除，请检查链接是否正确。</p>
+        <div class="nf-actions">
+            <a href="/" class="btn btn-primary">
+                <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+                返回首页
+            </a>
+        </div>
+    </div>
+</div>
+</body>
+</html>
+    <?php
+}
+
 if (!is_dir('./data/articles')) mkdir('./data/articles', 0755, true);
-ysmResolveShortParam(); // v5.1.0：?p=<id> → $_GET['file']
+// v5.2.3：?p=<id> → $_GET['file']；返回 false 表示"带了 ?p= 但格式非法或没有任何文件匹配"（无效短链）。
+$__ysmShortMiss = (ysmResolveShortParam() === false);
 $siteConf = loadSiteConfig();
 $siteHeading = $siteConf['site_title'] ?? 'You Super Markdown';
 // v3.1.6：首页公告卡片数据（公告表 + 关联文章提取封面图/标签/字数；纯文字公告无关联文章）
@@ -298,6 +402,15 @@ if ($seg !== '' && !in_array($seg, [
 ], true)) {
     http_response_code(404);
     require __DIR__ . '/404.php';
+    exit;
+}
+
+// v5.2.3：无效 / 不存在的 ?p=<id> 短链 → 明确返回「文档不存在」页（HTTP 200 + og:title=文档不存在 + noindex），
+//   不再静默当作普通首页（此前 OG 会退回"站名 + 默认图"，分享出去只显示站名、无法辨识）。
+//   判定见 ysmResolveShortParam()（返回 false 即无效短链）；仅在"整页导航"（无 action）时呈现，
+//   以保证 ?file=、有效 ?p=、以及 ?action=list/read/search/rss 等接口的行为完全不变。
+if ($__ysmShortMiss && ($_GET['action'] ?? '') === '') {
+    ysmRenderShortNotFound($siteHeading, $siteConf);
     exit;
 }
 

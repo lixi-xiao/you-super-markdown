@@ -1088,3 +1088,30 @@
   #cardsGrid .doc-card .card-title,
   #cardsGrid .doc-card .card-excerpt { max-width: 100%; }
 }
+
+/* ============================================================================
+   P6（v5.2.3）：mermaid 流程图「等比显示」样式兜底
+   背景：mermaid 依 getBBox() 实时测量生成 viewBox（vendor/mermaid.min.js 的 y9/Ejt）；
+         若在容器不可见 / 宽度 0 时渲染，viewBox 会退化成极小方框，再被 width:100% 拉伸 → 图形变形。
+   JS 侧已在渲染前等待「已挂载 + 宽度 > 0」并做渲染后尺寸自检（js/main.js ysmWhenVisible /
+   ysmMermaidSvgOk / ysmMermaidRender）。此处仅从样式侧兜底：绝不写死高度，宽高比只由 viewBox 决定；
+   容器保留横向滚动（窄屏可横滑查看，而不是把图压缩变形）。
+   以壳容器 ID / 复合类前缀提权（覆盖后加载的 style.css 同名规则），仅作用于 mermaid，
+   不触碰 .markdown-body 其它正文排版；不新增玻璃拟态。
+   ============================================================================ */
+@layer components {
+  #readingView .markdown-body .mermaid,
+  .ann-modal-content.markdown-body .mermaid {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  #readingView .markdown-body .mermaid svg,
+  .ann-modal-content.markdown-body .mermaid svg {
+    max-width: 100%;
+    height: auto; /* 关键：不写死高度 → 宽高比来自 viewBox，杜绝非等比拉伸 */
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}

@@ -1115,3 +1115,35 @@
     margin-right: auto;
   }
 }
+
+/* ============================================================================
+   P7（v5.2.4）：宽「块级公式」内部横向滚动兜底 —— 修手机端「整页可左右拖动 / 正文被截」
+   根因（无头 Edge + CDP 实测，375 固定视口）：
+     正文里的块级公式由 MathJax 生成为 <mjx-container display="true">（display:block），
+     其内部 <mjx-math> 为 inline-block、white-space:nowrap 且无 max-width；当公式含
+     vmatrix / aligned / cases 等宽结构时固有宽度远超容器（实测：容器 337px、内部 474px），
+     越出 .markdown-body → document.scrollWidth=490 > innerWidth=375，整页可横向拖动。
+     5.0.2 的 body{overflow-x:clip} 只是把越界内容裁掉（掩盖根因），在未生效/不支持的
+     浏览器上即表现为「又出现了」。
+   本段仅让「块级公式容器」在自身内部横向滚动（同 5.2.3 mermaid 思路：宽内容容器内横滑，
+   绝不撑宽整页）。不写死公式高度、不动行内公式、不触碰 .markdown-body 其它正文排版；
+   不新增玻璃拟态；不改任何 JS 钩子。
+   ============================================================================ */
+@layer components {
+  #readingView .markdown-body mjx-container[display="true"] {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 0; /* 给公式上下各留 2px：overflow:auto/hidden 会同时裁纵向，防止分式/根式出头被切 */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 极窄屏（≤340px）顶栏收口：品牌 + 5 个图标按钮在 320 视口下合计越界 4px（实测
+     .header-right right=324 > innerWidth=320），此处仅在极窄屏压缩品牌上限与按钮尺寸，
+     消除顶栏（因而整页）横向溢出；≥341px 的常规手机不受影响。 */
+  @media (max-width: 340px) {
+    #topBar .brand { max-width: 30vw; }
+    #topBar .icon-btn { width: 32px; height: 32px; }
+    #topBar .header-right { gap: 3px; min-width: 0; }
+  }
+}

@@ -1147,3 +1147,47 @@
     #topBar .header-right { gap: 3px; min-width: 0; }
   }
 }
+
+/* ============================================================================
+   P8（v5.2.5）：横向溢出收口（补齐 5.2.4 的两处缺口）——行内公式 + 公告弹窗内公式/宽内容
+   缺口一（行内公式）：5.2.4 只约束了块级公式 mjx-container[display="true"]；行内公式
+     （非 display="true"）内部 mjx-math 同为 inline-block + white-space:nowrap，极宽时
+     仍无横向滚动，会撑宽整页。此处让其「仅在自身容器内横滑」；**刻意不写 overflow-y**，
+     避免 5.2.4 实测过的「行内公式纵向被裁切」副作用（overflow-y 缺省随 overflow-x 变 auto，
+     高度仍取内容自身高度，故纵向不裁切）。
+   缺口二（公告弹窗）：.ann-modal-content.markdown-body 内公式/表格此前未加同类约束。
+     此处**仅**补「公式 / 宽内容的内滚约束**（功能性必要）**，不改弹窗其它任何样式
+     （外观、间距、圆角、配色一律不动）。
+   复核结论（未撑宽整页，无需改动）：mermaid 由 P6 容器内横滑；阅读页表格由 .table-wrapper
+     内部横滑；代码块由 .markdown-body pre{overflow-x:auto} 内部横滑；图片有 max-width:100%。
+   ============================================================================ */
+@layer components {
+  /* 行内公式：容器内横滑，不设 overflow-y（不产生纵向裁切） */
+  #readingView .markdown-body mjx-container:not([display="true"]) {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* 公告弹窗内：块级公式 */
+  .ann-modal-content.markdown-body mjx-container[display="true"] {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 0;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* 公告弹窗内：行内公式（同上，不设 overflow-y） */
+  .ann-modal-content.markdown-body mjx-container:not([display="true"]) {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* 公告弹窗内：表格未走 .table-wrapper（阅读页才包），改为块级 + 内滚，
+     避免宽表格撑宽弹窗（仅加滚动约束，表格观感不变） */
+  .ann-modal-content.markdown-body table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

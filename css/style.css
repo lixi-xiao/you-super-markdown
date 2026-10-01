@@ -526,6 +526,17 @@ to{transform:rotate(360deg);}
 [data-theme="dark"] .markdown-body pre code .hljs-property{color:#f38ba8;}
 [data-theme="dark"] .markdown-body pre code .hljs-operator{color:#cba6f7;}
 [data-theme="dark"] .markdown-body pre code .hljs-punctuation{color:#cdd6f4;}
+/* v5.2.4：补齐深色代码高亮 token——主题切换钩子在深色下停用浅色 vendor 表（js/main.js ysmApplyHljsTheme），
+   故深色配色需在此完整覆盖，避免浅色 token 颜色残留；沿用上方 Catppuccin 同族调色。 */
+[data-theme="dark"] .markdown-body pre code .hljs-quote{color:#6c7086;font-style:italic;}
+[data-theme="dark"] .markdown-body pre code .hljs-formula{color:#cba6f7;}
+[data-theme="dark"] .markdown-body pre code .hljs-section{color:#f38ba8;}
+[data-theme="dark"] .markdown-body pre code .hljs-subst{color:#f38ba8;}
+[data-theme="dark"] .markdown-body pre code .hljs-selector-attr{color:#f9e2af;}
+[data-theme="dark"] .markdown-body pre code .hljs-selector-pseudo{color:#f9e2af;}
+[data-theme="dark"] .markdown-body pre code .hljs-bullet{color:#89dceb;}
+[data-theme="dark"] .markdown-body pre code .hljs-template-variable{color:#f38ba8;}
+[data-theme="dark"] .markdown-body pre code .hljs-class .hljs-title{color:#f9e2af;}
 [data-theme="dark"] .markdown-body code{background:#313244;border-color:#45475a;color:#f38ba8;}
 [data-theme="dark"] .markdown-body a code{color:#89b4fa;border-color:#45475a;background:#1e1e2e;}
 [data-theme="dark"] .doc-card:hover{border-color:hsl(var(--accent-hue),var(--accent-sat),40%);}

@@ -200,7 +200,10 @@
     }
     // 单节点渲染：等可见 → run → 尺寸自检；异常则复位源码重渲染一次，仍异常才回退源码展示
     async function ysmMermaidRender(e) {
-        var t = e.textContent;
+        // v5.2.4：记住原始源码（挂在元素属性上）——主题切换需要按新主题重渲染，
+        //         而渲染后 textContent 已被替换成 SVG，无法再取回源码。
+        var t = e.__ysmSrc != null ? e.__ysmSrc : e.textContent;
+        e.__ysmSrc = t;
         await new Promise(function(e2) {
             ysmWhenVisible(e, e2);
         });
@@ -276,6 +279,57 @@
         } catch (e) {
             n();
         }
+    }
+    // v5.2.4：统一主题变更钩子——主题切换时主动"重应用"不会随 data-theme 自动跟随的部分。
+    //   根因（用户实测「切回浅色后部分组件仍是暗色」）：mermaid 只在渲染当刻读取主题生成 SVG，
+    //   节点 fill / 连线 stroke / 文字色都写成内联属性；data-theme 变化不会让它自动重渲染 →
+    //   流程图停留在"上一次渲染"的配色（浅→暗残留浅色图、暗→浅残留暗色图，双向都会残留）。
+    //   修法：主题变化时，用事先保存的源码按当前主题重渲染（复位 data-processed + textContent，
+    //   避免新旧 SVG 叠加/泄漏）；连续切换用 Promise 链串行，杜绝并发 mermaid.run 内部状态错乱。
+    var __ysmMermaidRerenderSeq = Promise.resolve();
+    async function ysmMermaidRerenderOnce() {
+        if (!window.mermaid || typeof mermaid.run !== "function") return;
+        var list = document.querySelectorAll(".mermaid");
+        if (!list.length) return;
+        var theme = ysmMermaidTheme();
+        ysmMermaidInit(); // 新主题下重新 initialize（内部对"主题未变"有短路）
+        for (var i = 0; i < list.length; i++) {
+            if (theme !== ysmMermaidTheme()) return; // 渲染期间主题又变 → 交给最新一次接管
+            var el = list[i];
+            // 不可见（如公告弹窗未打开、容器宽度 0）时跳过：避免在宽度 0 下重渲染导致 viewBox 退化，
+            // 守住 5.2.3「流程图不变形」；该节点下次可见时（弹窗重开）会按当前主题重新渲染。
+            if (!el.isConnected || el.offsetWidth === 0) continue;
+            var src = el.__ysmSrc != null ? el.__ysmSrc : el.textContent;
+            if (src == null) continue;
+            el.__ysmSrc = src;
+            el.removeAttribute("data-processed");
+            el.textContent = src; // 复位源码，清掉上一主题的 SVG
+            try {
+                await ysmMermaidRender(el);
+            } catch (err) {
+                el.innerHTML = '<pre style="overflow:auto">' + escapeHTML(src) + "</pre>";
+            }
+        }
+    }
+    function ysmMermaidRerender() {
+        __ysmMermaidRerenderSeq = __ysmMermaidRerenderSeq.then(ysmMermaidRerenderOnce).catch(function() {});
+        return __ysmMermaidRerenderSeq;
+    }
+    // hljs 主题样式表：项目仅内置浅色 vendor 表，深色配色由 style.css 的 [data-theme="dark"] .hljs-* 提供。
+    //   深色下停用浅色表（浅色下启用），彻底避免浅色 token 颜色在 dark 下残留——即"链接的正确切换"。
+    function ysmApplyHljsTheme(t) {
+        var l = document.getElementById("hljsTheme");
+        if (!l) return;
+        var off = t === "dark";
+        if (l.disabled !== off) l.disabled = off;
+    }
+    // v5.2.4：主题唯一入口——点击切换 / 跟随系统 / 初始加载 全部经此收口，保证双向一致
+    function ysmApplyTheme(t) {
+        if (document.documentElement.getAttribute("data-theme") !== t) {
+            document.documentElement.setAttribute("data-theme", t);
+        }
+        ysmApplyHljsTheme(t);
+        ysmMermaidRerender();
     }
     // v4.9.0：数学公式渲染（MathJax 3 本地化 tex-chtml.js，约 1.1MB）——阅读页按需加载，仅排版文章正文容器
     // 语法：$$ 块级 / $ 行内 / \(...\)、\[...\]（与 Typora/GitHub 主流一致），\$ 转义输出字面美元
@@ -712,7 +766,8 @@
     o.addEventListener("click", () => {
         const e = document.documentElement.getAttribute("data-theme") === "dark";
         const t = e ? "light" : "dark";
-        document.documentElement.setAttribute("data-theme", t);
+        // v5.2.4：经统一钩子应用（切换 mermaid/hljs 的主题适配），不再只改 data-theme
+        ysmApplyTheme(t);
         // v4.7.11：手动切换双持久化——localStorage 记住用户选择，sessionStorage 标记"手动切换过"
         //          隐私模式下 localStorage 写入失败时，sessionStorage 仍可保证当前会话不跟随系统
                 try {
@@ -741,7 +796,7 @@
         c = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
         const t = c ? c.matches : false;
         const n = e || (t ? "dark" : "light");
-        document.documentElement.setAttribute("data-theme", n);
+        ysmApplyTheme(n);
         if (n === "dark") {
             o.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
         }
@@ -750,7 +805,7 @@
                 if (!e && c && !r) {
             l = function(e) {
                 if (r) return;
-                document.documentElement.setAttribute("data-theme", e.matches ? "dark" : "light");
+                ysmApplyTheme(e.matches ? "dark" : "light");
                 o.innerHTML = e.matches ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
             };
             mdThemeAddListener(c, l);

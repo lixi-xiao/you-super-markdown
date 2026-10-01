@@ -620,6 +620,7 @@
                 renderCategoryBar();
                 renderAnnouncements();
                 renderHomeContent();
+                renderHomePopular();
                 renderSidebarList(Ie);
             }
         } catch (e) {
@@ -840,7 +841,7 @@
             return e;
         }
         var e = filteredFiles();
-        x.innerHTML = e.map((e, t) => `\n            <div class="doc-card" data-filename="${escapeHTML(e.name)}" style="animation-delay:${t * .05}s">\n                ${e.cover ? `<div class="doc-cover"><img src="${escapeHTML(cardCover(e.cover))}" alt="" loading="lazy" onerror="this.parentNode.style.display='none'"></div>` : ""}\n                <div class="card-title">${e.pinned ? '<span class="card-pin-icon" title="置顶"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" fill="currentColor" stroke="none"/></svg></span>' : ""}${escapeHTML(e.displayName)}</div>\n                <div class="card-meta">\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>${e.modified}</span>\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>${e.wordCount}字</span>\n                    ${e.category ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>${escapeHTML(e.category)}</span>` : ""}\n                    ${(e.views || 0) > 0 ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>${e.views}</span>` : ""}\n                </div>\n                <div class="card-excerpt">${escapeHTML(e.excerpt || "")}</div>\n                <div class="card-tags">${e.tags.map(e => `<span class="tag" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div>\n            </div>`).join("");
+        x.innerHTML = e.map((e, t) => `\n            <div class="doc-card${t === 0 ? " card-hero" : ""}" data-heat="${escapeHTML(e.heat || "normal")}" data-views="${e.views || 0}" data-views30="${e.views30 || 0}" data-filename="${escapeHTML(e.name)}" style="animation-delay:${t * .05}s">\n                ${e.cover ? `<div class="doc-cover"><img src="${escapeHTML(cardCover(e.cover))}" alt="" loading="lazy" onerror="this.parentNode.style.display='none'"></div>` : ""}\n                <div class="card-title">${e.pinned ? '<span class="card-pin-icon" title="置顶"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" fill="currentColor" stroke="none"/></svg></span>' : ""}${escapeHTML(e.displayName)}</div>\n                <div class="card-meta">\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>${e.modified}</span>\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>${e.wordCount}字</span>\n                    ${e.category ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>${escapeHTML(e.category)}</span>` : ""}\n                    ${(e.views || 0) > 0 ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>${e.views}</span>` : ""}\n                </div>\n                <div class="card-excerpt">${escapeHTML(e.excerpt || "")}</div>\n                <div class="card-tags">${e.tags.map(e => `<span class="tag" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div>\n            </div>`).join("");
         document.querySelectorAll(".doc-card").forEach(e => e.addEventListener("click", () => loadFile(e.dataset.filename)));
         // v4.0.0：卡片标签点击 → 标签聚合过滤（阻止冒泡，避免误触进入文章）
                 document.querySelectorAll(".doc-card .card-tags .tag").forEach(e => {
@@ -855,6 +856,33 @@
         // v4.7.14：卡片标签横向滚动（鼠标拖动 + 滚轮）
                 document.querySelectorAll(".doc-card .card-tags").forEach(function(e) {
             enableHScroll(e);
+        });
+    }
+    // v5.2.0：副栏「热门文章」——与 list 接口同一份数据，按热度（近30天为主/总量为辅）取前 5
+        function renderHomePopular() {
+        var box = document.getElementById("homePopularList");
+        if (!box) return;
+        var list = Ie.filter(function(e) {
+            return (e.views30 || 0) > 0 || (e.views || 0) > 0;
+        }).sort(function(a, b) {
+            var d = (b.views30 || 0) - (a.views30 || 0);
+            if (d !== 0) return d;
+            return (b.views || 0) - (a.views || 0);
+        }).slice(0, 5);
+        if (!list.length) {
+            box.innerHTML = '<div class="home-popular-empty">暂无数据</div>';
+            return;
+        }
+        box.innerHTML = list.map(function(e, i) {
+            return '<div class="home-popular-item" data-filename="' + escapeHTML(e.name) + '">' +
+                '<span class="home-popular-rank">' + (i + 1) + "</span>" +
+                '<span class="home-popular-name">' + escapeHTML(e.displayName) + "</span>" +
+                '<span class="home-popular-views">' + (e.views30 || 0) + "</span></div>";
+        }).join("");
+        box.querySelectorAll(".home-popular-item").forEach(function(e) {
+            e.addEventListener("click", function() {
+                loadFile(e.dataset.filename);
+            });
         });
     }
     function renderCategoryBar() {

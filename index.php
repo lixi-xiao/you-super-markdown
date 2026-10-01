@@ -330,6 +330,27 @@ if ('unpin' === $action) {
     savePinnedList($pinList);
     echo json_encode(['success' => true]); exit;
 }
+// ===================== v5.2.0：首页卡片「热度」分档（按频率自适应卡片大小） =====================
+// 数据源（均已存在，见 db.php）：
+//   views_log(article, ip, day)  —— 文章+IP+日期 去重记录，用于统计「近 N 天」真实浏览；
+//   page_views(article, views)  —— 每篇文章历史累计 PV，作为辅助参考。
+// 热度分 = 近 N 天去重浏览数（主） + 历史累计 PV × YSM_HEAT_TOTAL_WEIGHT（辅，默认 0.1 即总量按 10:1 折算）。
+// 分档阈值（可调）：热 ≥100 / 中 20–99 / 普通 <20 —— 前端据此渲染「大卡 / 标准 / 紧凑」。
+if (!defined('YSM_HEAT_WINDOW_DAYS')) define('YSM_HEAT_WINDOW_DAYS', 30);
+if (!defined('YSM_HEAT_TOTAL_WEIGHT')) define('YSM_HEAT_TOTAL_WEIGHT', 0.1);
+if (!defined('YSM_HEAT_HOT_MIN')) define('YSM_HEAT_HOT_MIN', 100);
+if (!defined('YSM_HEAT_MID_MIN')) define('YSM_HEAT_MID_MIN', 20);
+/** 热度分：近 N 天去重浏览为主、历史累计 PV 为辅 */
+function ysmHeatScore($views30d, $viewsTotal) {
+    return (int)$views30d + ((int)$viewsTotal * YSM_HEAT_TOTAL_WEIGHT);
+}
+/** 热度分 → 档位：hot（热·大卡）/ mid（中·标准）/ normal（普通·紧凑） */
+function ysmHeatTier($score) {
+    if ($score >= YSM_HEAT_HOT_MIN) return 'hot';
+    if ($score >= YSM_HEAT_MID_MIN) return 'mid';
+    return 'normal';
+}
+
 if ('list' === $action) {
     header('Content-Type: application/json; charset=utf-8'); $mdFiles = glob('./data/articles/*.md');
     $articleItems = [];
@@ -339,6 +360,12 @@ if ('list' === $action) {
     // v4.0.0：浏览量一次取回构建 map，避免逐篇查询
     $viewCounts = [];
     foreach (db_all('SELECT article, views FROM page_views') as $v) $viewCounts[$v['article']] = (int)$v['views'];
+    // v5.2.0：近 N 天浏览（views_log 去重计数）一次取回构建 map，避免逐篇查询
+    $views30 = [];
+    foreach (db_all('SELECT article, COUNT(*) AS c FROM views_log WHERE day >= ? GROUP BY article',
+                    [date('Y-m-d', time() - YSM_HEAT_WINDOW_DAYS * 86400)]) as $v) {
+        $views30[$v['article']] = (int)$v['c'];
+    }
     $nowMin = date('Y-m-d H:i');
     if ($mdFiles) {
         usort($mdFiles, function($a, $b) { return filemtime($b) - filemtime($a); });
@@ -434,6 +461,9 @@ if ('list' === $action) {
                 'license' => $license, 'licenseUrl' => $licenseUrl, 'pinned' => $isPinned,
                 'cover' => $cover,
                 'views' => $viewCounts[$baseName] ?? 0,
+                // v5.2.0：仅"新增"字段——近 N 天去重浏览 + 热度档位（既有字段一律未改）
+                'views30' => $views30[$baseName] ?? 0,
+                'heat' => ysmHeatTier(ysmHeatScore($views30[$baseName] ?? 0, $viewCounts[$baseName] ?? 0)),
                 'status' => $mStatus ?? 'published',
                 'publishAt' => $mPublishAt ?? ''];
         }
@@ -994,7 +1024,27 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
     <div class="color-panel-content"><div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-weight:600;">选择主题色</span><button class="color-reset-btn" id="colorResetBtn">重置</button></div><input type="range" min="0" max="360" value="220" class="hue-slider" id="hueSlider"></div>
 </div>
 <main class="main-container" id="mainContainer">
-    <div id="homeView"><div class="category-bar" id="categoryBar"></div><!-- v3.1.6：公告卡片区块（有公告才显示） --><div class="announcement-section" id="announcementSection"></div><div class="cards-grid" id="cardsGrid"></div><!-- v4.0.0：归档视图（按年月分组；默认隐藏，点分类栏「归档」切换） --><div class="archive-view" id="archiveView" style="display:none"></div><div class="empty-state py-16 text-center text-ink-3" id="emptyHome" style="display:none;">📭 暂无文档</div></div>
+    <div id="homeView">
+        <!-- v5.2.0：杂志式主副栏——主栏（公告 + 卡片 + 归档）与副栏（分类/归档入口 + 热门）同源同接口，仅排版不同 -->
+        <div class="home-layout">
+            <div class="home-main">
+                <!-- v3.1.6：公告卡片区块（有公告才显示） -->
+                <div class="announcement-section" id="announcementSection"></div>
+                <div class="cards-grid" id="cardsGrid"></div>
+                <!-- v4.0.0：归档视图（按年月分组；默认隐藏，点分类栏「归档」切换） -->
+                <div class="archive-view" id="archiveView" style="display:none"></div>
+                <div class="empty-state py-16 text-center text-ink-3" id="emptyHome" style="display:none;">📭 暂无文档</div>
+            </div>
+            <aside class="home-aside" id="homeAside">
+                <div class="category-bar" id="categoryBar"></div>
+                <!-- v5.2.0：副栏热门榜（前端按热度分排序取前 5，数据同 list 接口，不新增接口） -->
+                <section class="home-popular" id="homePopular">
+                    <div class="home-popular-title">热门文章</div>
+                    <div class="home-popular-list" id="homePopularList"></div>
+                </section>
+            </aside>
+        </div>
+    </div>
     <div class="reading-view" id="readingView">
         <div class="markdown-body" id="markdownBody"></div>
         <div class="cmt-capsule-section" id="commentSection" style="display:none;">

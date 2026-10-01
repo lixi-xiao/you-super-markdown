@@ -26,6 +26,8 @@ __pycache__/
 *.md
 # README.md 例外（仓库门面，随仓库发布）
 !README.md
+# HELP.md 例外（使用与部署帮助文档，面向部署者与二次开发者，随仓库发布）
+!HELP.md
 # docs/ 目录（含敏感运维信息，不应进入公开仓库）
 docs/
 

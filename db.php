@@ -237,6 +237,23 @@ function db_init_schema($pdo) {
         day TEXT,
         PRIMARY KEY (article, ip, day)
     )');
+    // v5.3.1-beta：阅读字体库（站长/超管上传，读者仅从「已启用」字体中选择）
+    //   id: 随机 16 位 hex（下载端点 font.php?f=<id> 的唯一白名单键）
+    //   filename: 服务端随机重命名（f_<16hex>.<ext>，绝不使用用户原始文件名）
+    //   ext: woff2|woff|ttf|otf；enabled: 0 停用 / 1 启用
+    $pdo->exec('CREATE TABLE IF NOT EXISTS fonts (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        filename TEXT,
+        ext TEXT,
+        size INTEGER DEFAULT 0,
+        enabled INTEGER DEFAULT 0,
+        uploader_id TEXT,
+        uploader_name TEXT,
+        created TEXT
+    )');
+    // v5.3.1-beta：字体上传限速表（复用 db_rate_add/db_rate_count 的 (ip, fp, t) 结构）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS font_rates (ip TEXT, fp TEXT, t INTEGER)');
     // v4.0.0：评论邮件订阅设置（key 复用 config 表，无需新表）
     // v5.0.0：写入 schema 版本标记（s=5.0.0，epoch=2；迁移器据此判断是否需要升级）
     // v5.0.0 P7（审计链加固）：全新安装即使用新 HMAC 链，故 epoch=2（epoch1=旧 sha256 链，epoch2=新 HMAC 链）

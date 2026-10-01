@@ -513,6 +513,12 @@ server {
         open_file_cache_valid 60s;
     }
 
+    # v5.3.1-beta：阅读字体目录禁止 Web 直接访问/执行（唯一读取入口为受控端点 font.php?f=<id>）
+    location ^~ /data/fonts/ {
+        deny all;
+        return 403;
+    }
+
     # v3.3.0：放行文章视频目录（data/videos/ 仅视频可公开访问）
     # v3.3.2：启用 ngx_http_mp4_module 伪流媒体（拖动 seek 更流畅）+ 强缓存头
     location ^~ /data/videos/ {

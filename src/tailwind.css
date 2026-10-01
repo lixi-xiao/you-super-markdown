@@ -1191,3 +1191,52 @@
     -webkit-overflow-scrolling: touch;
   }
 }
+
+/* ============================================================================
+   v5.3.1-beta：读者可选阅读字体（阅读设置区内，轻量、不喧宾夺主）
+   说明：只追加本功能所需的组件类，不改 .markdown-body 正文排版、不改弹窗/卡片/音乐外观。
+   前端只接受服务端返回的字体 id（16 位 hex），src 由 id 拼固定端点 font.php（不接受任意 URL）。
+   ============================================================================ */
+@layer components {
+  .ysm-font-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+  }
+  .ysm-font-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .ysm-font-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .ysm-font-chip {
+    max-width: 100%;
+    padding: 7px 14px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: all 0.2s;
+  }
+  .ysm-font-chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .ysm-font-chip.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+}

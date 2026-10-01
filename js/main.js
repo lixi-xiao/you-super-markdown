@@ -242,11 +242,76 @@
         document.head.appendChild(t);
     }
     function renderMathBlocks(e) {
-        if (window.MathJax && MathJax.typesetPromise) {
-            MathJax.typesetPromise([ e ]).catch(function(e) {
-                console.error("[mathjax] 排版出错（已保留原文）", e);
-            });
+        // v5.2.1：长文分段排版——顶层块 > 40 时按批 typeset 并在批间让出主线程，
+        //         避免"整容器一次性 typeset"在公式密集长文中长时间阻塞；公式不跨顶层块，分段等价安全
+        if (!(window.MathJax && MathJax.typesetPromise)) return;
+        try {
+            var t = e.children, n = t.length;
+            if (n <= 40) {
+                MathJax.typesetPromise([ e ]).catch(function(e) {
+                    console.error("[mathjax] 排版出错（已保留原文）", e);
+                });
+                return;
+            }
+            var i = [], a = 0;
+            for (; a < n; a++) i.push(t[a]);
+            var s = 0, o = 40;
+            var c = function() {
+                if (s >= i.length) return;
+                var e = i.slice(s, s + o);
+                s += o;
+                MathJax.typesetPromise(e).catch(function(e) {
+                    console.error("[mathjax] 排版出错（已保留原文）", e);
+                }).then(function() {
+                    whenIdle(c);
+                });
+            };
+            c();
+        } catch (t) {
+            console.error("[mathjax] 排版出错（已保留原文）", t);
         }
+    }
+    // v5.2.1：空闲调度——优先 requestIdleCallback（300ms 超时兜底），无则退化为 setTimeout
+        function whenIdle(e) {
+        if (typeof window.requestIdleCallback === "function") {
+            window.requestIdleCallback(function() {
+                e();
+            }, {
+                timeout: 300
+            });
+        } else {
+            window.setTimeout(e, 1);
+        }
+    }
+    // v5.2.1：代码高亮分片——长文大量代码块不再"首帧一次性同步高亮"；分片 + 空闲调度，全部完成后回调（加复制按钮）
+        function highlightCodeBlocks(e, t) {
+        t = t || function() {};
+        if (typeof hljs === "undefined") {
+            t();
+            return;
+        }
+        var n = e.querySelectorAll("pre code");
+        if (!n.length) {
+            t();
+            return;
+        }
+        var i = [], a = 0;
+        for (; a < n.length; a++) i.push(n[a]);
+        var s = 0, o = 12;
+        var c = function() {
+            if (s >= i.length) {
+                t();
+                return;
+            }
+            var e = Math.min(s + o, i.length);
+            for (; s < e; s++) {
+                try {
+                    hljs.highlightElement(i[s]);
+                } catch (e) {}
+            }
+            if (s < i.length) whenIdle(c); else t();
+        };
+        whenIdle(c);
     }
     function hasMathInMd(e) {
         // 保守探测公式定界符：$$ 块、LaTeX 原生 \[ \(、成对行内 $…$
@@ -356,7 +421,8 @@
     const Ce = document.getElementById("nextTitle");
     let Ie = [];
     let Be = "";
-    let Me = "";
+    // v5.2.1：标签改为多选（数组），过滤语义为 AND（同时命中全部已选标签）
+        let Me = [];
  // v4.0.0：标签聚合过滤
         let He = false;
  // v4.0.0：归档视图开关
@@ -616,7 +682,8 @@
             const e = await fetch("?action=list");
             const t = await e.json();
             if (t.success) {
-                Ie = t.files;
+                // v5.2.1：兜底——list 缺 files 字段（旧/异常响应）时不致后续 forEach 崩溃
+                Ie = t.files || [];
                 renderCategoryBar();
                 renderAnnouncements();
                 renderHomeContent();
@@ -825,9 +892,10 @@
             x.style.display = "none";
             if (L) L.style.display = "block";
         } else if (L) L.style.display = "none";
-        if (Ie.length === 0) {
-            E.style.display = "block";
+        if (!Ie.length) {
             x.innerHTML = "";
+            E.style.display = "block";
+            E.textContent = "📭 暂无文档";
             return;
         }
         E.style.display = "none";
@@ -841,13 +909,20 @@
             return e;
         }
         var e = filteredFiles();
-        x.innerHTML = e.map((e, t) => `\n            <div class="doc-card${t === 0 ? " card-hero" : ""}" data-heat="${escapeHTML(e.heat || "normal")}" data-views="${e.views || 0}" data-views30="${e.views30 || 0}" data-filename="${escapeHTML(e.name)}" style="animation-delay:${t * .05}s">\n                ${e.cover ? `<div class="doc-cover"><img src="${escapeHTML(cardCover(e.cover))}" alt="" loading="lazy" onerror="this.parentNode.style.display='none'"></div>` : ""}\n                <div class="card-title">${e.pinned ? '<span class="card-pin-icon" title="置顶"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" fill="currentColor" stroke="none"/></svg></span>' : ""}${escapeHTML(e.displayName)}</div>\n                <div class="card-meta">\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>${e.modified}</span>\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>${e.wordCount}字</span>\n                    ${e.category ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>${escapeHTML(e.category)}</span>` : ""}\n                    ${(e.views || 0) > 0 ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>${e.views}</span>` : ""}\n                </div>\n                <div class="card-excerpt">${escapeHTML(e.excerpt || "")}</div>\n                <div class="card-tags">${e.tags.map(e => `<span class="tag" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div>\n            </div>`).join("");
+        // v5.2.1：多选标签交集为空时给出空态提示（此前只清空网格、无任何反馈，表现为"白屏"）
+        if (!e.length) {
+            x.innerHTML = "";
+            E.style.display = "block";
+            E.textContent = Me.length ? "🔍 没有同时包含所选标签的文章" : "🔍 该分类下暂无文章";
+            return;
+        }
+        x.innerHTML = e.map((e, t) => `\n            <div class="doc-card${t === 0 ? " card-hero" : ""}" data-heat="${escapeHTML(e.heat || "normal")}" data-views="${e.views || 0}" data-views30="${e.views30 || 0}" data-filename="${escapeHTML(e.name)}" style="animation-delay:${t * .05}s">\n                ${e.cover ? `<div class="doc-cover"><img src="${escapeHTML(cardCover(e.cover))}" alt="" loading="lazy" onerror="this.parentNode.style.display='none'"></div>` : ""}\n                <div class="card-title">${e.pinned ? '<span class="card-pin-icon" title="置顶"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" fill="currentColor" stroke="none"/></svg></span>' : ""}${escapeHTML(e.displayName)}</div>\n                <div class="card-meta">\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>${e.modified}</span>\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>${e.wordCount}字</span>\n                    ${e.category ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>${escapeHTML(e.category)}</span>` : ""}\n                    ${(e.views || 0) > 0 ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>${e.views}</span>` : ""}\n                </div>\n                <div class="card-excerpt">${escapeHTML(e.excerpt || "")}</div>\n                <div class="card-tags">${e.tags.map(e => `<span class="tag${isTagSelected(e) ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div></div>`).join("");
         document.querySelectorAll(".doc-card").forEach(e => e.addEventListener("click", () => loadFile(e.dataset.filename)));
         // v4.0.0：卡片标签点击 → 标签聚合过滤（阻止冒泡，避免误触进入文章）
                 document.querySelectorAll(".doc-card .card-tags .tag").forEach(e => {
             e.addEventListener("click", function(e) {
                 e.stopPropagation();
-                Me = Me === this.dataset.tag ? "" : this.dataset.tag;
+                toggleTagFilter(this.dataset.tag);
                 Be = "";
                 renderCategoryBar();
                 renderHomeContent();
@@ -862,7 +937,19 @@
         function renderHomePopular() {
         var box = document.getElementById("homePopularList");
         if (!box) return;
-        var list = Ie.filter(function(e) {
+        // v5.2.1：手机端热门榜默认折叠——点击标题展开/收起（桌面端由 CSS 保持展开，类切换无副作用）
+        var popSec = document.getElementById("homePopular");
+        if (popSec && !popSec.__ysmToggleBound) {
+            popSec.__ysmToggleBound = true;
+            var popTitle = popSec.querySelector(".home-popular-title");
+            if (popTitle) {
+                popTitle.addEventListener("click", function() {
+                    popSec.classList.toggle("is-open");
+                });
+            }
+        }
+        // v5.2.1：兜底——Ie 为空/字段缺失时不报错
+        var list = (Ie || []).filter(function(e) {
             return (e.views30 || 0) > 0 || (e.views || 0) > 0;
         }).sort(function(a, b) {
             var d = (b.views30 || 0) - (a.views30 || 0);
@@ -884,6 +971,17 @@
                 loadFile(e.dataset.filename);
             });
         });
+    }
+    // v5.2.1：标签多选（AND）——已选标签数组；点选叠加、再点取消；支持一键清空
+        function toggleTagFilter(e) {
+        var t = Me.indexOf(e);
+        if (t === -1) Me.push(e); else Me.splice(t, 1);
+    }
+    function isTagSelected(e) {
+        return Me.indexOf(e) !== -1;
+    }
+    function clearTagFilter() {
+        Me = [];
     }
     function renderCategoryBar() {
         var e = document.getElementById("categoryBar");
@@ -908,22 +1006,26 @@
         var s = Ie.length;
         // v4.0.0：归档视图切换按钮 + 标签聚合条
                 var o = He ? `<div class="category-bar-item active" data-view="archive">归档</div>` : `<div class="category-bar-item" data-view="archive">归档</div>`;
-        var c = `<div class="category-bar-left">${o}<div class="category-bar-item${Be === "" && !Me ? " active" : ""}" data-category="">全部 <span class="category-bar-count">${s}</span></div></div>`;
+        var c = `<div class="category-bar-left">${o}<div class="category-bar-item${Be === "" && !Me.length ? " active" : ""}" data-category="">全部 <span class="category-bar-count">${s}</span></div></div>`;
         var r = '<div class="category-bar-divider"></div>';
         var l = "";
-        if (Me) {
-            l += `<div class="category-bar-item active tag-filter" data-tag="${escapeHTML(Me)}">#${escapeHTML(Me)} <span class="category-bar-count">${n[Me] || 0}</span></div>`;
-        }
         i.forEach(e => {
-            l += `<div class="category-bar-item${Be === e && !Me ? " active" : ""}" data-category="${escapeHTML(e)}">${escapeHTML(e)} <span class="category-bar-count">${t[e]}</span></div>`;
+            l += `<div class="category-bar-item${Be === e && !Me.length ? " active" : ""}" data-category="${escapeHTML(e)}">${escapeHTML(e)} <span class="category-bar-count">${t[e]}</span></div>`;
         });
+        // v5.2.1：已选标签筛选条（移动端收敛为单行横向滚动、小尺寸 chip、可单删/一键清空）
+                var f = "";
+        if (Me.length) {
+            f = '<div class="tag-filter-bar">' + Me.map(function(e) {
+                return '<span class="tag-filter-chip" data-tag="' + escapeHTML(e) + '">#' + escapeHTML(e) + '<span class="tag-filter-count">' + (n[e] || 0) + '</span><span class="tag-filter-x" aria-hidden="true">×</span></span>';
+            }).join("") + '<span class="tag-filter-clear" data-clear="1">清空</span></div>';
+        }
         // v4.1.1：标签云独立一行（不再与分类按钮同排挤压导致重叠/挤出）
                 var d = "";
         if (Be === "" && a.length > 0) {
-            d = `<div class="tag-cloud-row"><div class="tag-cloud">${a.slice(0, 20).map(e => `<span class="tag-cloud-item${Me === e ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div></div>`;
+            d = `<div class="tag-cloud-row"><div class="tag-cloud">${a.slice(0, 20).map(e => `<span class="tag-cloud-item${isTagSelected(e) ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div></div>`;
         }
         var m = `<div class="category-bar-right">${l}</div>`;
-        e.innerHTML = c + r + m + d;
+        e.innerHTML = f + c + r + m + d;
         e.querySelectorAll(".category-bar-item").forEach(e => {
             e.addEventListener("click", function() {
                 if (this.dataset.view === "archive") {
@@ -933,33 +1035,66 @@
                     return;
                 }
                 if (this.dataset.tag !== undefined) {
-                    Me = Me === this.dataset.tag ? "" : this.dataset.tag;
+                    toggleTagFilter(this.dataset.tag);
                 } else {
                     // v4.0.0：点「全部」（data-category=""）同时清除标签筛选
                     Be = this.dataset.category;
-                    Me = "";
+                    clearTagFilter();
                 }
                 renderCategoryBar();
                 renderHomeContent();
             });
         });
+        // v5.2.1：已选标签 chip 点击 = 取消该标签；「清空」= 取消全部
+                e.querySelectorAll(".tag-filter-chip").forEach(function(e) {
+            e.addEventListener("click", function() {
+                toggleTagFilter(this.dataset.tag);
+                renderCategoryBar();
+                renderHomeContent();
+            });
+        });
+        var clearBtn = e.querySelector(".tag-filter-clear");
+        if (clearBtn) {
+            clearBtn.addEventListener("click", function() {
+                clearTagFilter();
+                renderCategoryBar();
+                renderHomeContent();
+            });
+        }
         e.querySelectorAll(".tag-cloud-item").forEach(e => {
             e.addEventListener("click", function() {
-                Me = Me === this.dataset.tag ? "" : this.dataset.tag;
+                toggleTagFilter(this.dataset.tag);
                 renderCategoryBar();
                 renderHomeContent();
             });
         });
         // v4.1.4：分类栏/标签云启用横向滚动（滚轮+拖拽），超出部分电脑端可查看
-                enableHScroll(e.querySelector(".category-bar-right"));
+        enableHScroll(e.querySelector(".category-bar-left"));
+        enableHScroll(e.querySelector(".category-bar-right"));
+        enableHScroll(e.querySelector(".tag-filter-bar"));
         enableHScroll(e.querySelector(".tag-cloud"));
     }
     // v4.1.4：分类/标签栏横向滚动增强——桌面端鼠标滚轮垂直滚动转横向，并支持按住拖动
-        function enableHScroll(e) {
+    // v5.2.1：document 级拖拽监听改为「全局仅注册一次」（此前每次重渲染分类栏都会重新注册，
+    //         交互次数越多监听器越多，造成泄漏）；拖拽状态改用共享变量，不再逐元素闭包。
+    var ysmDragEl = null, ysmDragStartX = 0, ysmDragStartLeft = 0, ysmDragMoved = false, ysmDragGuardEl = null;
+    document.addEventListener("mousemove", function(s) {
+        if (!ysmDragEl) return;
+        var o = s.clientX - ysmDragStartX;
+        if (Math.abs(o) > 4) ysmDragMoved = true;
+        ysmDragEl.scrollLeft = ysmDragStartLeft - o;
+    });
+    document.addEventListener("mouseup", function() {
+        if (!ysmDragEl) return;
+        ysmDragEl.style.cursor = "";
+        ysmDragGuardEl = ysmDragMoved ? ysmDragEl : null;
+        ysmDragEl = null;
+    });
+    function enableHScroll(e) {
         if (!e || e.__ysmHScroll) return;
         e.__ysmHScroll = true;
         // 滚轮：垂直滚动（deltaY）转为横向滚动（deltaX），Shift 不依赖
-                e.addEventListener("wheel", function(t) {
+        e.addEventListener("wheel", function(t) {
             if (Math.abs(t.deltaY) > Math.abs(t.deltaX) && e.scrollWidth > e.clientWidth + 2) {
                 t.preventDefault();
                 e.scrollLeft += t.deltaY;
@@ -968,40 +1103,37 @@
             passive: false
         });
         // 按住拖动（桌面鼠标；移动端原生触摸滚动不受影响）
-                var t = false, n = 0, i = 0, a = false;
         e.addEventListener("mousedown", function(s) {
             if (s.button !== 0) return;
-            if (e.scrollWidth <= e.clientWidth + 2) return;
- // 无溢出不启用拖拽，避免干扰点击
-                        t = true;
-            a = false;
-            n = s.clientX;
-            i = e.scrollLeft;
+            if (e.scrollWidth <= e.clientWidth + 2) return; // 无溢出不启用拖拽，避免干扰点击
+            ysmDragEl = e;
+            ysmDragMoved = false;
+            ysmDragGuardEl = null;
+            ysmDragStartX = s.clientX;
+            ysmDragStartLeft = e.scrollLeft;
             e.style.cursor = "grabbing";
         });
-        document.addEventListener("mousemove", function(s) {
-            if (!t) return;
-            var o = s.clientX - n;
-            if (Math.abs(o) > 4) a = true;
-            e.scrollLeft = i - o;
-        });
-        document.addEventListener("mouseup", function() {
-            if (!t) return;
-            t = false;
-            e.style.cursor = "";
-        });
         // 子元素点击：若刚拖动过则忽略
-                e.addEventListener("click", function(e) {
-            if (a) {
-                e.stopPropagation();
-                e.preventDefault();
-                a = false;
+        e.addEventListener("click", function(ev) {
+            if (ysmDragGuardEl === e) {
+                ysmDragGuardEl = null;
+                ev.stopPropagation();
+                ev.preventDefault();
             }
         }, true);
     }
     // v4.0.0：根据 currentCategory/currentTag 过滤 + 归档视图渲染（按年月分组）
         function filteredFiles() {
-        return Ie.filter(e => (!Be || e.category === Be) && (!Me || (e.tags || []).includes(Me)));
+        // v5.2.1：标签多选 AND——需同时命中全部已选标签（逐步缩小范围）
+        return Ie.filter(function(e) {
+            if (Be && e.category !== Be) return false;
+            if (!Me.length) return true;
+            var t = e.tags || [];
+            for (var i = 0; i < Me.length; i++) {
+                if (t.indexOf(Me[i]) === -1) return false;
+            }
+            return true;
+        });
     }
     function renderHomeContent() {
         if (He) {
@@ -1533,16 +1665,17 @@
             // v4.9.0：正文含公式（$$ / \( \[ / 成对 $）时按需加载 MathJax 并排版正文容器（无公式则零加载）
                         if (hasMathInMd(o)) {
                 ensureMathJax(function() {
-                    renderMathBlocks(w);
+                    // v5.2.1：等引擎就绪后，把公式排版推迟到空闲时段——正文文字先上屏，公式随后补齐
+                    whenIdle(function() {
+                        renderMathBlocks(w);
+                    });
                 });
             }
             // v3.2.5：mermaid 流程图渲染（```mermaid 代码块 → 实际图表；优先于 hljs 高亮处理）；v4.2.2 起按需加载
             // v4.7.14：mermaid 渲染完成后执行 hljs 和 addCopyButtons，避免异步加载时序问题
                         renderMermaidBlocks(w, function() {
-                if (typeof hljs !== "undefined") {
-                    w.querySelectorAll("pre code").forEach(e => hljs.highlightElement(e));
-                }
-                addCopyButtons();
+                // v5.2.1：代码高亮改为分片 + 空闲调度（长文大量代码块不再首帧同步全量高亮）；完成后加复制按钮
+                highlightCodeBlocks(w, addCopyButtons);
             });
             // v3.3.0：视频语法 → 播放器（仅站内 data/videos/ 相对路径；外链按纯文本保留）
                         renderYmVideos(w, i);

@@ -929,6 +929,56 @@
     color: var(--text-muted);
   }
 
+  /* ── v5.2.1：已选标签筛选条（单行横向滚动 / 小尺寸 chip / 一键清空） ── */
+  #categoryBar .tag-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  #categoryBar .tag-filter-bar::-webkit-scrollbar { display: none; }
+  #categoryBar .tag-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 4px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 0.76em;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #categoryBar .tag-filter-chip .tag-filter-count { opacity: 0.75; font-weight: 700; }
+  #categoryBar .tag-filter-chip .tag-filter-x { font-size: 1.05em; line-height: 1; opacity: 0.85; }
+  #categoryBar .tag-filter-clear {
+    flex: 0 0 auto;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.76em;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #categoryBar .tag-filter-clear:hover { color: var(--accent); border-color: var(--accent); }
+  /* 卡片内标签选中态（标签多选可见反馈） */
+  #cardsGrid .doc-card .card-tags .tag.active {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 4px 10px -4px hsla(var(--accent-hue), var(--accent-sat), 50%, 0.6);
+  }
+
   /* ── 布局断点：<1200 单列（副栏置顶）；≥1200 主副两栏 ── */
   @media (max-width: 1199px) {
     #homeView .home-aside { order: -1; }
@@ -938,6 +988,53 @@
     #mainContainer.main-container { max-width: 1180px; padding: 24px 28px 60px; }
     /* 主容器加宽后，阅读视图保持原有阅读宽度并居中（正文内部排版保持原样） */
     #readingView { max-width: 860px; margin-left: auto; margin-right: auto; }
+  }
+
+  /* ── v5.2.1：手机端（<768px）副栏收口 ─────────────────────────
+     ① 热门榜默认折叠为一行，点击标题展开（桌面端不受影响，始终展开）；
+     ② 分类栏 / 标签云改单行横向滚动，不再纵向堆叠占满首屏（首屏以卡片列表为主）。
+     桌面端（≥768px）保持原有观感。 ─────────────────────────────── */
+  @media (max-width: 767px) {
+    /* ① 热门文章榜：默认折叠，点击标题展开/收起 */
+    #homeAside .home-popular-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #homeAside .home-popular-title::after {
+      content: "展开";
+      flex: 0 0 auto;
+      font-size: 0.74em;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    #homeAside .home-popular.is-open .home-popular-title::after { content: "收起"; }
+    #homeAside .home-popular:not(.is-open) .home-popular-list { display: none; }
+
+    /* ② 分类 / 标签云：单行横向滚动（一行可横向滑动），杜绝纵向堆叠 */
+    #homeAside #categoryBar .category-bar-left,
+    #homeAside #categoryBar .category-bar-right,
+    #homeAside #categoryBar .tag-cloud {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    #homeAside #categoryBar .category-bar-left::-webkit-scrollbar,
+    #homeAside #categoryBar .category-bar-right::-webkit-scrollbar,
+    #homeAside #categoryBar .tag-cloud::-webkit-scrollbar { display: none; }
+    #homeAside #categoryBar .tag-cloud-row { padding-top: 8px; }
+    #homeAside #categoryBar .category-bar-item { padding: 5px 11px; }
+    #homeAside #categoryBar .tag-cloud-item { padding: 3px 10px; }
+
+    /* 已选标签筛选条：进一步紧凑 */
+    #categoryBar .tag-filter-chip,
+    #categoryBar .tag-filter-clear { padding: 2px 8px; font-size: 0.72em; }
   }
 
   /* ── 移动端：紧凑化，杜绝横向溢出 ─────────────────────── */

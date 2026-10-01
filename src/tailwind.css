@@ -752,88 +752,30 @@
     min-width: 0;
   }
 
-  /* ── 卡片网格：按视口断点自适应列数（手机 1 / 平板 2 / 桌面 3–4） ── */
+  /* ── v5.2.2：卡片网格改为「按容器宽度 auto-fill 自适应」——
+     不再用固定断点写死 1/2/3 列；列数由容器可用宽度与卡片最小宽度自动推导，
+     宽屏一行容纳更多卡片、窄屏自然回退单列；min(100%,…) 兜底确保任何视口不横向溢出。 ── */
   #cardsGrid {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 18px;
-    grid-auto-flow: dense;
-  }
-  @media (min-width: 641px) {
-    #cardsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-  }
-  @media (min-width: 1024px) {
-    #cardsGrid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 22px; }
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--ysm-card-min, 260px)), 1fr));
+    gap: var(--ysm-gap, 16px);
+    grid-auto-flow: row;
+    align-items: stretch;
+    min-width: 0;
   }
 
-  /* ── 大图头条：首卡整行贯通，放大的标题与留白 ─────────── */
-  #cardsGrid .doc-card.card-hero {
-    grid-column: 1 / -1;
-    aspect-ratio: 21 / 9;
-    padding: 24px 28px;
-    gap: 10px;
+  /* ── v5.2.2：卡片尺寸统一（移除「越热越大」）──────────────────
+     5.2.0 的 .card-hero 首卡大图头条、[data-heat="hot"] 跨列大卡、
+     [data-heat="normal"] 紧凑卡三档尺寸规则、以及 hot 卡的「热」角标伪元素
+     已【全部删除】：所有卡片只保留下面这一套统一尺寸规则。
+     data-heat 字段仍由 JS 输出（内部备用），但不再影响任何尺寸/排版。
+     如需「热度优先排序」，见 js/main.js 顶部 YSM_SORT_BY_HEAT 常量（一行开关，默认 false＝最新优先）。 */
+  #cardsGrid .doc-card {
+    padding: clamp(12px, 1.1vw, 17px) clamp(14px, 1.3vw, 19px);
+    gap: 6px;
+    border-radius: 18px;
   }
-  #cardsGrid .doc-card.card-hero .card-title {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    overflow: hidden;
-    white-space: normal;
-    font-size: 1.6em;
-    font-weight: 900;
-    line-height: 1.25;
-    letter-spacing: -0.02em;
-  }
-  #cardsGrid .doc-card.card-hero .card-meta { font-size: 0.84em; gap: 12px; }
-  #cardsGrid .doc-card.card-hero .card-excerpt {
-    -webkit-line-clamp: 3;
-    font-size: 1em;
-    line-height: 1.7;
-  }
-
-  /* ── 热度大卡（heat=hot）：跨两列、更大的标题 ─────────── */
-  #cardsGrid .doc-card[data-heat="hot"] {
-    aspect-ratio: 16 / 9;
-    padding: 20px 22px;
-  }
-  #cardsGrid .doc-card[data-heat="hot"] .card-title {
-    font-size: 1.35em;
-    font-weight: 800;
-    line-height: 1.3;
-  }
-  #cardsGrid .doc-card[data-heat="hot"] .card-excerpt { -webkit-line-clamp: 3; }
-  @media (min-width: 641px) {
-    #cardsGrid .doc-card[data-heat="hot"] { grid-column: span 2; }
-  }
-  /* 热卡角标（纯 CSS 伪元素，无需改动 JS 模板；.doc-card::after 此前未被占用） */
-  #cardsGrid .doc-card[data-heat="hot"]::after {
-    content: "热";
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    z-index: 2;
-    padding: 2px 10px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: #fff;
-    background: var(--accent);
-    box-shadow: 0 6px 14px -6px hsla(var(--accent-hue), var(--accent-sat), 50%, 0.9);
-  }
-
-  /* ── 普通紧凑卡（heat=normal）：更矮更密 ─────────────── */
-  #cardsGrid .doc-card[data-heat="normal"] {
-    aspect-ratio: 16 / 8;
-    padding: 12px 14px;
-    gap: 4px;
-  }
-  #cardsGrid .doc-card[data-heat="normal"] .card-title { font-size: 1em; font-weight: 650; }
-  #cardsGrid .doc-card[data-heat="normal"] .card-meta { font-size: 0.76em; gap: 8px; }
-  #cardsGrid .doc-card[data-heat="normal"] .card-excerpt {
-    -webkit-line-clamp: 2;
-    font-size: 0.84em;
-    line-height: 1.5;
-  }
+  #cardsGrid .doc-card .card-title { font-size: 1.12em; line-height: 1.35; }
+  #cardsGrid .doc-card .card-excerpt { -webkit-line-clamp: 4; font-size: 0.9em; line-height: 1.6; }
 
   /* ── 副栏：分类 / 归档入口 / 标签云（竖排） ───────────── */
   #homeAside #categoryBar.category-bar {
@@ -929,19 +871,9 @@
     color: var(--text-muted);
   }
 
-  /* ── v5.2.1：已选标签筛选条（单行横向滚动 / 小尺寸 chip / 一键清空） ── */
-  #categoryBar .tag-filter-bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    min-width: 0;
-    overflow-x: auto;
-    padding-bottom: 2px;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-  #categoryBar .tag-filter-bar::-webkit-scrollbar { display: none; }
+  /* ── v5.2.2：已选标签 chip 内联进筛选区（不再单起一整行）──
+     由 js/main.js 把 chip 渲染进 .category-bar-right（与一级标签同排、可横向滑动），
+     每个 chip 自带 ×（.tag-filter-x）可直接点击取消；尺寸沿用 5.2.1。 ── */
   #categoryBar .tag-filter-chip {
     display: inline-flex;
     align-items: center;
@@ -979,14 +911,15 @@
     box-shadow: 0 4px 10px -4px hsla(var(--accent-hue), var(--accent-sat), 50%, 0.6);
   }
 
-  /* ── 布局断点：<1200 单列（副栏置顶）；≥1200 主副两栏 ── */
-  @media (max-width: 1199px) {
+  /* ── v5.2.2 布局断点：<1025 单列（副栏置顶）；≥1025 主副两栏 ──
+     桌面端提前进入两栏（更早收敛留白），主容器放宽到 min(1400px,100%) 以容纳更多列。 ── */
+  @media (max-width: 1024px) {
     #homeView .home-aside { order: -1; }
   }
-  @media (min-width: 1200px) {
-    #homeView .home-layout { grid-template-columns: minmax(0, 1fr) 280px; gap: 30px; }
-    #mainContainer.main-container { max-width: 1180px; padding: 24px 28px 60px; }
-    /* 主容器加宽后，阅读视图保持原有阅读宽度并居中（正文内部排版保持原样） */
+  @media (min-width: 1025px) {
+    #homeView .home-layout { grid-template-columns: minmax(0, 1fr) 264px; gap: 24px; }
+    #mainContainer.main-container { max-width: min(1400px, 100%); padding: 18px 24px 48px; }
+    /* 主容器加宽后，阅读视图仍保持原阅读宽度并居中（正文内部排版保持原样） */
     #readingView { max-width: 860px; margin-left: auto; margin-right: auto; }
   }
 
@@ -1039,12 +972,119 @@
 
   /* ── 移动端：紧凑化，杜绝横向溢出 ─────────────────────── */
   @media (max-width: 640px) {
-    #cardsGrid { gap: 16px; }
-    #cardsGrid .doc-card.card-hero { aspect-ratio: 16 / 9; padding: 18px; }
-    #cardsGrid .doc-card.card-hero .card-title { font-size: 1.3em; }
-    #cardsGrid .doc-card.card-hero .card-excerpt { -webkit-line-clamp: 2; }
+    #cardsGrid { gap: 14px; }
     #homeView .home-aside { gap: 14px; }
     #homeAside #categoryBar.category-bar { padding: 12px; border-radius: 16px; }
     #homeAside .home-popular { padding: 12px; border-radius: 16px; }
   }
+}
+
+/* ============================================================================
+   P5（v5.2.2）：首页信息密度提升 —— 取消「越热越大」+ 桌面/手机双向压缩 + 全宽自适应
+   做法同前：仅以「壳容器 ID」(#homeView / #homeAside / #cardsGrid / #mainContainer /
+   #categoryBar / #announcementSection / #archiveView) 作前缀提权，覆盖后加载的 style.css
+   旧规则；不改 style.css、不改任何既有 JS 钩子（ID/类名全部保留，仅新增 data-* 无）。
+   ① 卡片尺寸已在 P4 段统一（三档尺寸与「热」角标规则删除）；data-heat 仅内部备用。
+   ② 桌面端同样收紧留白 / 行高 / 组件内边距；宽屏一行排满更多项（flex-wrap 自动填行）。
+   ③ 卡片网格用 auto-fill + minmax(min(100%,…),1fr) + clamp() + 容器宽度变量实现 fluid，
+      随可用宽度自动放大、窄屏回退单列；min(100%,…) 保证任何视口都不横向溢出。
+   不可动清单（卡片背景 / 背景图机制 / 封面水墨遮罩 / 全部弹窗 / 音乐播放器 /
+   .markdown-body 内部正文排版）本段一律未涉及；未新增玻璃拟态。
+   「热度优先排序」开关：js/main.js 顶部 YSM_SORT_BY_HEAT（默认 false＝保持最新优先）。
+   ============================================================================ */
+@layer components {
+  /* ── 全宽自适应的调节旋钮：改这里即可整体缩放首页密度 ──── */
+  #homeView {
+    --ysm-card-min: 260px;                        /* 卡片最小宽度：决定一行放几列 */
+    --ysm-gap: clamp(12px, 1.1vw, 20px);          /* 网格间距随视口伸缩 */
+    min-width: 0;
+  }
+
+  /* ── 桌面端压缩：区块间距 / 组件内边距 / 行高整体收紧 ──── */
+  #announcementSection { margin-bottom: clamp(16px, 1.6vw, 24px); }
+  #announcementSection .ann-header { padding: 8px 14px; border-radius: 14px; }
+  #announcementSection .ann-list { gap: 12px; }
+  #announcementSection .ann-card-left { padding: clamp(14px, 1.4vw, 20px) clamp(16px, 1.6vw, 22px); gap: 9px; }
+  #announcementSection .ann-card-title { font-size: 1.14em; }
+  #announcementSection .ann-card-summary { line-height: 1.6; }
+  #announcementSection .ann-card-meta { gap: 12px; }
+  #archiveView .archive-group { margin-bottom: 18px; }
+  #archiveView .archive-year { padding-bottom: 8px; margin-bottom: 8px; }
+  #archiveView .archive-item { padding: 10px 14px; }
+  #homeAside #categoryBar.category-bar { padding: 10px 12px; border-radius: 16px; }
+  #homeAside #categoryBar .category-bar-right { gap: 6px; }
+  #categoryBar .tag-cloud-row { padding-top: 8px; }
+  #categoryBar .category-bar-item { padding: 5px 12px; }
+  #categoryBar .tag-cloud-item { padding: 3px 10px; }
+  #homeAside .home-popular { padding: 12px; }
+  #homeAside .home-popular-item { padding: 7px 8px; }
+
+  /* ── 标签 / 归档 / 筛选 chip：宽度允许时自动排满一行 ──────
+     flex-wrap 自动换行（非「固定数量后换行」），宽容器一行容纳更多项；窄容器自然折行。 ── */
+  #categoryBar .category-bar-left,
+  #categoryBar .category-bar-right,
+  #categoryBar .tag-cloud {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    column-gap: 6px;
+    min-width: 0;
+  }
+  #categoryBar .category-bar-item,
+  #categoryBar .tag-cloud-item,
+  #categoryBar .tag-filter-chip,
+  #categoryBar .tag-filter-clear { flex: 0 0 auto; }
+
+  /* ── 手机端（<768px）：归档 + 一级标签合并到同一行；已选 chip 内联；公告折一行 ── */
+  @media (max-width: 767px) {
+    /* ① 归档 + 一级标签同一行：副栏分类栏恢复横向流（此前被竖排导致「一级标签另起第二行」）；
+          .tag-cloud-row 仍以 flex-basis:100% 独占第二行，二级标签云保持单行横向滚动。 */
+    #homeAside #categoryBar.category-bar {
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      overflow: hidden;
+      padding: 8px 10px;
+      border-radius: 14px;
+    }
+    #homeAside #categoryBar .category-bar-left {
+      width: auto;
+      flex: 0 0 auto;
+      flex-wrap: nowrap;
+      overflow: visible;
+    }
+    #homeAside #categoryBar .category-bar-right {
+      width: auto;
+      flex: 1 1 0;
+      min-width: 0;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    #homeAside #categoryBar .tag-cloud-row { flex: 1 1 100%; }
+    #homeAside #categoryBar .tag-filter-chip,
+    #homeAside #categoryBar .tag-filter-clear { padding: 2px 8px; font-size: 0.72em; }
+
+    /* ② 公告摘要默认折成一行，点击展开全文（桌面端不折叠、保持原多行观感与点击行为） */
+    #announcementSection .ann-card-summary { cursor: pointer; }
+    #announcementSection .ann-card-summary:not(.is-expanded) {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 1;
+      overflow: hidden;
+    }
+
+    /* ③ 手机端卡片再紧凑一档 */
+    #cardsGrid .doc-card { padding: 14px 15px; border-radius: 16px; }
+  }
+
+  /* ── 任何视口不得横向溢出：关键列允许收缩（min-width:0）+ 溢出兜底 ── */
+  #homeView,
+  #homeView .home-layout,
+  #homeView .home-main,
+  #homeView .home-aside,
+  #cardsGrid,
+  #cardsGrid .doc-card { min-width: 0; }
+  #cardsGrid .doc-card .card-title,
+  #cardsGrid .doc-card .card-excerpt { max-width: 100%; }
 }

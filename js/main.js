@@ -427,6 +427,9 @@
         let He = false;
  // v4.0.0：归档视图开关
         let Ae = false;
+    // v5.2.2：「热度优先排序」开关 —— 默认 false＝保持「最新优先」（与既有 list 顺序一致，排序契约不变）。
+    // 如需改为热度优先：只把下面这一行改成 true 即可（卡片按 views30 优先、views 兜底降序展示）。
+    const YSM_SORT_BY_HEAT = false;
     let Pe = [];
     let Re = -1;
     let Oe = 0;
@@ -737,6 +740,15 @@
                 if (n) openAnnounceDetail(n);
             });
         });
+        // v5.2.2：手机端公告摘要默认折成一行——点击摘要展开/收起全文（阻止冒泡，避免误触整卡跳转）；
+        //         桌面端不做折叠，点击摘要仍走整卡原有行为（不改动既有交互）。
+                e.querySelectorAll(".ann-card-summary").forEach(function(s) {
+            s.addEventListener("click", function(ev) {
+                if (!window.matchMedia || !window.matchMedia("(max-width: 767px)").matches) return;
+                ev.stopPropagation();
+                s.classList.toggle("is-expanded");
+            });
+        });
     }
     // v3.1.8：公告详情弹窗（完整内容；有关联文章时提供跳转按钮）
     // v3.2.3：body 为 markdown 原文 → 用 marked 渲染富文本，提升公告可读性（小白也能看懂排版）
@@ -909,6 +921,14 @@
             return e;
         }
         var e = filteredFiles();
+        // v5.2.2：可选「热度优先排序」（默认关闭，见顶部 YSM_SORT_BY_HEAT）。
+        // 关闭时保持 list 原顺序（最新优先），不改任何排序契约；仅在开启时按热度重排。
+        if (YSM_SORT_BY_HEAT) {
+            e = e.slice().sort(function(a, b) {
+                var d = (b.views30 || 0) - (a.views30 || 0);
+                return d !== 0 ? d : (b.views || 0) - (a.views || 0);
+            });
+        }
         // v5.2.1：多选标签交集为空时给出空态提示（此前只清空网格、无任何反馈，表现为"白屏"）
         if (!e.length) {
             x.innerHTML = "";
@@ -916,7 +936,7 @@
             E.textContent = Me.length ? "🔍 没有同时包含所选标签的文章" : "🔍 该分类下暂无文章";
             return;
         }
-        x.innerHTML = e.map((e, t) => `\n            <div class="doc-card${t === 0 ? " card-hero" : ""}" data-heat="${escapeHTML(e.heat || "normal")}" data-views="${e.views || 0}" data-views30="${e.views30 || 0}" data-filename="${escapeHTML(e.name)}" style="animation-delay:${t * .05}s">\n                ${e.cover ? `<div class="doc-cover"><img src="${escapeHTML(cardCover(e.cover))}" alt="" loading="lazy" onerror="this.parentNode.style.display='none'"></div>` : ""}\n                <div class="card-title">${e.pinned ? '<span class="card-pin-icon" title="置顶"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" fill="currentColor" stroke="none"/></svg></span>' : ""}${escapeHTML(e.displayName)}</div>\n                <div class="card-meta">\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>${e.modified}</span>\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>${e.wordCount}字</span>\n                    ${e.category ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>${escapeHTML(e.category)}</span>` : ""}\n                    ${(e.views || 0) > 0 ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>${e.views}</span>` : ""}\n                </div>\n                <div class="card-excerpt">${escapeHTML(e.excerpt || "")}</div>\n                <div class="card-tags">${e.tags.map(e => `<span class="tag${isTagSelected(e) ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div></div>`).join("");
+        x.innerHTML = e.map((e, t) => `\n            <div class="doc-card" data-heat="${escapeHTML(e.heat || "normal")}" data-views="${e.views || 0}" data-views30="${e.views30 || 0}" data-filename="${escapeHTML(e.name)}" style="animation-delay:${t * .05}s">\n                ${e.cover ? `<div class="doc-cover"><img src="${escapeHTML(cardCover(e.cover))}" alt="" loading="lazy" onerror="this.parentNode.style.display='none'"></div>` : ""}\n                <div class="card-title">${e.pinned ? '<span class="card-pin-icon" title="置顶"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" fill="currentColor" stroke="none"/></svg></span>' : ""}${escapeHTML(e.displayName)}</div>\n                <div class="card-meta">\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>${e.modified}</span>\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>${e.wordCount}字</span>\n                    ${e.category ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>${escapeHTML(e.category)}</span>` : ""}\n                    ${(e.views || 0) > 0 ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>${e.views}</span>` : ""}\n                </div>\n                <div class="card-excerpt">${escapeHTML(e.excerpt || "")}</div>\n                <div class="card-tags">${e.tags.map(e => `<span class="tag${isTagSelected(e) ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div></div>`).join("");
         document.querySelectorAll(".doc-card").forEach(e => e.addEventListener("click", () => loadFile(e.dataset.filename)));
         // v4.0.0：卡片标签点击 → 标签聚合过滤（阻止冒泡，避免误触进入文章）
                 document.querySelectorAll(".doc-card .card-tags .tag").forEach(e => {
@@ -1012,20 +1032,22 @@
         i.forEach(e => {
             l += `<div class="category-bar-item${Be === e && !Me.length ? " active" : ""}" data-category="${escapeHTML(e)}">${escapeHTML(e)} <span class="category-bar-count">${t[e]}</span></div>`;
         });
-        // v5.2.1：已选标签筛选条（移动端收敛为单行横向滚动、小尺寸 chip、可单删/一键清空）
+        // v5.2.2：已选二级标签不再单起一整行——改为筛选区内可直接点掉（×）的 chip，
+        //         与一级标签同排渲染（放进 .category-bar-right），不占独立整行。
                 var f = "";
         if (Me.length) {
-            f = '<div class="tag-filter-bar">' + Me.map(function(e) {
+            f = Me.map(function(e) {
                 return '<span class="tag-filter-chip" data-tag="' + escapeHTML(e) + '">#' + escapeHTML(e) + '<span class="tag-filter-count">' + (n[e] || 0) + '</span><span class="tag-filter-x" aria-hidden="true">×</span></span>';
-            }).join("") + '<span class="tag-filter-clear" data-clear="1">清空</span></div>';
+            }).join("");
         }
         // v4.1.1：标签云独立一行（不再与分类按钮同排挤压导致重叠/挤出）
                 var d = "";
         if (Be === "" && a.length > 0) {
             d = `<div class="tag-cloud-row"><div class="tag-cloud">${a.slice(0, 20).map(e => `<span class="tag-cloud-item${isTagSelected(e) ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div></div>`;
         }
-        var m = `<div class="category-bar-right">${l}</div>`;
-        e.innerHTML = f + c + r + m + d;
+        var clr = Me.length ? '<span class="tag-filter-clear" data-clear="1">清空</span>' : "";
+        var m = `<div class="category-bar-right">${f}${l}${clr}</div>`;
+        e.innerHTML = c + r + m + d;
         e.querySelectorAll(".category-bar-item").forEach(e => {
             e.addEventListener("click", function() {
                 if (this.dataset.view === "archive") {
@@ -1069,9 +1091,9 @@
             });
         });
         // v4.1.4：分类栏/标签云启用横向滚动（滚轮+拖拽），超出部分电脑端可查看
+        // v5.2.2：已选标签 chip 现内联在 .category-bar-right 内，随其横向滚动，无需单独处理
         enableHScroll(e.querySelector(".category-bar-left"));
         enableHScroll(e.querySelector(".category-bar-right"));
-        enableHScroll(e.querySelector(".tag-filter-bar"));
         enableHScroll(e.querySelector(".tag-cloud"));
     }
     // v4.1.4：分类/标签栏横向滚动增强——桌面端鼠标滚轮垂直滚动转横向，并支持按住拖动

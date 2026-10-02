@@ -192,6 +192,37 @@ def _mail_palette(alert_type: str):
     return ('#1f3a5f', '#2a4a75', '#1f3a5f', '安全通知 · 系统自动发送')
 
 
+def _mail_category(alert_type: str) -> str:
+    """v5.4.1：邮件类别（两行 badge 上行用）——告警 / 通知 / 验证；配色仍沿用 _mail_palette"""
+    import re as _re
+    if _re.search(r'失败|断裂|异常|告警|篡改|无法|错误|超时|拒绝|降级|封禁|越权', alert_type):
+        return '告警'
+    if _re.search(r'验证|确认|绑定|注册', alert_type):
+        return '验证'
+    return '通知'
+
+
+def _mail_event_text(alert_type: str) -> str:
+    """v5.4.1：从邮件 type/主题中提取「具体事件」（两行 badge 下行用）——去掉形如「[站点 类别] 」的前缀"""
+    import re as _re
+    raw = str(alert_type).strip()
+    ev = _re.sub(r'^\[[^\]]*\]\s*', '', raw)
+    return ev.strip() or raw
+
+
+def _mail_badge_html(site_e: str, category: str, event: str, bg: str) -> str:
+    """v5.4.1：两行 badge（上行=站点+类别，下行=具体事件）；纯内联样式，邮件客户端兼容，窄屏居中且可换行不截断"""
+    import html as _html
+    e = lambda v: _html.escape(str(v), quote=True)
+    return ('<div style="display:inline-block;max-width:100%;box-sizing:border-box;background:' + bg
+            + ';border-radius:14px;padding:9px 22px;text-align:center;">'
+            '<div style="color:#ffffff;font-size:15px;font-weight:600;letter-spacing:0.5px;line-height:1.5;">'
+            + site_e + ' ' + e(category) + '</div>'
+            '<div style="color:rgba(255,255,255,0.92);font-size:14px;font-weight:400;margin-top:3px;line-height:1.5;word-break:break-word;overflow-wrap:anywhere;">'
+            + e(event) + '</div>'
+            '</div>')
+
+
 def render_mail_html(site: str, alert_type: str, detail: str, server: str = 'localhost', ts: str = '') -> str:
     """HTML 邮件模板（v2.10.1 统一设计：顶部栏按功能分色 + 卡片放大 660px + 内容分层 + 大圆角；与 PHP renderMailHtml 同一视觉；内联样式；动态值转义防注入）"""
     import html as _html
@@ -214,7 +245,7 @@ def render_mail_html(site: str, alert_type: str, detail: str, server: str = 'loc
             '</tr></table>'
             '</td></tr>'
             '<tr><td style="padding:38px 40px 26px;">'
-            '<div style="display:inline-block;background:' + badge + ';color:#ffffff;font-size:12px;font-weight:600;padding:7px 18px;border-radius:999px;letter-spacing:0.5px;">' + type_e + '</div>'
+            + _mail_badge_html(site_e, _mail_category(alert_type), _mail_event_text(alert_type), badge) +
             '<div style="margin-top:22px;color:#2d3748;font-size:14.5px;line-height:2.0;word-break:break-all;overflow-wrap:anywhere;">' + detail_e + '</div>'
             '</td></tr>'
             '<tr><td style="padding:0 40px 34px;">'

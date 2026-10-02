@@ -565,6 +565,16 @@
     let Oe = 0;
     let Ue = -1;
     let Fe = "";
+    // v5.4.3：请求序号 + AbortController 守卫——弱网下快速切换文章/搜索时，
+    //         迟到的旧响应不得再覆盖新视图（修复「点 A 却显示 B / 前一篇」）。
+    let loadSeq = 0;
+    let loadCtrl = null;
+    let searchSeq = 0;
+    let searchCtrl = null;
+    let sidebarSearchSeq = 0;
+    let sidebarSearchCtrl = null;
+    let listSeq = 0;
+    let listCtrl = null;
     function escapeHTML(e) {
         const t = document.createElement("div");
         t.textContent = e;
@@ -812,9 +822,13 @@
         }
     })();
     async function loadFileList() {
+        const seq = ++listSeq;
+        if (listCtrl) listCtrl.abort();
+        listCtrl = new AbortController();
         try {
-            const e = await fetch("?action=list");
+            const e = await fetch("?action=list", { signal: listCtrl.signal });
             const t = await e.json();
+            if (seq !== listSeq) return;
             if (t.success) {
                 // v5.2.1：兜底——list 缺 files 字段（旧/异常响应）时不致后续 forEach 崩溃
                 Ie = t.files || [];
@@ -825,6 +839,7 @@
                 renderSidebarList(Ie);
             }
         } catch (e) {
+            if (seq !== listSeq || (e && e.name === "AbortError")) return;
             x.innerHTML = '<div class="empty-state">⚠️ 加载失败</div>';
         }
     }
@@ -1367,16 +1382,26 @@
         xe.addEventListener("input", function() {
             const e = this.value.trim();
             if (!e) {
+                clearTimeout(xe._timer);
+                if (sidebarSearchCtrl) sidebarSearchCtrl.abort();
+                ++sidebarSearchSeq;
                 renderSidebarList(Ie);
                 return;
             }
             clearTimeout(xe._timer);
             xe._timer = setTimeout(async function() {
+                const seq = ++sidebarSearchSeq;
+                if (sidebarSearchCtrl) sidebarSearchCtrl.abort();
+                sidebarSearchCtrl = new AbortController();
                 try {
-                    const t = await fetch("?action=search&q=" + encodeURIComponent(e));
+                    const t = await fetch("?action=search&q=" + encodeURIComponent(e), { signal: sidebarSearchCtrl.signal });
                     const n = await t.json();
+                    if (seq !== sidebarSearchSeq) return;
                     if (n.success) renderSidebarList(n.files || []);
-                } catch (e) {/* 失败保持原列表 */}
+                } catch (e) {
+                    if (seq !== sidebarSearchSeq || (e && e.name === "AbortError")) return;
+                    /* 失败保持原列表 */
+                }
             }, 250);
         });
     }
@@ -1386,16 +1411,23 @@
     v.addEventListener("input", function() {
         const e = this.value.trim();
         if (!e) {
+            clearTimeout(v._timer);
+            if (searchCtrl) searchCtrl.abort();
+            ++searchSeq;
             y.innerHTML = "";
             return;
         }
         // v4.0.0：全文搜索升级——防抖后请求后端 ?action=search（标题/标签/摘要/正文匹配）
                 clearTimeout(v._timer);
         v._timer = setTimeout(async function() {
+            const seq = ++searchSeq;
+            if (searchCtrl) searchCtrl.abort();
+            searchCtrl = new AbortController();
             y.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">搜索中…</div>';
             try {
-                const t = await fetch("?action=search&q=" + encodeURIComponent(e));
+                const t = await fetch("?action=search&q=" + encodeURIComponent(e), { signal: searchCtrl.signal });
                 const n = await t.json();
+                if (seq !== searchSeq) return;
                 if (!n.success) {
                     y.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">搜索失败</div>';
                     return;
@@ -1415,6 +1447,7 @@
                     });
                 });
             } catch (e) {
+                if (seq !== searchSeq || (e && e.name === "AbortError")) return;
                 y.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">搜索失败</div>';
             }
         }, 250);
@@ -1641,6 +1674,9 @@
         document.body.removeChild(t);
     }
     function showHome(e = true) {
+        // v5.4.3：返回首页即作废在途加载——取消在途请求，并推进序号让迟到响应静默丢弃
+        if (loadCtrl) loadCtrl.abort();
+        ++loadSeq;
         if (Ae) {
             sessionStorage.setItem("md-read-scroll-" + Fe, window.scrollY);
         } else {
@@ -1734,6 +1770,10 @@
         document.title = "渲染失败 | " + (window.YSM_SITE_TITLE || "You Super Markdown");
     }
     async function loadFile(e, t = true) {
+        // v5.4.3：请求序号 + AbortController——开启新加载即取消旧请求；迟到的旧响应静默丢弃
+        const seq = ++loadSeq;
+        if (loadCtrl) loadCtrl.abort();
+        loadCtrl = new AbortController();
         showReading();
         w.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:40px;">⏳ 加载中...</p>';
         Ue = Ie.findIndex(t => t.name === e);
@@ -1742,19 +1782,22 @@
         let n = null;
         // v4.6.1：网络/解析阶段独立 try——失败提示「加载失败」，不再误报「文档不存在」
                 try {
-            const t = await fetch(`?action=read&file=${encodeURIComponent(e)}`);
+            const t = await fetch(`?action=read&file=${encodeURIComponent(e)}`, { signal: loadCtrl.signal });
             const i = await t.text();
+            if (seq !== loadSeq) return;
             try {
                 n = JSON.parse(i);
             } catch (e) {
                 n = null;
             }
         } catch (t) {
+            if (seq !== loadSeq || (t && t.name === "AbortError")) return;
             console.error("[loadFile network error]", t);
             showLoadError(e);
             cmtOnArticleHide();
             return;
         }
+        if (seq !== loadSeq) return;
         if (!n || !n.success) {
             showNotFound(e);
             cmtOnArticleHide();
@@ -1929,12 +1972,15 @@
                 cmtOnArticleLoad();
             }
         } catch (t) {
+            if (seq !== loadSeq || (t && t.name === "AbortError")) return;
             console.error("[loadFile render error]", t);
             showRenderError(e);
             cmtOnArticleHide();
         }
     }
     window.addEventListener("popstate", () => {
+        // v5.4.3：前进/后退同样作废在途加载（loadFile/showHome 内部会再次取消，幂等）
+        if (loadCtrl) loadCtrl.abort();
         const e = getUrlParam("file") || window.YSM_FILE || "";
         if (e && Ie.some(t => t.name === e)) {
             loadFile(e, false);

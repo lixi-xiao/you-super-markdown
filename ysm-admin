@@ -1102,6 +1102,102 @@ case "${1:-}" in
         echo "更新通道已切换为: $CH（stable=仅正式 Release / beta=含预发布；可在超管后台「在线更新」查看）"
         ;;
 
+    set-self-ip)
+        # v5.4.4：维护服务器自身 IP 白名单 threat_self_ips（自封防护）——命中者不参与威胁计分/不封禁/不加锁。
+        # 背景：服务器用默认 UA 的 curl 访问自身域名会被判扫描器，累计达永久阈值后把自己公网 IP 封死。
+        # 用法:
+        #   sudo ysm-admin set-self-ip --auto        # 自动探测出口 IP + 域名解析 IP 并追加（安装/更新流程自动调用）
+        #   sudo ysm-admin set-self-ip --add=<ip>    # 手动追加单个 IP
+        #   ysm-admin set-self-ip --list             # 查看当前白名单（只读）
+        MODE=""; ADDIP=""
+        shift || true
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --auto)  MODE="auto"; shift ;;
+                --list)  MODE="list"; shift ;;
+                --add)   MODE="add"; ADDIP="${2:-}"; shift 2 ;;
+                --add=*) MODE="add"; ADDIP="${1#--add=}"; shift ;;
+                *) echo "错误：未知参数 $1"; echo "用法: ysm-admin set-self-ip [--add=<ip>|--auto|--list]"; exit 1 ;;
+            esac
+        done
+        if [ -z "$MODE" ]; then
+            echo "用法: ysm-admin set-self-ip [--add=<ip>|--auto|--list]"
+            echo "  --auto      自动探测服务器出口/域名解析公网 IP 并追加（需 sudo）"
+            echo "  --add=<ip>  手动追加一个服务器自身 IP（需 sudo）"
+            echo "  --list      查看当前白名单（只读）"
+            exit 1
+        fi
+        if [ "$MODE" = "list" ]; then
+            php -r "
+                require_once '$WEB_ROOT/utils.php';
+                \$c = loadSiteConfig();
+                \$ips = \$c['threat_self_ips'] ?? [];
+                if (!is_array(\$ips) || !count(\$ips)) { echo '（空）' . PHP_EOL; exit; }
+                foreach (\$ips as \$x) { echo \$x . PHP_EOL; }
+            " 2>/dev/null
+            exit 0
+        fi
+        if [ "$(id -u)" -ne 0 ]; then
+            echo "错误：修改自身 IP 白名单需 root 权限（sudo ysm-admin set-self-ip ...）"
+            exit 1
+        fi
+        CAND=""
+        if [ "$MODE" = "add" ]; then
+            CAND="$ADDIP"
+        else
+            # --auto：出口源 IP（默认路由 src）+ 域名解析 IP
+            DOM=$(get_domain)
+            EGRESS=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oE 'src [0-9.]+' | awk '{print $2}' | head -1)
+            [ -z "$EGRESS" ] && EGRESS=$(ip -4 addr show scope global 2>/dev/null | grep -oE 'inet [0-9.]+' | awk '{print $2}' | head -1)
+            [ -n "$EGRESS" ] && CAND="$CAND$EGRESS
+"
+            if [ -n "$DOM" ] && [ "$DOM" != "localhost" ]; then
+                RES=$(YSM_HOST="$DOM" YSM_UTILS="$WEB_ROOT/utils.php" php -r 'require_once getenv("YSM_UTILS"); foreach (resolveAllHostIps((string)getenv("YSM_HOST")) as $x) { echo $x . "\n"; }' 2>/dev/null)
+                [ -z "$RES" ] && RES=$(getent ahosts "$DOM" 2>/dev/null | awk '{print $1}')
+                [ -n "$RES" ] && CAND="$CAND$RES
+"
+            fi
+        fi
+        # 仅保留合法公网 IP（内网/回环本就不参与联动封锁），并去重
+        IPS=$(printf '%s' "$CAND" | YSM_UTILS="$WEB_ROOT/utils.php" php -r '
+            require_once getenv("YSM_UTILS");
+            $seen = [];
+            foreach (preg_split("#\s+#", trim((string)stream_get_contents(STDIN))) as $x) {
+                $x = trim($x);
+                if ($x === "" || filter_var($x, FILTER_VALIDATE_IP) === false) continue;
+                if (isPrivateIp($x)) continue;
+                if (isset($seen[$x])) continue;
+                $seen[$x] = true;
+                echo $x . "\n";
+            }
+        ' 2>/dev/null)
+        if [ -z "$IPS" ]; then
+            echo "未获得可用的公网 IP（--add 请给合法公网 IP；--auto 需能确定出口/域名解析），未写入"
+            exit 0
+        fi
+        YSM_IPS_NL="$IPS" php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$c = loadSiteConfig();
+            \$cur = (isset(\$c['threat_self_ips']) && is_array(\$c['threat_self_ips'])) ? \$c['threat_self_ips'] : [];
+            \$add = preg_split('#\s+#', trim((string)getenv('YSM_IPS_NL')));
+            \$changed = [];
+            foreach (\$add as \$x) {
+                \$x = trim(\$x);
+                if (\$x === '') continue;
+                \$found = false;
+                foreach (\$cur as \$y) { if (strcasecmp(trim((string)\$y), \$x) === 0) { \$found = true; break; } }
+                if (!\$found) { \$cur[] = \$x; \$changed[] = \$x; }
+            }
+            if (\$changed) {
+                \$c['threat_self_ips'] = array_values(\$cur);
+                saveSiteConfig(\$c);
+                echo '已登记服务器自身 IP：' . implode(', ', \$changed) . PHP_EOL;
+            } else {
+                echo '服务器自身 IP 已登记，无需变更' . PHP_EOL;
+            }
+        " 2>/dev/null
+        ;;
+
     cleanup-history)
         # v5.3.0：一次性清理「更新历史.md」中同一版本的重复小节（先备份为 .dedup-bak-<时间戳>，
         #          仅重写重复小节，其它内容原样保留）。用于清理历史遗留的「同版本多条/顶部重复」。
@@ -1593,6 +1689,8 @@ case "${1:-}" in
             cp "$WEB_ROOT/ysm-admin" /usr/local/bin/ysm-admin 2>/dev/null || true
             chmod +x /usr/local/bin/ysm-admin 2>/dev/null || true
         fi
+        # v5.4.4：自动登记服务器自身出口/域名解析 IP 到 threat_self_ips（自封防护，幂等；失败不阻断更新）
+        /usr/local/bin/ysm-admin set-self-ip --auto >/dev/null 2>&1 || true
 
         # 4.5 数据库结构迁移（4.x→5.0，按需、幂等）——必须在文件 rsync 落地之后、健康检查/重启服务之前，
         # 且在下方 data 目录 chown 之前执行（迁移会新建/改名 ysm.db，随后的 chown 归位属主）。
@@ -1894,6 +1992,7 @@ case "${1:-}" in
         echo "  apply-update [--allow-unsigned] 执行系统更新（完成后自动发通知邮件；--allow-unsigned 为一次性受控引导，未部署签名公钥时慎用）"
         echo "  deps                      检查并一键补装功能依赖（内置兜底清单，需 sudo；更新时自动按包内 deps 声明安装）"
         echo "  set-channel <stable|beta> 切换更新通道（别名 channel；stable=仅正式 Release / beta=含预发布）"
+        echo "  set-self-ip [--add=<ip>|--auto|--list] 维护服务器自身 IP 白名单 threat_self_ips（自封防护；--auto 自动探测出口/域名解析）"
         echo "  check [--no-mail]         体检：超管邮箱 / SMTP / php-fpm 是否注入 YSM_SMTP_PASS / 能否发测试邮件"
         echo "  harden-nginx [--check]    同步/校验 Nginx 站点加固片段（字体目录禁止直读；--check 只校验不写）"
         echo "  cleanup-history           一次性清理「更新历史.md」中同一版本的重复小节（先备份，仅动重复节）"

@@ -731,50 +731,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         </div>
         <div id="cardCoverApiTestResult" style="margin-top:8px"></div>
     </div>
-    <!-- v5.3.1-beta：阅读字体（站长/超管上传与管理；读者只能从「已启用」字体中选择） -->
-    <?php $fontList = listFonts(false); $fontUsage = fontLibraryUsage(); ?>
-    <div class="card" id="fontLibCard">
-        <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
-            阅读字体
-            <span class="card-badge"><?= count($fontList) ?> / <?= FONT_MAX_COUNT ?></span>
-        </div>
-        <div class="form-hint" style="margin-bottom:12px">站长 / 超管可上传字体；读者在前台「字体设置」中只能从<strong>已启用</strong>字体里选择。支持 .woff2 / .woff / .ttf / .otf，单文件 ≤ 20MB，字体库 ≤ 200MB 且 ≤ 20 款（当前已用 <?= number_format($fontUsage['bytes'] / 1048576, 1) ?> MB）。</div>
-        <div class="form-group">
-            <label class="form-label">显示名称（可选，留空取文件名）</label>
-            <input class="form-input" type="text" id="fontDisplayName" maxlength="40" placeholder="例如：思源宋体 / 圆润手写体">
-        </div>
-        <div class="upload-area" id="fontUploadArea">
-            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            <div class="upload-text">点击或拖拽上传字体文件</div>
-            <div class="upload-hint">woff2 / woff / ttf / otf，单文件 ≤ 20MB</div>
-            <input type="file" id="fontFileInput" accept=".woff2,.woff,.ttf,.otf">
-        </div>
-        <div id="fontUploadResult" style="margin-top:10px"></div>
-        <div class="table-wrap" style="margin-top:14px">
-            <table>
-                <thead><tr><th>名称</th><th>格式</th><th>体积</th><th>状态</th><th>上传人</th><th>时间</th><th>操作</th></tr></thead>
-                <tbody id="fontTableBody">
-                <?php if (empty($fontList)): ?>
-                    <tr><td colspan="7"><div class="table-empty">暂无字体，请上传</div></td></tr>
-                <?php else: foreach ($fontList as $f): ?>
-                    <tr data-id="<?= htmlspecialchars($f['id']) ?>">
-                        <td><?= htmlspecialchars($f['name']) ?></td>
-                        <td><?= htmlspecialchars(strtoupper($f['ext'])) ?></td>
-                        <td><?= number_format(((int)$f['size']) / 1024, 1) ?> KB</td>
-                        <td><span style="color:<?= ((int)$f['enabled'] === 1) ? '#16a34a' : 'var(--text-muted)' ?>"><?= ((int)$f['enabled'] === 1) ? '已启用' : '已停用' ?></span></td>
-                        <td><?= htmlspecialchars($f['uploader_name']) ?></td>
-                        <td><?= htmlspecialchars($f['created']) ?></td>
-                        <td>
-                            <button class="btn btn-sm btn-outline" type="button" onclick="ysmFontToggle('<?= htmlspecialchars($f['id']) ?>', <?= ((int)$f['enabled'] === 1) ? 'false' : 'true' ?>)"><?= ((int)$f['enabled'] === 1) ? '停用' : '启用' ?></button>
-                            <button class="btn btn-sm btn-outline" type="button" onclick="ysmFontDelete('<?= htmlspecialchars($f['id']) ?>','<?= htmlspecialchars($f['name']) ?>')">删除</button>
-                        </td>
-                    </tr>
-                <?php endforeach; endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
     <div class="card">
         <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>模糊与透明度</div>
         <div class="toggle-row" id="bgBlurRow" style="display:<?= $bgType!=='none'?'flex':'none' ?>">
@@ -879,49 +835,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         (function() { var u=<?= json_encode($bgApiUrl, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>; var img=new Image(); img.onload=function(){previewApiSrc=u;updatePreview();}; img.src=u; })();
         <?php endif; ?>
         updatePreview();
-        // v5.3.1-beta：阅读字体管理（上传 / 启用停用 / 删除）
-        var ysFontCsrf = '<?= htmlspecialchars(generateCsrfToken()) ?>';
-        function ysFontResult(html) { document.getElementById('fontUploadResult').innerHTML = html; }
-        function ysFontReload() { setTimeout(function() { location.reload(); }, 300); }
-        window.ysmFontToggle = function(id, enabled) {
-            fetch('../api.php?action=font_toggle', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': ysFontCsrf }, body: JSON.stringify({ id: id, enabled: enabled }) })
-                .then(function(r) { return r.json(); })
-                .then(function(d) { if (d.success) { ysFontReload(); } else { alert(d.error || '操作失败'); } })
-                .catch(function() { alert('网络错误'); });
-        };
-        window.ysmFontDelete = function(id, name) {
-            if (!confirm('确定删除字体「' + name + '」？删除后不可恢复，已选择该字体的读者将回退默认字体。')) return;
-            fetch('../api.php?action=font_delete', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': ysFontCsrf }, body: JSON.stringify({ id: id }) })
-                .then(function(r) { return r.json(); })
-                .then(function(d) { if (d.success) { ysFontReload(); } else { alert(d.error || '删除失败'); } })
-                .catch(function() { alert('网络错误'); });
-        };
-        (function() {
-            var area = document.getElementById('fontUploadArea');
-            var input = document.getElementById('fontFileInput');
-            if (!area || !input) return;
-            function doUpload(file) {
-                if (!file) return;
-                if (file.size > 20 * 1024 * 1024) { ysFontResult('<span style="color:#dc2626;font-size:13px">✗ 单个字体文件不能超过 20MB</span>'); return; }
-                ysFontResult('<span style="color:var(--text-muted);font-size:13px">上传中…</span>');
-                var fd = new FormData();
-                fd.append('font', file);
-                var nm = document.getElementById('fontDisplayName').value.trim();
-                if (nm) fd.append('name', nm);
-                fetch('../api.php?action=font_upload', { method: 'POST', headers: { 'X-CSRF-Token': ysFontCsrf }, body: fd })
-                    .then(function(r) { return r.json(); })
-                    .then(function(d) {
-                        if (d.success) { ysFontResult('<span style="color:#16a34a;font-size:13px">✓ 上传成功（服务端已随机重命名）；请在列表中「启用」后读者才可选择</span>'); ysFontReload(); }
-                        else { ysFontResult('<span style="color:#dc2626;font-size:13px">✗ ' + (d.error || '上传失败') + '</span>'); }
-                    })
-                    .catch(function() { ysFontResult('<span style="color:#dc2626;font-size:13px">✗ 网络错误</span>'); });
-            }
-            area.addEventListener('click', function() { input.click(); });
-            input.addEventListener('change', function() { if (input.files && input.files[0]) doUpload(input.files[0]); input.value = ''; });
-            ['dragover', 'dragenter'].forEach(function(ev) { area.addEventListener(ev, function(e) { e.preventDefault(); area.style.borderColor = 'var(--accent)'; }); });
-            ['dragleave', 'drop'].forEach(function(ev) { area.addEventListener(ev, function(e) { e.preventDefault(); area.style.borderColor = ''; }); });
-            area.addEventListener('drop', function(e) { var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) doUpload(f); });
-        })();
     })();
     </script>
 

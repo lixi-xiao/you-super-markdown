@@ -9,12 +9,8 @@
 
     # v5.0.0：data/ 目录安全兜底（Apache 部署）——拒绝 Web 访问数据库/密钥/JSON 等敏感文件
     # （与 nginx-site.conf 的 data/ 规则等价；data/images、data/videos 仍可公开访问）
-    # v5.0.0 第6轮 M1：补 *.db-journal（SQLite 回滚日志）
+    # 第6轮 M1：补 *.db-journal（SQLite 回滚日志）
     RewriteRule (^|/)data/.*\.(db|db-wal|db-shm|db-journal|sqlite|sqlite3|json)$ - [F,L,NC]
-
-    # v5.3.1-beta：阅读字体目录禁止 Web 直接访问（唯一读取入口为受控端点 font.php?f=<id>），
-    # 同时确保该目录不放任何脚本、不被当作可执行路径
-    RewriteRule (^|/)data/fonts/ - [F,L,NC]
 
     # v5.0.0 第6轮 M1：显式拒绝应用配置（含 repo/hfish 信息；与 nginx-site.conf 的 app-config.json deny 对齐）
     RewriteRule (^|/)app-config\.json$ - [F,L,NC]

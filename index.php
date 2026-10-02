@@ -1125,11 +1125,6 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
             <button class="font-type-btn active" data-font="default">默认</button>
             <button class="font-type-btn" data-font="custom">萝莉体</button>
         </div>
-        <!-- v5.3.1-beta：读者可选阅读字体（只列出服务端「已启用」字体；无可用字体时整块隐藏） -->
-        <div class="ysm-font-section" id="readerFontSection" style="display:none">
-            <div class="ysm-font-label">阅读字体</div>
-            <div class="ysm-font-grid" id="readerFontList"></div>
-        </div>
         <div class="font-size-slider">
             <span style="font-size:14px; color:var(--text-secondary);">A</span>
             <input type="range" min="12" max="24" value="14" step="1" id="fontSizeSlider">

@@ -641,88 +641,10 @@
         e.addEventListener("click", () => {
             ie.forEach(e => e.classList.remove("active"));
             e.classList.add("active");
-            // v5.3.1-beta：切换回「默认/萝莉体」时清除阅读字体选择，避免互相覆盖
-            localStorage.removeItem("md-font-id");
-            readerFontId = "";
-            readerFontStyleEl().textContent = "";
-            syncReaderFontActive();
             applyFontType(e.dataset.font);
         });
     });
     ae.addEventListener("input", () => applyFontSize(ae.value));
-    // v5.3.1-beta：读者可选阅读字体——只接受服务端返回的字体 id（16 位 hex），
-    //   前端不接收任何任意 URL/路径（防把选择框变成 SSRF/注入点）；@font-face 的 src 由 id 拼接固定端点。
-    const FONT_ID_RE = /^[a-f0-9]{16}$/;
-    const FONT_FALLBACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
-    let readerFonts = [];
-    let readerFontId = localStorage.getItem("md-font-id") || "";
-    function readerFontStyleEl() {
-        let el = document.getElementById("ysmReaderFontStyle");
-        if (!el) {
-            el = document.createElement("style");
-            el.id = "ysmReaderFontStyle";
-            document.head.appendChild(el);
-        }
-        return el;
-    }
-    function syncReaderFontActive() {
-        document.querySelectorAll("#readerFontList .ysm-font-chip").forEach(b => {
-            b.classList.toggle("active", (b.dataset.fontId || "") === readerFontId);
-        });
-    }
-    function applyReaderFont(id) {
-        if (id && !FONT_ID_RE.test(id)) id = "";
-        if (!id) {
-            readerFontId = "";
-            localStorage.removeItem("md-font-id");
-            readerFontStyleEl().textContent = "";
-            applyFontType(localStorage.getItem("md-font-type") || "default");
-            syncReaderFontActive();
-            return;
-        }
-        const f = readerFonts.filter(x => x.id === id)[0];
-        const fmt = f && f.format ? " format(\"" + f.format + "\")" : "";
-        const fam = "YSMFont_" + id;
-        readerFontStyleEl().textContent = '@font-face{font-family:"' + fam + '";src:url("font.php?f=' + id + '")' + fmt + ';font-display:swap;}';
-        document.body.style.fontFamily = '"' + fam + '", ' + FONT_FALLBACK;
-        readerFontId = id;
-        localStorage.setItem("md-font-id", id);
-        syncReaderFontActive();
-    }
-    function renderReaderFonts() {
-        const sec = document.getElementById("readerFontSection");
-        const box = document.getElementById("readerFontList");
-        if (!sec || !box) return;
-        if (!readerFonts.length) {
-            sec.style.display = "none";
-            return;
-        }
-        box.innerHTML = "";
-        const mk = (label, id) => {
-            const b = document.createElement("button");
-            b.type = "button";
-            b.className = "ysm-font-chip" + ((id || "") === readerFontId ? " active" : "");
-            b.dataset.fontId = id || "";
-            b.textContent = label;
-            b.addEventListener("click", () => applyReaderFont(id || ""));
-            return b;
-        };
-        box.appendChild(mk("默认字体", ""));
-        readerFonts.forEach(f => box.appendChild(mk(f.name || f.id, f.id)));
-        sec.style.display = "block";
-    }
-    (function initReaderFonts() {
-        fetch("api.php?action=fonts").then(r => r.json()).then(d => {
-            readerFonts = (d && d.success && Array.isArray(d.fonts))
-                ? d.fonts.filter(f => f && typeof f.id === "string" && FONT_ID_RE.test(f.id))
-                : [];
-        }).catch(() => {
-            readerFonts = [];
-        }).then(() => {
-            renderReaderFonts();
-            if (readerFontId) applyReaderFont(readerFontId);
-        });
-    })();
     function openPanel(e) {
         closeAllPanels();
         e.classList.add("active");

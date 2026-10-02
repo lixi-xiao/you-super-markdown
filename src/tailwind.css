@@ -1499,6 +1499,46 @@
   .ai-privacy-box h3 { margin: 0 0 10px; font-size: 1.05rem; font-weight: 800; }
   .ai-privacy-box p { margin: 0 0 10px; font-size: 0.9rem; line-height: 1.7; color: var(--text-secondary, #9aa4bf); }
 
+  /* ── AI 相关输入框：手机输入时高度自适应（当前 AI 界面无 textarea，规则无副作用、向后兼容） ── */
+  .ai-drawer textarea, .ai-admin textarea, #aiKeyManager textarea {
+    field-sizing: content;
+    min-height: 40px;
+    max-height: 40vh;
+    resize: vertical;
+  }
+
+  /* ── 窄屏 / 触摸设备（v5.4.0-beta.3）：触控目标 ≥44px、输入 ≥40px、字号 ≥14px、
+        软键盘不顶断（动态视口高度 + 内容区滚动）与底部安全区兼容 ── */
+  @media (max-width: 768px) {
+    /* 抽屉高度用动态视口单位：地址栏/软键盘弹出时不变形，内容区可滚动、底部按钮可达 */
+    .ai-drawer { height: 100dvh; }
+    .ai-drawer-head {
+      padding-top: calc(14px + env(safe-area-inset-top, 0px));
+      flex: 0 0 auto;
+    }
+    .ai-drawer-body {
+      padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+      scroll-padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+      overscroll-behavior: contain;
+    }
+    /* 触控目标 ≥44×44px */
+    .ai-fab { min-height: 44px; padding: 0 16px; font-size: 14px; }
+    .ai-drawer-close { width: 44px; height: 44px; font-size: 24px; }
+    .ai-chip {
+      min-height: 44px; padding: 10px 16px;
+      display: inline-flex; align-items: center; font-size: 14px;
+    }
+    .ai-btn { min-height: 44px; padding: 11px 18px; font-size: 15px; }
+    .ai-select { min-height: 44px; font-size: 16px; }
+    /* 字号 ≥14px（正文与可读标签） */
+    .ai-group-title, .ai-label, .ai-hint, .ai-status,
+    .ai-src, .ai-diff-title, .ai-diff-body { font-size: 14px; }
+    /* 主按钮窄屏全宽；动作条换行不重叠 */
+    .ai-run-row { gap: 10px; }
+    .ai-run-row .ai-btn { flex: 1 1 auto; }
+    .ai-apply-row .ai-btn { flex: 1 1 auto; }
+  }
+
   /* ── 窄屏：抽屉满宽、差异区纵向堆叠、控件压缩，杜绝横向溢出 ── */
   @media (max-width: 560px) {
     .ai-drawer { width: 100vw; max-width: 100vw; }

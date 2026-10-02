@@ -2305,8 +2305,32 @@ td code {
 .ai-relogin { color: var(--accent); font-weight: 600; text-decoration: none; margin-left: 4px; }
 .ai-relogin:hover { text-decoration: underline; }
 
-@media (max-width: 640px) {
+/* ---------- 窄屏 / 触摸设备（v5.4.0-beta.3）：触控目标 ≥44px、输入 ≥40px、字号 ≥14px、
+   操作条换行不重叠、表格容器内横滚（不撑宽整页）、底部安全区兼容 ---------- */
+@media (max-width: 768px) {
+    /* 个人 Key 管理：单列布局、操作条换行占满、主按钮全宽 */
     .ai-key-grid { grid-template-columns: 1fr; }
+    .ai-key-card { padding: 14px; }
+    .ai-key-head { gap: 8px; }
+    .ai-key-state { font-size: 14px; }
+    .ai-key-actions { gap: 8px; }
     .ai-key-btns { margin-left: 0; width: 100%; }
-    .ai-key-btns .btn { flex: 1 1 auto; }
+    .ai-key-btns .btn { flex: 1 1 auto; min-height: 44px; font-size: 14px; }
+    .ai-default-label { min-height: 44px; padding: 8px 14px; font-size: 14px; }
+    .ai-msg { font-size: 14px; }
+    #aiKeyManager .form-input { min-height: 44px; }
+    #aiKeyManager .form-label { font-size: 14px; }
+
+    /* 超管「AI 写作」页签：开关卡触控目标、说明/表格字号、操作控件触控高度 */
+    .ai-admin .ai-toggle-card { padding: 12px 14px; align-items: center; }
+    .ai-admin .ai-toggle-card input[type="checkbox"] { width: 20px; height: 20px; margin-top: 0; }
+    .ai-admin .ai-toggle-label { display: flex; align-items: center; min-height: 44px; }
+    .ai-admin .form-hint { font-size: 14px; }
+    .ai-admin .form-select, .ai-admin .btn { min-height: 44px; }
+    /* 服务商白名单表：容器内横向滚动（.table-wrap 已有 overflow-x:auto），不撑宽整页 */
+    .ai-admin .ai-provider-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .ai-admin .ai-provider-table table { min-width: 420px; }
+    .ai-admin .ai-provider-table th,
+    .ai-admin .ai-provider-table td { font-size: 14px; padding: 10px 12px; white-space: nowrap; }
+    .ai-admin .ai-provider-table code { white-space: nowrap; }
 }

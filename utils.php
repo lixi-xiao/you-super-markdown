@@ -1189,31 +1189,24 @@ function aiRateHit($ip, $fp) {
     db_rate_add('ai_rates', $ip, $fp);
 }
 
-/** 将服务商响应/错误映射为可读原因（脱敏，不含 Key 与正文） */
+/** 将服务商响应/错误映射为可读原因（脱敏：只返回固定可读文案 + HTTP 码/错误类别，
+ *  绝不回传上游原始响应体片段；$raw 形参仅为保持调用签名不变）。 */
 function aiReadableError($httpCode, $curlErr = '', $raw = '') {
-    $msg = '';
-    if (is_string($raw) && $raw !== '') {
-        $j = json_decode($raw, true);
-        if (is_array($j)) {
-            $msg = (string)($j['error']['message'] ?? $j['message'] ?? $j['error'] ?? '');
-        }
-        if ($msg === '') $msg = mb_substr(trim(strip_tags($raw)), 0, 200);
-    }
     if ($curlErr !== '') {
         if (stripos($curlErr, 'timed out') !== false || stripos($curlErr, 'timeout') !== false) return '连接超时（网络不可达或服务商无响应）';
         if (stripos($curlErr, 'resolve') !== false || stripos($curlErr, 'Could not resolve') !== false) return '网络不可达（域名解析失败）';
-        return '网络不可达（' . mb_substr($curlErr, 0, 120) . '）';
+        return '网络不可达（连接失败）';
     }
     switch ((int)$httpCode) {
-        case 401: return '鉴权失败（Key 无效或无权限）';
-        case 403: return '鉴权失败（Key 被拒绝访问该模型/服务）';
-        case 404: return '接口或模型不存在（404）' . ($msg !== '' ? '：' . $msg : '');
-        case 400: return '请求被拒绝（多为模型名不存在）' . ($msg !== '' ? '：' . $msg : '');
-        case 429: return '请求过于频繁或额度不足（429）';
-        case 500: case 502: case 503: case 504: return '服务商暂时不可用（' . (int)$httpCode . '）';
+        case 401: return '鉴权失败（Key 无效或无权限，HTTP 401）';
+        case 403: return '鉴权失败（Key 被拒绝访问该模型/服务，HTTP 403）';
+        case 404: return '接口或模型不存在（HTTP 404）';
+        case 400: return '请求被拒绝（多为模型名不存在，HTTP 400）';
+        case 429: return '请求过于频繁或额度不足（HTTP 429）';
+        case 500: case 502: case 503: case 504: return '服务商暂时不可用（HTTP ' . (int)$httpCode . '）';
     }
     if ($httpCode >= 200 && $httpCode < 300) return '';
-    return '调用失败（HTTP ' . (int)$httpCode . '）' . ($msg !== '' ? '：' . $msg : '');
+    return '调用失败（HTTP ' . (int)$httpCode . '）';
 }
 
 /** 统一 JSON POST（Authorization: Bearer）；返回 ['ok','code','data','raw','err']。

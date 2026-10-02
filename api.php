@@ -1212,6 +1212,13 @@ function aiActionUserAllowed() {
     if (!aiRoleAllowed($actor['role'] ?? '')) sendJson(['success' => false, 'error' => 'AI 功能未开放'], 403);
     return $actor;
 }
+/** v5.4.1-beta：AI 写接口叠加后台会话有效期校验。
+ *  环境一致性校验（requireSessionEnv）+ 后台会话 24h 显式过期（backendSessionExpired）双闸；
+ *  AI 写作入口全部位于后台页面（sc.php 编辑器 / station|author dashboard），与此二页面的后台会话判定一致。 */
+function aiRequireFreshBackendSession() {
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    if (backendSessionExpired()) sendJson(['success' => false, 'error' => '后台会话已过期，请重新登录', 'backend_expired' => true], 401);
+}
 /** 流式输出一个 SSE 事件并立即 flush */
 function aiSseEmit($payload) {
     echo 'data: ' . json_encode($payload, JSON_UNESCAPED_UNICODE) . "\n\n";
@@ -1263,7 +1270,7 @@ if ($action === 'ai_keys' && $_SERVER['REQUEST_METHOD'] === 'GET') {
 // POST ai_key_test：连通性测试（用所选白名单 base_url + 该 Key + 模型名发最小请求）；不落库
 if ($action === 'ai_key_test' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $actor = aiActionUserAllowed();
-    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    aiRequireFreshBackendSession();
     $body = aiJsonBody();
     $provider = (string)($body['provider'] ?? '');
     $model = trim((string)($body['model'] ?? ''));
@@ -1280,7 +1287,7 @@ if ($action === 'ai_key_test' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 // POST ai_key_save：必须先做连通性测试，通过才固化（失败不落库，返回可读原因）
 if ($action === 'ai_key_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $actor = aiActionUserAllowed();
-    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    aiRequireFreshBackendSession();
     $body = aiJsonBody();
     $provider = (string)($body['provider'] ?? '');
     $model = trim((string)($body['model'] ?? ''));
@@ -1310,8 +1317,8 @@ if ($action === 'ai_key_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // POST ai_key_delete：删除该账号某服务商 Key
 if ($action === 'ai_key_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $actor = aiActionUser();
-    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    $actor = aiActionUserAllowed();
+    aiRequireFreshBackendSession();
     $body = aiJsonBody();
     $provider = (string)($body['provider'] ?? '');
     if (!isset(aiBuiltinProviders()[$provider])) sendJson(['success' => false, 'error' => '服务商不存在'], 400);
@@ -1324,7 +1331,7 @@ if ($action === 'ai_key_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 // POST ai_run：AI 代理调用（流式 SSE 或普通 JSON）；Key/正文均不出后端记录
 if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $actor = aiActionUserAllowed();
-    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    aiRequireFreshBackendSession();
     $body = aiJsonBody();
     $act = (string)($body['action'] ?? '');
     if (!array_key_exists($act, aiActions())) sendJson(['success' => false, 'error' => '不支持的动作'], 400);

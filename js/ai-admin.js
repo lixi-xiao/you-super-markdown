@@ -20,9 +20,12 @@
     };
 
     function api(action, method, body) {
+        // v5.4.0-beta.4：补 X-Fp（本页不加载 main.js，其 fetch 包装不会注入）——取值与 main.js 一致，否则后端校验环境失败返回 401
+        var headers = { 'X-Fp': (typeof window.ysmGetFp === 'function' ? window.ysmGetFp() : '') };
+        if (method === 'POST') { headers['Content-Type'] = 'application/json'; headers['X-CSRF-Token'] = csrf; }
         return fetch('../api.php?action=' + action, {
             method: method || 'GET',
-            headers: method === 'POST' ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } : {},
+            headers: headers,
             body: body ? JSON.stringify(body) : undefined
         }).then(function (r) {
             return r.json().catch(function () { return { success: false, error: 'HTTP ' + r.status }; });

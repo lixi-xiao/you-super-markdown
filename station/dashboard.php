@@ -1284,6 +1284,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         </div>
     </div>
     <div id="aiKeyManager" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>"></div>
+    <!-- v5.4.0-beta.4：AI Key 管理请求需带 X-Fp（本页不加载 main.js），先引入公共指纹 -->
+    <script src="../js/fp.js?v=<?= @filemtime(__DIR__ . '/../js/fp.js') ?>"></script>
     <script src="../js/ai-admin.js?v=<?= @filemtime(__DIR__ . '/../js/ai-admin.js') ?>"></script>
     <?php endif; ?>
 

@@ -29,7 +29,7 @@
             return "";
         }
     }
-    function ysmGetFp() {
+    function ysmFpLocal() {
         if (e) return e;
         try {
             var t = [ navigator.language || "", (new Date).getTimezoneOffset(), (screen.width || 0) + "x" + (screen.height || 0), ysmCanvasHash(), navigator.userAgent ];
@@ -40,8 +40,14 @@
             return e;
         }
     }
+    // v5.4.0-beta.4：优先复用公共指纹实现（js/fp.js 暴露的 window.ysmGetFp），避免两份算法漂移；
+    // 未加载 fp.js 的页面（如首页）回退本文件内置实现，输出完全一致（不会递归：仅当全局实现非本函数时才复用）。
+    function ysmGetFp() {
+        if (typeof window.ysmGetFp === "function" && window.ysmGetFp !== ysmGetFp) return window.ysmGetFp();
+        return ysmFpLocal();
+    }
     // 暴露给后台/OTP 入口页面使用（后台原生表单无自定义头，用上报校验模式）
-        window.ysmGetFp = ysmGetFp;
+    if (typeof window.ysmGetFp !== "function") window.ysmGetFp = ysmGetFp;
     // v4.5.0：所有 api.php 请求统一携带 X-Fp（登录态接口服务端校验环境）
         (function ysmPatchFetch() {
         var e = window.fetch;

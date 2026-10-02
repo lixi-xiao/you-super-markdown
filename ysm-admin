@@ -147,7 +147,12 @@ $CL_TEXT"
 
 【更新方式】$UPDATE_METHOD"
     fi
-    /usr/local/bin/ysm-admin notify "$NOTIFY_MSG" "系统更新完成" 2>/dev/null || true
+    # v5.4.9：不再静默——通知失败时必须可见（此前 2>/dev/null || true 会把"Shebang 被 CRLF 污染/CLI 不可执行/SMTP 失败"全部吞掉）
+    NOTIFY_OUT=$(/usr/local/bin/ysm-admin notify "$NOTIFY_MSG" "系统更新完成" 2>&1) || true
+    if ! printf '%s' "$NOTIFY_OUT" | grep -q 'MAIL_OK'; then
+        echo "         [警告] 更新完成通知邮件未发出：${NOTIFY_OUT:-（无输出）}" >&2
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 更新完成通知发送失败：${NOTIFY_OUT:-无输出}" >> /opt/you-super-markdown/logs/alert.log 2>/dev/null || true
+    fi
 }
 
 # ============================================================
@@ -415,7 +420,8 @@ auto_rollback() {
     rm -f /opt/you-super-markdown/run/ysm-update.lock
     echo "  [回退] 自动回退完成，系统已恢复至更新前状态"
     # 回退完成自动通知管理员（失败不阻断）
-    /usr/local/bin/ysm-admin notify "系统更新失败，已自动回退并恢复正常。${reason:+失败原因：${reason}。}系统已恢复至更新前状态，请登录后台查看更新状态。" "系统更新失败（详见站内）" 2>/dev/null || true
+    FAIL_OUT=$(/usr/local/bin/ysm-admin notify "系统更新失败，已自动回退并恢复正常。${reason:+失败原因：${reason}。}系统已恢复至更新前状态，请登录后台查看更新状态。" "系统更新失败（详见站内）" 2>&1) || true
+    printf '%s' "$FAIL_OUT" | grep -q 'MAIL_OK' || echo "[$(date '+%Y-%m-%d %H:%M:%S')] 更新失败通知发送失败：${FAIL_OUT:-无输出}" >> /opt/you-super-markdown/logs/alert.log 2>/dev/null || true
     return 0
 }
 

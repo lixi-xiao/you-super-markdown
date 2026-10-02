@@ -3076,25 +3076,23 @@ function splitChangelogDoc($content) {
     return [$preamble, $sections];
 }
 
-// 合并正文：同一版本只保留一个小节（覆盖式），其它小节原样；新版本置顶（最新在前）。
-// 幂等：同 (ver, changelog) 连续执行两次，结果完全一致（第二次命中小节 → 覆盖为相同内容）。
+// 合并正文：目标版本「覆盖并置顶」（最新在前）；其它小节相对顺序保持不变。
+// v5.3.2：修复「同版本已存在 → 原地覆盖但不置顶」——导致「最顶上的不是当前部署版本」。
+// 现语义：无论目标版本此前是否存在，一律把该版本小节移动到最前（紧随前言/引言之后），
+//          内容用本次 changelog 覆盖；已存在多个同名小节时合并为一份（顺带去重）。
+// 幂等：同 (ver, changelog) 连续执行两次，结果完全一致（第二次目标节已在最前 → 原样返回）。
 function mergeChangelogSection($content, $ver, $changelog) {
     $ver = trim((string)$ver);
     [$preamble, $sections] = splitChangelogDoc($content);
     $preamble = rtrim($preamble);
     $preamble = ($preamble === '') ? '' : $preamble . "\n\n";
     $section = renderChangelogSection($ver, $changelog);
-    $out = [];
-    $done = false;
+    $others = [];
     foreach ($sections as $s) {
-        if ($s['ver'] === $ver) {
-            if (!$done) { $out[] = $section; $done = true; } // 首次命中 → 覆盖；后续同名 → 丢弃（顺带去重）
-            continue;
-        }
-        $out[] = $s['text'];
+        if ($s['ver'] === $ver) { continue; } // 命中目标版本：不再保留原位，统一用新内容置顶（顺带去重）
+        $others[] = $s['text'];
     }
-    if (!$done) { array_unshift($out, $section); } // 新版本 → 置顶（最新在前）
-    return $preamble . implode('', $out);
+    return $preamble . $section . implode('', $others);
 }
 
 // 一次性去重：同一版本只保留「最靠前」的一份（最新在前，顶部即最近一次写入），其余删除。
@@ -3113,6 +3111,7 @@ function dedupeChangelogSections($content) {
 }
 
 // 写入「更新历史」文章（覆盖式、幂等）：文章不存在则建骨架。返回 true=内容确有变化。
+// v5.3.2：写入前先把现有文章备份为同目录 .changelog-bak-<时间戳>（覆盖前先备份，可回退）。
 function injectChangelogIntoArticle($artPath, $ver, $changelog) {
     $dir = dirname($artPath);
     if (!is_dir($dir)) { @mkdir($dir, 0755, true); }
@@ -3123,6 +3122,11 @@ function injectChangelogIntoArticle($artPath, $ver, $changelog) {
     $content = (string)@file_get_contents($artPath);
     $new = mergeChangelogSection($content, $ver, $changelog);
     if ($new === $content) return false;
+    // 覆盖前先备份（同目录 .changelog-bak-<时间戳>），保留可回退副本
+    $backup = $artPath . '.changelog-bak-' . date('YmdHis');
+    if (!@copy($artPath, $backup)) {
+        return false; // 备份失败 → 不覆盖（保持一致性与可回退）
+    }
     return (bool)@file_put_contents($artPath, $new, LOCK_EX);
 }
 

@@ -210,7 +210,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             $delId = $_POST['user_id'] ?? '';
             foreach ($users as $i => $u) {
                 if ($u['id'] === $delId && ($u['role'] ?? '') === ROLE_AUTHOR && ($u['station_id'] ?? '') === $myId) {
-                    auditLog('author_delete', $u['account'] ?? $delId, "站长删除写作者: {$u['nickname']}");
+                    // v5.4.0-beta.5：站长删除写作者 → 一并清除该写作者的 AI Key（防"账号已删、密钥残留"）
+                    $aiPurged = aiClearUserKeys($delId);
+                    auditLog('author_delete', $u['account'] ?? $delId, "站长删除写作者: {$u['nickname']}" . ($aiPurged > 0 ? "（同时清除 AI Key {$aiPurged} 条）" : ''));
                     array_splice($users, $i, 1);
                     replaceAllUsers($users);
                     $msg = 'author_deleted';

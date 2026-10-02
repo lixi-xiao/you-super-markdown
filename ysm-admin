@@ -822,7 +822,18 @@ case "${1:-}" in
         if [ -z "$USER_ID" ]; then echo "用法: ysm-admin revoke-user <用户ID>"; exit 1; fi
         # v5.0.0：用户ID经 base64 环境变量传入，避免直接拼进 php -r 代码字符串
         USER_ID_B64=$(printf '%s' "$USER_ID" | base64 -w0 2>/dev/null || printf '%s' "$USER_ID" | base64)
-        USER_ID_B64="$USER_ID_B64" php -r "require_once '$WEB_ROOT/utils.php'; db_exec('DELETE FROM users WHERE id = ?', [base64_decode(getenv('USER_ID_B64'))]);" 2>/dev/null
+        # v5.4.0-beta.5：吊销（删除）用户时一并清除其 AI Key + 写审计（仅记条数，不记明文 Key），杜绝孤儿密钥残留
+        USER_ID_B64="$USER_ID_B64" php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$uid = base64_decode(getenv('USER_ID_B64'));
+            \$acc = '';
+            \$row = db_one('SELECT account FROM users WHERE id = ?', [\$uid]);
+            if (\$row) \$acc = (string)(\$row['account'] ?? '');
+            \$purged = aiClearUserKeys(\$uid);
+            db_exec('DELETE FROM users WHERE id = ?', [\$uid]);
+            auditLog('user_revoke', \$acc !== '' ? \$acc : \$uid, 'ysm-admin 吊销用户（同时清除 AI Key ' . \$purged . ' 条）');
+            echo 'AI_KEY_PURGED=' . \$purged . PHP_EOL;
+        " 2>/dev/null
         echo "用户已吊销: $USER_ID"
         ;;
 

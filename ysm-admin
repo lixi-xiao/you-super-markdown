@@ -607,6 +607,146 @@ schema_needs_migration() {
     [ "$ver" != "5.0.0" ]
 }
 
+# ============================================================
+# v5.4.0：字体资源直读收紧 + Nginx 站点加固片段「同步 + 校验」（方案 B）
+#   背景：模板 nginx-site.conf 含 `location ^~ /data/fonts/ { deny all; }`，但更新器此前只同步
+#         WEB_ROOT/母本，不更新线上 nginx 配置 → 可 GET /data/fonts/*.ttf 直读字体文件（绕过受控端点）。
+#   策略（只动本项目自有 include 片段，绝不改写他人配置；全流程幂等、失败封闭）：
+#     ① 已生效则跳过（幂等）：站点配置或 `nginx -T` 已含 `location ^~ /data/fonts/` 即视为已加固；
+#     ② 受控同步：把包内/母本的 nginx-hardening.conf 同步到 /etc/nginx/snippets/ysm-hardening.conf，
+#        该片段以 `include` 被本项目 server 块引用（引用行由安装/运维一次性接入）；
+#     ③ 失败封闭：同步后 `nginx -t` 不通过 → 还原片段并中止（不 reload）；
+#     ④ 兜底：无法安全定位/管理（未接入 include、非 root、无 nginx、基线 nginx -t 本不通过）→
+#        校验 + 告警（写审计 + alert.log + 打印修复命令），绝不静默放过。
+#   用法：sync_nginx_hardening [check]  → apply 返回 0=完成/1=需中止更新；check 返回 0=已加固/1=缺失。
+# ============================================================
+YSM_HARDEN_SNIPPET="/etc/nginx/snippets/ysm-hardening.conf"
+
+# 定位本项目站点配置文件（优先按域名，回退按 WEB_ROOT 内容匹配；仅 sites-available/conf.d 真实文件）
+nginx_site_conf() {
+    local d f
+    d=$(get_domain)
+    if [ -n "$d" ] && [ -f "/etc/nginx/sites-available/$d" ]; then echo "/etc/nginx/sites-available/$d"; return 0; fi
+    f=$(grep -rlF "$WEB_ROOT" /etc/nginx/sites-available/ /etc/nginx/conf.d/ 2>/dev/null | head -1)
+    [ -n "$f" ] && { echo "$f"; return 0; }
+    return 1
+}
+
+# /data/fonts/ 拒绝规则是否已生效（生效=已加固）：先看生效配置 nginx -T，再看站点配置文件
+nginx_fonts_denied() {
+    local f
+    nginx -T 2>/dev/null | grep -qE 'location[[:space:]]+\^~[[:space:]]+/data/fonts/' && return 0
+    f=$(nginx_site_conf) && [ -n "$f" ] && grep -qE 'location[[:space:]]+\^~[[:space:]]+/data/fonts/' "$f" 2>/dev/null && return 0
+    return 1
+}
+
+# 加固缺失/失败告警：打印提示 + 写审计 + 落 alert.log（失败不阻断）
+nginx_harden_warn() {
+    local detail="$1"
+    echo "  [nginx] 警告：$detail"
+    echo "  [nginx] 修复（root）：确认站点 server 块已 include $YSM_HARDEN_SNIPPET ，再执行："
+    echo "          sudo ysm-admin harden-nginx && sudo nginx -t && sudo systemctl reload nginx"
+    YSM_DETAIL="nginx 加固校验未通过：$detail" php -r "require_once '$WEB_ROOT/utils.php'; auditLog('nginx_hardening_missing', 'update', getenv('YSM_DETAIL'));" 2>/dev/null || true
+    printf '%s [nginx] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$detail" >> /opt/you-super-markdown/alert.log 2>/dev/null || true
+}
+
+sync_nginx_hardening() {
+    local mode="${1:-apply}" src="$WEB_ROOT/nginx-hardening.conf" conf ts bk="" changed=0
+    ts=$(date +%s)
+    # ① 已生效 → 幂等跳过（不写、不 reload）
+    if nginx_fonts_denied; then
+        echo "  [nginx] /data/fonts/ 拒绝规则已生效（幂等，无需改动）"
+        return 0
+    fi
+    if [ "$mode" = "check" ]; then
+        nginx_harden_warn "线上未检测到 /data/fonts/ 拒绝规则"
+        return 1
+    fi
+    if [ ! -f "$src" ]; then
+        nginx_harden_warn "缺少加固片段源（$src）"
+        return 0
+    fi
+    if [ "$(id -u)" -ne 0 ]; then
+        nginx_harden_warn "非 root，无法同步 nginx 配置（请用 sudo 执行）"
+        return 0
+    fi
+    if ! command -v nginx >/dev/null 2>&1; then
+        nginx_harden_warn "未找到 nginx，跳过加固同步"
+        return 0
+    fi
+    conf=$(nginx_site_conf) || conf=""
+    if [ -z "$conf" ] || ! grep -qF "$YSM_HARDEN_SNIPPET" "$conf" 2>/dev/null; then
+        # 未接入受控 include 片段：为避免改写他人配置，不自动注入，仅校验 + 告警（含手动步骤）
+        nginx_harden_warn "站点配置未接入受控 include 片段（${conf:-未定位到站点配置}）"
+        return 0
+    fi
+    # 基线校验：若当前 nginx 配置本就不通过，不介入（避免把既有问题误判为本步所致）
+    if ! nginx -t >/dev/null 2>&1; then
+        nginx_harden_warn "nginx 配置基线 nginx -t 未通过，跳过加固同步"
+        return 0
+    fi
+    # ② 受控同步片段（幂等：逐字节比对）
+    mkdir -p "$(dirname "$YSM_HARDEN_SNIPPET")" 2>/dev/null
+    if [ -f "$YSM_HARDEN_SNIPPET" ] && cmp -s "$src" "$YSM_HARDEN_SNIPPET"; then
+        echo "  [nginx] 加固片段已是最新"
+    else
+        [ -f "$YSM_HARDEN_SNIPPET" ] && { bk="$YSM_HARDEN_SNIPPET.ysm-bak-$ts"; cp -p "$YSM_HARDEN_SNIPPET" "$bk" 2>/dev/null; }
+        if cp -f "$src" "$YSM_HARDEN_SNIPPET" 2>/dev/null; then
+            chmod 644 "$YSM_HARDEN_SNIPPET" 2>/dev/null || true
+            chown root:root "$YSM_HARDEN_SNIPPET" 2>/dev/null || true
+            changed=1
+            echo "  [nginx] 已同步加固片段 → $YSM_HARDEN_SNIPPET"
+        else
+            nginx_harden_warn "加固片段写入失败（$YSM_HARDEN_SNIPPET）"
+            return 0
+        fi
+    fi
+    # ③ 失败封闭：nginx -t 不通过 → 还原片段并中止（不 reload）
+    if ! nginx -t >/dev/null 2>&1; then
+        echo "  [nginx] 错误：nginx -t 未通过，回滚加固片段"
+        if [ -n "$bk" ]; then cp -p "$bk" "$YSM_HARDEN_SNIPPET" 2>/dev/null; else rm -f "$YSM_HARDEN_SNIPPET" 2>/dev/null; fi
+        nginx -t >/dev/null 2>&1 && echo "  [nginx] 已还原片段，nginx 配置恢复可用"
+        YSM_DETAIL="nginx -t 失败，已回滚加固片段" php -r "require_once '$WEB_ROOT/utils.php'; auditLog('nginx_hardening_rollback', 'update', getenv('YSM_DETAIL'));" 2>/dev/null || true
+        return 1
+    fi
+    # ④ 校验通过后才 reload
+    if [ "$changed" = "1" ]; then
+        systemctl reload nginx 2>/dev/null && echo "  [nginx] 已 reload nginx" || echo "  [nginx] 警告：nginx reload 失败"
+    fi
+    if nginx_fonts_denied; then
+        YSM_DETAIL="nginx 加固片段已同步并生效" php -r "require_once '$WEB_ROOT/utils.php'; auditLog('nginx_hardening_synced', 'update', getenv('YSM_DETAIL'));" 2>/dev/null || true
+        echo "  [nginx] /data/fonts/ 拒绝规则已生效"
+    else
+        nginx_harden_warn "同步后仍未检测到 /data/fonts/ 拒绝规则"
+    fi
+    return 0
+}
+
+# v5.4.0：敏感目录「直读」端到端探测（真实 HTTP，断言 /data/fonts/ 与 /data/ysm.db 不可直读）。
+#   与配置级检测（nginx_fonts_denied）互补——本函数直接反映线上实际响应，验证 deny 确实生效。
+#   失败仅告警（写审计 + alert.log + 打印修复步骤），不阻断更新、不触发回滚：
+#   避免把「域名解析/网络抖动」等误判为安全缺口而误回滚，导致站点不可用。
+sensitive_paths_probe() {
+    local d code bad="" p
+    d=$(get_domain)
+    if [ -z "$d" ]; then echo "  [敏感目录] 跳过直读探测（无法确定域名）"; return 0; fi
+    for p in "/data/fonts/ysm-probe.ttf" "/data/ysm.db"; do
+        code=$(curl -sk -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$d$p" 2>/dev/null || echo 000)
+        case "$code" in
+            403|404) echo "  [敏感目录] OK：$p → HTTP $code（不可直读）";;
+            *) echo "  [敏感目录] 警告：$p → HTTP $code（疑似可直读，应补 deny all）"; bad="$bad $p($code)";;
+        esac
+    done
+    if [ -n "$bad" ]; then
+        echo "  [敏感目录] 修复：确认站点 server 块已 include $YSM_HARDEN_SNIPPET ，再执行："
+        echo "          sudo ysm-admin harden-nginx && sudo nginx -t && sudo systemctl reload nginx"
+        YSM_DETAIL="敏感目录疑似可直读:$bad" php -r "require_once '$WEB_ROOT/utils.php'; auditLog('sensitive_dir_exposed', 'update', getenv('YSM_DETAIL'));" 2>/dev/null || true
+        printf '%s [敏感目录] 疑似可直读:%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$bad" >> /opt/you-super-markdown/alert.log 2>/dev/null || true
+        return 1
+    fi
+    return 0
+}
+
 case "${1:-}" in
     login)
         ENTRY_TOKEN=$(openssl rand -base64 12 | tr -d '=+/' | cut -c1-12)
@@ -897,6 +1037,24 @@ case "${1:-}" in
         chown www-data:www-data "$ART_PATH" 2>/dev/null || true
         ;;
 
+    harden-nginx)
+        # v5.4.0：手动同步/校验 Nginx 站点加固片段（字体等敏感目录禁止直读）。
+        #   与 apply-update [4.95/6] 共用 sync_nginx_hardening（唯一真源）。
+        #   用法: sudo ysm-admin harden-nginx [--check]
+        #   --check 只校验不写：0=已加固 / 1=缺失。
+        MODE="apply"; for _a in "$@"; do [ "$_a" = "--check" ] && MODE="check"; done
+        if [ "$MODE" = "apply" ] && [ "$(id -u)" -ne 0 ]; then
+            echo "错误：harden-nginx 需 root 权限（sudo ysm-admin harden-nginx）"
+            exit 1
+        fi
+        if sync_nginx_hardening "$MODE"; then
+            if [ "$MODE" = "check" ]; then echo "已加固：/data/fonts/ 拒绝规则在位"; else echo "加固完成"; fi
+        else
+            if [ "$MODE" = "check" ]; then echo "未加固：线上缺少 /data/fonts/ 拒绝规则"; else echo "加固失败（详见上方输出）"; fi
+            exit 1
+        fi
+        ;;
+
     check|doctor)
         # v5.3.0：邮件 / 通知链路体检——报告 超管邮箱 / SMTP / php-fpm 是否注入 YSM_SMTP_PASS / 能否发测试邮件，
         #          并给出修复指引。重点覆盖真实故障：php-fpm 升级（如 8.3）后 env[YSM_SMTP_PASS] 丢失 → Web 端静默发不出信。
@@ -975,6 +1133,10 @@ case "${1:-}" in
                 *)  echo "[x] 测试邮件发送失败：${MAIL_RC#FAIL: }";;
             esac
         fi
+        # v5.4.0：敏感目录直读自检（/data/fonts/、/data/ysm.db 应 403/404，不可直读）
+        echo ""
+        echo "--- 敏感目录直读检测 ---"
+        sensitive_paths_probe || true
         echo ""
         ;;
 
@@ -1429,6 +1591,15 @@ case "${1:-}" in
             exit 1
         fi
 
+        # 4.95 Nginx 站点配置加固（v5.4.0）：字体等敏感目录禁止直读——同步受控 include 片段 + nginx -t 校验；
+        #   失败封闭（nginx -t 不通过 → 回滚片段并中止）；无法安全管理时降级为「校验 + 告警」（不静默放过）。
+        echo "[4.95/6] Nginx 站点配置加固同步与校验..."
+        if ! sync_nginx_hardening; then
+            echo "错误：Nginx 站点配置加固校验失败（nginx -t 未通过），触发自动回滚"
+            mark_failed "Nginx 站点配置加固校验失败（nginx -t）"
+            exit 1
+        fi
+
         # 4.7 更新历史注入（v3.1.9）：changelog 已在 4.7a 提前读取（TMP_DIR 已清理）。
         # 不再逐版本生成独立公告——把本次更新内容写入「更新历史.md」文章（首页公告只保留
         # 一条指向该文章的公告，点进去即可查看全部历史版本更新）。
@@ -1495,6 +1666,9 @@ case "${1:-}" in
             exit 1
         fi
         echo "  重启后复检通过：主页 HTTP $RC_HOME，API HTTP $RC_API，web↔母本 MD5 一致"
+        # v5.4.0：敏感目录直读端到端探测（/data/fonts/、/data/ysm.db 应 403/404）；
+        #   仅告警、不阻断（避免误判触发回滚导致站点不可用），失败写审计 + alert.log。
+        sensitive_paths_probe || true
         # 6.4 写审计日志 + 标记完成 + 更新通知邮件（含本次更新内容/更新方式）
         YSM_UTILS="$WEB_ROOT/utils.php" YSM_FROM_VER="$FROM_VER" YSM_TO_VER="$TO_VER" php -r '
             require_once getenv("YSM_UTILS");
@@ -1631,6 +1805,7 @@ case "${1:-}" in
         echo "  deps                      检查并一键补装功能依赖（内置兜底清单，需 sudo；更新时自动按包内 deps 声明安装）"
         echo "  set-channel <stable|beta> 切换更新通道（别名 channel；stable=仅正式 Release / beta=含预发布）"
         echo "  check [--no-mail]         体检：超管邮箱 / SMTP / php-fpm 是否注入 YSM_SMTP_PASS / 能否发测试邮件"
+        echo "  harden-nginx [--check]    同步/校验 Nginx 站点加固片段（字体目录禁止直读；--check 只校验不写）"
         echo "  cleanup-history           一次性清理「更新历史.md」中同一版本的重复小节（先备份，仅动重复节）"
         echo "  migrate [--db <路径>]      迁移 4.x 数据库结构到 5.0（需 sudo；不重启服务，完成后请重启守护进程）"
         echo "  rollback                  回滚到备份版本"

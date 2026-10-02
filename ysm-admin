@@ -99,7 +99,7 @@ $CL_TEXT"
 
 【更新方式】$UPDATE_METHOD"
     fi
-    /usr/local/bin/ysm-admin notify "$NOTIFY_MSG" 2>/dev/null || true
+    /usr/local/bin/ysm-admin notify "$NOTIFY_MSG" "系统更新完成" 2>/dev/null || true
 }
 
 # ============================================================
@@ -367,7 +367,7 @@ auto_rollback() {
     rm -f /opt/you-super-markdown/run/ysm-update.lock
     echo "  [回退] 自动回退完成，系统已恢复至更新前状态"
     # 回退完成自动通知管理员（失败不阻断）
-    /usr/local/bin/ysm-admin notify "系统更新失败，已自动回退并恢复正常。${reason:+失败原因：${reason}。}系统已恢复至更新前状态，请登录后台查看更新状态。" 2>/dev/null || true
+    /usr/local/bin/ysm-admin notify "系统更新失败，已自动回退并恢复正常。${reason:+失败原因：${reason}。}系统已恢复至更新前状态，请登录后台查看更新状态。" "系统更新失败（详见站内）" 2>/dev/null || true
     return 0
 }
 
@@ -905,12 +905,14 @@ case "${1:-}" in
     notify)
         # v3.1.0：发送通知邮件到管理员邮箱（测试/更新/运维消息均可用）
         # v3.1.1：复用 renderMailHtml 统一邮件模板（HTML 布局 + 纯文本双版本 multipart），修复纯文本无布局
-        # 用法: ysm-admin notify "<消息>"；CLI 发信注入 YSM_SMTP_PASS（root 密钥文件）
+        # 用法: ysm-admin notify "<消息>" [事件标签]；CLI 发信注入 YSM_SMTP_PASS（root 密钥文件）
+        # v5.4.1：可选第 3 参数为「具体事件标签」——邮件两行 badge 下行用它（如"系统更新完成"），缺省则由正文首句兜底
         MSG="${2:-}"
-        if [ -z "$MSG" ]; then echo "用法: ysm-admin notify <消息>"; exit 1; fi
+        EVENT="${3:-}"
+        if [ -z "$MSG" ]; then echo "用法: ysm-admin notify <消息> [事件标签]"; exit 1; fi
         SMTP_PASS_FILE="/opt/you-super-markdown/secrets/smtp_pass"
         if [ -f "$SMTP_PASS_FILE" ]; then
-            YSM_SMTP_PASS="$(cat "$SMTP_PASS_FILE")" MSG_B64=$(printf '%s' "$MSG" | base64 -w0 2>/dev/null || printf '%s' "$MSG" | base64) \
+            YSM_SMTP_PASS="$(cat "$SMTP_PASS_FILE")" MSG_B64=$(printf '%s' "$MSG" | base64 -w0 2>/dev/null || printf '%s' "$MSG" | base64) EVENT_B64=$(printf '%s' "$EVENT" | base64 -w0 2>/dev/null || printf '%s' "$EVENT" | base64) \
             php -r "
                 require_once '$WEB_ROOT/utils.php';
                 \$cfg = loadSiteConfig();
@@ -918,8 +920,10 @@ case "${1:-}" in
                 if (\$to === '') { echo 'NO_ADMIN_EMAIL'; exit(0); }
                 \$site = \$cfg['site_title'] ?? 'You Super Markdown';
                 \$msg = base64_decode(getenv('MSG_B64'));
+                \$event = trim((string)base64_decode((string)getenv('EVENT_B64')));
                 \$subject = '[You Super Markdown] ' . mb_substr(\$msg, 0, 60);
-                \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')]);
+                // v5.4.1：两行 badge 下行「具体事件」——第 3 参数给事件标签则用之，否则由正文自动兜底（不再只显示"通知"）
+                \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')], null, \$event);
                 [\$ok, \$err] = sendSmtpMail(\$to, \$subject, \$msg, \$html);
                 echo \$ok ? 'MAIL_OK' : ('MAIL_FAIL: ' . \$err);
             "
@@ -990,7 +994,8 @@ case "${1:-}" in
             if (\$to === '') { echo 'NO_ADMIN_EMAIL'; exit(0); }
             \$site = \$cfg['site_title'] ?? 'You Super Markdown';
             \$msg = 'SMTP 授权码已更新成功。若收到此邮件说明新的授权码配置正确，安全告警可正常发送。';
-            \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')]);
+            // v5.4.1：两行 badge 下行「具体事件」——此处语义为 SMTP 授权码更新，显式传入避免只显示"通知"
+            \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')], null, 'SMTP 授权码已更新');
             [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown] SMTP 授权码已更新', \$msg, \$html);
             echo \$ok ? 'MAIL_OK' : ('MAIL_FAIL: ' . \$err);
         " 2>/dev/null)

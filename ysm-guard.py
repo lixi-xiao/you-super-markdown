@@ -210,6 +210,30 @@ def _mail_event_text(alert_type: str) -> str:
     return ev.strip() or raw
 
 
+def _mail_resolve_event(category: str, event: str, detail: str) -> str:
+    """v5.4.1：解析两行 badge 的「下行（具体事件）」——兜底防御，绝不允许下行只显示"通知/告警/验证"：
+    事件非空且与「上行类别」不同则直接用；否则取 $detail 首行首句（≤30 字）；仍为空则用固定兜底文案。"""
+    import re as _re
+    ev = str(event).strip()
+    if ev and ev != str(category):
+        return ev
+    first = ''
+    for ln in _re.split(r'\r\n|\r|\n', str(detail)):
+        ln = ln.strip()
+        if ln:
+            first = ln
+            break
+    first = _re.sub(r'\s+', ' ', first).strip()
+    m = _re.match(r'^(.{1,30}?)[。！？!?；;]', first)
+    if m:
+        first = m.group(1)
+    if len(first) > 30:
+        first = first[:30] + '…'
+    if first:
+        return first
+    return {'告警': '系统告警', '验证': '身份验证', '通知': '系统通知'}.get(str(category), '系统通知')
+
+
 def _mail_badge_html(site_e: str, category: str, event: str, bg: str) -> str:
     """v5.4.1：两行 badge（上行=站点+类别，下行=具体事件）；纯内联样式，邮件客户端兼容，窄屏居中且可换行不截断"""
     import html as _html
@@ -245,7 +269,7 @@ def render_mail_html(site: str, alert_type: str, detail: str, server: str = 'loc
             '</tr></table>'
             '</td></tr>'
             '<tr><td style="padding:38px 40px 26px;">'
-            + _mail_badge_html(site_e, _mail_category(alert_type), _mail_event_text(alert_type), badge) +
+            + _mail_badge_html(site_e, _mail_category(alert_type), _mail_resolve_event(_mail_category(alert_type), _mail_event_text(alert_type), detail), badge) +
             '<div style="margin-top:22px;color:#2d3748;font-size:14.5px;line-height:2.0;word-break:break-all;overflow-wrap:anywhere;">' + detail_e + '</div>'
             '</td></tr>'
             '<tr><td style="padding:0 40px 34px;">'

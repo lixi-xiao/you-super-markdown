@@ -1087,6 +1087,27 @@ function mailEventText($type) {
     return ($ev === null || trim($ev) === '') ? $raw : trim($ev);
 }
 
+// v5.4.1：解析两行 badge 的「下行（具体事件）」——兜底防御，绝不允许下行只显示"通知/告警/验证"：
+//   ① 事件非空且与「上行类别」不同 → 直接用；
+//   ② 事件为空、或与类别相同 → 取 $detail 首行首句（截断 ≤30 字）；
+//   ③ 仍为空 → 固定兜底文案（告警/验证/通知各自的可读文案）。
+function mailResolveEvent($category, $typeOrEvent, $detail) {
+    $cat = (string)$category;
+    $ev = mailEventText($typeOrEvent);
+    if ($ev !== '' && $ev !== $cat) return $ev;
+    $first = '';
+    foreach (preg_split('/\r\n|\r|\n/u', (string)$detail) as $ln) {
+        $ln = trim($ln);
+        if ($ln !== '') { $first = $ln; break; }
+    }
+    $first = trim(preg_replace('/\s+/u', ' ', $first));
+    if (preg_match('/^(.{1,30}?)[。！？!?；;]/u', $first, $m)) { $first = $m[1]; }
+    if (mb_strlen($first, 'UTF-8') > 30) { $first = mb_substr($first, 0, 30, 'UTF-8') . '…'; }
+    if ($first !== '') return $first;
+    $fixed = ['告警' => '系统告警', '验证' => '身份验证', '通知' => '系统通知'];
+    return $fixed[$cat] ?? '系统通知';
+}
+
 // v5.4.1：两行 badge（上行=站点+类别，下行=具体事件）；纯内联样式，邮件客户端兼容，窄屏居中且可换行不截断
 function mailBadgeHtml($site, $category, $event, $bg) {
     $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
@@ -1101,7 +1122,8 @@ function mailBadgeHtml($site, $category, $event, $bg) {
 
 // HTML 邮件基础模板（v2.10.1 统一设计：顶部栏按功能分色 + 卡片放大 660px + 内容分层 + 大圆角；内联样式兼容主流邮件客户端）
 // $htmlDetail 为非空时直接作为正文区 HTML（调用方负责转义动态值），否则将 $detail 按纯文本转义后渲染（默认安全）
-function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null) {
+// $badgeEvent 可选：两行 badge 的「下行（具体事件）」显式文案；为空则从 $type/$detail 自动解析（见 mailResolveEvent）
+function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null, $badgeEvent = null) {
     $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
     $siteE = $e($site);
     $typeE = $e($type);
@@ -1113,6 +1135,9 @@ function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null) 
         $detailHtml = nl2br($e($detail));
     }
     $p = mailPalette($type);
+    // v5.4.1：两行 badge 解析——上行=站点+类别，下行=具体事件（空/与类别相同则按 $detail 兜底）
+    $badgeCat = mailCategory($type);
+    $badgeEv = mailResolveEvent($badgeCat, $badgeEvent !== null ? $badgeEvent : $type, $detail);
     $iconLetter = mb_substr($siteE, 0, 1, 'UTF-8');
     return '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
         . '<body style="margin:0;padding:0;background:#eef1f6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
@@ -1128,7 +1153,7 @@ function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null) 
         . '</td></tr>'
         // 主内容区（分层一：类型徽标（v5.4.1 两行：站点+类别 / 具体事件） + 正文）
         . '<tr><td style="padding:38px 40px 26px;">'
-        . mailBadgeHtml($site, mailCategory($type), mailEventText($type), $p['badge'])
+        . mailBadgeHtml($site, $badgeCat, $badgeEv, $p['badge'])
         . '<div style="margin-top:22px;color:#2d3748;font-size:14.5px;line-height:2.0;word-break:break-all;overflow-wrap:anywhere;">' . $detailHtml . '</div>'
         . '</td></tr>'
         // 分层二：元信息面板（浅色内嵌卡）

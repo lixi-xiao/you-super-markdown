@@ -3245,6 +3245,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     $aiEnabledIds = aiEnabledProviderIds();
     $aiCandidates = array_values(array_filter($users, fn($u) => in_array($u['role'] ?? '', [ROLE_STATION_ADMIN, ROLE_AUTHOR], true)));
     ?>
+    <div class="ai-admin">
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
@@ -3267,30 +3268,30 @@ $banMsg = $_GET['bmsg'] ?? '';
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="save_ai_config" value="1">
             <input type="hidden" name="challenge_code">
-            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
-                <input type="checkbox" name="ai_enabled" id="aiEnabled" value="1" <?= !empty($config['ai_enabled']) ? 'checked' : '' ?> style="width:17px;height:17px;accent-color:var(--accent)">
+            <div class="ai-toggle-card is-primary">
+                <input type="checkbox" name="ai_enabled" id="aiEnabled" value="1" <?= !empty($config['ai_enabled']) ? 'checked' : '' ?>>
                 <div>
-                    <label for="aiEnabled" style="font-weight:600;cursor:pointer">启用 AI 写作（总开关）</label>
+                    <label for="aiEnabled" class="ai-toggle-label">启用 AI 写作（总开关）</label>
                     <div class="form-hint" style="margin:0">关闭后所有角色均无法使用 AI 写作（已配置的 Key 保留）</div>
                 </div>
             </div>
-            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
-                <input type="checkbox" name="ai_role_station_admin" id="aiRoleSt" value="1" <?= !empty($config['ai_role_station_admin']) ? 'checked' : '' ?> style="width:17px;height:17px;accent-color:var(--accent)">
+            <div class="ai-toggle-card">
+                <input type="checkbox" name="ai_role_station_admin" id="aiRoleSt" value="1" <?= !empty($config['ai_role_station_admin']) ? 'checked' : '' ?>>
                 <div>
-                    <label for="aiRoleSt" style="font-weight:600;cursor:pointer">站长可用</label>
+                    <label for="aiRoleSt" class="ai-toggle-label">站长可用</label>
                     <div class="form-hint" style="margin:0">允许 ROLE_STATION_ADMIN 在编辑器中使用 AI 写作</div>
                 </div>
             </div>
-            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
-                <input type="checkbox" name="ai_role_author" id="aiRoleAuthor" value="1" <?= !empty($config['ai_role_author']) ? 'checked' : '' ?> style="width:17px;height:17px;accent-color:var(--accent)">
+            <div class="ai-toggle-card">
+                <input type="checkbox" name="ai_role_author" id="aiRoleAuthor" value="1" <?= !empty($config['ai_role_author']) ? 'checked' : '' ?>>
                 <div>
-                    <label for="aiRoleAuthor" style="font-weight:600;cursor:pointer">写作者可用</label>
+                    <label for="aiRoleAuthor" class="ai-toggle-label">写作者可用</label>
                     <div class="form-hint" style="margin:0">允许 ROLE_AUTHOR 在编辑器中使用 AI 写作</div>
                 </div>
             </div>
             <div class="form-group">
                 <label class="form-label">服务商预设白名单（base_url 固定；使用者只能选，不能自定义）</label>
-                <div class="table-wrap">
+                <div class="table-wrap ai-provider-table">
                 <table>
                     <tr><th style="width:60px">启用</th><th>服务商</th><th>base_url（固定）</th></tr>
                     <?php foreach ($aiBuiltin as $pid => $p): ?>
@@ -3337,6 +3338,7 @@ $banMsg = $_GET['bmsg'] ?? '';
             </div>
         </form>
     </div>
+    </div><!-- /ai-admin -->
     <?php endif; ?>
 </div>
 

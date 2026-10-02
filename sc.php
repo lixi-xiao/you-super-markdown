@@ -861,36 +861,42 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 <!-- ===== v5.4.0-beta：AI 写作侧边浮层（选中文本 → 动作 → 流式 → 差异预览 → 插入/替换/撤销） ===== -->
 <div class="ai-drawer" id="aiDrawer" style="display:none">
     <div class="ai-drawer-head">
-        <span>AI 写作</span>
+        <span class="ai-drawer-title">AI 写作</span>
         <button type="button" class="ai-drawer-close" id="aiDrawerClose" aria-label="关闭">&times;</button>
     </div>
     <div class="ai-drawer-body">
-        <div class="ai-field">
-            <label class="ai-label">动作</label>
-            <div class="ai-actions" id="aiActionChips"></div>
+        <div class="ai-group">
+            <div class="ai-group-title">处理方式</div>
+            <div class="ai-field">
+                <label class="ai-label">动作</label>
+                <div class="ai-actions" id="aiActionChips"></div>
+            </div>
+            <div class="ai-field" id="aiStyleWrap" style="display:none">
+                <label class="ai-label">目标风格</label>
+                <select class="ai-select" id="aiStyle"></select>
+            </div>
+            <div class="ai-field" id="aiLangWrap" style="display:none">
+                <label class="ai-label">目标语言</label>
+                <select class="ai-select" id="aiLang"></select>
+            </div>
         </div>
-        <div class="ai-field" id="aiStyleWrap" style="display:none">
-            <label class="ai-label">目标风格</label>
-            <select class="ai-select" id="aiStyle"></select>
-        </div>
-        <div class="ai-field" id="aiLangWrap" style="display:none">
-            <label class="ai-label">目标语言</label>
-            <select class="ai-select" id="aiLang"></select>
-        </div>
-        <div class="ai-field">
-            <label class="ai-label">服务商</label>
-            <select class="ai-select" id="aiProvider"></select>
-            <div class="ai-hint" id="aiProviderHint" style="margin-top:6px"></div>
-        </div>
-        <div class="ai-field">
-            <label class="ai-label">选中文本</label>
-            <div class="ai-src" id="aiSrc"></div>
+        <div class="ai-group">
+            <div class="ai-group-title">服务商与原文</div>
+            <div class="ai-field">
+                <label class="ai-label">服务商</label>
+                <select class="ai-select" id="aiProvider"></select>
+                <div class="ai-hint" id="aiProviderHint"></div>
+            </div>
+            <div class="ai-field">
+                <label class="ai-label">选中文本</label>
+                <div class="ai-src" id="aiSrc"></div>
+            </div>
         </div>
         <div class="ai-run-row">
             <button type="button" class="ai-btn ai-btn-primary" id="aiRunBtn">开始生成</button>
-            <span class="ai-hint" id="aiStatus"></span>
+            <span class="ai-status" id="aiStatus"></span>
         </div>
-        <div class="ai-field" id="aiResultWrap" style="display:none;margin-top:14px">
+        <div class="ai-field ai-result" id="aiResultWrap" style="display:none">
             <div class="ai-diff">
                 <div class="ai-diff-col"><div class="ai-diff-title">原文</div><div class="ai-diff-body" id="aiDiffOld"></div></div>
                 <div class="ai-diff-col"><div class="ai-diff-title">结果</div><div class="ai-diff-body" id="aiDiffNew"></div></div>
@@ -1229,7 +1235,19 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         }).then(function(r) { return r.json().catch(function() { return { success: false, error: 'HTTP ' + r.status }; }); });
     }
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
-    function setStatus(t) { $('aiStatus').textContent = t || ''; }
+    // v5.4.0-beta.2：状态反馈分色（成功/失败/进行中），失败透出后端可读原因
+    function setStatus(t, tone) {
+        var el = $('aiStatus');
+        if (!el) return;
+        el.textContent = t || '';
+        el.className = 'ai-status' + (tone ? ' is-' + tone : '');
+    }
+    // 统一读取后端可读原因：env_invalid 优先（提示重新登录），其次 error / message
+    function reasonOf(d, fallback) {
+        d = d || {};
+        if (d.env_invalid) return '登录环境已变化，请重新登录';
+        return d.message || d.error || fallback;
+    }
 
     function tokenize(s) {
         var out = [], re = /[A-Za-z0-9]+|[\u4e00-\u9fff]|[^\s]|\s+/g, m;
@@ -1325,17 +1343,17 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         var dv = diffHtml(captured, result);
         $('aiDiffOld').innerHTML = dv.old;
         $('aiDiffNew').innerHTML = dv['new'];
-        setStatus('完成（' + result.length + ' 字）：可插入 / 替换');
+        setStatus('完成（' + result.length + ' 字）：可插入 / 替换', 'ok');
     }
 
     function run() {
         if (busy) return;
-        if (!cfg.privacy_ack) { $('aiPrivacyMask').style.display = 'flex'; setStatus('请先确认隐私提示'); return; }
+        if (!cfg.privacy_ack) { $('aiPrivacyMask').style.display = 'flex'; setStatus('请先确认隐私提示', 'err'); return; }
         var pid = $('aiProvider').value, k = null, i;
         for (i = 0; i < (cfg.keys || []).length; i++) if (cfg.keys[i].provider === pid) k = cfg.keys[i];
-        if (!k || !k.configured) { alert('该服务商尚未配置 Key，请先到后台「AI 写作」配置'); return; }
+        if (!k || !k.configured) { setStatus('该服务商尚未配置 Key，请先到后台「AI 写作」配置', 'err'); return; }
         var style = $('aiStyle').value, lang = $('aiLang').value;
-        busy = true; $('aiRunBtn').disabled = true; setStatus('生成中…');
+        busy = true; $('aiRunBtn').disabled = true; setStatus('生成中…', 'busy');
         result = ''; finalized = false;
         $('aiResultWrap').style.display = 'block';
         $('aiDiffOld').innerHTML = esc(captured);
@@ -1348,7 +1366,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         }).then(function(resp) {
             var ct = resp.headers.get('content-type') || '';
             if (ct.indexOf('application/json') >= 0) {
-                return resp.json().then(function(d) { err = d.error || '调用失败'; });
+                return resp.json().then(function(d) { err = reasonOf(d, '调用失败'); });
             }
             if (!resp.body || !resp.body.getReader) { err = '当前浏览器不支持流式读取'; return; }
             var reader = resp.body.getReader(), dec = new TextDecoder(), buf = '';
@@ -1375,10 +1393,10 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
             return pump();
         }).then(function() {
             busy = false; $('aiRunBtn').disabled = false;
-            if (err) { setStatus(err); return; }
-            if (result) finalize(); else setStatus('未获得结果');
+            if (err) { setStatus(err, 'err'); return; }
+            if (result) finalize(); else setStatus('未获得结果', 'err');
         }).catch(function(e) {
-            busy = false; $('aiRunBtn').disabled = false; setStatus((e && e.message) || '网络错误');
+            busy = false; $('aiRunBtn').disabled = false; setStatus((e && e.message) || '网络错误', 'err');
         });
     }
 
@@ -1397,7 +1415,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         ta.focus();
         ta.selectionStart = ta.selectionEnd = lastSel.end;
         $('aiUndoBtn').style.display = '';
-        setStatus(mode === 'replace' ? '已替换' : '已插入');
+        setStatus(mode === 'replace' ? '已替换' : '已插入', 'ok');
     }
 
     $('aiRunBtn').addEventListener('click', run);
@@ -1408,7 +1426,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         ta.value = undoValue; undoValue = null;
         ta.dispatchEvent(new Event('input', { bubbles: true }));
         $('aiUndoBtn').style.display = 'none';
-        setStatus('已撤销');
+        setStatus('已撤销', 'ok');
     });
     $('aiDrawerClose').addEventListener('click', closeDrawer);
     var btn = $('btnAiWrite');

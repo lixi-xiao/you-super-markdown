@@ -3710,7 +3710,7 @@ function buildUpdateResult($release, $channel) {
     $updateDecision = ysmCanUpdate(APP_VERSION, $latest, 'full', $channel);
     $verCmp = ysmCompareVersion($latest, APP_VERSION);
     $sameCross = ($latest !== APP_VERSION && $verCmp === 0);
-    $available = ($verCmp > 0) || ($sameCross && (($updateDecision['decision'] ?? '') === 'allow'));
+    $available = ($verCmp > 0) || ($sameCross && !empty($updateDecision['allowed']));
     return [
         'available' => $available,
         'latest_version' => $latest,

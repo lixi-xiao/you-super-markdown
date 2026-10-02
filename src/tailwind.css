@@ -1548,4 +1548,20 @@
     .ai-btn { flex: 1 1 auto; }
     .ai-apply-row .ai-btn { flex: 1 1 auto; }
   }
+
+  /* ── v5.4.2-beta：未配置 Key 的「去配置 Key」引导链接 ── */
+  .ai-hint-link { color: var(--accent, #2563eb); text-decoration: underline; margin-left: 2px; }
+  .ai-hint-link:hover { opacity: 0.85; }
+
+  /* ── v5.4.2-beta：移动端底部操作条固定（插入/替换/撤销吸底，含底部安全区） ── */
+  @media (max-width: 768px) {
+    .ai-apply-row {
+      position: sticky;
+      bottom: 0;
+      z-index: 6;
+      background: var(--surface, #121722);
+      padding-top: 8px;
+      padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    }
+  }
 }

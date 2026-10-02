@@ -29,6 +29,8 @@ $isStationAdmin = checkRole(ROLE_STATION_ADMIN);
 $isAuthor = (($_SESSION['cmt_user']['role'] ?? '') === ROLE_AUTHOR);
 // v5.4.0-beta：AI 写作入口是否可用（超管不参与创作；需超管已开放对应角色）
 $aiToolEnabled = aiRoleAllowed($_SESSION['cmt_user']['role'] ?? '');
+// v5.4.2-beta：AI 浮层「未配置 Key」引导目标（按角色指向对应后台 AI 写作 tab）
+$aiConfigUrl = $isStationAdmin ? 'station/dashboard.php?tab=ai' : 'author/dashboard.php?tab=ai';
 $myId = getCurrentUserId();
 $myNick = $_SESSION['cmt_user']['nickname'] ?? '';
 
@@ -894,6 +896,8 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
         </div>
         <div class="ai-run-row">
             <button type="button" class="ai-btn ai-btn-primary" id="aiRunBtn">开始生成</button>
+            <button type="button" class="ai-btn" id="aiCancelBtn" style="display:none">取消</button>
+            <button type="button" class="ai-btn" id="aiRetryBtn" style="display:none">重试</button>
             <span class="ai-status" id="aiStatus"></span>
         </div>
         <div class="ai-field ai-result" id="aiResultWrap" style="display:none">
@@ -1219,6 +1223,8 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
 // ============================================================================
 // v5.4.0-beta：AI 写作侧边浮层（选中文本 → 动作 → 流式 SSE → 差异预览 → 插入/替换/撤销）
 //   Key 永不触达前端；接口只回传"已配置(****末四位)/未配置"。
+// v5.4.2-beta：记住上次选择（动作/服务商/风格/语言，localStorage）、生成可取消 + 失败可重试、
+//   显示耗时（上游若回 usage 则一并显示 token）、未配置 Key 时给出「去配置 Key」引导、移动端底部操作条吸底。
 // ============================================================================
 (function() {
     var $ = function(id) { return document.getElementById(id); };
@@ -1226,8 +1232,15 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     var ta = $('editContent');
     if (!drawer || !ta) return;
     var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+    var aiConfigUrl = <?= json_encode($aiConfigUrl) ?>;
     var cfg = null, captured = '', result = '', lastSel = { start: 0, end: 0 };
     var undoValue = null, busy = false, finalized = false, curAction = 'polish';
+    // v5.4.2-beta：记住上次选择（动作/服务商/风格/语言）——localStorage，纯前端偏好，不含任何 Key
+    var PREF_KEY = 'ysm_ai_pref';
+    function loadPref() { try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}') || {}; } catch (e) { return {}; } }
+    function savePref() { try { localStorage.setItem(PREF_KEY, JSON.stringify({ action: curAction, provider: $('aiProvider').value, style: $('aiStyle').value, lang: $('aiLang').value })); } catch (e) {} }
+    // v5.4.2-beta：生成可取消（AbortController）+ 失败可重试 + 显示耗时（上游若回 usage 则一并显示 token）
+    var controller = null, tokenUsage = null;
 
     function api(action, method, body) {
         // v5.4.0-beta.4：补 X-Fp（本页不加载 main.js，其 fetch 包装不会注入）——取值与 main.js 一致，否则后端校验环境失败返回 401
@@ -1284,8 +1297,9 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         var pid = $('aiProvider').value, k = null, i;
         for (i = 0; i < (cfg.keys || []).length; i++) if (cfg.keys[i].provider === pid) k = cfg.keys[i];
         var hint = $('aiProviderHint');
-        if (k && k.configured) hint.textContent = '已配置 ' + k.hint + ' · 模型 ' + (k.model || '未填');
-        else hint.textContent = '未配置：请先在后台「AI 写作」中配置该服务商的 Key';
+        if (k && k.configured) hint.innerHTML = '已配置 ' + esc(k.hint) + ' · 模型 ' + esc(k.model || '未填');
+        // v5.4.2-beta：未配置 Key 时给出直达「AI 写作」配置页的入口
+        else hint.innerHTML = '未配置：请先配置该服务商的 Key <a class="ai-hint-link" href="' + esc(aiConfigUrl) + '">去配置 Key</a>';
     }
     function syncActionFields() {
         $('aiStyleWrap').style.display = (curAction === 'style') ? '' : 'none';
@@ -1293,6 +1307,9 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     }
 
     function buildForm() {
+        // v5.4.2-beta：先套用本地记住的动作（决定 chip 高亮），再构建表单
+        var pref = loadPref();
+        if (pref.action && cfg.actions && cfg.actions[pref.action] !== undefined) curAction = pref.action;
         var chips = '', i;
         for (var k in cfg.actions) {
             chips += '<button type="button" class="ai-chip' + (k === curAction ? ' active' : '') + '" data-action="' + k + '">' + esc(cfg.actions[k]) + '</button>';
@@ -1307,7 +1324,11 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         var po = '';
         cfg.providers.forEach(function(p) { po += '<option value="' + esc(p.id) + '">' + esc(p.label) + '</option>'; });
         $('aiProvider').innerHTML = po;
-        if (cfg.default_provider) $('aiProvider').value = cfg.default_provider;
+        // 套用记住的服务商 / 风格 / 语言（仅当仍在候选集合内）
+        if (pref.provider) { for (i = 0; i < cfg.providers.length; i++) if (cfg.providers[i].id === pref.provider) $('aiProvider').value = pref.provider; }
+        if (pref.style) { for (i = 0; i < cfg.styles.length; i++) if (cfg.styles[i] === pref.style) $('aiStyle').value = pref.style; }
+        if (pref.lang) { for (i = 0; i < cfg.langs.length; i++) if (cfg.langs[i] === pref.lang) $('aiLang').value = pref.lang; }
+        if (cfg.default_provider && !pref.provider) $('aiProvider').value = cfg.default_provider;
         refreshProviderHint();
         syncActionFields();
     }
@@ -1320,8 +1341,11 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         for (var i = 0; i < all.length; i++) all[i].classList.remove('active');
         t.classList.add('active');
         syncActionFields();
+        savePref();
     });
-    $('aiProvider').addEventListener('change', refreshProviderHint);
+    $('aiProvider').addEventListener('change', function() { refreshProviderHint(); savePref(); });
+    $('aiStyle').addEventListener('change', savePref);
+    $('aiLang').addEventListener('change', savePref);
 
     function openDrawer() {
         var s = ta.selectionStart, e = ta.selectionEnd, sel = ta.value.slice(s, e);
@@ -1335,7 +1359,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         hideFab();
         if (!cfg.privacy_ack) $('aiPrivacyMask').style.display = 'flex';
     }
-    function closeDrawer() { drawer.style.display = 'none'; hideFab(); }
+    function closeDrawer() { if (controller) { try { controller.abort(); } catch (e) {} } drawer.style.display = 'none'; hideFab(); }
 
     $('aiPrivacyOk').addEventListener('click', function() {
         $('aiPrivacyMask').style.display = 'none';
@@ -1343,12 +1367,28 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     });
     $('aiPrivacyCancel').addEventListener('click', function() { $('aiPrivacyMask').style.display = 'none'; });
 
-    function finalize() {
+    // v5.4.2-beta：生成按钮态（运行中显示「取消」；出错显示「重试」）
+    function setRunBtns(state) {
+        var runB = $('aiRunBtn'), cancelB = $('aiCancelBtn'), retryB = $('aiRetryBtn');
+        if (!runB) return;
+        runB.disabled = (state === 'busy');
+        if (cancelB) cancelB.style.display = (state === 'busy') ? '' : 'none';
+        if (retryB) retryB.style.display = (state === 'error') ? '' : 'none';
+    }
+
+    function finalize(started) {
         finalized = true;
         var dv = diffHtml(captured, result);
         $('aiDiffOld').innerHTML = dv.old;
         $('aiDiffNew').innerHTML = dv['new'];
-        setStatus('完成（' + result.length + ' 字）：可插入 / 替换', 'ok');
+        var extra = '';
+        if (started) extra += ' · 用时 ' + ((Date.now() - started) / 1000).toFixed(1) + 's';
+        if (tokenUsage) {
+            var tk = (tokenUsage.total_tokens != null) ? tokenUsage.total_tokens
+                : ((tokenUsage.completion_tokens || 0) + (tokenUsage.prompt_tokens || 0));
+            if (tk) extra += ' · tokens ' + tk;
+        }
+        setStatus('完成（' + result.length + ' 字' + extra + '）：可插入 / 替换', 'ok');
     }
 
     function run() {
@@ -1356,10 +1396,16 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         if (!cfg.privacy_ack) { $('aiPrivacyMask').style.display = 'flex'; setStatus('请先确认隐私提示', 'err'); return; }
         var pid = $('aiProvider').value, k = null, i;
         for (i = 0; i < (cfg.keys || []).length; i++) if (cfg.keys[i].provider === pid) k = cfg.keys[i];
-        if (!k || !k.configured) { setStatus('该服务商尚未配置 Key，请先到后台「AI 写作」配置', 'err'); return; }
+        if (!k || !k.configured) {
+            setStatus('该服务商尚未配置 Key，请先到后台「AI 写作」配置', 'err');
+            refreshProviderHint();
+            return;
+        }
         var style = $('aiStyle').value, lang = $('aiLang').value;
-        busy = true; $('aiRunBtn').disabled = true; setStatus('生成中…', 'busy');
-        result = ''; finalized = false;
+        busy = true; setRunBtns('busy'); setStatus('生成中…（可取消）', 'busy');
+        result = ''; finalized = false; tokenUsage = null;
+        var started = Date.now();
+        controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
         $('aiResultWrap').style.display = 'block';
         $('aiDiffOld').innerHTML = esc(captured);
         $('aiDiffNew').innerHTML = '';
@@ -1367,6 +1413,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         fetch('api.php?action=ai_run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Fp': (typeof window.ysmGetFp === 'function' ? window.ysmGetFp() : '') },
+            signal: controller ? controller.signal : undefined,
             body: JSON.stringify({ action: curAction, provider: pid, text: captured, style: style, lang: lang, stream: true })
         }).then(function(resp) {
             var ct = resp.headers.get('content-type') || '';
@@ -1384,6 +1431,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
                         $('aiDiffNew').textContent = result;
                         $('aiDiffNew').scrollTop = $('aiDiffNew').scrollHeight;
                     } else if (ev.event === 'error') { err = ev.message || '调用失败'; }
+                    else if (ev.event === 'usage') { tokenUsage = ev.usage || ev; }
                 });
             }
             function pump() {
@@ -1397,11 +1445,13 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
             }
             return pump();
         }).then(function() {
-            busy = false; $('aiRunBtn').disabled = false;
-            if (err) { setStatus(err, 'err'); return; }
-            if (result) finalize(); else setStatus('未获得结果', 'err');
+            busy = false; controller = null;
+            if (err) { setRunBtns('error'); setStatus(err, 'err'); return; }
+            if (result) { setRunBtns('idle'); finalize(started); } else { setRunBtns('error'); setStatus('未获得结果', 'err'); }
         }).catch(function(e) {
-            busy = false; $('aiRunBtn').disabled = false; setStatus((e && e.message) || '网络错误', 'err');
+            busy = false; controller = null;
+            if (e && e.name === 'AbortError') { setRunBtns('error'); setStatus('已取消', 'err'); }
+            else { setRunBtns('error'); setStatus((e && e.message) || '网络错误', 'err'); }
         });
     }
 
@@ -1424,6 +1474,9 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     }
 
     $('aiRunBtn').addEventListener('click', run);
+    // v5.4.2-beta：取消（中断进行中的流式请求）与重试（失败后一键重跑）
+    $('aiCancelBtn').addEventListener('click', function() { if (controller) { try { controller.abort(); } catch (e) {} } });
+    $('aiRetryBtn').addEventListener('click', function() { if (!busy) run(); });
     $('aiInsertBtn').addEventListener('click', function() { applyText('insert'); });
     $('aiReplaceBtn').addEventListener('click', function() { applyText('replace'); });
     $('aiUndoBtn').addEventListener('click', function() {

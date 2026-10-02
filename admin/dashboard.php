@@ -562,6 +562,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_ai_config'])) {
     exit;
 }
 
+// v5.4.3-beta.2：保存「模型与长度」——按服务商维护模型名单（id/展示名/单次输入上限/最大输出/超时/流式超时）
+//   安全口径与既有 AI 页一致：CSRF + 挑战码 + 后台环境校验（页面加载时 X-Fp 上报）+ 审计日志。
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_ai_models'])) {
+    if (!checkCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: dashboard.php?tab=ai&msg=csrf_error');
+        exit;
+    }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=ai&msg=challenge_failed');
+        exit;
+    }
+    // 只接受白名单服务商；逐行归一化（非法行丢弃），同服务商内按 id 去重
+    $posted = (isset($_POST['ai_model_catalog']) && is_array($_POST['ai_model_catalog'])) ? $_POST['ai_model_catalog'] : [];
+    $catalog = [];
+    $count = 0;
+    foreach (array_keys(aiBuiltinProviders()) as $pid) {
+        $list = []; $seen = [];
+        if (isset($posted[$pid]) && is_array($posted[$pid])) {
+            foreach ($posted[$pid] as $row) {
+                $n = aiNormalizeModelEntry($row);
+                if ($n === null || isset($seen[$n['id']])) continue;
+                $seen[$n['id']] = true;
+                $list[] = $n; $count++;
+            }
+        }
+        $catalog[$pid] = $list;
+    }
+    $cfg = loadSiteConfig();
+    $cfg['ai_model_catalog'] = $catalog;
+    saveSiteConfig($cfg);
+    auditLog('ai_models_update', 'ai_model_catalog', "更新「模型与长度」清单（共 {$count} 个模型）");
+    header('Location: dashboard.php?tab=ai&msg=ai_models_saved');
+    exit;
+}
+
 // v5.4.0-beta：清除某用户的 AI Key（仅清除，不提供任何查看/导出）
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ai_clear_user'])) {
     if (!checkCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -3246,6 +3281,8 @@ $banMsg = $_GET['bmsg'] ?? '';
     $aiBuiltin = aiBuiltinProviders();
     $aiEnabledIds = aiEnabledProviderIds();
     $aiCandidates = array_values(array_filter($users, fn($u) => in_array($u['role'] ?? '', [ROLE_STATION_ADMIN, ROLE_AUTHOR], true)));
+    // v5.4.3-beta.2：模型与长度清单（超管维护；字段缺失回落内置预设）
+    $aiCatalog = aiModelsConfig();
     ?>
     <div class="ai-admin">
     <div class="page-header">
@@ -3256,6 +3293,7 @@ $banMsg = $_GET['bmsg'] ?? '';
         <div class="page-subtitle">站级开关与服务商白名单（超管仅管理"站"的层面，不接触任何人的 Key）</div>
     </div>
     <?php if ($msg === 'ai_cleared'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>已清除该用户的 AI Key</div><?php endif; ?>
+    <?php if ($msg === 'ai_models_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>已保存「模型与长度」配置</div><?php endif; ?>
     <?php if ($msg === 'challenge_failed'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>挑战码无效或已过期，请重新生成</div><?php endif; ?>
     <div class="card">
         <div class="card-title">
@@ -3305,10 +3343,54 @@ $banMsg = $_GET['bmsg'] ?? '';
                     <?php endforeach; ?>
                 </table>
                 </div>
-                <div class="form-hint">模型名由使用者自行填写（各家/各模型不同）。后端调用时 base_url 一律取自本白名单，不接受前端传入 URL（防 SSRF）。</div>
+                <div class="form-hint">模型由超管在下方「模型与长度」中按服务商维护（使用者只能从名单里选，不支持自定义地址）。后端调用时 base_url 一律取自本白名单，不接受前端传入 URL（防 SSRF）。</div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
                 <button type="submit" class="btn btn-primary">保存 AI 配置</button>
+            </div>
+        </form>
+    </div>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
+            模型与长度
+        </div>
+        <div class="form-hint" style="margin-bottom:12px">
+            按服务商维护可用模型名单与长度上限；使用者只能在名单里选择（<b>不支持自定义地址</b>）。<br>
+            「单次输入上限」为处理后正文字符上限（留空回退 20000）；「最大输出」为 tokens（留空则不传，用服务商默认）；「超时 / 流式超时」为秒（留空回退 60 / 120）。
+        </div>
+        <form method="post" class="need-challenge" id="aiModelsForm">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="save_ai_models" value="1">
+            <input type="hidden" name="challenge_code">
+            <?php foreach ($aiBuiltin as $pid => $p): $rows = isset($aiCatalog[$pid]) ? array_values($aiCatalog[$pid]) : []; ?>
+            <div class="ai-model-provider">
+                <div class="ai-model-provider-head">
+                    <span class="ai-model-provider-name"><?= htmlspecialchars($p['label']) ?></span>
+                    <button type="button" class="btn btn-sm btn-outline" onclick="aiModelAddRow('<?= htmlspecialchars($pid) ?>')">+ 添加模型</button>
+                </div>
+                <div class="table-wrap">
+                <table class="ai-model-table">
+                    <thead><tr><th>模型 id</th><th>展示名</th><th>单次输入上限(字)</th><th>最大输出(tokens)</th><th>超时(秒)</th><th>流式超时(秒)</th><th style="width:70px"></th></tr></thead>
+                    <tbody data-provider="<?= htmlspecialchars($pid) ?>">
+                    <?php foreach ($rows as $ri => $m): ?>
+                    <tr>
+                        <td><input class="form-input" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][id]" value="<?= htmlspecialchars($m['id']) ?>" placeholder="如 deepseek-flash"></td>
+                        <td><input class="form-input" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][label]" value="<?= htmlspecialchars($m['label']) ?>" placeholder="展示名"></td>
+                        <td><input class="form-input" type="number" min="0" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][max_input_chars]" value="<?= (int)$m['max_input_chars'] ?>"></td>
+                        <td><input class="form-input" type="number" min="0" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][max_out_tokens]" value="<?= (int)$m['max_out_tokens'] ?>"></td>
+                        <td><input class="form-input" type="number" min="0" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][timeout]" value="<?= (int)$m['timeout'] ?>"></td>
+                        <td><input class="form-input" type="number" min="0" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][timeout_stream]" value="<?= (int)$m['timeout_stream'] ?>"></td>
+                        <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">删除</button></td>
+                    </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div>
+            </div>
+            <?php endforeach; ?>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+                <button type="submit" class="btn btn-primary">保存模型与长度</button>
             </div>
         </form>
     </div>
@@ -3464,6 +3546,25 @@ function ysmOpenUserDetail(btn) {
     document.getElementById('udTitle').textContent = '用户详情 - ' + (d.nickname || d.account || '');
     document.getElementById('udBody').innerHTML = h;
     document.getElementById('userDetailModal').style.display = 'flex';
+}
+</script>
+<script>
+// v5.4.3-beta.2：模型与长度——动态添加一行（index 用大基数，避免与既有行冲突；删除仅移除 DOM 行）
+var _aiModelSeq = 1000;
+function aiModelAddRow(pid) {
+    var tb = document.querySelector('.ai-model-table tbody[data-provider="' + pid + '"]');
+    if (!tb) return;
+    var n = 'ai_model_catalog[' + pid + '][' + (_aiModelSeq++) + ']';
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+        '<td><input class="form-input" name="' + n + '[id]" placeholder="如 deepseek-flash"></td>' +
+        '<td><input class="form-input" name="' + n + '[label]" placeholder="展示名"></td>' +
+        '<td><input class="form-input" type="number" min="0" name="' + n + '[max_input_chars]" placeholder="20000"></td>' +
+        '<td><input class="form-input" type="number" min="0" name="' + n + '[max_out_tokens]" placeholder="8192"></td>' +
+        '<td><input class="form-input" type="number" min="0" name="' + n + '[timeout]" placeholder="60"></td>' +
+        '<td><input class="form-input" type="number" min="0" name="' + n + '[timeout_stream]" placeholder="120"></td>' +
+        '<td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'tr\').remove()">删除</button></td>';
+    tb.appendChild(tr);
 }
 </script>
 <script>

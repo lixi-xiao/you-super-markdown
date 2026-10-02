@@ -1,7 +1,8 @@
-/* You Super Markdown — AI 写作 · 个人 Key 管理（v5.4.0-beta.2）
+/* You Super Markdown — AI 写作 · 个人 Key 管理（v5.4.3-beta.2）
  * 站长 / 写作者后台共用：为每个账号配置各自的服务商 Key（绑定站内账号）。
  * 安全口径：前端只提交 key/model/provider；服务端连通性测试通过才保存；接口只回传"已配置(****末四位)/未配置"。
- * v5.4.0-beta.2：失败时透出后端可读原因（message/error）；env_invalid 时引导重新登录；模型名输入框下方给出推荐模型名。
+ * v5.4.3-beta.2：模型名改为「下拉选择」（数据来自服务端名单）；旧配置不在名单时标注「待重选」并保留 Key；
+ *   新增账号级「思考模式」开关（默认关闭；服务商不支持时给出提示）。
  */
 (function () {
     'use strict';
@@ -9,18 +10,13 @@
     if (!box) return;
     var csrf = box.getAttribute('data-csrf') || '';
     var providers = [];
-    var state = {}; // provider -> {configured, hint, model, is_default}
-
-    // v5.4.0-beta.2：各服务商推荐模型名（仅提示，不强制、不预填；与后端白名单 provider id 对应）
-    var MODEL_HINTS = {
-        'deepseek':  { rec: 'deepseek-chat',  note: '' },
-        'mimo-payg': { rec: 'mimo-v2.6-pro',  note: 'mimo-v2-pro 已下线，请勿再填' },
-        'mimo-plan': { rec: 'mimo-v2.6-pro',  note: 'mimo-v2-pro 已下线，请勿再填' },
-        'qwen':      { rec: 'qwen-plus',      note: '' }
-    };
+    var models = {};          // provider -> [ {id,label,max_input_chars,max_out_tokens} ]
+    var thinkingSupport = {}; // provider -> bool（是否支持思考模式开关）
+    var thinking = false;     // 账号级思考模式（默认关闭）
+    var state = {};           // provider -> {configured, hint, model, is_default, model_available}
 
     function api(action, method, body) {
-        // v5.4.0-beta.4：补 X-Fp（本页不加载 main.js，其 fetch 包装不会注入）——取值与 main.js 一致，否则后端校验环境失败返回 401
+        // 本页不加载 main.js，其 fetch 包装不会注入 X-Fp —— 取值与 main.js 一致，否则后端校验环境失败返回 401
         var headers = { 'X-Fp': (typeof window.ysmGetFp === 'function' ? window.ysmGetFp() : '') };
         if (method === 'POST') { headers['Content-Type'] = 'application/json'; headers['X-CSRF-Token'] = csrf; }
         return fetch('../api.php?action=' + action, {
@@ -44,21 +40,61 @@
         el.className = 'msg ' + (ok ? 'msg-success' : 'msg-error');
         el.style.display = msg ? 'flex' : 'none';
     }
-    // v5.4.0-beta.2：统一读取后端可读原因——env_invalid 优先（提示重新登录），其次 message / error
+    // 统一读取后端可读原因——env_invalid 优先（提示重新登录），其次 message / error
     function reasonOf(d, fallback) {
         d = d || {};
         if (d.env_invalid) return '登录环境已变化，请重新登录';
         return d.message || d.error || fallback;
     }
-    function modelHint(pid) {
-        var h = MODEL_HINTS[pid];
-        if (!h) return '';
-        var t = '推荐模型：' + h.rec + (h.note ? '（' + h.note + '）' : '');
-        return '<div class="ai-hint ai-model-hint">' + esc(t) + '</div>';
+    // 该 provider 的模型是否在名单内
+    function modelKnown(pid, id) {
+        var list = models[pid] || [];
+        for (var i = 0; i < list.length; i++) if (list[i].id === id) return true;
+        return false;
+    }
+    // 模型下拉：显示 label（无 label 时回退 id），提交 id；旧配置不在名单 → 置顶「待重选」项（保留 Key）
+    function modelSelect(pid, st) {
+        var list = models[pid] || [];
+        var pending = st.configured && st.model && !modelKnown(pid, st.model);
+        var html = '<select class="form-select ai-model" data-provider="' + esc(pid) + '">';
+        if (pending) html += '<option value="' + esc(st.model) + '" selected>（待重选）' + esc(st.model) + '</option>';
+        else html += '<option value="" disabled' + (st.model ? '' : ' selected') + '>请选择模型</option>';
+        for (var i = 0; i < list.length; i++) {
+            var m = list[i];
+            var lb = m.label ? (m.label + '（' + m.id + '）') : m.id;
+            var sel = (!pending && m.id === st.model) ? ' selected' : '';
+            html += '<option value="' + esc(m.id) + '"' + sel + '>' + esc(lb) + '</option>';
+        }
+        return html + '</select>';
+    }
+    function modelHint(pid, st) {
+        if (st.configured && st.model && !modelKnown(pid, st.model)) {
+            return '<div class="ai-hint ai-model-hint ai-model-reselect">当前模型「' + esc(st.model) + '」已不在可用名单，请重新选择（Key 已保留）</div>';
+        }
+        if (thinkingSupport[pid] === false) {
+            return '<div class="ai-hint ai-model-hint">该服务商/模型不支持思考模式开关</div>';
+        }
+        return '';
+    }
+    // 账号级思考模式开关卡（默认关闭）
+    function thinkCard() {
+        var supported = [];
+        providers.forEach(function (p) { if (thinkingSupport[p.id] !== false) supported.push(p.label); });
+        var note = supported.length
+            ? ('支持思考模式的服务商：' + supported.join('、'))
+            : '当前所有服务商均不支持思考模式开关';
+        return '<div class="ai-think-card">'
+            + '<div class="ai-think-row">'
+            + '<input type="checkbox" id="aiThinkToggle"' + (thinking ? ' checked' : '') + '>'
+            + '<div><label for="aiThinkToggle" class="ai-think-label">思考模式（更会推理但更慢更贵）</label>'
+            + '<div class="form-hint" style="margin:2px 0 0">账号级，默认关闭；关闭时按服务商默认行为处理。</div></div>'
+            + '</div>'
+            + '<div class="ai-think-note">' + esc(note) + '</div>'
+            + '</div>';
     }
 
     function render() {
-        var html = '';
+        var html = thinkCard();
         providers.forEach(function (p) {
             var st = state[p.id] || { configured: false, hint: '未配置', model: '', is_default: false };
             html += '<div class="ai-key-card' + (st.is_default ? ' is-default' : '') + '" data-provider="' + esc(p.id) + '">';
@@ -67,9 +103,8 @@
                 + '<span class="ai-key-state' + (st.configured ? ' is-on' : '') + '">'
                 + esc(st.hint) + (st.is_default ? ' · 默认' : '') + '</span></div>';
             html += '<div class="ai-key-grid">';
-            html += '<div class="form-group"><label class="form-label">模型名（自行填写）</label>'
-                + '<input class="form-input ai-model" data-provider="' + esc(p.id) + '" value="' + esc(st.model) + '" placeholder="如 deepseek-chat / qwen-plus">'
-                + modelHint(p.id) + '</div>';
+            html += '<div class="form-group"><label class="form-label">模型（从名单选择）</label>'
+                + modelSelect(p.id, st) + modelHint(p.id, st) + '</div>';
             html += '<div class="form-group"><label class="form-label">API Key' + (st.configured ? '（留空=不修改）' : '') + '</label>'
                 + '<input class="form-input ai-key" type="password" data-provider="' + esc(p.id) + '" autocomplete="off" placeholder="粘贴你的 Key（不会回显）"></div>';
             html += '</div>';
@@ -106,6 +141,22 @@
         return { model: m ? m.value.trim() : '', key: k ? k.value.trim() : '', is_default: d ? d.checked : false };
     }
 
+    // 思考模式开关（账号级；切换即保存）
+    box.addEventListener('change', function (e) {
+        var t = e.target;
+        if (!t || t.id !== 'aiThinkToggle') return;
+        var want = !!t.checked;
+        t.disabled = true;
+        api('ai_thinking', 'POST', { enabled: want }).then(function (d) {
+            t.disabled = false;
+            if (!d.success) { t.checked = !want; notice(reasonOf(d, '思考模式保存失败'), false, !!d.env_invalid); return; }
+            thinking = !!d.thinking;
+            if (d.thinking_support) thinkingSupport = d.thinking_support;
+            notice('思考模式已' + (thinking ? '开启' : '关闭'), true);
+            render();
+        }).catch(function () { t.disabled = false; t.checked = !want; notice('网络错误', false); });
+    });
+
     box.addEventListener('click', function (e) {
         var t = e.target.closest ? e.target.closest('button') : null;
         if (!t) return;
@@ -113,6 +164,7 @@
         if (!pid) return;
         var row = readRow(pid);
         if (t.classList.contains('ai-test')) {
+            if (!row.model) { rowMsg(pid, '请先选择模型', 'err'); return; }
             if (!row.key) { rowMsg(pid, '请先填写 Key', 'err'); return; }
             t.disabled = true; rowMsg(pid, '测试中…', 'busy');
             api('ai_key_test', 'POST', { provider: pid, model: row.model, key: row.key }).then(function (d) {
@@ -121,11 +173,12 @@
                 else fail(pid, d, '测试失败');
             }).catch(function () { t.disabled = false; rowMsg(pid, '网络错误', 'err'); });
         } else if (t.classList.contains('ai-save')) {
+            if (!row.model) { rowMsg(pid, '请选择模型', 'err'); return; }
             if (!row.key) { rowMsg(pid, '请填写 Key（如需保留原 Key 请直接保存模型）', 'err'); return; }
             t.disabled = true; rowMsg(pid, '校验并保存中…', 'busy');
             api('ai_key_save', 'POST', { provider: pid, model: row.model, key: row.key, is_default: row.is_default }).then(function (d) {
                 t.disabled = false;
-                if (d.success) { applyKeys(d.keys); notice('已保存（' + pid + '）', true); }
+                if (d.success) { applyResponse(d); notice('已保存（' + pid + '）', true); }
                 else fail(pid, d, '保存失败');
             }).catch(function () { t.disabled = false; rowMsg(pid, '网络错误', 'err'); });
         } else if (t.classList.contains('ai-del')) {
@@ -133,22 +186,25 @@
             t.disabled = true;
             api('ai_key_delete', 'POST', { provider: pid }).then(function (d) {
                 t.disabled = false;
-                if (d.success) { applyKeys(d.keys); notice('已删除（' + pid + '）', true); }
+                if (d.success) { applyResponse(d); notice('已删除（' + pid + '）', true); }
                 else fail(pid, d, '删除失败');
             }).catch(function () { t.disabled = false; rowMsg(pid, '网络错误', 'err'); });
         }
     });
 
-    function applyKeys(keys) {
-        if (!keys) return;
-        keys.forEach(function (k) { state[k.provider] = k; });
+    // 应用后端响应（按存在字段增量更新，再整体重绘）
+    function applyResponse(d) {
+        if (!d) return;
+        if (d.providers) providers = d.providers;
+        if (d.models) models = d.models;
+        if (d.thinking_support) thinkingSupport = d.thinking_support;
+        if (typeof d.thinking !== 'undefined') thinking = !!d.thinking;
+        (d.keys || []).forEach(function (k) { state[k.provider] = k; });
         render();
     }
 
     api('ai_keys', 'GET').then(function (d) {
         if (!d.success) { notice(reasonOf(d, '无法加载（AI 可能未开放）'), false, !!d.env_invalid); return; }
-        providers = d.providers || [];
-        (d.keys || []).forEach(function (k) { state[k.provider] = k; });
-        render();
+        applyResponse(d);
     }).catch(function () { notice('网络错误', false); });
 })();

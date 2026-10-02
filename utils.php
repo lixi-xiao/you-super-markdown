@@ -968,9 +968,10 @@ function decryptSecret($stored) {
 define('AI_ENC_KEY_FILE', '/opt/you-super-markdown/secrets/ai_enc_key');
 define('AI_ENC_KEY_FALLBACK', __DIR__ . '/data/.ai_enc_key');
 // 请求体/响应长度与超时上限（不做站内成本控制；额度由账号自担）
-define('AI_MAX_INPUT', 20000);        // 单次处理正文字符上限
-define('AI_TIMEOUT', 60);             // 非流式调用超时（秒）
-define('AI_TIMEOUT_STREAM', 120);     // 流式调用超时（秒，流式可更长）
+// v5.4.3-beta.2：单次输入上限 / 最大输出 / 超时改为"按模型取超管配置值"，以下为字段缺失时的兜底默认。
+define('AI_MAX_INPUT', 20000);        // 单次处理正文字符上限兜底（模型未配 max_input_chars 时）
+define('AI_TIMEOUT', 60);             // 非流式调用超时兜底（秒）
+define('AI_TIMEOUT_STREAM', 120);     // 流式调用超时兜底（秒，流式可更长）
 
 /** 固定 base_url 的服务商预设白名单（唯一真源；使用者只能选，不能改 base_url） */
 function aiBuiltinProviders() {
@@ -1004,6 +1005,106 @@ function aiProviderBaseUrl($id) {
     if (!isset($all[$id]) || !in_array($id, aiEnabledProviderIds(), true)) return '';
     return $all[$id]['base_url'];
 }
+
+// ---- v5.4.3-beta.2：模型与长度（超管按服务商维护模型名单，使用者只能从名单里选） ----
+// 预设为官方口径的起步值，超管可在后台「模型与长度」按服务商增删模型并改四个数值（建议值，非硬性）。
+//   · max_input_chars = 单次输入字符上限（取代写死的 AI_MAX_INPUT；未配置回退 20000）
+//   · max_out_tokens  = 最大输出 tokens（未配置=不传，用服务商默认）
+//   · timeout / timeout_stream = 超时秒数（未配置回退 60 / 120）
+//   · deepseek-chat / deepseek-reasoner 官方已弃用（2026-07-24），不出现在预设名单。
+/** 内置默认模型名单（站点配置 ai_model_catalog 字段缺失时回落） */
+function aiBuiltinModels() {
+    $mimo = [
+        ['id' => 'mimo-v2.6-pro',            'label' => 'MiMo V2.6 Pro',            'max_input_chars' => 80000,  'max_out_tokens' => 8192,  'timeout' => 60, 'timeout_stream' => 180],
+        ['id' => 'mimo-v2.6-flash',          'label' => 'MiMo V2.6 Flash',          'max_input_chars' => 80000,  'max_out_tokens' => 8192,  'timeout' => 60, 'timeout_stream' => 180],
+        ['id' => 'mimo-v2.6-pro-ultraspeed', 'label' => 'MiMo V2.6 Pro UltraSpeed', 'max_input_chars' => 80000,  'max_out_tokens' => 8192,  'timeout' => 60, 'timeout_stream' => 180],
+    ];
+    $qwen = [
+        ['id' => 'qwen3.8-max',   'label' => 'Qwen3.8 Max',   'max_input_chars' => 200000, 'max_out_tokens' => 32768, 'timeout' => 60, 'timeout_stream' => 180],
+        ['id' => 'qwen3.7-plus',  'label' => 'Qwen3.7 Plus',  'max_input_chars' => 200000, 'max_out_tokens' => 16384, 'timeout' => 60, 'timeout_stream' => 180],
+        ['id' => 'qwen3.8-flash', 'label' => 'Qwen3.8 Flash', 'max_input_chars' => 200000, 'max_out_tokens' => 16384, 'timeout' => 60, 'timeout_stream' => 180],
+    ];
+    $deepseek = [
+        ['id' => 'deepseek-flash',  'label' => 'DeepSeek Flash',  'max_input_chars' => 200000, 'max_out_tokens' => 8192,  'timeout' => 60, 'timeout_stream' => 180],
+        ['id' => 'deepseek-v4-pro', 'label' => 'DeepSeek V4 Pro', 'max_input_chars' => 200000, 'max_out_tokens' => 16384, 'timeout' => 60, 'timeout_stream' => 180],
+    ];
+    return [
+        'mimo-payg' => $mimo,
+        'mimo-plan' => $mimo,
+        'qwen'      => $qwen,
+        'deepseek'  => $deepseek,
+    ];
+}
+/** 归一化单条模型配置（字段缺失/非法回落默认；max_out_tokens=0 视为"不传"） */
+function aiNormalizeModelEntry($m) {
+    if (!is_array($m)) return null;
+    $id = trim((string)($m['id'] ?? ''));
+    if ($id === '') return null;
+    $mic = (int)($m['max_input_chars'] ?? 0);
+    if ($mic <= 0) $mic = AI_MAX_INPUT;
+    $mot = (int)($m['max_out_tokens'] ?? 0);
+    if ($mot < 0) $mot = 0;
+    $to = (int)($m['timeout'] ?? 0);
+    if ($to <= 0) $to = AI_TIMEOUT;
+    $tos = (int)($m['timeout_stream'] ?? 0);
+    if ($tos <= 0) $tos = AI_TIMEOUT_STREAM;
+    return [
+        'id' => $id,
+        'label' => trim((string)($m['label'] ?? '')),
+        'max_input_chars' => $mic,
+        'max_out_tokens' => $mot,
+        'timeout' => $to,
+        'timeout_stream' => $tos,
+    ];
+}
+/** 站点配置里的模型名单（config.ai_model_catalog）；字段缺失回落内置默认 */
+function aiModelsConfig() {
+    $c = loadSiteConfig();
+    $m = $c['ai_model_catalog'] ?? null;
+    $builtin = aiBuiltinModels();
+    if (!is_array($m)) return $builtin;
+    $out = [];
+    foreach (aiBuiltinProviders() as $pid => $p) {
+        if (!array_key_exists($pid, $m)) { $out[$pid] = $builtin[$pid] ?? []; continue; }
+        $list = [];
+        if (is_array($m[$pid])) {
+            foreach ($m[$pid] as $r) { $n = aiNormalizeModelEntry($r); if ($n !== null) $list[] = $n; }
+        }
+        $out[$pid] = $list;
+    }
+    return $out;
+}
+/** 某服务商的模型名单 */
+function aiProviderModels($pid) {
+    $all = aiModelsConfig();
+    return $all[$pid] ?? [];
+}
+/** 在名单中查模型配置；不在名单返回 null */
+function aiFindModel($pid, $modelId) {
+    $modelId = trim((string)$modelId);
+    if ($modelId === '') return null;
+    foreach (aiProviderModels($pid) as $m) { if ($m['id'] === $modelId) return $m; }
+    return null;
+}
+/** 取运行时参数（单次输入上限 / 最大输出 / 超时）；模型不在名单时回落全局兜底（调用方应已拒绝） */
+function aiModelRuntime($pid, $modelId) {
+    $m = aiFindModel($pid, $modelId);
+    if ($m) return $m;
+    return ['id' => $modelId, 'label' => '', 'max_input_chars' => AI_MAX_INPUT, 'max_out_tokens' => 0, 'timeout' => AI_TIMEOUT, 'timeout_stream' => AI_TIMEOUT_STREAM];
+}
+/** 面向使用者的模型名单（仅 id / 展示名 / 上限值，不含 base_url 与任何密钥） */
+function aiPublicModels() {
+    $out = [];
+    foreach (aiEnabledProviderIds() as $pid) {
+        $list = [];
+        foreach (aiProviderModels($pid) as $m) {
+            $list[] = ['id' => $m['id'], 'label' => $m['label'], 'max_input_chars' => $m['max_input_chars'], 'max_out_tokens' => $m['max_out_tokens']];
+        }
+        $out[$pid] = $list;
+    }
+    return $out;
+}
+
 /** 当前角色是否被允许使用 AI 写作（超管一律不参与） */
 function aiRoleAllowed($role) {
     $c = loadSiteConfig();
@@ -1084,6 +1185,7 @@ function aiKeysForClient($uid) {
             'configured' => $r ? true : false,
             'hint' => $hint,
             'model' => $r['model'] ?? '',
+            'model_available' => $r ? (aiFindModel($id, $r['model'] ?? '') !== null) : true,
             'is_default' => $r ? !empty($r['is_default']) : false,
         ];
     }
@@ -1141,6 +1243,60 @@ function aiSetPrivacyAck($uid) {
     db_exec('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', ['ai_privacy_ack:' . $uid, date('c')]);
 }
 
+// ---- v5.4.3-beta.2：思考模式（账号级，默认关闭）----
+// 存储于 meta 表 ai_thinking:<uid>（'on'/'off'）；删除/禁用/吊销账号时随 purgeUserResiduals 一并清理。
+/** 该账号是否开启思考模式（默认关闭） */
+function aiThinkingEnabled($uid) {
+    if ($uid === '') return false;
+    $r = db_one('SELECT value FROM meta WHERE key = ?', ['ai_thinking:' . $uid]);
+    return $r && trim((string)$r['value']) === 'on';
+}
+function aiSetThinkingEnabled($uid, $enabled) {
+    if ($uid === '') return false;
+    db_exec('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', ['ai_thinking:' . $uid, $enabled ? 'on' : 'off']);
+    return true;
+}
+/** 实测发现"不接受思考参数"的服务商（缓存于站点配置，避免重复下发导致请求被拒） */
+function aiThinkingUnsupportedSet() {
+    $c = loadSiteConfig();
+    $v = $c['ai_thinking_unsupported'] ?? null;
+    if (!is_array($v)) return [];
+    return array_values(array_filter(array_map('strval', $v)));
+}
+function aiThinkingMarkUnsupported($pid) {
+    if ($pid === '') return;
+    $set = aiThinkingUnsupportedSet();
+    if (in_array($pid, $set, true)) return;
+    $set[] = $pid;
+    $c = loadSiteConfig();
+    $c['ai_thinking_unsupported'] = $set;
+    saveSiteConfig($c);
+}
+/** 服务商"思考"支持能力（参数名/类型）；未知或已实测不支持 → supported=false（一律不下发）。
+ *  参数口径：qwen（DashScope 兼容）用 enable_thinking（bool）；deepseek / mimo-* 用 thinking:{type}。
+ *  ⚠ 若某服务商/模型实测不接受该参数，运行时将回退"忽略并不报错"并标记为不支持（界面随之提示）。 */
+function aiThinkingCapability($pid) {
+    if (in_array($pid, aiThinkingUnsupportedSet(), true)) return ['supported' => false];
+    if ($pid === 'qwen') return ['supported' => true, 'kind' => 'enable_thinking'];
+    if (in_array($pid, ['deepseek', 'mimo-payg', 'mimo-plan'], true)) return ['supported' => true, 'kind' => 'thinking'];
+    return ['supported' => false];
+}
+/** 依据服务商能力 + 账号开关，返回需并入请求体的思考参数；未支持 → 空数组（绝不发未知参数） */
+function aiThinkingParams($provider, $enabled) {
+    $cap = aiThinkingCapability($provider);
+    if (empty($cap['supported'])) return [];
+    $kind = $cap['kind'] ?? '';
+    if ($kind === 'enable_thinking') return ['enable_thinking' => $enabled ? true : false];
+    if ($kind === 'thinking') return ['thinking' => ['type' => $enabled ? 'enabled' : 'disabled']];
+    return [];
+}
+/** 面向使用者的思考支持情况（provider id → 是否可开关） */
+function aiThinkingSupportMap() {
+    $out = [];
+    foreach (aiEnabledProviderIds() as $pid) $out[$pid] = !empty(aiThinkingCapability($pid)['supported']);
+    return $out;
+}
+
 /** 动作枚举（首发仅两类能力：润色/纠错 · 风格转换/翻译） */
 function aiActions() {
     return [
@@ -1156,27 +1312,46 @@ function aiStyleOptions() {
 function aiLangOptions() {
     return ['英文', '简体中文', '繁体中文', '日文', '韩文'];
 }
-/** 按动作构造服务端固定提示词（不接受任意自定义 prompt，避免被滥用） */
+/** 按动作构造服务端固定提示词（不接受任意自定义 prompt，避免被滥用）。
+ *  v5.4.3-beta.2 定稿：system = 基座 + 动作追加；用户选中文本仍只作为 user 消息。 */
 function aiBuildMessages($action, $text, $style = '', $lang = '') {
-    $base = '你是一名专业的中文写作助手。只输出处理后的正文，不要任何解释、客套、前后缀、引号或标题。';
+    // 基座（所有动作共用）
+    $base = "你是本站的写作助手，只做文字加工，不做加工以外的任何事。\n\n"
+        . "硬性规则（必须严格遵守）：\n"
+        . "1. 只输出处理后的正文本身：不要解释、说明、前言、后记、客套话、引号、代码围栏或标题。\n"
+        . "2. 不添加原文没有的信息、数字、人名、地名与结论；不删减原文的信息点。\n"
+        . "3. 保留原文的 Markdown 结构（标题层级、列表、表格、代码块、链接、图片语法、公式）与段落划分；除\"翻译\"任务外不改变语言。\n"
+        . "4. 保留专业术语、专有名词、单位与原有大小写写法，全篇一致。\n"
+        . "5. 原文中的引文、代码、URL、公式即使看起来有误也不修改。\n"
+        . "6. 输出应可直接替换原片段：不额外多出内容，也不遗漏内容。";
     switch ($action) {
         case 'polish':
-            $sys = $base . ' 任务：在保持原意、事实与信息量完全不变的前提下润色文字，使表达更通顺、准确、优雅。';
+            // 润色追加
+            $add = "任务：润色。在不改变原意、事实与信息量的前提下，使表达更通顺、准确、得体。\n"
+                . "允许：调整句式与语序、替换更贴切的词、修正搭配与标点。\n"
+                . "禁止：增删信息点、改变观点与语气强度、加入夸张或抒情。";
             break;
         case 'proofread':
-            $sys = $base . ' 任务：纠正错别字、标点、语法与用词错误，保持原意与结构不变。';
+            // 纠错追加
+            $add = "任务：纠错。只修正错别字、标点、语法、用词与明显笔误，保持原有结构与表达习惯。\n"
+                . "禁止：重写句子、替换同义词、调整语序、改变风格。\n"
+                . "不确定是否为错误的表达一律保留。";
             break;
         case 'style':
-            $sys = $base . ' 任务：在不改变原意的前提下，将下列文字改写成「' . $style . '」的风格。';
+            // 风格转换追加（风格名走既有白名单校验）
+            $add = "任务：风格转换。将原文改写为「" . $style . "」的风格，原意与信息量不变。\n"
+                . "保留术语、专有名词、数字与引用；只改变语体与表达方式（用词、句式、语气、繁简），不改变内容。";
             break;
         case 'translate':
-            $sys = $base . ' 任务：将下列文字翻译成「' . $lang . '」，只输出译文。';
+            // 翻译追加（语言名走既有白名单校验）
+            $add = "任务：翻译。将原文翻译为「" . $lang . "」，只输出译文。\n"
+                . "保留 Markdown 结构与公式；术语、人名的译法全篇统一；不解释、不注释、不补充原文没有的内容。";
             break;
         default:
             return null;
     }
     return [
-        ['role' => 'system', 'content' => $sys],
+        ['role' => 'system', 'content' => $base . "\n\n" . $add],
         ['role' => 'user', 'content' => (string)$text],
     ];
 }
@@ -2003,6 +2178,8 @@ function purgeUserResiduals($uid) {
     if ($uid === '' || $uid === null) return;
     db_exec('DELETE FROM refresh_tokens WHERE user_id = ?', [$uid]);
     db_exec('DELETE FROM device_fps WHERE user_id = ?', [$uid]);
+    // v5.4.3-beta.2：账号级思考模式随账号一并清理
+    db_exec('DELETE FROM meta WHERE key = ?', ['ai_thinking:' . $uid]);
 }
 function clearRefreshCookie() {
     if (isset($_COOKIE['ysm_rt'])) {

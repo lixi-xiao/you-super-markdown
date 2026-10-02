@@ -1284,7 +1284,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <div class="card-title">说明</div>
         <div class="form-hint">
             你选择的文章内容将发送至所选第三方服务商进行处理；额度由你的账号自担。<br>
-            服务商由超管维护（base_url 固定，不可自定义）；<b>模型名由你自己填写</b>；Key 必须通过"测试连接"才会保存。
+            服务商与模型由超管维护（base_url 固定，不可自定义；<b>模型只能从名单里选择</b>）；Key 必须通过"测试连接"才会保存。可在上方开关账号级「思考模式」（默认关闭）。
         </div>
     </div>
     <div id="aiKeyManager" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>"></div>

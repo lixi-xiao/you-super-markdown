@@ -2227,6 +2227,33 @@ td code {
     color: var(--text-secondary);
 }
 
+/* ---------- 超管：模型与长度表（v5.4.3-beta.2） ---------- */
+.ai-admin .ai-model-provider { margin-bottom: 18px; }
+.ai-admin .ai-model-provider-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 8px;
+}
+.ai-admin .ai-model-provider-name { font-weight: 600; color: var(--text); }
+.ai-admin .ai-model-table th,
+.ai-admin .ai-model-table td { padding: 8px 10px; vertical-align: middle; }
+.ai-admin .ai-model-table .form-input { min-width: 84px; }
+
+/* ---------- 个人 Key 管理：思考模式开关（v5.4.3-beta.2） ---------- */
+.ai-think-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+}
+.ai-think-card .ai-think-row { display: flex; align-items: flex-start; gap: 12px; }
+.ai-think-card input[type="checkbox"] {
+    flex: 0 0 auto; width: 17px; height: 17px; margin: 2px 0 0;
+    accent-color: var(--accent); cursor: pointer;
+}
+.ai-think-card .ai-think-label { font-weight: 600; color: var(--text); cursor: pointer; }
+.ai-think-note { margin-top: 8px; font-size: 0.85em; color: var(--text-muted); }
+.ai-key-card .ai-model-reselect { color: var(--danger); }
+
 /* ---------- 个人 Key 管理：服务商卡片 ---------- */
 #aiKeyManager { display: flex; flex-direction: column; gap: 14px; }
 .ai-key-card {

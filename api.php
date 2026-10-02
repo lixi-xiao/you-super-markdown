@@ -1239,12 +1239,26 @@ if ($action === 'ai_config' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         'enabled' => !empty(loadSiteConfig()['ai_enabled']),
         'allowed' => aiRoleAllowed($role),
         'providers' => aiProvidersForClient(),
+        'models' => aiPublicModels(),
         'actions' => aiActions(),
         'styles' => aiStyleOptions(),
         'langs' => aiLangOptions(),
         'privacy_ack' => aiPrivacyAcked($actor['id']),
         'keys' => aiKeysForClient($actor['id']),
         'default_provider' => aiDefaultProvider($actor['id']),
+        'thinking' => aiThinkingEnabled($actor['id']),
+        'thinking_support' => aiThinkingSupportMap(),
+    ]);
+}
+
+// GET ai_models：只读——当前启用服务商的可用模型清单（仅 id/展示名/上限值；绝不回 base_url、绝不回 Key）
+if ($action === 'ai_models' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    aiActionUser();
+    sendJson([
+        'success' => true,
+        'providers' => aiProvidersForClient(),
+        'models' => aiPublicModels(),
+        'thinking_support' => aiThinkingSupportMap(),
     ]);
 }
 
@@ -1262,9 +1276,24 @@ if ($action === 'ai_keys' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     sendJson([
         'success' => true,
         'providers' => aiProvidersForClient(),
+        'models' => aiPublicModels(),
         'keys' => aiKeysForClient($actor['id']),
         'default_provider' => aiDefaultProvider($actor['id']),
+        'thinking' => aiThinkingEnabled($actor['id']),
+        'thinking_support' => aiThinkingSupportMap(),
     ]);
+}
+
+// POST ai_thinking：保存该账号的思考模式开关（账号级，默认关闭）
+if ($action === 'ai_thinking' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $actor = aiActionUserAllowed();
+    aiRequireFreshBackendSession();
+    $body = aiJsonBody();
+    if (!array_key_exists('enabled', $body)) sendJson(['success' => false, 'error' => '缺少参数'], 400);
+    $enabled = !empty($body['enabled']);
+    aiSetThinkingEnabled($actor['id'], $enabled);
+    auditLog('ai_thinking_update', $actor['id'], '思考模式=' . ($enabled ? '开启' : '关闭'));
+    sendJson(['success' => true, 'thinking' => aiThinkingEnabled($actor['id']), 'thinking_support' => aiThinkingSupportMap()]);
 }
 
 // POST ai_key_test：连通性测试（用所选白名单 base_url + 该 Key + 模型名发最小请求）；不落库
@@ -1278,6 +1307,10 @@ if ($action === 'ai_key_test' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (aiProviderBaseUrl($provider) === '') {
         auditLog('ai_key_test', $provider, '连通性测试：服务商不可用', 'failed');
         sendJson(['success' => false, 'ok' => false, 'message' => '服务商不可用'], 400);
+    }
+    if ($model === '' || aiFindModel($provider, $model) === null) {
+        auditLog('ai_key_test', $provider, '连通性测试：模型不在可用名单', 'failed');
+        sendJson(['success' => false, 'ok' => false, 'message' => '该模型不在可用名单，请重新选择模型'], 400);
     }
     [$ok, $reason] = aiConnectivityTest($provider, $key, $model);
     auditLog('ai_key_test', $provider, '连通性测试：' . ($ok ? '成功' : '失败'), $ok ? 'success' : 'failed');
@@ -1298,7 +1331,11 @@ if ($action === 'ai_key_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         sendJson(['success' => false, 'error' => '服务商不可用'], 400);
     }
     if ($key === '') sendJson(['success' => false, 'error' => '请填写 Key'], 400);
-    if ($model === '') sendJson(['success' => false, 'error' => '请填写模型名'], 400);
+    if ($model === '') sendJson(['success' => false, 'error' => '请选择模型'], 400);
+    if (aiFindModel($provider, $model) === null) {
+        auditLog('ai_key_save', $provider, '保存失败：模型不在可用名单', 'failed');
+        sendJson(['success' => false, 'error' => '该模型不在可用名单，请重新选择模型'], 400);
+    }
     // 未通过连通性测试 → 拒绝固化（不落库）
     [$ok, $reason] = aiConnectivityTest($provider, $key, $model);
     if (!$ok) {
@@ -1337,7 +1374,6 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!array_key_exists($act, aiActions())) sendJson(['success' => false, 'error' => '不支持的动作'], 400);
     $text = trim((string)($body['text'] ?? ''));
     if ($text === '') sendJson(['success' => false, 'error' => '请先选中要处理的文本'], 400);
-    if (mb_strlen($text) > AI_MAX_INPUT) sendJson(['success' => false, 'error' => '选中文本过长（上限 ' . AI_MAX_INPUT . ' 字）'], 400);
     $style = in_array((string)($body['style'] ?? ''), aiStyleOptions(), true) ? (string)$body['style'] : '';
     $lang = in_array((string)($body['lang'] ?? ''), aiLangOptions(), true) ? (string)$body['lang'] : '';
     if ($act === 'style' && $style === '') sendJson(['success' => false, 'error' => '请选择目标风格'], 400);
@@ -1353,19 +1389,38 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $apiKey = aiDecryptKey($row['key_cipher']);
     if ($apiKey === '') sendJson(['success' => false, 'error' => 'Key 不可用，请重新配置'], 400);
     $model = trim((string)$row['model']);
-    if ($model === '') sendJson(['success' => false, 'error' => '未填写模型名'], 400);
+    if ($model === '') sendJson(['success' => false, 'error' => '未选择模型'], 400);
+    // v5.4.3-beta.2：模型必须仍在当前名单内，否则拒绝并提示重选（不静默失败、不自动改写为猜测值）
+    if (aiFindModel($provider, $model) === null) {
+        auditLog('ai_call', $provider . '/' . $model, '模型不在可用名单，拒绝调用', 'failed');
+        sendJson(['success' => false, 'error' => '该模型已下线或不在可用名单，请重新选择模型', 'need_reselect' => true], 400);
+    }
+    // 按模型取运行时参数（单次输入上限 / 最大输出 / 超时）
+    $rt = aiModelRuntime($provider, $model);
+    if (mb_strlen($text) > $rt['max_input_chars']) sendJson(['success' => false, 'error' => '选中文本过长（本模型上限 ' . $rt['max_input_chars'] . ' 字）'], 400);
     // 出站限速（复用 ai_rates；防滥用放大外呼）
     $ip = getClientIP();
     $fp = $_SESSION['cmt_fp'] ?? '';
     if (aiRateBlocked($ip, $fp)) sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
     aiRateHit($ip, $fp);
     $messages = aiBuildMessages($act, $text, $style, $lang);
+    // 请求基线：模型 + 消息（+ 按模型配置的最大输出）；思考参数按账号开关与服务商能力追加。
+    // 提示词约束（只输出正文）完全由 messages 决定，思考参数改动不影响之。
+    $basePayload = ['model' => $model, 'messages' => $messages];
+    if ((int)$rt['max_out_tokens'] > 0) $basePayload['max_tokens'] = (int)$rt['max_out_tokens'];
+    $think = aiThinkingParams($provider, aiThinkingEnabled($actor['id']));
+    $payload = array_merge($basePayload, $think);
     $base = aiProviderBaseUrl($provider);
     $url = rtrim($base, '/') . '/chat/completions';
     $t0 = microtime(true);
     $stream = !empty($body['stream']);
     if (!$stream) {
-        $res = aiHttpJson($url, $apiKey, ['model' => $model, 'messages' => $messages, 'stream' => false], AI_TIMEOUT);
+        $res = aiHttpJson($url, $apiKey, array_merge($payload, ['stream' => false]), (int)$rt['timeout']);
+        // 服务商不接受思考参数 → 忽略该参数重试一次（不报错、不阻断；重试成功才标记为不支持）
+        if (!$res['ok'] && $think !== [] && (int)$res['code'] === 400) {
+            $retry = aiHttpJson($url, $apiKey, array_merge($basePayload, ['stream' => false]), (int)$rt['timeout']);
+            if ($retry['ok']) { aiThinkingMarkUnsupported($provider); $res = $retry; }
+        }
         $ms = (int)((microtime(true) - $t0) * 1000);
         if (!$res['ok']) {
             $reason = aiReadableError($res['code'], $res['err'], $res['raw']);
@@ -1386,39 +1441,50 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
     aiSseEmit(['event' => 'start', 'provider' => $provider, 'model' => $model]);
-    $buf = ''; $acc = ''; $rawHead = '';
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => json_encode(['model' => $model, 'messages' => $messages, 'stream' => true], JSON_UNESCAPED_UNICODE),
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $apiKey, 'Accept: text/event-stream'],
-        CURLOPT_CONNECTTIMEOUT => 15,
-        CURLOPT_TIMEOUT => AI_TIMEOUT_STREAM,
-        CURLOPT_RETURNTRANSFER => false,
-        CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$buf, &$acc, &$rawHead) {
-            if (strlen($rawHead) < 400) $rawHead .= $chunk;
-            $buf .= $chunk;
-            while (($nl = strpos($buf, "\n")) !== false) {
-                $line = rtrim(substr($buf, 0, $nl), "\r");
-                $buf = substr($buf, $nl + 1);
-                if ($line === '' || strpos($line, 'data:') !== 0) continue;
-                $jsonStr = trim(substr($line, 5));
-                if ($jsonStr === '[DONE]') continue;
-                $j = json_decode($jsonStr, true);
-                if (!is_array($j)) continue;
-                $delta = $j['choices'][0]['delta']['content'] ?? '';
-                if ($delta !== '' && $delta !== null) {
-                    $acc .= $delta;
-                    aiSseEmit(['event' => 'delta', 'text' => $delta]);
+    $acc = ''; $rawHead = '';
+    // 单次流式尝试：成功即边走边推 delta；返回 [ok, code, cerr]
+    $attempt = function ($reqPayload) use ($url, $apiKey, $rt, &$acc, &$rawHead) {
+        $acc = ''; $rawHead = ''; $buf = '';
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($reqPayload, JSON_UNESCAPED_UNICODE),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $apiKey, 'Accept: text/event-stream'],
+            CURLOPT_CONNECTTIMEOUT => 15,
+            CURLOPT_TIMEOUT => max(5, (int)$rt['timeout_stream']),
+            CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$buf, &$acc, &$rawHead) {
+                if (strlen($rawHead) < 400) $rawHead .= $chunk;
+                $buf .= $chunk;
+                while (($nl = strpos($buf, "\n")) !== false) {
+                    $line = rtrim(substr($buf, 0, $nl), "\r");
+                    $buf = substr($buf, $nl + 1);
+                    if ($line === '' || strpos($line, 'data:') !== 0) continue;
+                    $jsonStr = trim(substr($line, 5));
+                    if ($jsonStr === '[DONE]') continue;
+                    $j = json_decode($jsonStr, true);
+                    if (!is_array($j)) continue;
+                    $delta = $j['choices'][0]['delta']['content'] ?? '';
+                    if ($delta !== '' && $delta !== null) {
+                        $acc .= $delta;
+                        aiSseEmit(['event' => 'delta', 'text' => $delta]);
+                    }
                 }
-            }
-            return strlen($chunk);
-        },
-    ]);
-    $ok = curl_exec($ch);
-    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $cerr = curl_error($ch);
-    curl_close($ch);
+                return strlen($chunk);
+            },
+        ]);
+        $ok = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $cerr = curl_error($ch);
+        curl_close($ch);
+        return [$ok, $code, $cerr];
+    };
+    list($ok, $code, $cerr) = $attempt(array_merge($payload, ['stream' => true]));
+    // 服务商不接受思考参数 → 忽略重试（对客户端不可见；重试拿到内容才标记不支持）
+    if ($acc === '' && $think !== [] && ($ok === false || $code >= 400)) {
+        list($rOk, $rCode, $rCerr) = $attempt(array_merge($basePayload, ['stream' => true]));
+        if ($acc !== '') { aiThinkingMarkUnsupported($provider); $ok = $rOk; $code = $rCode; $cerr = $rCerr; }
+    }
     $ms = (int)((microtime(true) - $t0) * 1000);
     if ($acc === '' && ($ok === false || $code >= 400)) {
         $reason = aiReadableError($code, $cerr, $rawHead);

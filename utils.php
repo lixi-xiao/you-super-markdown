@@ -3635,20 +3635,51 @@ function ysmCanUpdate($from, $to, $pkgType = 'full', $channel = 'stable') {
 //   GitHub 列表按创建时间倒序、不保证版本最大，故按 tag 版本取最大者，而非取第 0 条。
 function pickLatestRelease(array $releases, $channel) {
     $channel = normalizeUpdateChannel($channel);
-    $best = null;
-    $bestVer = null;
+    $cands = [];
     foreach ($releases as $r) {
         if (!is_array($r) || empty($r['tag_name'])) continue;
         if (!empty($r['draft'])) continue;
         if ($channel === 'stable' && !empty($r['prerelease'])) continue;
         $ver = ltrim((string)$r['tag_name'], 'v');
         if ($ver === '') continue;
-        if ($bestVer === null || ysmCompareVersion($ver, $bestVer) > 0) {
-            $best = $r;
-            $bestVer = $ver;
+        $ts = strtotime((string)($r['published_at'] ?? ''));
+        $cands[] = ['r' => $r, 'ver' => $ver, 'ts' => $ts ?: 0, 'pkg' => releaseHasPackage($r)];
+    }
+    if (!$cands) return null;
+    // v5.4.7：优先在「带可用更新包」的 Release 中挑选——避免选中没有资产的条目（点了更新却拿不到包）
+    $pool = array_values(array_filter($cands, function ($c) { return $c['pkg']; }));
+    if (!$pool) $pool = $cands;
+    if ($channel === 'beta') {
+        // v5.4.7：beta 通道按「最新发布」取（published_at 优先，缺失时回退语义化版本）。
+        //   修复：语义化比较下 5.4.6 > 5.4.6-beta，旧逻辑会一直选中"同号正式版"，
+        //   导致站在 5.4.6 正式版上切到 beta 后「检查更新」显示"已是最新"、拿不到 5.4.6-beta。
+        usort($pool, function ($a, $b) {
+            if ($a['ts'] !== $b['ts']) return ($b['ts'] <=> $a['ts']);
+            return ysmCompareVersion($b['ver'], $a['ver']);
+        });
+        return $pool[0]['r'];
+    }
+    // stable：保持既有语义——按语义化版本取最高（上游已用 /releases/latest 只认正式版）
+    $best = null;
+    $bestVer = null;
+    foreach ($pool as $c) {
+        if ($bestVer === null || ysmCompareVersion($c['ver'], $bestVer) > 0) {
+            $best = $c['r'];
+            $bestVer = $c['ver'];
         }
     }
     return $best;
+}
+
+/** v5.4.7：Release 是否含可用更新包（-full / -inc / -to-vX-inc） */
+function releaseHasPackage($r) {
+    if (empty($r['assets']) || !is_array($r['assets'])) return false;
+    foreach ($r['assets'] as $a) {
+        $n = (string)($a['name'] ?? '');
+        if (preg_match('/-(full|inc)\.(tar\.gz|zip)$/i', $n)) return true;
+        if (preg_match('/-to-v[\d.]+-inc\./i', $n)) return true;
+    }
+    return false;
 }
 
 // v5.3.0：把一条 Release 归一化为检查结果（含触发更新所需的包信息）
@@ -3674,8 +3705,14 @@ function buildUpdateResult($release, $channel) {
             ];
         }
     }
+    // v5.4.7：同号跨通道互转（如 5.4.7(stable) ↔ 5.4.7-beta(beta)，语义化视为"版本等同"）也应视为"有可用更新"——
+    //   否则站在同号正式版上切到 beta 通道后，「检查更新」会显示"已是最新"而拿不到同号 beta（必须全量包，判定交给 ysmCanUpdate）。
+    $updateDecision = ysmCanUpdate(APP_VERSION, $latest, 'full', $channel);
+    $verCmp = ysmCompareVersion($latest, APP_VERSION);
+    $sameCross = ($latest !== APP_VERSION && $verCmp === 0);
+    $available = ($verCmp > 0) || ($sameCross && (($updateDecision['decision'] ?? '') === 'allow'));
     return [
-        'available' => ysmCompareVersion($latest, APP_VERSION) > 0,
+        'available' => $available,
         'latest_version' => $latest,
         'current_version' => APP_VERSION,
         'release_notes' => $release['body'] ?? '',
@@ -3688,7 +3725,7 @@ function buildUpdateResult($release, $channel) {
         'prerelease' => !empty($release['prerelease']),
         // v5.3.0：与更新器（apply-update）同一套判定（ysmCanUpdate）——供前端默认选中全量包/展示原因。
         //   检查阶段尚不知请求的真实包类型，故按「全量包可用」预判（force_full 只提示，最终以 apply-update 为准）。
-        'update_decision' => ysmCanUpdate(APP_VERSION, $latest, 'full', $channel),
+        'update_decision' => $updateDecision,
     ];
 }
 

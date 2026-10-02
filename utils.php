@@ -360,6 +360,10 @@ function loadSiteConfig() {
         'ai_role_station_admin' => false,
         'ai_role_author' => false,
         'ai_providers' => ['deepseek', 'mimo-payg', 'mimo-plan', 'qwen'],
+        // v5.4.4：服务器自身 IP 白名单（数组）——命中者不参与威胁计分/不封禁/不加锁（自封防护）。
+        // 安装与更新流程在能确定服务器出口/域名解析 IP 时自动登记（--auto）；亦可用
+        // `sudo ysm-admin set-self-ip --add=<ip>` 维护。
+        'threat_self_ips' => [],
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;
@@ -459,6 +463,12 @@ function replaceAllBans($bans) {
 }
 function banIp($ip, $types, $reason = '', $duration = 0) {
     // $duration：0=永久封禁；>0=封禁秒数（v4.4.0 注册蜜罐自动封禁使用）
+    // v5.4.4：自封保护——目标属回环/内网/服务器自身 IP（threat_self_ips）时不写封禁，改为只告警
+    //（alert.log + 审计 + 邮件），绝不阻断/封禁服务器自身，杜绝「服务器自己封自己」
+    if (isSelfProtectedHost($ip)) {
+        selfProtectAlert('banIp', $ip, 'types=' . implode(',', (array)$types) . ($reason !== '' ? '；' . $reason : ''));
+        return;
+    }
     $expires = $duration > 0 ? time() + $duration : 0;
     $existing = db_one('SELECT * FROM bans WHERE ip = ?', [$ip]);
     if ($existing) {
@@ -504,11 +514,66 @@ function getClientIP() {
     return $remote !== '' ? $remote : '0.0.0.0';
 }
 // ============================================================
+// v5.4.4：服务器自访问与内部请求识别（自封防护基础）
+//   · threat_self_ips：站点配置里的「服务器自身 IP」白名单（数组）；安装/更新流程在能确定
+//     出口/域名解析 IP 时自动登记，亦可用 `sudo ysm-admin set-self-ip [--add=<ip>|--auto]` 维护；
+//   · 内部 UA 前缀 YSM-（如 YSM-HealthCheck/1.0、YSM-Update/1.0、YSM-Probe/1.0）：站内自检请求标识；
+//   · 命中上述任一（或回环/内网）即视为「内部来源」——不参与威胁计分、不封禁、不加锁。
+// 背景：服务器用默认 UA 的 curl 访问自身域名会被判扫描器（scanner_ua 40 + unauthorized 25），
+//       累计达永久阈值后把自己公网 IP 写进 bans（expires=0）——本次起从根上避免「自封」。
+// ============================================================
+/** 读取服务器自身 IP 白名单（threat_self_ips），归一化为小写集合（单次请求内缓存） */
+function selfIpList() {
+    static $list = null;
+    if ($list !== null) return $list;
+    $cfg = loadSiteConfig();
+    $raw = $cfg['threat_self_ips'] ?? [];
+    $list = [];
+    if (is_array($raw)) {
+        foreach ($raw as $x) {
+            $x = strtolower(trim(trim((string)$x), '[]'));
+            if ($x !== '') $list[$x] = true;
+        }
+    }
+    return $list;
+}
+/** 是否为服务器自身 IP（命中 threat_self_ips） */
+function isSelfIp($ip) {
+    $ip = strtolower(trim(trim((string)$ip), '[]'));
+    if ($ip === '') return false;
+    return isset(selfIpList()[$ip]);
+}
+/** 自封保护判定：回环/内网/服务器自身 IP —— 一律不得写封禁/加锁（仅告警） */
+function isSelfProtectedHost($ip) {
+    $ip = trim(trim((string)$ip), '[]');
+    if ($ip === '') return true;
+    return isPrivateIp($ip) || isSelfIp($ip);
+}
+/** 内部请求 UA（前缀 YSM-）——站内自检/更新/探针请求标识 */
+function isInternalUA() {
+    return strncasecmp((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 'YSM-', 4) === 0;
+}
+/** 内部来源请求（内部 UA 或服务器自身/内网/回环 IP） */
+function isInternalRequest() {
+    if (isInternalUA()) return true;
+    return isSelfProtectedHost(getClientIP());
+}
+/** 自封保护告警：只告警（alert.log + 审计 + 邮件走既有告警通道），不写封禁/不加锁、不阻断调用方 */
+function selfProtectAlert($context, $ip, $detail = '') {
+    $msg = '目标地址属服务器自身/内网/回环，已按自封保护跳过封禁与加锁（' . $context . '）'
+         . ($detail !== '' ? '：' . $detail : '');
+    auditLog('self_protect_skip', 'security', $msg, 'blocked');
+    @file_put_contents(ALERT_LOG, date('Y-m-d H:i:s') . " [自封保护] {$msg}\n", FILE_APPEND | LOCK_EX);
+    sendAlert('自封保护（已跳过封禁）', $msg . "\nIP：" . $ip . "\n上下文：" . $context);
+}
+// ============================================================
 // v3.0.8 统一安全入口（detectScannerUA：扫描器 UA 黑名单检测）
 // 命中 sqlmap/nikto/nmap/acunetix/masscan/zgrab/curl 等工具特征：
 // 返回 403 + 记录越权日志 + 按现有封禁机制封禁来源 IP
 // ============================================================
 function detectScannerUA() {
+    // v5.4.4：内部请求 UA 白名单（前缀 YSM-）——放在扫描器判定最前，直接放过不判扫描器
+    if (isInternalUA()) return false;
     $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
     if ($ua === '') return false;
     $l = strtolower($ua);
@@ -522,10 +587,27 @@ function detectScannerUA() {
     }
     return false;
 }
+// v5.4.4：curl/wget 属「通用命令行工具」——从扫描器里单列降级（仍 403 并记日志，但不计威胁分、
+// 不参与永久阈值累计，避免服务器自身/运维脚本用默认 UA 自检时被永久自封）；
+// sqlmap/nmap/nikto 等真实攻击工具保持原权重不变（不削弱风控）。
+function scannerUADegraded($tool) {
+    return in_array($tool, ['curl', 'wget'], true);
+}
 function runRequestSecurityCheck() {
+    // v5.4.4：内部请求白名单——UA 前缀 YSM-（YSM-HealthCheck/1.0 / YSM-Update/1.0 / YSM-Probe/1.0）
+    // 直接放过：不判扫描器、不计分、不封禁（放在扫描器判定最前）
+    if (isInternalUA()) return;
     $tool = detectScannerUA();
     if ($tool === false) return;
     $ip = getClientIP();
+    // v5.4.4：curl/wget 降级——仍返回 403 并记录日志（越权表 + 异常表），但不计威胁分、不写 threat_events
+    if (scannerUADegraded($tool)) {
+        logUnauthorized('扫描器UA检测(降级·不计分): ' . $tool, false, false);
+        logAbnormal($ip, '扫描器UA拦截(降级·不计分): ' . $tool);
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=utf-8');
+        exit('Forbidden');
+    }
     logUnauthorized('扫描器UA检测: ' . $tool);
     // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 写入 threat_events 后自动升级）
     logThreat('scanner_ua', $ip, '', 300);
@@ -560,7 +642,7 @@ function logAbnormal($ip, $action) {
         db_exec('DELETE FROM logs WHERE rowid IN (SELECT rowid FROM logs ORDER BY rowid ASC LIMIT ?)', [$cnt - 500]);
     }
 }
-function logUnauthorized($action, $ban = false) {
+function logUnauthorized($action, $ban = false, $score = true) {
     $ip = getClientIP();
     db_exec('INSERT INTO unauthorized (ip, action, user, user_id, ua, time) VALUES (?,?,?,?,?,?)', [
         $ip,
@@ -583,7 +665,11 @@ function logUnauthorized($action, $ban = false) {
         }
     }
     // v4.7.0：越权事件计入联动威胁评分（独立于 auto_ban_unauthorized 开关，自动升级联动封锁）
-    logThreat('unauthorized', $ip, '', 300);
+    // v5.4.4：只对「非内部来源」计分——内部来源（YSM- 内部UA / 服务器自身 IP / 内网回环）只写日志；
+    //         $score=false 供 curl/wget 降级类等显式跳过计分
+    if ($score && !isInternalRequest()) {
+        logThreat('unauthorized', $ip, '', 300);
+    }
 }
 // ============================================================
 // v2.2 五层角色体系
@@ -2411,6 +2497,9 @@ function logThreat($reason, $ip = '', $fp = '', $dedupeWindow = 0) {
     // v4.7.5：联动威胁评分本地/内网 IP 豁免——内网回环地址不参与自动联动封锁（与蜜罐内网豁免一致），
     // 防内网/本机测试误封（如 127.0.0.1 直连验证）；fp 维度照常计分
     if ($ip !== '' && isPrivateHost($ip)) $ip = '';
+    // v5.4.4：服务器自身 IP 豁免——命中 threat_self_ips 一律不计分（含指纹维度，直接返回），
+    // 从根上避免「服务器自访问 → 每次累计高分 → 把自己公网 IP 永久封禁（自封）」
+    if ($ip !== '' && isSelfIp($ip)) return;
     $now = time();
     $entries = [];
     if ($ip !== '') $entries[] = ['ip', $ip];
@@ -2459,6 +2548,12 @@ function linkedLock($key, $seconds, $reason) {
 /** 按总分自动升级联动封锁（四级：L1 15min / L1.5 6h / L2 24h / L3 永久） */
 function maybeLinkedBlock($dimType, $dimKey) {
     if (!threatCfg('threat_enable', 1)) return;
+    // v5.4.4：自封保护——IP 维度目标属回环/内网/服务器自身 IP 时不写封禁、不加锁，改为只告警
+    if ($dimType === 'ip' && isSelfProtectedHost($dimKey)) {
+        $score = threatScore($dimType, $dimKey);
+        if ($score > 0) selfProtectAlert('linkedBlock', $dimKey, '联动阈值升级（评分 ' . $score . '）');
+        return;
+    }
     $score = threatScore($dimType, $dimKey);
     $l3 = (int)threatCfg('threat_l3', 250);
     $l2 = (int)threatCfg('threat_l2', 150);

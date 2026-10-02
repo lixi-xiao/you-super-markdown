@@ -59,6 +59,8 @@
     })();
     (function applyBg() {
         var e = document.body;
+        // v5.4.3：应用序号——晚到的旧 onload/亮度回调不得再改写对比色属性（时序安全 + 幂等）
+        var bgSeq = 0;
         var t = e.dataset.bgType || "none";
         var n = e.dataset.bgImage || "";
         var i = e.dataset.bgApiUrl || "";
@@ -102,13 +104,19 @@
             n.src = e;
         }
         function applyBgImage(t) {
+            var mySeq = ++bgSeq;
             var n = new Image;
             n.onload = function() {
+                if (mySeq !== bgSeq) return;
                 e.classList.add("bg-active");
                 e.style.setProperty("--bg-url", "url(" + t + ")");
+                // v5.4.3：每次应用先复位对比色属性，确认亮度后再设——避免旧值残留。
+                e.removeAttribute("data-text-contrast");
                 // 背景暗（≤140）→ data-text-contrast=light 整页暗色白字；背景亮 → dark 黑色系；读取失败降级不设属性（保持浅色强制黑）
-                                computeBgLuma(t, function(t) {
-                    if (t < 0) {
+                computeBgLuma(t, function(t) {
+                    if (mySeq !== bgSeq) return;
+                    // v5.4.3：手动选过主题时，对比色自适应让位于用户选择（不覆盖）
+                    if (t < 0 || ysmThemeIsManual()) {
                         e.removeAttribute("data-text-contrast");
                         return;
                     }
@@ -323,11 +331,35 @@
         var off = t === "dark";
         if (l.disabled !== off) l.disabled = off;
     }
+    // v5.4.3：是否「用户手动选过主题」——localStorage.md-theme 存在 / sessionStorage.md-theme-manual 标记即视为手动
+    function ysmThemeIsManual() {
+        try {
+            if (sessionStorage.getItem("md-theme-manual")) return true;
+        } catch (e) {}
+        try {
+            if (localStorage.getItem("md-theme")) return true;
+        } catch (e) {}
+        return false;
+    }
+    // v5.4.3：手动主题优先——把「对比色自适应」与「手动主题」的优先级收口到 html[data-theme-manual]：
+    //   用户手动选过主题就不再让背景图亮度改写 body 级变量（浅色时移除 data-text-contrast，彻底避免"切不动/刷新才恢复"）。
+    function ysmSyncTextContrast() {
+        var de = document.documentElement;
+        if (!document.body) return;
+        if (ysmThemeIsManual()) {
+            de.setAttribute("data-theme-manual", "1");
+            if (de.getAttribute("data-theme") !== "dark") document.body.removeAttribute("data-text-contrast");
+        } else {
+            de.removeAttribute("data-theme-manual");
+        }
+    }
     // v5.2.4：主题唯一入口——点击切换 / 跟随系统 / 初始加载 全部经此收口，保证双向一致
+    // v5.4.3：一并同步「手动主题 / 对比色自适应」优先级，保证切主题后立即一致、刷新前后一致
     function ysmApplyTheme(t) {
         if (document.documentElement.getAttribute("data-theme") !== t) {
             document.documentElement.setAttribute("data-theme", t);
         }
+        ysmSyncTextContrast();
         ysmApplyHljsTheme(t);
         ysmMermaidRerender();
     }
@@ -776,18 +808,19 @@
     o.addEventListener("click", () => {
         const e = document.documentElement.getAttribute("data-theme") === "dark";
         const t = e ? "light" : "dark";
-        // v5.2.4：经统一钩子应用（切换 mermaid/hljs 的主题适配），不再只改 data-theme
-        ysmApplyTheme(t);
         // v4.7.11：手动切换双持久化——localStorage 记住用户选择，sessionStorage 标记"手动切换过"
         //          隐私模式下 localStorage 写入失败时，sessionStorage 仍可保证当前会话不跟随系统
-                try {
+        // v5.4.3：先落"手动"标记再应用主题——保证对比色自适应立即让位于用户选择（切浅色即移除暗化属性）
+        try {
             localStorage.setItem("md-theme", t);
         } catch (e) {}
         try {
             sessionStorage.setItem("md-theme-manual", "1");
         } catch (e) {}
+        r = true;
+        // v5.2.4：经统一钩子应用（切换 mermaid/hljs 的主题适配 + 对比色优先级同步），不再只改 data-theme
+        ysmApplyTheme(t);
         // v4.6.2：手动切换后停止跟随系统——移除 change 监听，系统深色模式不再把刚切走的主题立刻改回
-                r = true;
         mdThemeRemoveListener(c, l);
         o.innerHTML = e ? '<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>' : '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
     });
@@ -1677,6 +1710,8 @@
         // v5.4.3：返回首页即作废在途加载——取消在途请求，并推进序号让迟到响应静默丢弃
         if (loadCtrl) loadCtrl.abort();
         ++loadSeq;
+        // v5.4.3：返回主页同步一次对比色属性——按当前主题/手动标记收口，避免"回主页后残留暗色"
+        ysmSyncTextContrast();
         if (Ae) {
             sessionStorage.setItem("md-read-scroll-" + Fe, window.scrollY);
         } else {

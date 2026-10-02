@@ -494,6 +494,11 @@ function isIPBanned($ip, $type) {
 }
 function getClientIP() {
     $remote = $_SERVER['REMOTE_ADDR'] ?? '';
+    // v5.4.5：标记「本次客户端 IP 是否取自代理头」——供 isSelfProtectedHost() 使用：
+    //   经被采信 XFF / X-Real-IP 得到且非内网的 IP，不享受 isSelfIp（服务器自身 IP）豁免，
+    //   防攻击者自带 `X-Forwarded-For: <服务器自身IP>` 命中 isSelfIp 免疫。
+    //   ⚠ 反代/CDN 部署必须配合「真值透传」（见 说明文档/PACKAGING_AND_DEPLOY.md §11.9）。
+    $GLOBALS['YSM_IP_FROM_PROXY'] = false;
     // v5.0.0：仅当直连方为本机/私有网段（受控代理）时，才考虑采信代理头；
     // 且代理头值本身必须是合法公网 IP 才采用——否则一律回落 REMOTE_ADDR，
     // 防伪造 X-Real-IP / X-Forwarded-For 绕过限流与封禁。
@@ -507,6 +512,7 @@ function getClientIP() {
             if ($val === '') continue;
             $candidate = trim(explode(',', $val)[0]); // XFF 可能是列表，取首个（原始客户端）
             if (filter_var($candidate, FILTER_VALIDATE_IP) && !isPrivateIp($candidate)) {
+                $GLOBALS['YSM_IP_FROM_PROXY'] = true; // v5.4.5：本次客户端 IP 取自代理头
                 return $candidate;
             }
         }
@@ -521,6 +527,9 @@ function getClientIP() {
 //   · 命中上述任一（或回环/内网）即视为「内部来源」——不参与威胁计分、不封禁、不加锁。
 // 背景：服务器用默认 UA 的 curl 访问自身域名会被判扫描器（scanner_ua 40 + unauthorized 25），
 //       累计达永久阈值后把自己公网 IP 写进 bans（expires=0）——本次起从根上避免「自封」。
+// v5.4.5 加固：内部请求判定改为「双因子」——内部 UA（YSM- 前缀）**且** 来源可信（回环/内网/自身 IP）。
+//       修复 v5.4.4 引入的攻击窗口：外部攻击者仅凭伪造 `-A 'YSM-xxx'` 即被当作「内部请求」，
+//       从而① 绕过扫描器判定（runRequestSecurityCheck 直接 return）② 越权不计分 → 永不被联动封禁。
 // ============================================================
 /** 读取服务器自身 IP 白名单（threat_self_ips），归一化为小写集合（单次请求内缓存） */
 function selfIpList() {
@@ -543,20 +552,63 @@ function isSelfIp($ip) {
     if ($ip === '') return false;
     return isset(selfIpList()[$ip]);
 }
+/** v5.4.5：客户端 IP 是否取自被采信的代理头（X-Real-IP / X-Forwarded-For） */
+function clientIpFromProxy() {
+    return !empty($GLOBALS['YSM_IP_FROM_PROXY']);
+}
+/**
+ * v5.4.5：真内网/回环判定（受信来源）——仅回环、RFC1918 私网、CGNAT、链路本地、IPv6 ULA/链路本地。
+ * 刻意排除 TEST-NET（192.0.2.0/24、198.51.100.0/24、203.0.113.0/24）、文档/基准/组播/保留段：
+ * 它们并非「本机内网」，不可作为内部来源豁免。
+ * 与 isPrivateIp() 的区别：后者面向 SSRF 一律 fail-closed（刻意放宽，含 TEST-NET 等）；
+ * 本函数面向「信任」，必须收窄——避免把文档网段误当可豁免的内部地址。
+ */
+function isTrustedInternalIp($ip) {
+    $ip = strtolower(trim(trim((string)$ip), '[]'));
+    if ($ip === '') return false;
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+        $long = ip2long($ip);
+        if ($long === false) return false;
+        $ranges = [
+            [ip2long('10.0.0.0'),    ip2long('10.255.255.255')],   // RFC1918
+            [ip2long('100.64.0.0'),  ip2long('100.127.255.255')],  // CGNAT
+            [ip2long('127.0.0.0'),   ip2long('127.255.255.255')],  // 回环
+            [ip2long('169.254.0.0'), ip2long('169.254.255.255')],  // 链路本地
+            [ip2long('172.16.0.0'),  ip2long('172.31.255.255')],   // RFC1918
+            [ip2long('192.168.0.0'), ip2long('192.168.255.255')],  // RFC1918
+        ];
+        foreach ($ranges as $r) { if ($long >= $r[0] && $long <= $r[1]) return true; }
+        return false;
+    }
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        $bin = @inet_pton($ip);
+        if ($bin === false) return false;
+        if ($ip === '::1') return true;                          // 回环
+        $b0 = ord($bin[0]);
+        $b1 = ord($bin[1]);
+        if (($b0 & 0xfe) === 0xfc) return true;                  // fc00::/7 ULA
+        if ($b0 === 0xfe && ($b1 & 0xc0) === 0x80) return true;  // fe80::/10 链路本地
+        return false;
+    }
+    return false;
+}
 /** 自封保护判定：回环/内网/服务器自身 IP —— 一律不得写封禁/加锁（仅告警） */
 function isSelfProtectedHost($ip) {
     $ip = trim(trim((string)$ip), '[]');
-    if ($ip === '') return true;
-    return isPrivateIp($ip) || isSelfIp($ip);
+    if ($ip === '') return false;              // v5.4.5：空 IP 不可信（v5.4.4 曾错误地视为受保护）
+    if (isTrustedInternalIp($ip)) return true; // 回环/内网始终可信（含经 XFF 识别出的内网地址）
+    // v5.4.5：服务器自身 IP 豁免仅对「直连来源」生效——客户端 IP 若取自被采信的 XFF/X-Real-IP，
+    //         不再享受 isSelfIp 豁免（防自带 `X-Forwarded-For: <服务器自身IP>` 命中免疫）。
+    if (!clientIpFromProxy() && isSelfIp($ip)) return true;
+    return false;
 }
 /** 内部请求 UA（前缀 YSM-）——站内自检/更新/探针请求标识 */
 function isInternalUA() {
     return strncasecmp((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 'YSM-', 4) === 0;
 }
-/** 内部来源请求（内部 UA 或服务器自身/内网/回环 IP） */
+/** 内部来源请求（v5.4.5 双因子：内部 UA **且** 来源可信——回环/内网/自身 IP） */
 function isInternalRequest() {
-    if (isInternalUA()) return true;
-    return isSelfProtectedHost(getClientIP());
+    return isInternalUA() && isSelfProtectedHost(getClientIP());
 }
 /** 自封保护告警：只告警（alert.log + 审计 + 邮件走既有告警通道），不写封禁/不加锁、不阻断调用方 */
 function selfProtectAlert($context, $ip, $detail = '') {
@@ -572,8 +624,9 @@ function selfProtectAlert($context, $ip, $detail = '') {
 // 返回 403 + 记录越权日志 + 按现有封禁机制封禁来源 IP
 // ============================================================
 function detectScannerUA() {
-    // v5.4.4：内部请求 UA 白名单（前缀 YSM-）——放在扫描器判定最前，直接放过不判扫描器
-    if (isInternalUA()) return false;
+    // v5.4.5：仅「内部请求（双因子：内部 UA 且 来源可信）」放过；单独伪造 YSM- 前缀不再豁免，
+    //         外部来源（如 UA=YSM-curl/1.0）照常判为扫描器。
+    if (isInternalRequest()) return false;
     $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
     if ($ua === '') return false;
     $l = strtolower($ua);
@@ -587,23 +640,48 @@ function detectScannerUA() {
     }
     return false;
 }
-// v5.4.4：curl/wget 属「通用命令行工具」——从扫描器里单列降级（仍 403 并记日志，但不计威胁分、
-// 不参与永久阈值累计，避免服务器自身/运维脚本用默认 UA 自检时被永久自封）；
-// sqlmap/nmap/nikto 等真实攻击工具保持原权重不变（不削弱风控）。
+// v5.4.5：curl/wget 属「通用命令行工具」——低权重单列（reason=tool_ua，5 分/次）：
+//   仍 403 并记日志；独立计数，窗口内累计达阈值 → 短时封禁 15 分钟；
+//   不参与联动评分升级（含永久阈值 L3）——避免运维脚本裸 curl 自检被永久自封。
+//   sqlmap/nmap/nikto/acunetix 等真实攻击工具保持原权重与升级链路不变（不削弱风控）。
 function scannerUADegraded($tool) {
     return in_array($tool, ['curl', 'wget'], true);
 }
+/** v5.4.5：curl/wget 降级计数策略（默认 10 次 / 10 分钟 → 短时封禁 15 分钟；可被 config threat_tool_ua_* 覆盖） */
+function toolUaBanThreshold() { return (int)threatCfg('threat_tool_ua_count', 10); }
+function toolUaBanWindow() { return (int)threatCfg('threat_tool_ua_window', 600); }
+function toolUaBanDuration() { return (int)threatCfg('threat_tool_ua_dur', 900); }
+/** v5.4.5：纯函数——计数是否达短时封禁阈值（供单元断言/策略验证，无副作用） */
+function toolUaBanReached($count, $threshold = null) {
+    if ($threshold === null) $threshold = toolUaBanThreshold();
+    return (int)$count >= (int)$threshold;
+}
+/** v5.4.5：curl/wget 降级短时封禁——同一 IP 窗口内累计达阈值 → 15 分钟临时锁（extend-only，不参与永久阈值） */
+function toolUaTempBan($ip) {
+    if ($ip === '' || isSelfProtectedHost($ip)) return false;
+    $win = toolUaBanWindow();
+    $cnt = (int)(db_one('SELECT COUNT(*) AS c FROM threat_events WHERE dim_type = ? AND dim_key = ? AND reason = ? AND created > ?',
+        ['ip', $ip, 'tool_ua', time() - $win])['c'] ?? 0);
+    if (!toolUaBanReached($cnt)) return false;
+    linkedLock('link:ip:' . $ip, toolUaBanDuration(),
+        '命令行走量工具UA短时封禁（累计' . $cnt . '次/' . max(1, intdiv($win, 60)) . '分钟）');
+    logAbnormal($ip, '命令行走量工具UA短时封禁: 累计' . $cnt . '次');
+    return true;
+}
 function runRequestSecurityCheck() {
-    // v5.4.4：内部请求白名单——UA 前缀 YSM-（YSM-HealthCheck/1.0 / YSM-Update/1.0 / YSM-Probe/1.0）
-    // 直接放过：不判扫描器、不计分、不封禁（放在扫描器判定最前）
-    if (isInternalUA()) return;
+    // v5.4.5：仅「内部请求（双因子：内部 UA 且 来源可信）」直接放过；
+    //         外部攻击者伪造 YSM- 前缀不再获得任何豁免。
+    if (isInternalRequest()) return;
     $tool = detectScannerUA();
     if ($tool === false) return;
     $ip = getClientIP();
-    // v5.4.4：curl/wget 降级——仍返回 403 并记录日志（越权表 + 异常表），但不计威胁分、不写 threat_events
+    // v5.4.5：curl/wget 降权——仍 403 + 记日志；低权重(reason=tool_ua, 5 分)独立计数，
+    //         窗口内累计达阈值 → 短时封禁 15 分钟；不写越权计分、不参与联动/永久阈值升级。
     if (scannerUADegraded($tool)) {
-        logUnauthorized('扫描器UA检测(降级·不计分): ' . $tool, false, false);
-        logAbnormal($ip, '扫描器UA拦截(降级·不计分): ' . $tool);
+        logUnauthorized('扫描器UA检测(降级·低权重): ' . $tool, false, false);
+        logAbnormal($ip, '扫描器UA拦截(降级·低权重): ' . $tool);
+        logThreat('tool_ua', $ip, '', 0);
+        toolUaTempBan($ip);
         http_response_code(403);
         header('Content-Type: text/plain; charset=utf-8');
         exit('Forbidden');
@@ -2474,6 +2552,7 @@ function threatWeight($reason) {
         'login_lock'        => 15,  // 触发登录锁定（3 次=45 分触发 L1）
         'login_locked_try'  => 10,  // 锁定期内仍尝试（4 次=40 分触发 L1）
         'scanner_ua'        => 40,  // 扫描器 UA 命中（1 次即触发 L1）
+        'tool_ua'           => 5,   // v5.4.5：curl/wget 等命令行走量工具 UA（低权重；独立计数，不参与联动/永久阈值升级）
         'unauthorized'      => 25,  // 越权操作（2 次=50 分触发 L1）
         'honeypot'          => 25,  // 蜜罐命中（2 次=50 分触发 L1）
         'hfish_attack'      => 20,  // v4.8.0：HFish 蜜罐攻击事件（2 次=40 分触发 L1）
@@ -2499,7 +2578,9 @@ function logThreat($reason, $ip = '', $fp = '', $dedupeWindow = 0) {
     if ($ip !== '' && isPrivateHost($ip)) $ip = '';
     // v5.4.4：服务器自身 IP 豁免——命中 threat_self_ips 一律不计分（含指纹维度，直接返回），
     // 从根上避免「服务器自访问 → 每次累计高分 → 把自己公网 IP 永久封禁（自封）」
-    if ($ip !== '' && isSelfIp($ip)) return;
+    // v5.4.5：仅对「直连来源」生效——客户端 IP 若取自被采信的 XFF（clientIpFromProxy），
+    //         不享受自身 IP 豁免（防自带 `X-Forwarded-For: <服务器自身IP>` 免疫计分）。
+    if ($ip !== '' && isSelfIp($ip) && !clientIpFromProxy()) return;
     $now = time();
     $entries = [];
     if ($ip !== '') $entries[] = ['ip', $ip];
@@ -2555,6 +2636,11 @@ function maybeLinkedBlock($dimType, $dimKey) {
         return;
     }
     $score = threatScore($dimType, $dimKey);
+    // v5.4.5：curl/wget 降级事件(reason=tool_ua, 5 分)不参与联动评分升级（含永久阈值 L3）——
+    //         其封禁走独立计数（toolUaTempBan：10 次/10 分钟 → 15 分钟临时锁）。其余原因行为不变。
+    $toolUaScore = (int)(db_one('SELECT COALESCE(SUM(weight),0) AS s FROM threat_events WHERE dim_type = ? AND dim_key = ? AND reason = ? AND created > ?',
+        [$dimType, $dimKey, 'tool_ua', time() - (int)threatCfg('threat_window', 86400)])['s'] ?? 0);
+    if ($toolUaScore > 0) $score = max(0, $score - $toolUaScore);
     $l3 = (int)threatCfg('threat_l3', 250);
     $l2 = (int)threatCfg('threat_l2', 150);
     $l1_5 = (int)threatCfg('threat_l1_5', 80);

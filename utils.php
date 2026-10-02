@@ -1618,6 +1618,16 @@ function consumeRefreshToken($token, $requestFp, $userTV) {
 function revokeUserRefreshTokens($uid) {
     db_exec('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', [$uid]);
 }
+/**
+ * v5.4.1：删除/吊销用户后清理其会话与设备残留（refresh_tokens、device_fps）。
+ * 语义保留：comments / audit / unauthorized 属于业务与审计记录，不做删除。
+ * 供 ysm-admin revoke-user、超管后台删除用户、站长后台删除写作者统一调用。
+ */
+function purgeUserResiduals($uid) {
+    if ($uid === '' || $uid === null) return;
+    db_exec('DELETE FROM refresh_tokens WHERE user_id = ?', [$uid]);
+    db_exec('DELETE FROM device_fps WHERE user_id = ?', [$uid]);
+}
 function clearRefreshCookie() {
     if (isset($_COOKIE['ysm_rt'])) {
         setcookie('ysm_rt', '', ['expires' => time() - 42000, 'path' => '/', 'httponly' => true, 'samesite' => 'Strict']);

@@ -3246,6 +3246,29 @@ function localUpdateResult($channel) {
     ];
 }
 
+/** v5.4.7：beta 通道下的两条候选项——「最新正式版」与「最新测试版」各取一条（供用户自选安装哪一个） */
+function pickChannelOptions(array $releases) {
+    $formal = [];
+    $pre = [];
+    foreach ($releases as $r) {
+        if (!is_array($r) || empty($r['tag_name']) || !empty($r['draft'])) continue;
+        if (empty($r['prerelease'])) $formal[] = $r; else $pre[] = $r;
+    }
+    $newest = function ($list) {
+        if (!$list) return null;
+        $pool = array_values(array_filter($list, function ($r) { return releaseHasPackage($r); }));
+        if (!$pool) $pool = $list;
+        usort($pool, function ($a, $b) {
+            $ta = strtotime((string)($a['published_at'] ?? '')) ?: 0;
+            $tb = strtotime((string)($b['published_at'] ?? '')) ?: 0;
+            if ($ta !== $tb) return ($tb <=> $ta);
+            return ysmCompareVersion(ltrim((string)$b['tag_name'], 'v'), ltrim((string)$a['tag_name'], 'v'));
+        });
+        return $pool[0];
+    };
+    return ['stable' => $newest($formal), 'beta' => $newest($pre)];
+}
+
 function checkForUpdates($channel = 'stable') {
     $channel = normalizeUpdateChannel($channel);
     // 从配置读取仓库 API 地址，留空则跳过更新检查
@@ -3254,7 +3277,7 @@ function checkForUpdates($channel = 'stable') {
         return localUpdateResult($channel);
     }
     // stable：仅取正式 Release（GitHub /releases/latest 本身排除预发布与草稿）；
-    // beta：取 Releases 列表（含预发布），交由 pickLatestRelease 按语义化版本取最高者。
+    // beta：取 Releases 列表（含预发布），交由 pickLatestRelease 按「最新发布」取主推荐。
     $url = $channel === 'beta'
         ? rtrim($apiBase, '/') . "/releases?per_page=30"
         : rtrim($apiBase, '/') . "/releases/latest";
@@ -3262,17 +3285,28 @@ function checkForUpdates($channel = 'stable') {
     $result = fetchHttpContent($url);
     if ($result) {
         $release = json_decode($result, true);
+        $releaseList = null;
         if ($channel === 'beta') {
             if (is_array($release) && isset($release['tag_name'])) {
                 $release = [$release];   // 兼容个别自托管实现只返回单个对象
             }
             if (is_array($release)) {
+                $releaseList = $release;                       // v5.4.7：保留原始列表，供"双候选"使用
                 $release = pickLatestRelease($release, $channel);
             }
         }
         // stable 走 /releases/latest：此处再兜底拒绝被误标为预发布的条目（「只认正式」失败封闭）
         if ($release && isset($release['tag_name']) && ($channel !== 'stable' || empty($release['prerelease']))) {
-            return buildUpdateResult($release, $channel);
+            $res = buildUpdateResult($release, $channel);
+            // v5.4.7：beta 通道同时给出「最新正式版」+「最新测试版」两条候选，由使用者自选安装哪一个
+            if ($channel === 'beta' && is_array($releaseList)) {
+                $opts = pickChannelOptions($releaseList);
+                $out = [];
+                if (!empty($opts['stable'])) $out[] = array_merge(buildUpdateResult($opts['stable'], 'stable'), ['option_label' => '正式版']);
+                if (!empty($opts['beta']))   $out[] = array_merge(buildUpdateResult($opts['beta'], 'beta'),     ['option_label' => '测试版']);
+                if ($out) $res['options'] = $out;
+            }
+            return $res;
         }
     }
     // 降级：返回本地版本信息

@@ -2250,6 +2250,20 @@ $banMsg = $_GET['bmsg'] ?? '';
                     resultDiv.innerHTML = '<div class="msg" style="margin:0;background:var(--accent-glass);color:var(--text)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>当前已是最新版本 v' + d.current_version + '</div>';
                     document.getElementById('updateActionCard').style.display = 'none';
                 }
+                // v5.4.7：测试通道——同时列出「最新正式版」与「最新测试版」，由使用者自选安装哪一个
+                if (d.options && d.options.length) {
+                    window.__ysmOpts = d.options;
+                    var oh = '<div style="margin:8px 0 0;padding:10px 12px;border:1px solid var(--border);border-radius:10px">' +
+                             '<div style="font-weight:600;margin-bottom:6px">可安装版本（测试通道）</div>';
+                    d.options.forEach(function(o, i) {
+                        oh += '<div style="display:flex;align-items:center;gap:10px;padding:6px 0">' +
+                              '<span style="flex:1">' + o.option_label + ' · <strong>v' + o.latest_version + '</strong>' +
+                              (String(o.latest_version) === String(d.current_version) ? ' <span style="color:var(--text-muted)">（与本机版本相同）</span>' : '') +
+                              '</span><button class="btn btn-secondary" type="button" onclick="pickOption(' + i + ')">选择此版本</button></div>';
+                    });
+                    oh += '</div>';
+                    resultDiv.innerHTML += oh;
+                }
                 resultDiv.style.display = 'block';
             })
             .catch(function() {
@@ -2259,6 +2273,27 @@ $banMsg = $_GET['bmsg'] ?? '';
                 resultDiv.innerHTML = '<div class="msg" style="margin:0;background:rgba(255,80,80,0.15);color:#ff6060"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>检查更新失败，请检查服务器网络连接</div>';
                 resultDiv.style.display = 'block';
             });
+    }
+
+    // v5.4.7：选定「正式版 / 测试版」候选后，带入该版本的包并进入既有更新流程（挑战码 → apply-update）
+    function pickOption(i) {
+        var o = (window.__ysmOpts || [])[i];
+        if (!o) return;
+        var pkgs = o.packages || [];
+        var full = null;
+        for (var k = 0; k < pkgs.length; k++) { if (pkgs[k].type === 'full' && pkgs[k].url) { full = pkgs[k]; break; } }
+        pendingUpdateVersion = o.latest_version;
+        pendingUpdatePath = '';
+        pendingUpdateUrl = full ? full.url : '';
+        document.getElementById('newVersionText').textContent = 'v' + o.latest_version;
+        document.getElementById('updateActionCard').style.display = 'block';
+        if (pkgs.length) {
+            renderPkgSelect(pkgs, true);   // 同号跨通道/预发布→正式版均要求全量包
+        } else {
+            document.getElementById('pkgSelectArea').style.display = 'none';
+        }
+        var ac = document.getElementById('updateActionCard');
+        if (ac && ac.scrollIntoView) ac.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     function showChallengeModal() {

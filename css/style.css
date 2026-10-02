@@ -483,7 +483,8 @@ to{transform:rotate(360deg);}
 }
 [data-theme="dark"]{--bg: hsl(var(--accent-hue), 40%, 8%);--surface: #161b22;--border: #30363d;--text: #e6edf3;--text-secondary: #b1bac4;--text-muted: #8b949e;--accent-light: hsl(var(--accent-hue), var(--accent-sat), 18%);--code-bg: #0d1117;--fixed-icon-bg: #1c2333;--fixed-icon-color: #8b949e;}
 /* v4.7.2：背景图对比色自适应——背景图平均亮度暗（≤140）时整页切暗色（白字深面），
-   由前端 applyBg 计算后设置 data-text-contrast="light"；背景亮时不设属性（默认黑色系）。 */ body[data-text-contrast="light"]{--bg: hsl(var(--accent-hue), 40%, 8%);--surface: #161b22;--border: #30363d;--text: #e6edf3;--text-secondary: #b1bac4;--text-muted: #8b949e;--accent-light: hsl(var(--accent-hue), var(--accent-sat), 18%);--code-bg: #0d1117;--fixed-icon-bg: #1c2333;--fixed-icon-color: #8b949e;}
+   由前端 applyBg 计算后设置 data-text-contrast="light"；背景亮时不设属性（默认黑色系）。
+   v5.4.3：仅在用户「未手动选择主题」时生效——手动选过主题则以用户选择优先（html[data-theme-manual="1"] 时本规则不参与）。 */ html:not([data-theme-manual="1"]) body[data-text-contrast="light"]{--bg: hsl(var(--accent-hue), 40%, 8%);--surface: #161b22;--border: #30363d;--text: #e6edf3;--text-secondary: #b1bac4;--text-muted: #8b949e;--accent-light: hsl(var(--accent-hue), var(--accent-sat), 18%);--code-bg: #0d1117;--fixed-icon-bg: #1c2333;--fixed-icon-color: #8b949e;}
 [data-theme="dark"] .top-bar{background:var(--surface);border-bottom:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,0.15),0 0 0 1px rgba(255,255,255,0.03) inset;}
 [data-theme="dark"] .markdown-body pre{background:#1e1e2e;border-color:#313244;}
 [data-theme="dark"] .markdown-body pre::before{background:#484f58;}

@@ -90,6 +90,8 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'save_channel' && isset($_POST['
     $ch = ($_POST['channel'] ?? 'stable') === 'beta' ? 'beta' : 'stable';
     $config['update_channel'] = $ch;
     saveSiteConfig($config);
+    // v5.4.5：切换通道写入审计（与其它敏感操作一致）
+    auditLog('update_channel', $ch, '切换更新通道为 ' . ($ch === 'beta' ? '测试版(beta)' : '正式版(stable)'), 'ok');
     echo json_encode(['success' => true, 'channel' => $ch], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -2183,7 +2185,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     var pendingUpdateUrl = ''; // v3.2.0：在线更新选中的仓库包下载地址（全量/增量包）
 
     function switchChannel(ch) {
-        var code = prompt('切换更新通道为敏感操作，请在 SSH 中执行 sudo ysm-admin challenge 获取确认码后输入：');
+        var code = prompt('切换更新通道为敏感操作。\n请先在 SSH 中执行：sudo ysm-admin challenge\n再输入得到的确认码：');
         if (!code) return;
         var fd = new FormData();
         fd.append('ajax', 'save_channel');
@@ -2191,15 +2193,22 @@ $banMsg = $_GET['bmsg'] ?? '';
         fd.append('csrf_token', '<?= generateCsrfToken() ?>');
         fd.append('challenge_code', code.trim().toUpperCase());
         fetch('<?= $_SERVER['SCRIPT_NAME'] ?>?tab=update', { method: 'POST', body: fd })
-            .then(function(r) { return r.json(); })
+            .then(function(r) { return r.json().catch(function() { return { success: false, error: '响应解析失败' }; }); })
             .then(function(d) {
-                if (d.success) {
-                    document.querySelectorAll('.channel-tab').forEach(function(t) {
-                        t.classList.toggle('active', t.textContent.includes(ch === 'stable' ? '正式版' : '测试版'));
-                    });
-                    document.querySelector('.version-label').textContent = ch === 'beta' ? '测试版' : '正式版';
+                if (!d || !d.success) {
+                    // v5.4.5：失败必须有明确反馈（此前静默无反应，看起来像"功能不可用"）
+                    alert('切换失败：' + ((d && d.error) || '未知错误') + '\n若为确认码无效/过期，请重新执行：sudo ysm-admin challenge');
+                    return;
                 }
-            });
+                document.querySelectorAll('.channel-tab').forEach(function(t) {
+                    t.classList.toggle('active', t.textContent.indexOf(ch === 'stable' ? '正式版' : '测试版') >= 0);
+                });
+                var vl = document.querySelector('.version-label');
+                if (vl) vl.textContent = ch === 'beta' ? '测试版' : '正式版';
+                alert('已切换为' + (ch === 'beta' ? '测试版（含预发布）' : '正式版（仅正式 Release）') + '。\n页面将自动刷新以同步所有显示项；随后请点「检查更新」。');
+                setTimeout(function() { location.reload(); }, 300);
+            })
+            .catch(function(e) { alert('切换请求失败：' + e); });
     }
 
     function checkUpdate() {

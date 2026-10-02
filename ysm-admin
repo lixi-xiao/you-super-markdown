@@ -1617,6 +1617,33 @@ case "${1:-}" in
                 fi
             fi
         fi
+        # v5.4.7：包内声明版本必须与请求目标版本一致——防「谎报 to_version + 喂官方旧包」的降级攻击。
+        #   签名只能证明"包没被篡改"，无法阻止"用官方旧包做降级"；此校验补上最后一道闸门。
+        #   version.json 已被 manifest 覆盖并通过签名 + 逐文件 SHA256 校验，故读取其 version 可信。
+        if [ -n "$VFILE" ] && [ -f "$VFILE" ]; then
+            PKG_VER=$(YSM_VFILE="$VFILE" php -r '$v = json_decode(@file_get_contents(getenv("YSM_VFILE")), true); echo trim((string)($v["version"] ?? ""));' 2>/dev/null)
+            if [ -z "$PKG_VER" ]; then
+                echo "错误：更新包 version.json 缺少 version 字段，已拒绝（失败封闭）"
+                rm -rf "$TMP_DIR" "${PKG_FILE:-}" 2>/dev/null || true
+                mark_failed "更新包缺少版本声明"
+                exit 1
+            fi
+            if [ "$PKG_VER" != "$TO_VER" ]; then
+                echo "错误：更新包声明版本 v$PKG_VER 与请求目标版本 v$TO_VER 不一致，已拒绝（防降级/防伪报版本）"
+                rm -rf "$TMP_DIR" "${PKG_FILE:-}" 2>/dev/null || true
+                YSM_DETAIL="更新被拒绝（包内版本 v$PKG_VER ≠ 请求版本 v$TO_VER）" php -r "require_once '$WEB_ROOT/utils.php'; auditLog('update_request_rejected', 'update', getenv('YSM_DETAIL'));" 2>/dev/null || true
+                mark_failed "更新包版本与请求不一致"
+                exit 1
+            fi
+            echo "  包内版本校验通过：v$PKG_VER"
+        elif [ "${ALLOW_UNSIGNED:-0}" = "1" ]; then
+            echo "  [警告] 更新包缺少 version.json，因 --allow-unsigned 引导开关放行（不校验版本一致性）"
+        else
+            echo "错误：更新包缺少 version.json（无法校验版本一致性），已拒绝（失败封闭）"
+            rm -rf "$TMP_DIR" "${PKG_FILE:-}" 2>/dev/null || true
+            mark_failed "更新包缺少 version.json"
+            exit 1
+        fi
         # 双保险：全量包必须含核心文件；增量包必须含 version.json（绝不使用 --delete 清空目标）
         if [ -z "$STAGE_DIR" ]; then
             echo "错误：更新源无效（未找到核心文件或增量清单），已中止，未修改任何文件"

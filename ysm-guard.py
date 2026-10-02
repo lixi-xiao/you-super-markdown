@@ -1466,6 +1466,54 @@ def ensure_mirror_dir():
         log(f"镜像目录自检失败: {e}")
 
 
+def ensure_audit_recover_units():
+    """v5.4.8：确保「后台发起恢复 → root 执行」的 systemd 通道存在（幂等）。
+    放在守护进程启动时执行（而非 apply-update 内）：更新器会覆盖正在运行的自身脚本，
+    bash 边读边执行导致替换文件之后的步骤不可靠；守护进程是更新后必然重启的独立进程，可靠。"""
+    svc = """[Unit]
+Description=You Super Markdown - 审计镜像恢复（由恢复请求触发，root 执行）
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ysm-admin audit-recover --from-request
+"""
+    pth = """[Unit]
+Description=You Super Markdown - 监听审计恢复请求文件
+
+[Path]
+PathExists=/opt/you-super-markdown/run/audit-recover-request.json
+Unit=ysm-audit-recover.service
+
+[Install]
+WantedBy=multi-user.target
+"""
+    try:
+        need = True
+        for path, want in (('/etc/systemd/system/ysm-audit-recover.service', svc),
+                           ('/etc/systemd/system/ysm-audit-recover.path', pth)):
+            cur = ''
+            if os.path.exists(path):
+                try:
+                    cur = open(path).read()
+                except Exception:
+                    cur = ''
+            if cur != want:
+                with open(path, 'w') as f:
+                    f.write(want)
+            else:
+                need = False
+        if need:
+            log("已创建/更新审计恢复通道单元（ysm-audit-recover.path/.service）")
+        subprocess.run(['systemctl', 'daemon-reload'], capture_output=True)
+        subprocess.run(['systemctl', 'enable', '--now', 'ysm-audit-recover.path'], capture_output=True)
+        r = subprocess.run(['systemctl', 'is-active', 'ysm-audit-recover.path'], capture_output=True, text=True)
+        if 'active' not in (r.stdout or ''):
+            log("警告: ysm-audit-recover.path 未处于 active（后台从镜像恢复将不可用，可用 CLI）")
+    except Exception as e:
+        log(f"审计恢复通道自检失败: {e}")
+
+
 def main():
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
@@ -1481,6 +1529,8 @@ def main():
 
     # v5.4.8：镜像目录自检——必须是 root:www-data 750 + immutable（www-data 不可写）
     ensure_mirror_dir()
+    # v5.4.8：确保「后台从镜像恢复」的 root 执行通道存在（systemd path unit，幂等）
+    ensure_audit_recover_units()
 
     # 自诊断（v5.0.0-fix）：启动即校验告警通道可用性，不可用则明确落盘 alert.log（不静默）
     _smtp = load_smtp_config()

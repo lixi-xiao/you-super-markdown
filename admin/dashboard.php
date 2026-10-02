@@ -428,7 +428,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $delId = $_POST['user_id'] ?? '';
         foreach ($users as $i => $u) {
             if ($u['id'] === $delId && ($u['role'] ?? '') !== ROLE_SUPER_ADMIN) {
-                auditLog('user_delete', $u['account'] ?? $delId, "删除用户: {$u['nickname']}");
+                // v5.4.0-beta：删除账号 → 其 AI Key 一并清除（含文件级清理）
+                $aiPurged = aiClearUserKeys($delId);
+                auditLog('user_delete', $u['account'] ?? $delId, "删除用户: {$u['nickname']}" . ($aiPurged > 0 ? "（同时清除 AI Key {$aiPurged} 条）" : ''));
                 array_splice($users, $i, 1);
                 replaceAllUsers($users);
                 $msg = 'user_deleted';
@@ -466,6 +468,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         foreach ($users as &$uu) {
             if ($uu['id'] === $uid && ($uu['role'] ?? '') !== ROLE_SUPER_ADMIN) {
                 $uu['disabled'] = $disabled ? 1 : 0;
+                // v5.4.0-beta：吊销（禁用）账号 → 其 AI Key 一并清除
+                if ($disabled) aiClearUserKeys($uid);
                 auditLog('user_disable', $uu['account'] ?? $uid, ($disabled ? '禁用账号: ' : '启用账号: ') . ($uu['nickname'] ?? ''));
                 $msg = $disabled ? 'user_disabled' : 'user_enabled';
                 break;
@@ -526,6 +530,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         header("Location: dashboard.php?tab=users&msg={$msg}");
         exit;
     }
+}
+
+// v5.4.0-beta：保存 AI 写作站级配置（总开关 + 按角色开关 + 服务商白名单）——超管只管"站"的层面
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_ai_config'])) {
+    if (!checkCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: dashboard.php?tab=ai&msg=csrf_error');
+        exit;
+    }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=ai&msg=challenge_failed');
+        exit;
+    }
+    $allIds = array_keys(aiBuiltinProviders());
+    $picked = (isset($_POST['ai_providers']) && is_array($_POST['ai_providers'])) ? $_POST['ai_providers'] : [];
+    $picked = array_values(array_intersect($allIds, array_map('strval', $picked)));
+    $aiCfg = loadSiteConfig();
+    $aiCfg['ai_enabled'] = !empty($_POST['ai_enabled']);
+    $aiCfg['ai_role_station_admin'] = !empty($_POST['ai_role_station_admin']);
+    $aiCfg['ai_role_author'] = !empty($_POST['ai_role_author']);
+    $aiCfg['ai_providers'] = $picked;
+    saveSiteConfig($aiCfg);
+    auditLog('ai_config_update', 'ai_config',
+        'AI 总开关=' . ($aiCfg['ai_enabled'] ? '开' : '关')
+        . '; 站长=' . ($aiCfg['ai_role_station_admin'] ? '开' : '关')
+        . '; 写作者=' . ($aiCfg['ai_role_author'] ? '开' : '关')
+        . '; 白名单=' . (empty($picked) ? '无' : implode(',', $picked)));
+    header('Location: dashboard.php?tab=ai&msg=saved');
+    exit;
+}
+
+// v5.4.0-beta：清除某用户的 AI Key（仅清除，不提供任何查看/导出）
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ai_clear_user'])) {
+    if (!checkCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: dashboard.php?tab=ai&msg=csrf_error');
+        exit;
+    }
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=ai&msg=challenge_failed');
+        exit;
+    }
+    $targetUid = (string)$_POST['ai_clear_user'];
+    $purged = aiClearUserKeys($targetUid);
+    $accName = '';
+    foreach ($users as $u) { if (($u['id'] ?? '') === $targetUid) { $accName = $u['account'] ?? ''; break; } }
+    auditLog('ai_key_clear', $accName !== '' ? $accName : $targetUid, "清除该用户 AI Key（{$purged} 条）");
+    header('Location: dashboard.php?tab=ai&msg=ai_cleared');
+    exit;
 }
 
 // 系统配置表单
@@ -886,6 +937,10 @@ $banMsg = $_GET['bmsg'] ?? '';
             <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>
             联动风控
         </a>
+        <a href="dashboard.php?tab=ai" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'ai' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
+            AI 写作
+        </a>
         <a href="#" onclick="bindLogoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             退出登录
@@ -927,7 +982,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php
     $tab = $_GET['tab'] ?? 'overview';
     // v5.0.0 P2：tab 白名单校验（对齐 station/author 后台），非法值回落 overview
-    if (!in_array($tab, ['overview', 'users', 'logs', 'config', 'security', 'ui', 'update', 'guard', 'data', 'hfish', 'mail', 'verify', 'threat'], true)) $tab = 'overview';
+    if (!in_array($tab, ['overview', 'users', 'logs', 'config', 'security', 'ui', 'update', 'guard', 'data', 'hfish', 'mail', 'verify', 'threat', 'ai'], true)) $tab = 'overview';
     $superCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_SUPER_ADMIN));
     $stationCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_STATION_ADMIN));
     $authorCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_AUTHOR));
@@ -3180,6 +3235,106 @@ $banMsg = $_GET['bmsg'] ?? '';
                 </div>
             </div>
             <div class="form-hint">重置码 30 分钟内一次性有效；用户可在首页「忘记密码」中直接输入该重置码与新密码完成重置</div>
+        </form>
+    </div>
+    <?php elseif ($tab === 'ai'): ?>
+    <?php
+    // v5.4.0-beta：AI 写作（超管只管"站"的层面）
+    //   总开关 + 可分别开关"站长/写作者可用" + 维护服务商预设白名单；超管不接触任何人的 Key。
+    $aiBuiltin = aiBuiltinProviders();
+    $aiEnabledIds = aiEnabledProviderIds();
+    $aiCandidates = array_values(array_filter($users, fn($u) => in_array($u['role'] ?? '', [ROLE_STATION_ADMIN, ROLE_AUTHOR], true)));
+    ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
+            AI 写作
+        </div>
+        <div class="page-subtitle">站级开关与服务商白名单（超管仅管理"站"的层面，不接触任何人的 Key）</div>
+    </div>
+    <?php if ($msg === 'ai_cleared'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>已清除该用户的 AI Key</div><?php endif; ?>
+    <?php if ($msg === 'challenge_failed'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>挑战码无效或已过期，请重新生成</div><?php endif; ?>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
+            AI 功能开关
+        </div>
+        <div class="form-hint" style="margin-bottom:12px">
+            仅"站长 / 写作者"可参与创作（超管不参与，入口不显示）。用户需在各自后台自行配置个人 Key（绑定其站内账号，密文存储、明文永不回显），
+            且必须通过"连通性测试"才会保存。Key 由用户自担额度，站点不做成本控制。
+        </div>
+        <form method="post" class="need-challenge">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="save_ai_config" value="1">
+            <input type="hidden" name="challenge_code">
+            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+                <input type="checkbox" name="ai_enabled" id="aiEnabled" value="1" <?= !empty($config['ai_enabled']) ? 'checked' : '' ?> style="width:17px;height:17px;accent-color:var(--accent)">
+                <div>
+                    <label for="aiEnabled" style="font-weight:600;cursor:pointer">启用 AI 写作（总开关）</label>
+                    <div class="form-hint" style="margin:0">关闭后所有角色均无法使用 AI 写作（已配置的 Key 保留）</div>
+                </div>
+            </div>
+            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+                <input type="checkbox" name="ai_role_station_admin" id="aiRoleSt" value="1" <?= !empty($config['ai_role_station_admin']) ? 'checked' : '' ?> style="width:17px;height:17px;accent-color:var(--accent)">
+                <div>
+                    <label for="aiRoleSt" style="font-weight:600;cursor:pointer">站长可用</label>
+                    <div class="form-hint" style="margin:0">允许 ROLE_STATION_ADMIN 在编辑器中使用 AI 写作</div>
+                </div>
+            </div>
+            <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+                <input type="checkbox" name="ai_role_author" id="aiRoleAuthor" value="1" <?= !empty($config['ai_role_author']) ? 'checked' : '' ?> style="width:17px;height:17px;accent-color:var(--accent)">
+                <div>
+                    <label for="aiRoleAuthor" style="font-weight:600;cursor:pointer">写作者可用</label>
+                    <div class="form-hint" style="margin:0">允许 ROLE_AUTHOR 在编辑器中使用 AI 写作</div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">服务商预设白名单（base_url 固定；使用者只能选，不能自定义）</label>
+                <div class="table-wrap">
+                <table>
+                    <tr><th style="width:60px">启用</th><th>服务商</th><th>base_url（固定）</th></tr>
+                    <?php foreach ($aiBuiltin as $pid => $p): ?>
+                    <tr>
+                        <td><input type="checkbox" name="ai_providers[]" value="<?= htmlspecialchars($pid) ?>" <?= in_array($pid, $aiEnabledIds, true) ? 'checked' : '' ?> style="width:16px;height:16px;accent-color:var(--accent)"></td>
+                        <td><?= htmlspecialchars($p['label']) ?></td>
+                        <td><code style="font-size:0.85em"><?= htmlspecialchars($p['base_url']) ?></code></td>
+                    </tr>
+                    <?php endforeach; ?>
+                </table>
+                </div>
+                <div class="form-hint">模型名由使用者自行填写（各家/各模型不同）。后端调用时 base_url 一律取自本白名单，不接受前端传入 URL（防 SSRF）。</div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+                <button type="submit" class="btn btn-primary">保存 AI 配置</button>
+            </div>
+        </form>
+    </div>
+    <div class="card">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            清除某人的 AI Key（仅清除，不能查看）
+        </div>
+        <div class="form-hint" style="margin-bottom:12px">
+            出于隐私，超管<b>无法查看</b>任何用户的 Key（含末四位）。此处仅提供"清除"能力：清除后该用户需重新配置。
+        </div>
+        <form method="post" class="need-challenge" data-confirm="确定清除该用户的全部 AI Key？此操作不可撤销。">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="ai_clear_user" id="aiClearUser" value="">
+            <input type="hidden" name="challenge_code">
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">选择用户（站长 / 写作者）</label>
+                    <select class="form-select" onchange="document.getElementById('aiClearUser').value=this.value">
+                        <option value="">请选择</option>
+                        <?php foreach ($aiCandidates as $cu): ?>
+                        <option value="<?= htmlspecialchars($cu['id']) ?>"><?= htmlspecialchars(($cu['nickname'] ?? '') . '（' . ($cu['account'] ?? '') . '，' . ($cu['role'] ?? '') . '）') ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+                <button type="submit" class="btn btn-danger">清除该用户 AI Key</button>
+            </div>
         </form>
     </div>
     <?php endif; ?>

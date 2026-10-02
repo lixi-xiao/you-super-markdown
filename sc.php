@@ -27,6 +27,8 @@ $isStationAdmin = checkRole(ROLE_STATION_ADMIN);
 // v2.6.4：写作者进入编辑器后侧边栏提供返回「写作者后台」入口（与站长一致）
 // 注意：checkRole 是层级匹配（站长也会命中 author），此处用精确角色匹配，入口各归各
 $isAuthor = (($_SESSION['cmt_user']['role'] ?? '') === ROLE_AUTHOR);
+// v5.4.0-beta：AI 写作入口是否可用（超管不参与创作；需超管已开放对应角色）
+$aiToolEnabled = aiRoleAllowed($_SESSION['cmt_user']['role'] ?? '');
 $myId = getCurrentUserId();
 $myNick = $_SESSION['cmt_user']['nickname'] ?? '';
 
@@ -476,6 +478,8 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>文档管理 - <?= htmlspecialchars($siteTitle) ?></title>
 <meta name="csrf-token" content="<?= htmlspecialchars(generateCsrfToken()) ?>">
+<!-- v5.4.0-beta：AI 浮层组件样式（tw.min.css 先于 admin.css 加载，仅追加 .ai-* 组件类，不改既有选择器） -->
+<link rel="stylesheet" href="css/tw.min.css?v=<?= @filemtime(__DIR__ . '/css/tw.min.css') ?>">
 <link rel="stylesheet" href="css/admin.css?v=<?= @filemtime(__DIR__ . '/css/admin.css') ?>">
 </head>
 <body>
@@ -776,6 +780,10 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                         <button type="button" class="btn btn-sm btn-outline" id="btnInsertVideo" style="margin-left:8px">插入视频</button>
                         <input type="file" id="videoUploadInput" accept="video/mp4,video/webm" style="display:none">
                         <span class="form-hint" id="videoUploadHint" style="margin-left:10px"></span>
+                        <?php if ($aiToolEnabled): ?>
+                        <button type="button" class="btn btn-sm btn-outline" id="btnAiWrite" style="margin-left:8px">AI 写作</button>
+                        <span class="form-hint" style="margin-left:8px">在下方选中文本后点此打开</span>
+                        <?php endif; ?>
                     </div>
                     <textarea class="form-input" name="content" id="editContent" style="min-height:200px;font-family:monospace" placeholder="Markdown 内容..."></textarea>
                     <p class="form-hint" id="editCharCount"></p>
@@ -848,6 +856,65 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
         </div>
     </div>
 </div>
+
+<?php if ($aiToolEnabled): ?>
+<!-- ===== v5.4.0-beta：AI 写作侧边浮层（选中文本 → 动作 → 流式 → 差异预览 → 插入/替换/撤销） ===== -->
+<div class="ai-drawer" id="aiDrawer" style="display:none">
+    <div class="ai-drawer-head">
+        <span>AI 写作</span>
+        <button type="button" class="ai-drawer-close" id="aiDrawerClose" aria-label="关闭">&times;</button>
+    </div>
+    <div class="ai-drawer-body">
+        <div class="ai-field">
+            <label class="ai-label">动作</label>
+            <div class="ai-actions" id="aiActionChips"></div>
+        </div>
+        <div class="ai-field" id="aiStyleWrap" style="display:none">
+            <label class="ai-label">目标风格</label>
+            <select class="ai-select" id="aiStyle"></select>
+        </div>
+        <div class="ai-field" id="aiLangWrap" style="display:none">
+            <label class="ai-label">目标语言</label>
+            <select class="ai-select" id="aiLang"></select>
+        </div>
+        <div class="ai-field">
+            <label class="ai-label">服务商</label>
+            <select class="ai-select" id="aiProvider"></select>
+            <div class="ai-hint" id="aiProviderHint" style="margin-top:6px"></div>
+        </div>
+        <div class="ai-field">
+            <label class="ai-label">选中文本</label>
+            <div class="ai-src" id="aiSrc"></div>
+        </div>
+        <div class="ai-run-row">
+            <button type="button" class="ai-btn ai-btn-primary" id="aiRunBtn">开始生成</button>
+            <span class="ai-hint" id="aiStatus"></span>
+        </div>
+        <div class="ai-field" id="aiResultWrap" style="display:none;margin-top:14px">
+            <div class="ai-diff">
+                <div class="ai-diff-col"><div class="ai-diff-title">原文</div><div class="ai-diff-body" id="aiDiffOld"></div></div>
+                <div class="ai-diff-col"><div class="ai-diff-title">结果</div><div class="ai-diff-body" id="aiDiffNew"></div></div>
+            </div>
+            <div class="ai-apply-row">
+                <button type="button" class="ai-btn" id="aiInsertBtn">插入</button>
+                <button type="button" class="ai-btn ai-btn-primary" id="aiReplaceBtn">替换</button>
+                <button type="button" class="ai-btn" id="aiUndoBtn" style="display:none">撤销</button>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="ai-privacy-mask" id="aiPrivacyMask" style="display:none">
+    <div class="ai-privacy-box">
+        <h3>隐私提示</h3>
+        <p>你选中的内容将发送至<b>你选择的第三方服务商</b>（AI 服务商）进行处理。请勿处理包含个人隐私或敏感信息的文本。</p>
+        <p>额度由你的账号自担；本站仅做代理转发，不记录正文。</p>
+        <div class="ai-apply-row" style="justify-content:flex-end">
+            <button type="button" class="ai-btn" id="aiPrivacyCancel">取消</button>
+            <button type="button" class="ai-btn ai-btn-primary" id="aiPrivacyOk">我已知晓，继续</button>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <script>
 function closeModalById(id) { document.getElementById(id).classList.remove('active'); }
@@ -1139,5 +1206,245 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { openDeleteConfirmModal(this.dataset.name, this.dataset.display); });
 });
 </script>
+<?php if ($aiToolEnabled): ?>
+<script>
+// ============================================================================
+// v5.4.0-beta：AI 写作侧边浮层（选中文本 → 动作 → 流式 SSE → 差异预览 → 插入/替换/撤销）
+//   Key 永不触达前端；接口只回传"已配置(****末四位)/未配置"。
+// ============================================================================
+(function() {
+    var $ = function(id) { return document.getElementById(id); };
+    var drawer = $('aiDrawer');
+    var ta = $('editContent');
+    if (!drawer || !ta) return;
+    var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+    var cfg = null, captured = '', result = '', lastSel = { start: 0, end: 0 };
+    var undoValue = null, busy = false, finalized = false, curAction = 'polish';
+
+    function api(action, method, body) {
+        return fetch('api.php?action=' + action, {
+            method: method || 'GET',
+            headers: method === 'POST' ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } : {},
+            body: body ? JSON.stringify(body) : undefined
+        }).then(function(r) { return r.json().catch(function() { return { success: false, error: 'HTTP ' + r.status }; }); });
+    }
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+    function setStatus(t) { $('aiStatus').textContent = t || ''; }
+
+    function tokenize(s) {
+        var out = [], re = /[A-Za-z0-9]+|[\u4e00-\u9fff]|[^\s]|\s+/g, m;
+        while ((m = re.exec(s))) out.push(m[0]);
+        return out;
+    }
+    function diffHtml(oldS, newS) {
+        var a = tokenize(oldS), b = tokenize(newS);
+        if (a.length * b.length > 400000) {
+            return { old: esc(oldS), 'new': esc(newS) };
+        }
+        var n = a.length, m = b.length, i, j, dp = [];
+        for (i = 0; i <= n; i++) { dp.push(new Array(m + 1)); for (j = 0; j <= m; j++) dp[i][j] = 0; }
+        for (i = n - 1; i >= 0; i--) for (j = m - 1; j >= 0; j--) {
+            dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+        var oh = '', nh = ''; i = 0; j = 0;
+        while (i < n && j < m) {
+            if (a[i] === b[j]) { oh += esc(a[i]); nh += esc(b[j]); i++; j++; }
+            else if (dp[i + 1][j] >= dp[i][j + 1]) { oh += '<span class="ai-del">' + esc(a[i]) + '</span>'; i++; }
+            else { nh += '<span class="ai-add">' + esc(b[j]) + '</span>'; j++; }
+        }
+        while (i < n) { oh += '<span class="ai-del">' + esc(a[i]) + '</span>'; i++; }
+        while (j < m) { nh += '<span class="ai-add">' + esc(b[j]) + '</span>'; j++; }
+        return { old: oh, 'new': nh };
+    }
+
+    function refreshProviderHint() {
+        var pid = $('aiProvider').value, k = null, i;
+        for (i = 0; i < (cfg.keys || []).length; i++) if (cfg.keys[i].provider === pid) k = cfg.keys[i];
+        var hint = $('aiProviderHint');
+        if (k && k.configured) hint.textContent = '已配置 ' + k.hint + ' · 模型 ' + (k.model || '未填');
+        else hint.textContent = '未配置：请先在后台「AI 写作」中配置该服务商的 Key';
+    }
+    function syncActionFields() {
+        $('aiStyleWrap').style.display = (curAction === 'style') ? '' : 'none';
+        $('aiLangWrap').style.display = (curAction === 'translate') ? '' : 'none';
+    }
+
+    function buildForm() {
+        var chips = '', i;
+        for (var k in cfg.actions) {
+            chips += '<button type="button" class="ai-chip' + (k === curAction ? ' active' : '') + '" data-action="' + k + '">' + esc(cfg.actions[k]) + '</button>';
+        }
+        $('aiActionChips').innerHTML = chips;
+        var so = '';
+        cfg.styles.forEach(function(s) { so += '<option value="' + esc(s) + '">' + esc(s) + '</option>'; });
+        $('aiStyle').innerHTML = so;
+        var lo = '';
+        cfg.langs.forEach(function(s) { lo += '<option value="' + esc(s) + '">' + esc(s) + '</option>'; });
+        $('aiLang').innerHTML = lo;
+        var po = '';
+        cfg.providers.forEach(function(p) { po += '<option value="' + esc(p.id) + '">' + esc(p.label) + '</option>'; });
+        $('aiProvider').innerHTML = po;
+        if (cfg.default_provider) $('aiProvider').value = cfg.default_provider;
+        refreshProviderHint();
+        syncActionFields();
+    }
+
+    $('aiActionChips').addEventListener('click', function(e) {
+        var t = e.target.closest ? e.target.closest('.ai-chip') : null;
+        if (!t) return;
+        curAction = t.getAttribute('data-action');
+        var all = this.querySelectorAll('.ai-chip');
+        for (var i = 0; i < all.length; i++) all[i].classList.remove('active');
+        t.classList.add('active');
+        syncActionFields();
+    });
+    $('aiProvider').addEventListener('change', refreshProviderHint);
+
+    function openDrawer() {
+        var s = ta.selectionStart, e = ta.selectionEnd, sel = ta.value.slice(s, e);
+        if (!sel.trim()) { alert('请先在编辑框中选中要处理的文本'); return; }
+        captured = sel; lastSel = { start: s, end: e };
+        $('aiSrc').textContent = sel;
+        $('aiResultWrap').style.display = 'none';
+        $('aiUndoBtn').style.display = 'none';
+        result = ''; finalized = false; undoValue = null; setStatus('');
+        drawer.style.display = 'flex';
+        hideFab();
+        if (!cfg.privacy_ack) $('aiPrivacyMask').style.display = 'flex';
+    }
+    function closeDrawer() { drawer.style.display = 'none'; hideFab(); }
+
+    $('aiPrivacyOk').addEventListener('click', function() {
+        $('aiPrivacyMask').style.display = 'none';
+        api('ai_privacy_ack', 'POST', {}).then(function(d) { if (d && d.success) cfg.privacy_ack = true; });
+    });
+    $('aiPrivacyCancel').addEventListener('click', function() { $('aiPrivacyMask').style.display = 'none'; });
+
+    function finalize() {
+        finalized = true;
+        var dv = diffHtml(captured, result);
+        $('aiDiffOld').innerHTML = dv.old;
+        $('aiDiffNew').innerHTML = dv['new'];
+        setStatus('完成（' + result.length + ' 字）：可插入 / 替换');
+    }
+
+    function run() {
+        if (busy) return;
+        if (!cfg.privacy_ack) { $('aiPrivacyMask').style.display = 'flex'; setStatus('请先确认隐私提示'); return; }
+        var pid = $('aiProvider').value, k = null, i;
+        for (i = 0; i < (cfg.keys || []).length; i++) if (cfg.keys[i].provider === pid) k = cfg.keys[i];
+        if (!k || !k.configured) { alert('该服务商尚未配置 Key，请先到后台「AI 写作」配置'); return; }
+        var style = $('aiStyle').value, lang = $('aiLang').value;
+        busy = true; $('aiRunBtn').disabled = true; setStatus('生成中…');
+        result = ''; finalized = false;
+        $('aiResultWrap').style.display = 'block';
+        $('aiDiffOld').innerHTML = esc(captured);
+        $('aiDiffNew').innerHTML = '';
+        var err = '';
+        fetch('api.php?action=ai_run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            body: JSON.stringify({ action: curAction, provider: pid, text: captured, style: style, lang: lang, stream: true })
+        }).then(function(resp) {
+            var ct = resp.headers.get('content-type') || '';
+            if (ct.indexOf('application/json') >= 0) {
+                return resp.json().then(function(d) { err = d.error || '调用失败'; });
+            }
+            if (!resp.body || !resp.body.getReader) { err = '当前浏览器不支持流式读取'; return; }
+            var reader = resp.body.getReader(), dec = new TextDecoder(), buf = '';
+            function handleBlock(block) {
+                block.split('\n').forEach(function(line) {
+                    if (line.indexOf('data:') !== 0) return;
+                    var ev; try { ev = JSON.parse(line.slice(5).trim()); } catch (x) { return; }
+                    if (ev.event === 'delta' && ev.text) {
+                        result += ev.text;
+                        $('aiDiffNew').textContent = result;
+                        $('aiDiffNew').scrollTop = $('aiDiffNew').scrollHeight;
+                    } else if (ev.event === 'error') { err = ev.message || '调用失败'; }
+                });
+            }
+            function pump() {
+                return reader.read().then(function(r) {
+                    if (r.done || err) return;
+                    buf += dec.decode(r.value, { stream: true });
+                    var idx;
+                    while ((idx = buf.indexOf('\n\n')) >= 0) { handleBlock(buf.slice(0, idx)); buf = buf.slice(idx + 2); }
+                    return pump();
+                });
+            }
+            return pump();
+        }).then(function() {
+            busy = false; $('aiRunBtn').disabled = false;
+            if (err) { setStatus(err); return; }
+            if (result) finalize(); else setStatus('未获得结果');
+        }).catch(function(e) {
+            busy = false; $('aiRunBtn').disabled = false; setStatus((e && e.message) || '网络错误');
+        });
+    }
+
+    function applyText(mode) {
+        if (!result) return;
+        undoValue = ta.value;
+        var v = ta.value;
+        if (mode === 'replace') {
+            ta.value = v.slice(0, lastSel.start) + result + v.slice(lastSel.end);
+            lastSel = { start: lastSel.start, end: lastSel.start + result.length };
+        } else {
+            ta.value = v.slice(0, lastSel.start) + result + v.slice(lastSel.start);
+            lastSel = { start: lastSel.start, end: lastSel.start + result.length };
+        }
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = lastSel.end;
+        $('aiUndoBtn').style.display = '';
+        setStatus(mode === 'replace' ? '已替换' : '已插入');
+    }
+
+    $('aiRunBtn').addEventListener('click', run);
+    $('aiInsertBtn').addEventListener('click', function() { applyText('insert'); });
+    $('aiReplaceBtn').addEventListener('click', function() { applyText('replace'); });
+    $('aiUndoBtn').addEventListener('click', function() {
+        if (undoValue === null) return;
+        ta.value = undoValue; undoValue = null;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        $('aiUndoBtn').style.display = 'none';
+        setStatus('已撤销');
+    });
+    $('aiDrawerClose').addEventListener('click', closeDrawer);
+    var btn = $('btnAiWrite');
+    if (btn) btn.addEventListener('click', openDrawer);
+
+    // 选中文本后在编辑框右上角浮出入口（侧边浮层触发）
+    var fab = document.createElement('div');
+    fab.className = 'ai-fab';
+    fab.textContent = 'AI 写作';
+    fab.style.display = 'none';
+    document.body.appendChild(fab);
+    fab.addEventListener('mousedown', function(e) { e.preventDefault(); openDrawer(); });
+    function hideFab() { fab.style.display = 'none'; }
+    function maybeFab() {
+        if (drawer.style.display === 'flex') return;
+        var sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+        if (!sel.trim()) { hideFab(); return; }
+        var r = ta.getBoundingClientRect();
+        var left = Math.min(window.innerWidth - 90, Math.max(8, r.right - 96));
+        var top = Math.max(8, r.top + 6);
+        fab.style.left = left + 'px';
+        fab.style.top = top + 'px';
+        fab.style.display = '';
+    }
+    ta.addEventListener('select', maybeFab);
+    ta.addEventListener('mouseup', maybeFab);
+    ta.addEventListener('keyup', function(e) { if (e.shiftKey || e.key === 'Shift') maybeFab(); });
+    window.addEventListener('scroll', hideFab, true);
+
+    // 载入配置：决定动作/风格/语言/服务商与状态
+    api('ai_config', 'GET').then(function(d) {
+        if (!d || !d.success || !d.allowed) { if (btn) btn.disabled = true; return; }
+        cfg = d; buildForm();
+    }).catch(function() {});
+})();
+</script>
+<?php endif; ?>
 </body>
 </html>

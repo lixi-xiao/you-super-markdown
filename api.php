@@ -1188,4 +1188,240 @@ if ($action === 'bg_config' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         'bg_card_opacity' => $settings['bg_card_opacity'] ?? 100
     ]);
 }
+
+// ============================================================================
+// v5.4.0-beta：AI 写作（服务端代理调用）
+//   - 使用者：站长 / 写作者；超管不参与创作（其会话在校验中被排除 → 403）。
+//   - 前端只发"动作 + 选中文本 + 目标服务商"；Key 永不出后端、永不回传明文。
+//   - base_url 只取自服务端白名单（不接受任何用户传入 URL → 防 SSRF）。
+// ============================================================================
+/** 校验当前用户为"可参与创作"的站长/写作者（未登录/超管/普通用户一律 403） */
+function aiActionUser() {
+    $actor = verifyHomeUser();
+    if (!$actor) sendJson(['success' => false, 'error' => '无权限'], 403);
+    $role = $actor['role'] ?? '';
+    if (!in_array($role, [ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) {
+        logUnauthorized('越权尝试使用 AI 写作接口');
+        sendJson(['success' => false, 'error' => '无权限'], 403);
+    }
+    return $actor;
+}
+/** 校验当前用户且该角色已被超管开放 AI */
+function aiActionUserAllowed() {
+    $actor = aiActionUser();
+    if (!aiRoleAllowed($actor['role'] ?? '')) sendJson(['success' => false, 'error' => 'AI 功能未开放'], 403);
+    return $actor;
+}
+/** 流式输出一个 SSE 事件并立即 flush */
+function aiSseEmit($payload) {
+    echo 'data: ' . json_encode($payload, JSON_UNESCAPED_UNICODE) . "\n\n";
+    @ob_flush();
+    @flush();
+}
+function aiJsonBody() {
+    $j = json_decode(file_get_contents('php://input'), true);
+    return is_array($j) ? $j : [];
+}
+
+// GET ai_config：编辑器/后台据此决定入口可见性与选项（不含任何 Key 明文）
+if ($action === 'ai_config' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $actor = aiActionUser();
+    $role = $actor['role'] ?? '';
+    sendJson([
+        'success' => true,
+        'enabled' => !empty(loadSiteConfig()['ai_enabled']),
+        'allowed' => aiRoleAllowed($role),
+        'providers' => aiProvidersForClient(),
+        'actions' => aiActions(),
+        'styles' => aiStyleOptions(),
+        'langs' => aiLangOptions(),
+        'privacy_ack' => aiPrivacyAcked($actor['id']),
+        'keys' => aiKeysForClient($actor['id']),
+        'default_provider' => aiDefaultProvider($actor['id']),
+    ]);
+}
+
+// POST ai_privacy_ack：每角色首次使用确认"内容将发送至第三方服务商"（记录已同意，避免每次弹）
+if ($action === 'ai_privacy_ack' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $actor = aiActionUser();
+    aiSetPrivacyAck($actor['id']);
+    auditLog('ai_privacy_ack', $actor['id'], '确认 AI 隐私提示');
+    sendJson(['success' => true]);
+}
+
+// GET ai_keys：返回该账号各服务商状态（已配置(****末四位)/未配置 + 是否默认），无明文
+if ($action === 'ai_keys' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $actor = aiActionUser();
+    sendJson([
+        'success' => true,
+        'providers' => aiProvidersForClient(),
+        'keys' => aiKeysForClient($actor['id']),
+        'default_provider' => aiDefaultProvider($actor['id']),
+    ]);
+}
+
+// POST ai_key_test：连通性测试（用所选白名单 base_url + 该 Key + 模型名发最小请求）；不落库
+if ($action === 'ai_key_test' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $actor = aiActionUserAllowed();
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    $body = aiJsonBody();
+    $provider = (string)($body['provider'] ?? '');
+    $model = trim((string)($body['model'] ?? ''));
+    $key = trim((string)($body['key'] ?? ''));
+    if (aiProviderBaseUrl($provider) === '') {
+        auditLog('ai_key_test', $provider, '连通性测试：服务商不可用', 'failed');
+        sendJson(['success' => false, 'ok' => false, 'message' => '服务商不可用'], 400);
+    }
+    [$ok, $reason] = aiConnectivityTest($provider, $key, $model);
+    auditLog('ai_key_test', $provider, '连通性测试：' . ($ok ? '成功' : '失败'), $ok ? 'success' : 'failed');
+    sendJson(['success' => $ok, 'ok' => $ok, 'message' => $ok ? '连接成功' : $reason]);
+}
+
+// POST ai_key_save：必须先做连通性测试，通过才固化（失败不落库，返回可读原因）
+if ($action === 'ai_key_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $actor = aiActionUserAllowed();
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    $body = aiJsonBody();
+    $provider = (string)($body['provider'] ?? '');
+    $model = trim((string)($body['model'] ?? ''));
+    $key = trim((string)($body['key'] ?? ''));
+    $isDefault = !empty($body['is_default']);
+    if (aiProviderBaseUrl($provider) === '') {
+        auditLog('ai_key_save', $provider, '保存失败：服务商不可用', 'failed');
+        sendJson(['success' => false, 'error' => '服务商不可用'], 400);
+    }
+    if ($key === '') sendJson(['success' => false, 'error' => '请填写 Key'], 400);
+    if ($model === '') sendJson(['success' => false, 'error' => '请填写模型名'], 400);
+    // 未通过连通性测试 → 拒绝固化（不落库）
+    [$ok, $reason] = aiConnectivityTest($provider, $key, $model);
+    if (!$ok) {
+        auditLog('ai_key_save', $provider, '连通性测试未通过，未保存', 'failed');
+        sendJson(['success' => false, 'error' => $reason, 'test_failed' => true], 400);
+    }
+    $exist = db_one('SELECT 1 AS x FROM ai_keys WHERE user_id = ? AND provider = ?', [$actor['id'], $provider]);
+    if (!aiSaveKey($actor['id'], $provider, $model, $key, $isDefault)) {
+        auditLog('ai_key_save', $provider, '保存失败（加密不可用）', 'failed');
+        sendJson(['success' => false, 'error' => '保存失败'], 500);
+    }
+    auditLog('ai_key_' . ($exist ? 'update' : 'add'), $provider,
+        ($exist ? '更新' : '新增') . ' Key（模型=' . $model . '；测试通过；不留明文）');
+    sendJson(['success' => true, 'keys' => aiKeysForClient($actor['id']), 'default_provider' => aiDefaultProvider($actor['id'])]);
+}
+
+// POST ai_key_delete：删除该账号某服务商 Key
+if ($action === 'ai_key_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $actor = aiActionUser();
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    $body = aiJsonBody();
+    $provider = (string)($body['provider'] ?? '');
+    if (!isset(aiBuiltinProviders()[$provider])) sendJson(['success' => false, 'error' => '服务商不存在'], 400);
+    $n = aiDeleteKey($actor['id'], $provider);
+    auditLog('ai_key_delete', $provider, '删除 Key');
+    // 删除后若默认缺失，自动补一个默认
+    sendJson(['success' => true, 'deleted' => $n, 'keys' => aiKeysForClient($actor['id']), 'default_provider' => aiDefaultProvider($actor['id'])]);
+}
+
+// POST ai_run：AI 代理调用（流式 SSE 或普通 JSON）；Key/正文均不出后端记录
+if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $actor = aiActionUserAllowed();
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    $body = aiJsonBody();
+    $act = (string)($body['action'] ?? '');
+    if (!array_key_exists($act, aiActions())) sendJson(['success' => false, 'error' => '不支持的动作'], 400);
+    $text = trim((string)($body['text'] ?? ''));
+    if ($text === '') sendJson(['success' => false, 'error' => '请先选中要处理的文本'], 400);
+    if (mb_strlen($text) > AI_MAX_INPUT) sendJson(['success' => false, 'error' => '选中文本过长（上限 ' . AI_MAX_INPUT . ' 字）'], 400);
+    $style = in_array((string)($body['style'] ?? ''), aiStyleOptions(), true) ? (string)$body['style'] : '';
+    $lang = in_array((string)($body['lang'] ?? ''), aiLangOptions(), true) ? (string)$body['lang'] : '';
+    if ($act === 'style' && $style === '') sendJson(['success' => false, 'error' => '请选择目标风格'], 400);
+    if ($act === 'translate' && $lang === '') sendJson(['success' => false, 'error' => '请选择目标语言'], 400);
+    // 目标服务商：仅接受白名单内 id（不接受 base_url）；缺省用账号默认
+    $provider = (string)($body['provider'] ?? '');
+    if (aiProviderBaseUrl($provider) === '') $provider = aiDefaultProvider($actor['id']);
+    if ($provider === '' || aiProviderBaseUrl($provider) === '') {
+        sendJson(['success' => false, 'error' => '请先在后台配置 AI Key'], 400);
+    }
+    $row = db_one('SELECT * FROM ai_keys WHERE user_id = ? AND provider = ?', [$actor['id'], $provider]);
+    if (!$row) sendJson(['success' => false, 'error' => '该服务商尚未配置 Key'], 400);
+    $apiKey = aiDecryptKey($row['key_cipher']);
+    if ($apiKey === '') sendJson(['success' => false, 'error' => 'Key 不可用，请重新配置'], 400);
+    $model = trim((string)$row['model']);
+    if ($model === '') sendJson(['success' => false, 'error' => '未填写模型名'], 400);
+    // 出站限速（复用 ai_rates；防滥用放大外呼）
+    $ip = getClientIP();
+    $fp = $_SESSION['cmt_fp'] ?? '';
+    if (aiRateBlocked($ip, $fp)) sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
+    aiRateHit($ip, $fp);
+    $messages = aiBuildMessages($act, $text, $style, $lang);
+    $base = aiProviderBaseUrl($provider);
+    $url = rtrim($base, '/') . '/chat/completions';
+    $t0 = microtime(true);
+    $stream = !empty($body['stream']);
+    if (!$stream) {
+        $res = aiHttpJson($url, $apiKey, ['model' => $model, 'messages' => $messages, 'stream' => false], AI_TIMEOUT);
+        $ms = (int)((microtime(true) - $t0) * 1000);
+        if (!$res['ok']) {
+            $reason = aiReadableError($res['code'], $res['err'], $res['raw']);
+            auditLog('ai_call', $provider . '/' . $model, "动作={$act}; 耗时={$ms}ms; 失败", 'failed');
+            sendJson(['success' => false, 'error' => $reason !== '' ? $reason : '调用失败'], 400);
+        }
+        $out = (string)($res['data']['choices'][0]['message']['content'] ?? '');
+        auditLog('ai_call', $provider . '/' . $model, "动作={$act}; 耗时={$ms}ms; 成功");
+        sendJson(['success' => true, 'result' => $out]);
+    }
+    // ===== 流式（SSE）=====
+    header('Content-Type: text/event-stream; charset=utf-8');
+    header('Cache-Control: no-cache, no-transform');
+    header('X-Accel-Buffering: no');
+    while (ob_get_level() > 0) { @ob_end_flush(); }
+    if (!function_exists('curl_init')) {
+        aiSseEmit(['event' => 'error', 'message' => '服务器不支持流式传输']);
+        exit;
+    }
+    aiSseEmit(['event' => 'start', 'provider' => $provider, 'model' => $model]);
+    $buf = ''; $acc = ''; $rawHead = '';
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode(['model' => $model, 'messages' => $messages, 'stream' => true], JSON_UNESCAPED_UNICODE),
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $apiKey, 'Accept: text/event-stream'],
+        CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_TIMEOUT => AI_TIMEOUT_STREAM,
+        CURLOPT_RETURNTRANSFER => false,
+        CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$buf, &$acc, &$rawHead) {
+            if (strlen($rawHead) < 400) $rawHead .= $chunk;
+            $buf .= $chunk;
+            while (($nl = strpos($buf, "\n")) !== false) {
+                $line = rtrim(substr($buf, 0, $nl), "\r");
+                $buf = substr($buf, $nl + 1);
+                if ($line === '' || strpos($line, 'data:') !== 0) continue;
+                $jsonStr = trim(substr($line, 5));
+                if ($jsonStr === '[DONE]') continue;
+                $j = json_decode($jsonStr, true);
+                if (!is_array($j)) continue;
+                $delta = $j['choices'][0]['delta']['content'] ?? '';
+                if ($delta !== '' && $delta !== null) {
+                    $acc .= $delta;
+                    aiSseEmit(['event' => 'delta', 'text' => $delta]);
+                }
+            }
+            return strlen($chunk);
+        },
+    ]);
+    $ok = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $cerr = curl_error($ch);
+    curl_close($ch);
+    $ms = (int)((microtime(true) - $t0) * 1000);
+    if ($acc === '' && ($ok === false || $code >= 400)) {
+        $reason = aiReadableError($code, $cerr, $rawHead);
+        aiSseEmit(['event' => 'error', 'message' => $reason !== '' ? $reason : '调用失败']);
+        auditLog('ai_call', $provider . '/' . $model, "动作={$act}; 耗时={$ms}ms; 失败", 'failed');
+    } else {
+        aiSseEmit(['event' => 'done', 'chars' => mb_strlen($acc)]);
+        auditLog('ai_call', $provider . '/' . $model, "动作={$act}; 耗时={$ms}ms; 成功");
+    }
+    exit;
+}
+
 sendJson(['success' => false, 'error' => '未知操作'], 400);

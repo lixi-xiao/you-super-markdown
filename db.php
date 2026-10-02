@@ -207,6 +207,23 @@ function db_init_schema($pdo) {
         key TEXT PRIMARY KEY,
         locked_until INTEGER
     )');
+    // v5.4.0-beta：AI 写作——个人 Key 表。
+    //   绑定站内账号（user_id），一个账号可配多家服务商；key_cipher 为 AES-256-GCM 密文（绝不明文回显）。
+    //   无站点共享 Key；谁配置谁使用。provider 取自服务端白名单（base_url 固定，不接受前端传入）。
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ai_keys (
+        user_id TEXT,
+        provider TEXT,
+        key_cipher TEXT,
+        model TEXT,
+        is_default INTEGER DEFAULT 0,
+        created INTEGER,
+        updated INTEGER,
+        PRIMARY KEY (user_id, provider)
+    )');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_ai_keys_user ON ai_keys(user_id)');
+    // v5.4.0-beta：AI 出站调用限速表（与 music_rates 同构：ip + 指纹，防滥用放大外呼）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ai_rates (ip TEXT, fp TEXT, t INTEGER)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_ai_rates_ip_t ON ai_rates(ip, t)');
     // v2.5.4 性能优化：频率计数表索引
     // (ip, t) 复合索引加速 db_rate_count() 的按 IP 窗口计数；t 单列索引加速 30 天过期清理
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_login_fails_ip_t ON login_fails(ip, t)');

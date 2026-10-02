@@ -353,6 +353,13 @@ function loadSiteConfig() {
         // v4.8.1：威胁评分衰减——无新事件超过 N 天后评分自动减半，防止长期误封
         'threat_decay_days' => 3,           // 无新事件多少天后开始衰减
         'threat_decay_ratio' => 0.5,        // 每个衰减周期评分乘以此系数（如 0.5=每周期减半）
+        // v5.4.0-beta：AI 写作（超管只管"站"的层面）——
+        //   ai_enabled：AI 功能总开关；ai_role_station_admin / ai_role_author：可分别开关"站长/写作者可用"；
+        //   ai_providers：服务商预设白名单（启用的 provider id 列表；base_url 固定，使用者不可自定义）。
+        'ai_enabled' => false,
+        'ai_role_station_admin' => false,
+        'ai_role_author' => false,
+        'ai_providers' => ['deepseek', 'mimo-payg', 'mimo-plan', 'qwen'],
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;
@@ -949,6 +956,328 @@ function decryptSecret($stored) {
     $key = hash('sha256', getAppSecret(), true);
     $plain = openssl_decrypt($cipher, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
     return $plain === false ? '' : $plain;
+}
+
+// ============================================================
+// v5.4.0-beta AI 写作（服务端代理调用）
+//   - 使用者：站长 / 写作者（超管不参与创作）；超管只管"站"的层面（总开关/角色开关/白名单/清 Key）。
+//   - 个人 Key 绑定站内账号（user_id），密文入库，明文永不回传。
+//   - base_url 只取自服务端白名单（不接受任何用户传入 URL → 防 SSRF）。
+// ============================================================
+// AI Key 加密密钥文件：优先 /opt 下 secrets/（安装脚本生成），不可读时回退 webroot data/（0600）
+define('AI_ENC_KEY_FILE', '/opt/you-super-markdown/secrets/ai_enc_key');
+define('AI_ENC_KEY_FALLBACK', __DIR__ . '/data/.ai_enc_key');
+// 请求体/响应长度与超时上限（不做站内成本控制；额度由账号自担）
+define('AI_MAX_INPUT', 20000);        // 单次处理正文字符上限
+define('AI_TIMEOUT', 60);             // 非流式调用超时（秒）
+define('AI_TIMEOUT_STREAM', 120);     // 流式调用超时（秒，流式可更长）
+
+/** 固定 base_url 的服务商预设白名单（唯一真源；使用者只能选，不能改 base_url） */
+function aiBuiltinProviders() {
+    return [
+        'deepseek'  => ['id' => 'deepseek',  'label' => 'DeepSeek',              'base_url' => 'https://api.deepseek.com/v1'],
+        'mimo-payg' => ['id' => 'mimo-payg', 'label' => 'MiMo（按量付费）',       'base_url' => 'https://api.xiaomimimo.com/v1'],
+        'mimo-plan' => ['id' => 'mimo-plan', 'label' => 'MiMo（Token Plan 订阅）', 'base_url' => 'https://token-plan-cn.xiaomimimo.com/v1'],
+        'qwen'      => ['id' => 'qwen',      'label' => '千问（DashScope 兼容）',   'base_url' => 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
+    ];
+}
+/** 超管维护的启用白名单（config.ai_providers = 启用的 provider id 列表）；字段缺失视为全部启用 */
+function aiEnabledProviderIds() {
+    $c = loadSiteConfig();
+    $ids = $c['ai_providers'] ?? null;
+    $all = aiBuiltinProviders();
+    if (!is_array($ids)) return array_keys($all);
+    $out = [];
+    foreach ($all as $id => $p) { if (in_array($id, $ids, true)) $out[] = $id; }
+    return $out;
+}
+/** 面向使用者的服务商清单（仅 id + 展示名，不含 base_url） */
+function aiProvidersForClient() {
+    $all = aiBuiltinProviders();
+    $out = [];
+    foreach (aiEnabledProviderIds() as $id) $out[] = ['id' => $id, 'label' => $all[$id]['label']];
+    return $out;
+}
+/** 取服务商 base_url（仅白名单内且已启用；否则空——调用方据此拒绝） */
+function aiProviderBaseUrl($id) {
+    $all = aiBuiltinProviders();
+    if (!isset($all[$id]) || !in_array($id, aiEnabledProviderIds(), true)) return '';
+    return $all[$id]['base_url'];
+}
+/** 当前角色是否被允许使用 AI 写作（超管一律不参与） */
+function aiRoleAllowed($role) {
+    $c = loadSiteConfig();
+    if (empty($c['ai_enabled'])) return false;
+    if ($role === ROLE_STATION_ADMIN) return !empty($c['ai_role_station_admin']);
+    if ($role === ROLE_AUTHOR) return !empty($c['ai_role_author']);
+    return false;
+}
+
+/** 读取 AI Key 加密密钥（不存在则安全生成；均不可写时返回空 → 加密失败即拒绝保存） */
+function getAiEncKey() {
+    foreach ([AI_ENC_KEY_FILE, AI_ENC_KEY_FALLBACK] as $f) {
+        if (is_readable($f)) {
+            $v = trim((string)@file_get_contents($f));
+            if ($v !== '') return $v;
+        }
+        $dir = dirname($f);
+        if (is_dir($dir) && is_writable($dir)) {
+            $v = bin2hex(random_bytes(32));
+            if (@file_put_contents($f, $v, LOCK_EX) !== false) { @chmod($f, 0600); return $v; }
+        }
+    }
+    return '';
+}
+/** 加密 AI Key（AES-256-GCM；返回 'gcm:'+base64(iv|tag|cipher)） */
+function aiEncryptKey($plain) {
+    if ($plain === '') return '';
+    $secret = getAiEncKey();
+    if ($secret === '') return '';
+    $key = hash('sha256', 'ysm-ai:' . $secret, true);
+    $iv = random_bytes(12);
+    $tag = '';
+    $cipher = openssl_encrypt($plain, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    if ($cipher === false) return '';
+    return 'gcm:' . base64_encode($iv . $tag . $cipher);
+}
+/** 解密 AI Key */
+function aiDecryptKey($stored) {
+    if (!is_string($stored) || strpos($stored, 'gcm:') !== 0) return '';
+    $secret = getAiEncKey();
+    if ($secret === '') return '';
+    $raw = base64_decode(substr($stored, 4));
+    if ($raw === false || strlen($raw) < 28) return '';
+    $key = hash('sha256', 'ysm-ai:' . $secret, true);
+    $plain = openssl_decrypt(substr($raw, 28), 'aes-256-gcm', $key, OPENSSL_RAW_DATA, substr($raw, 0, 12), substr($raw, 12, 16));
+    return $plain === false ? '' : $plain;
+}
+/** 明文 Key 掩码（仅保留末四位；绝不明文回显的展示口径） */
+function aiMaskKey($plain) {
+    $plain = (string)$plain;
+    if ($plain === '') return '';
+    if (strlen($plain) <= 4) return '****';
+    return '****' . substr($plain, -4);
+}
+
+/** 该账号已配置的 Key 行 */
+function aiLoadKeys($uid) {
+    if ($uid === '') return [];
+    return db_all('SELECT user_id, provider, key_cipher, model, is_default, created, updated FROM ai_keys WHERE user_id = ? ORDER BY provider', [$uid]);
+}
+/** 面向使用者的 Key 列表：仅返回 状态 + 末四位 + 模型 + 是否默认（绝不含明文/密文） */
+function aiKeysForClient($uid) {
+    $all = aiBuiltinProviders();
+    $rows = [];
+    foreach (aiLoadKeys($uid) as $r) $rows[$r['provider']] = $r;
+    $out = [];
+    foreach (aiEnabledProviderIds() as $id) {
+        $r = $rows[$id] ?? null;
+        if ($r) {
+            $plain = aiDecryptKey($r['key_cipher']);
+            $hint = $plain !== '' ? '已配置(' . aiMaskKey($plain) . ')' : '已配置';
+        } else {
+            $hint = '未配置';
+        }
+        $out[] = [
+            'provider' => $id,
+            'label' => $all[$id]['label'],
+            'configured' => $r ? true : false,
+            'hint' => $hint,
+            'model' => $r['model'] ?? '',
+            'is_default' => $r ? !empty($r['is_default']) : false,
+        ];
+    }
+    return $out;
+}
+/** 该账号默认服务商（无默认则取首个已配置且启用者） */
+function aiDefaultProvider($uid) {
+    $enabled = aiEnabledProviderIds();
+    $rows = aiLoadKeys($uid);
+    foreach ($rows as $r) { if (!empty($r['is_default']) && in_array($r['provider'], $enabled, true)) return $r['provider']; }
+    foreach ($rows as $r) { if (in_array($r['provider'], $enabled, true)) return $r['provider']; }
+    return '';
+}
+/** 保存（新增/更新）Key：加密后入库；可设默认（设默认时清除同账号其它默认） */
+function aiSaveKey($uid, $provider, $model, $plain, $isDefault) {
+    $cipher = aiEncryptKey($plain);
+    if ($cipher === '') return false;
+    $now = time();
+    $exist = db_one('SELECT user_id FROM ai_keys WHERE user_id = ? AND provider = ?', [$uid, $provider]);
+    if ($isDefault) db_exec('UPDATE ai_keys SET is_default = 0 WHERE user_id = ?', [$uid]);
+    if ($exist) {
+        db_exec('UPDATE ai_keys SET key_cipher = ?, model = ?, is_default = ?, updated = ? WHERE user_id = ? AND provider = ?',
+            [$cipher, $model, $isDefault ? 1 : 0, $now, $uid, $provider]);
+    } else {
+        db_exec('INSERT INTO ai_keys (user_id, provider, key_cipher, model, is_default, created, updated) VALUES (?,?,?,?,?,?,?)',
+            [$uid, $provider, $cipher, $model, $isDefault ? 1 : 0, $now, $now]);
+    }
+    // 保底：账号下若尚无默认，自动把当前这条设为默认
+    if (!$isDefault) {
+        $hasDefault = db_one('SELECT 1 AS x FROM ai_keys WHERE user_id = ? AND is_default = 1 LIMIT 1', [$uid]);
+        if (!$hasDefault) db_exec('UPDATE ai_keys SET is_default = 1 WHERE user_id = ? AND provider = ?', [$uid, $provider]);
+    }
+    return true;
+}
+/** 删除某账号某服务商 Key */
+function aiDeleteKey($uid, $provider) {
+    return db_exec('DELETE FROM ai_keys WHERE user_id = ? AND provider = ?', [$uid, $provider]);
+}
+/** 清除某账号全部 AI Key（超管"只能清、不能看"；删除/吊销账号时一并清理），返回清除条数 */
+function aiClearUserKeys($uid) {
+    if ($uid === '') return 0;
+    $n = (int)(db_one('SELECT COUNT(*) AS c FROM ai_keys WHERE user_id = ?', [$uid])['c'] ?? 0);
+    db_exec('DELETE FROM ai_keys WHERE user_id = ?', [$uid]);
+    return $n;
+}
+
+/** 隐私提示：每角色（账号）首次使用确认一次 */
+function aiPrivacyAcked($uid) {
+    if ($uid === '') return false;
+    $r = db_one('SELECT value FROM meta WHERE key = ?', ['ai_privacy_ack:' . $uid]);
+    return !empty($r);
+}
+function aiSetPrivacyAck($uid) {
+    if ($uid === '') return;
+    db_exec('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', ['ai_privacy_ack:' . $uid, date('c')]);
+}
+
+/** 动作枚举（首发仅两类能力：润色/纠错 · 风格转换/翻译） */
+function aiActions() {
+    return [
+        'polish'    => '润色',
+        'proofread' => '纠错',
+        'style'     => '风格转换',
+        'translate' => '翻译',
+    ];
+}
+function aiStyleOptions() {
+    return ['正式公文', '口语科普', '简明要点', '文艺抒情', '商务邮件'];
+}
+function aiLangOptions() {
+    return ['英文', '简体中文', '繁体中文', '日文', '韩文'];
+}
+/** 按动作构造服务端固定提示词（不接受任意自定义 prompt，避免被滥用） */
+function aiBuildMessages($action, $text, $style = '', $lang = '') {
+    $base = '你是一名专业的中文写作助手。只输出处理后的正文，不要任何解释、客套、前后缀、引号或标题。';
+    switch ($action) {
+        case 'polish':
+            $sys = $base . ' 任务：在保持原意、事实与信息量完全不变的前提下润色文字，使表达更通顺、准确、优雅。';
+            break;
+        case 'proofread':
+            $sys = $base . ' 任务：纠正错别字、标点、语法与用词错误，保持原意与结构不变。';
+            break;
+        case 'style':
+            $sys = $base . ' 任务：在不改变原意的前提下，将下列文字改写成「' . $style . '」的风格。';
+            break;
+        case 'translate':
+            $sys = $base . ' 任务：将下列文字翻译成「' . $lang . '」，只输出译文。';
+            break;
+        default:
+            return null;
+    }
+    return [
+        ['role' => 'system', 'content' => $sys],
+        ['role' => 'user', 'content' => (string)$text],
+    ];
+}
+
+/** AI 出站调用限速（复用 ai_rates 表） */
+function aiRateBlocked($ip, $fp, $max = 20, $window = 60) {
+    return db_rate_count('ai_rates', $ip, $window, $fp) >= $max;
+}
+function aiRateHit($ip, $fp) {
+    db_rate_add('ai_rates', $ip, $fp);
+}
+
+/** 将服务商响应/错误映射为可读原因（脱敏，不含 Key 与正文） */
+function aiReadableError($httpCode, $curlErr = '', $raw = '') {
+    $msg = '';
+    if (is_string($raw) && $raw !== '') {
+        $j = json_decode($raw, true);
+        if (is_array($j)) {
+            $msg = (string)($j['error']['message'] ?? $j['message'] ?? $j['error'] ?? '');
+        }
+        if ($msg === '') $msg = mb_substr(trim(strip_tags($raw)), 0, 200);
+    }
+    if ($curlErr !== '') {
+        if (stripos($curlErr, 'timed out') !== false || stripos($curlErr, 'timeout') !== false) return '连接超时（网络不可达或服务商无响应）';
+        if (stripos($curlErr, 'resolve') !== false || stripos($curlErr, 'Could not resolve') !== false) return '网络不可达（域名解析失败）';
+        return '网络不可达（' . mb_substr($curlErr, 0, 120) . '）';
+    }
+    switch ((int)$httpCode) {
+        case 401: return '鉴权失败（Key 无效或无权限）';
+        case 403: return '鉴权失败（Key 被拒绝访问该模型/服务）';
+        case 404: return '接口或模型不存在（404）' . ($msg !== '' ? '：' . $msg : '');
+        case 400: return '请求被拒绝（多为模型名不存在）' . ($msg !== '' ? '：' . $msg : '');
+        case 429: return '请求过于频繁或额度不足（429）';
+        case 500: case 502: case 503: case 504: return '服务商暂时不可用（' . (int)$httpCode . '）';
+    }
+    if ($httpCode >= 200 && $httpCode < 300) return '';
+    return '调用失败（HTTP ' . (int)$httpCode . '）' . ($msg !== '' ? '：' . $msg : '');
+}
+
+/** 统一 JSON POST（Authorization: Bearer）；返回 ['ok','code','data','raw','err']。
+ *  仅允许调用白名单 base_url 拼出的地址（SSRF 防护：调用方已保证 base 来自白名单）。 */
+function aiHttpJson($url, $apiKey, $payload, $timeout = 60) {
+    $parts = parse_url($url);
+    $host = strtolower($parts['host'] ?? '');
+    if ($host === '' || isPrivateHost($host)) {
+        return ['ok' => false, 'code' => 0, 'data' => null, 'raw' => '', 'err' => '目标地址不可用', 'blocked' => true];
+    }
+    $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
+    $headers = ['Content-Type: application/json', 'Authorization: Bearer ' . $apiKey];
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 15,
+            CURLOPT_TIMEOUT => max(5, (int)$timeout),
+        ]);
+        $raw = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+        if ($raw === false) return ['ok' => false, 'code' => $code, 'data' => null, 'raw' => '', 'err' => $err ?: '请求失败'];
+        $data = json_decode($raw, true);
+        return ['ok' => $code >= 200 && $code < 300, 'code' => $code, 'data' => is_array($data) ? $data : null, 'raw' => (string)$raw, 'err' => ''];
+    }
+    $ctx = stream_context_create(['http' => [
+        'method' => 'POST',
+        'header' => implode("\r\n", $headers),
+        'content' => $body,
+        'timeout' => max(5, (int)$timeout),
+        'ignore_errors' => true,
+    ]]);
+    $raw = @file_get_contents($url, false, $ctx);
+    if ($raw === false) return ['ok' => false, 'code' => 0, 'data' => null, 'raw' => '', 'err' => '请求失败'];
+    $code = 0;
+    foreach ($http_response_header ?? [] as $h) { if (preg_match('#^HTTP/\S+\s+(\d{3})#', $h, $m)) $code = (int)$m[1]; }
+    $data = json_decode($raw, true);
+    return ['ok' => $code >= 200 && $code < 300, 'code' => $code, 'data' => is_array($data) ? $data : null, 'raw' => (string)$raw, 'err' => ''];
+}
+
+/** 连通性测试：用所选白名单 base_url + 该账号 Key + 其填写的模型名发一次最小请求。
+ *  成功返回 [true,'ok']，失败返回 [false, 可读原因]。绝不落库。 */
+function aiConnectivityTest($providerId, $apiKey, $model) {
+    $base = aiProviderBaseUrl($providerId);
+    if ($base === '') return [false, '该服务商未启用或不存在'];
+    if (trim((string)$apiKey) === '') return [false, '请填写 Key'];
+    if (trim((string)$model) === '') return [false, '请填写模型名'];
+    $url = rtrim($base, '/') . '/chat/completions';
+    $payload = [
+        'model' => trim($model),
+        'messages' => [['role' => 'user', 'content' => 'ping']],
+        'max_tokens' => 1,
+        'stream' => false,
+    ];
+    $res = aiHttpJson($url, trim($apiKey), $payload, 30);
+    if (!empty($res['blocked'])) return [false, '目标地址不可用（已被安全策略拦截）'];
+    if ($res['ok']) return [true, 'ok'];
+    $reason = aiReadableError($res['code'], $res['err'], $res['raw']);
+    return [false, $reason !== '' ? $reason : '调用失败'];
 }
 // v3.3.0：视频文件合法性强制校验（防伪装文件/损坏文件）
 // 三重校验：扩展名（调用方已校验）→ finfo MIME → 容器魔数/Box 结构

@@ -63,9 +63,9 @@ $siteTitle = $config['site_title'] ?? 'You Super Markdown';
 $currentUser = $_SESSION['cmt_user'] ?? [];
 $myId = $currentUser['id'] ?? '';
 
-// v2.6.3：写作者后台 tab 结构（articles 我的文章 / profile 个人信息）
+// v2.6.3：写作者后台 tab 结构（articles 我的文章 / profile 个人信息 / ai AI 写作 Key）
 $tab = $_GET['tab'] ?? 'articles';
-if (!in_array($tab, ['articles', 'profile'], true)) $tab = 'articles';
+if (!in_array($tab, ['articles', 'profile', 'ai'], true)) $tab = 'articles';
 $msg = $_GET['msg'] ?? '';
 
 // v2.6.3：写作者修改个人信息（昵称/签名/新密码）；v2.10.0：扩展头像上传 + 邮箱更换
@@ -219,6 +219,12 @@ if (is_dir($articlesDir)) {
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             个人信息
         </a>
+        <?php if (aiRoleAllowed(ROLE_AUTHOR)): ?>
+        <a href="dashboard.php?tab=ai" class="sidebar-link <?= $tab==='ai'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
+            AI 写作
+        </a>
+        <?php endif; ?>
         <!-- v2.6.5：与站长后台一致的「发表文章」入口 -->
         <a href="/sc.php" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -391,6 +397,24 @@ if (is_dir($articlesDir)) {
             </div>
         </form>
     </div>
+    <?php elseif ($tab === 'ai'): ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
+            AI 写作
+        </div>
+        <div class="page-subtitle">配置你个人的 AI 服务商 Key（绑定你的站内账号；密文存储，明文永不回显）</div>
+    </div>
+    <div id="aiKeyNotice" class="msg" style="display:none"></div>
+    <div class="card">
+        <div class="card-title">说明</div>
+        <div class="form-hint">
+            你选择的文章内容将发送至所选第三方服务商进行处理；额度由你的账号自担。<br>
+            服务商由超管维护（base_url 固定，不可自定义）；<b>模型名由你自己填写</b>；Key 必须通过"测试连接"才会保存。
+        </div>
+    </div>
+    <div id="aiKeyManager" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>"></div>
+    <script src="../js/ai-admin.js?v=<?= @filemtime(__DIR__ . '/../js/ai-admin.js') ?>"></script>
     <?php endif; ?>
 </div>
 

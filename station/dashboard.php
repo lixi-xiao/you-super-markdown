@@ -68,7 +68,7 @@ $myId = $currentUser['id'] ?? '';
 $msg = $_GET['msg'] ?? '';
 // v2.6.0 起 tab 结构（authors 写作者管理 / background 网站背景 / music 音乐设置 / banlog 封禁日志只读）；v2.6.3 新增 profile 个人信息；v3.1.6 新增 announce 公告管理；v4.0.0 新增 images 图片管理；v4.1.18 背景+音乐合并为 ui 主界面及功能设置
 $tab = $_GET['tab'] ?? 'authors';
-if (!in_array($tab, ['authors', 'ui', 'banlog', 'profile', 'announce', 'images', 'threat'], true)) $tab = 'authors';
+if (!in_array($tab, ['authors', 'ui', 'banlog', 'profile', 'announce', 'images', 'threat', 'ai'], true)) $tab = 'authors';
 
 // v3.1.6：文章列表（公告选择关联文章用：读 META title / 一级标题 / 文件名）
 function stArticleOptions() {
@@ -508,6 +508,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             个人信息
         </a>
+        <?php if (aiRoleAllowed(ROLE_STATION_ADMIN)): ?>
+        <a href="dashboard.php?tab=ai" class="sidebar-link <?= $tab==='ai'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
+            AI 写作
+        </a>
+        <?php endif; ?>
         <a href="/sc.php" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
             发表文章
@@ -1261,6 +1267,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             </div>
         </form>
     </div>
+    <?php elseif ($tab === 'ai'): ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
+            AI 写作
+        </div>
+        <div class="page-subtitle">配置你个人的 AI 服务商 Key（绑定你的站内账号；密文存储，明文永不回显）</div>
+    </div>
+    <div id="aiKeyNotice" class="msg" style="display:none"></div>
+    <div class="card">
+        <div class="card-title">说明</div>
+        <div class="form-hint">
+            你选择的文章内容将发送至所选第三方服务商进行处理；额度由你的账号自担。<br>
+            服务商由超管维护（base_url 固定，不可自定义）；<b>模型名由你自己填写</b>；Key 必须通过"测试连接"才会保存。
+        </div>
+    </div>
+    <div id="aiKeyManager" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>"></div>
+    <script src="../js/ai-admin.js?v=<?= @filemtime(__DIR__ . '/../js/ai-admin.js') ?>"></script>
     <?php endif; ?>
 
     <?php if ($tab === 'images'): ?>

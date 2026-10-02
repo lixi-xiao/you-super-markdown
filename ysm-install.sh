@@ -769,6 +769,21 @@ AUDIT_EPOCH_FILE="$AUDIT_SECRETS_DIR/audit_epoch"
 printf '2\n' > "$AUDIT_EPOCH_FILE"
 chown root:root "$AUDIT_EPOCH_FILE"
 chmod 600 "$AUDIT_EPOCH_FILE"
+# v5.4.0-beta：AI 写作个人 Key 的加密密钥（AES-256-GCM）。
+#   与审计母密钥同放 webroot 外 secrets/；但个人 Key 需在"后端代理调用时"解密，
+#   故该文件对 www-data 组可读（root:www-data 0640），并放开 secrets 目录的"组遍历"（0750）。
+#   审计/SMTP 等密钥仍为 0600 root（www-data 依旧读不到），安全面不受削弱。
+AI_ENC_KEY_FILE="$AUDIT_SECRETS_DIR/ai_enc_key"
+if [ ! -s "$AI_ENC_KEY_FILE" ]; then
+    openssl rand -hex 32 > "$AI_ENC_KEY_FILE"
+    log "AI Key 加密密钥已生成: $AI_ENC_KEY_FILE (root:www-data, 0640)"
+else
+    log "AI Key 加密密钥已存在，保留原密钥（不覆盖）"
+fi
+chown root:www-data "$AI_ENC_KEY_FILE" 2>/dev/null || chown root:root "$AI_ENC_KEY_FILE"
+chmod 640 "$AI_ENC_KEY_FILE"
+chown root:www-data "$AUDIT_SECRETS_DIR" 2>/dev/null || true
+chmod 750 "$AUDIT_SECRETS_DIR"
 # 记录密钥 SHA256 指纹进安装审计（与 trust_root_replaced 同级；绝不记录密钥本体）
 AUDIT_KEY_FPR=$(sha256sum "$AUDIT_KEY_FILE" | awk '{print $1}')
 php -r "require_once '$WEB_ROOT/utils.php'; auditLog('audit_key_created', 'audit', 'v5.0.0 安装时生成审计链母密钥（HMAC-SHA256，root 0600，webroot 外 secrets/audit_key；SHA256 指纹: $AUDIT_KEY_FPR）');" 2>/dev/null || true

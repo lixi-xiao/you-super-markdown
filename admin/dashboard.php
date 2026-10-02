@@ -636,14 +636,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clear_audit'])) {
     exit;
 }
 
-// 从镜像恢复操作日志
+// v5.4.8：从镜像恢复操作日志——Web 仅"发起请求"（CSRF + 挑战码 + 超管会话），
+//   实际恢复由根守护进程执行（镜像目录已收紧为 root:www-data 750 + immutable，www-data 无写权限）。
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['recover_audit'])) {
     if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
         header('Location: dashboard.php?tab=security&bmsg=csrf_error');
         exit;
     }
-    recoverAuditFromMirror();
-    header('Location: dashboard.php?tab=security&bmsg=recovered');
+    if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
+        header('Location: dashboard.php?tab=security&bmsg=challenge_error');
+        exit;
+    }
+    $nonce = writeAuditRecoverRequest();
+    auditLog('audit_recover_requested', '', '提交「从镜像恢复操作日志」请求（nonce ' . substr((string)$nonce, 0, 8) . '）', $nonce !== '' ? 'ok' : 'failed');
+    header('Location: dashboard.php?tab=security&bmsg=recover_submitted');
     exit;
 }
 
@@ -1727,12 +1733,22 @@ $banMsg = $_GET['bmsg'] ?? '';
                 ✗ 断裂（第 <?= ($chainResult['broken_at'] ?? 0) + 1 ?> 条异常）
                 <?php endif; ?>
             </span>
-            <?php if (!$chainResult['valid'] && is_dir(AUDIT_MIRROR_DIR)): ?>
-            <form method="post" style="display:inline" onsubmit="return confirm('确定从镜像恢复操作日志？')">
+            <?php $__mir = auditMirrorStatus(); $__rr = readAuditRecoverResult(); ?>
+            <?php if (($_GET['bmsg'] ?? '') === 'recover_submitted'): ?>
+            <div class="msg msg-success" style="margin:8px 0 0">已提交恢复请求：守护进程将在数秒内执行；稍后刷新本页可查看「最近一次恢复」结果。</div>
+            <?php endif; ?>
+            <?php if (!$chainResult['valid'] && $__mir['present']): ?>
+            <form method="post" style="display:inline" class="need-challenge" data-confirm="确定从镜像恢复操作日志？该操作会用镜像内容整体替换当前操作日志（镜像之后新增的记录将被丢弃）。">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <input type="hidden" name="recover_audit" value="1">
+                <input type="hidden" name="challenge_code">
                 <button type="submit" class="btn btn-sm btn-outline" style="color:#f59e0b;border-color:#fcd34d">从镜像恢复</button>
             </form>
+            <?php elseif (!$chainResult['valid']): ?>
+            <span style="color:var(--text-muted);font-size:12px">镜像不可用或守护进程未运行，请在服务器执行：<code>sudo ysm-admin audit-recover</code></span>
+            <?php endif; ?>
+            <?php if (!empty($__rr['status'])): ?>
+            <div style="color:var(--text-muted);font-size:12px;margin-top:4px">最近一次恢复：<?= htmlspecialchars(($__rr['status'] ?? '') . ' · ' . ($__rr['message'] ?? '') . ' · ' . ($__rr['time'] ?? '')) ?></div>
             <?php endif; ?>
             <form method="post" style="display:inline;margin-left:auto" class="need-challenge" data-confirm="确定清空所有操作日志？">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">

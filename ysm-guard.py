@@ -22,6 +22,8 @@ import sqlite3
 import time
 import signal
 import subprocess
+import pwd
+import grp
 import threading
 from pathlib import Path
 
@@ -744,6 +746,12 @@ def mirror_db():
         os.makedirs(os.path.dirname(AUDIT_MIRROR_DB), exist_ok=True)
         _chattr(os.path.dirname(AUDIT_MIRROR_DB), '-i')
         try:
+            # v5.4.8：先保留上一份镜像（防"当前镜像与主库被同一次事件同时污染"时无回退空间）
+            if os.path.exists(AUDIT_MIRROR_DB):
+                try:
+                    shutil.copy2(AUDIT_MIRROR_DB, AUDIT_MIRROR_DB + '.prev')
+                except Exception as _e:
+                    log(f"保留上一份镜像失败: {_e}")
             shutil.copy2(DB_FILE, AUDIT_MIRROR_DB)
             if os.path.exists(AUDIT_CHAIN):
                 shutil.copy2(AUDIT_CHAIN, AUDIT_MIRROR_CHAIN)
@@ -1241,6 +1249,9 @@ def save_guard_state():
         state['last_articles_backup'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(st.st_mtime))
     # 镜像目录锁定状态（chattr +i 是否生效）
     state['mirror_locked'] = os.path.isdir(os.path.dirname(AUDIT_MIRROR_DB))
+    # v5.4.8：镜像是否存在的可信信号——Web 无法 stat 已收紧的镜像目录（root:www-data 750），
+    #   故由守护进程把该状态写进 guard-state.json（644，Web 可读）供后台判断按钮可用性。
+    state['mirror_present'] = os.path.exists(AUDIT_MIRROR_DB)
     # v5.0.0 P7：截断/回滚锚点——(条数, 链头(最新) hash, 更新时间)
     # 供每日审计报告邮件携带（邮件发出即在服务器之外，事后难以追溯抹除）
     a_count, a_head = audit_anchor()
@@ -1427,6 +1438,34 @@ def run_polling_mode():
             save_guard_state()
 
 
+def ensure_mirror_dir():
+    """v5.4.8：镜像目录自检与修正——必须 root:www-data 750 且 immutable。
+    目的：镜像目录 owner 必须是 root（www-data 仅可读、不可写），否则 www-data 可在背书解锁的
+    时间窗口内「竞争替换镜像文件」，把伪造镜像变成"可信镜像"。此处幂等修正，防将来被人手改权限。"""
+    d = os.path.dirname(AUDIT_MIRROR_DB)
+    try:
+        if not os.path.isdir(d):
+            os.makedirs(d, exist_ok=True)
+        st = os.stat(d)
+        try:
+            want_uid = pwd.getpwnam('root').pw_uid
+            want_gid = grp.getgrnam('www-data').gr_gid
+        except Exception:
+            return
+        need = (st.st_uid != want_uid) or (st.st_gid != want_gid) or ((st.st_mode & 0o777) != 0o750)
+        _chattr(d, '-i')
+        if st.st_uid != want_uid or st.st_gid != want_gid:
+            os.chown(d, want_uid, want_gid)
+        if (st.st_mode & 0o777) != 0o750:
+            os.chmod(d, 0o750)
+        _chattr(d, '+i')
+        if need:
+            log(f"镜像目录权限已自动修正：{d} → root:www-data 750 + immutable")
+            send_alert("镜像目录权限被修改", f"检测到 {d} 的属主/权限不符合要求（必须 root:www-data 750 + immutable），已自动修正。请核查是谁改动的。")
+    except Exception as e:
+        log(f"镜像目录自检失败: {e}")
+
+
 def main():
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
@@ -1439,6 +1478,9 @@ def main():
     if not os.path.isdir(INSTALL_BASE):
         log(f"错误: 母本目录不存在 {INSTALL_BASE}")
         sys.exit(1)
+
+    # v5.4.8：镜像目录自检——必须是 root:www-data 750 + immutable（www-data 不可写）
+    ensure_mirror_dir()
 
     # 自诊断（v5.0.0-fix）：启动即校验告警通道可用性，不可用则明确落盘 alert.log（不静默）
     _smtp = load_smtp_config()

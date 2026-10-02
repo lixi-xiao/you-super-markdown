@@ -3210,7 +3210,7 @@ function buildUpdateResult($release, $channel) {
     //   否则站在同号正式版上切到 beta 通道后，「检查更新」会显示"已是最新"而拿不到同号 beta（必须全量包，判定交给 ysmCanUpdate）。
     $updateDecision = ysmCanUpdate(APP_VERSION, $latest, 'full', $channel);
     $verCmp = ysmCompareVersion($latest, APP_VERSION);
-    $sameCross = ($latest !== APP_VERSION && $verCmp === 0);
+    $sameCross = ($latest !== APP_VERSION && ysmCompareCore($latest, APP_VERSION) === 0);
     $available = ($verCmp > 0) || ($sameCross && !empty($updateDecision['allowed']));
     return [
         'available' => $available,

@@ -284,6 +284,14 @@ ysm-admin show-paths
 - 超管只能在站级层面配置：**总开关**、**按角色开关**（站长 / 写作者）、**服务商白名单**（内置服务商中启用哪些）。
 - 超管**不接触任何人的 Key**：**不可查看、不可导出**，仅在必要时可对某用户执行「**清除**」（清除后该用户需重新配置）；配置变更与清除均记入审计。
 
+### 6.8 分支 / 通道与版本号（beta 版说明）
+
+- **`-beta` 后缀的含义**：`-beta` 表示**测试版 / 预发布**（如 `5.4.0-beta`）。语义化比较里 **预发布低于同号正式版**（`5.4.0-beta < 5.4.0`）；迭代后缀 `-beta.2`、`-beta.3`… **数值递增**（`-beta.2 < -beta.10`）。
+- **分支 ↔ 通道**：`master` 分支对应 **stable 稳定通道**（版本号 `vX.Y.Z`）；`beta` 分支对应 **beta 测试通道**（版本号 `vX.Y.Z-beta`）。站点切换：`sudo ysm-admin set-channel beta` / `sudo ysm-admin set-channel stable`（或后台「在线更新」页签）。
+- **prerelease（预发布）**：beta 版在 GitHub 上以 **prerelease** 发布，因此 **stable 通道看不到**，只有切到 beta 通道才能发现——这是通道隔离的预期行为。
+- **切通道升级 × 全量包**：stable ↔ beta、以及**同号跨通道互转**（如 `5.4.0-beta ↔ 5.4.0`）**必须使用全量包**，增量包会被更新器拒绝（`need_full`）；并且**一律禁止降级**（目标核心版本低于当前即拒绝）。
+- **继承与毕业**：`beta = master + 测试功能`（继承只做 `git merge master`）；测试功能定稿后通过 **cherry-pick 毕业**进 `master`。详见本分支 `README.md`「本分支如何工作」与《开发文档/DEVELOPMENT_GUIDELINES.md》第二十节。
+
 ---
 
 ## 7. 分享卡片（OG）

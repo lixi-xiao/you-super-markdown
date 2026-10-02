@@ -10,6 +10,14 @@
 
 一个轻量级的 Markdown 在线阅读、写作与评论平台，当前版本 v5.4.0（stable 通道已上线）；预发布 v5.4.0-beta（**测试版，仅 beta 通道可见**，含「AI 写作」）已同步发布。
 
+## 本分支如何工作
+
+- **beta 继承 master（只做 `git merge master`）**：正式版在 `master` 发布后，在 beta 侧执行 `git checkout beta && git merge master` 把正式版更新**合并**进 beta（可脚本化：`常用脚本\inherit-to-beta.ps1`）。因为只合并、**不改写历史**，所以 `beta = master + 测试功能`，beta 天然包含全部正式版提交。
+- **beta 独有内容**：正式版没有的测试功能（当前为「AI 写作」，如 `js/ai-admin.js`）只提交在 `beta` 分支；`master` **不得**包含这些代码。
+- **转正（毕业）方式**：beta 上**定稿**的功能用 **`git cherry-pick`** 挑拣到 `master`（脚本：`promote-beta.ps1 -Commits "hash1,hash2"`），而**不是**把整个 beta 分支合并回 master——这样主线只吸收已定稿的部分，不会被未定稿的实验代码污染。
+- **beta 不会被 master 无脑覆盖**：正式版更新只做 `merge`（保留 beta 侧的测试功能与 `-beta` 版本号），**禁止**用 master 的文件整体镜像/覆盖 beta 工作树（**禁止 `/MIR`**，**禁止 `git reset --hard` / `git checkout master -- .`**）。合并冲突的固定约定：`app-config.json` 版本号取 beta 侧（带 `-beta`）、`css/tw.min.css` 合并后**必须重建**、README/HELP 保留 beta 侧。
+- **权威说明**：完整的分支与库工作流（四套库职责 / 四种同步形态 / 守卫红线）见《开发文档/DEVELOPMENT_GUIDELINES.md》第二十节。
+
 ## 本分支（beta）与主线的差异
 
 - **`master`**：主线 / 稳定版，正式 Release 由此发布，功能稳定、承诺可用。

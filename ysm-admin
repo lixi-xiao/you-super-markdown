@@ -1365,6 +1365,84 @@ case "${1:-}" in
         fi
         ;;
 
+    audit-recover)
+        # v5.4.8：从镜像恢复审计表（root 执行）。两条通道：
+        #   ① 运维直连：sudo ysm-admin audit-recover [--check]
+        #   ② 消费 Web 请求：sudo ysm-admin audit-recover --from-request
+        #      （由 systemd path unit 监听 run/audit-recover-request.json 触发；Web 只"发起"不执行）
+        # 前提：镜像目录为 root:www-data 750 + immutable（www-data 只读、不可写）。
+        MIRROR_DIR="/opt/you-super-markdown/logs"
+        MIRROR_DB="$MIRROR_DIR/ysm.db"
+        REQ_FILE="/opt/you-super-markdown/run/audit-recover-request.json"
+        RES_FILE="/opt/you-super-markdown/run/audit-recover-result.json"
+        RECOVER_CHECK=0
+        FROM_REQUEST=0
+        BK=""
+        for _a in "$@"; do
+            [ "$_a" = "--check" ] && RECOVER_CHECK=1
+            [ "$_a" = "--from-request" ] && FROM_REQUEST=1
+        done
+        _write_result() {
+            printf '{"status":"%s","message":"%s","time":"%s"}' "$1" "$2" "$(date '+%Y-%m-%d %H:%M:%S')" > "$RES_FILE" 2>/dev/null || true
+            chown root:www-data "$RES_FILE" 2>/dev/null || true
+            chmod 640 "$RES_FILE" 2>/dev/null || true
+        }
+        if [ "$FROM_REQUEST" = "1" ]; then
+            if [ ! -f "$REQ_FILE" ]; then echo "无恢复请求文件，忽略"; exit 0; fi
+            _ok=$(REQ_FILE="$REQ_FILE" php -r '$j=json_decode(@file_get_contents(getenv("REQ_FILE")),true); echo (!empty($j["challenge_verified"]) && !empty($j["nonce"])) ? "1":"0";' 2>/dev/null)
+            _exp=$(REQ_FILE="$REQ_FILE" php -r '$j=json_decode(@file_get_contents(getenv("REQ_FILE")),true); echo (int)($j["expires"] ?? 0);' 2>/dev/null)
+            if [ "$_ok" != "1" ] || [ "${_exp:-0}" -lt "$(date +%s)" ]; then
+                rm -f "$REQ_FILE"
+                _write_result "failed" "恢复请求无效或已过期"
+                echo "错误：恢复请求无效或已过期，已丢弃" >&2
+                exit 1
+            fi
+        fi
+        if [ ! -f "$MIRROR_DB" ]; then
+            _write_result "failed" "未找到审计镜像"
+            [ "$FROM_REQUEST" = "1" ] && rm -f "$REQ_FILE"
+            echo "错误：未找到审计镜像（$MIRROR_DB）" >&2
+            exit 1
+        fi
+        chattr -i "$MIRROR_DIR" 2>/dev/null || true
+        if [ "$RECOVER_CHECK" = "1" ]; then
+            MIRROR_DB="$MIRROR_DB" php -r '
+                $db = getenv("MIRROR_DB");
+                $ok = is_readable($db); $n = 0;
+                if ($ok) { try { $p = new PDO("sqlite:" . $db); $n = (int)$p->query("SELECT COUNT(*) FROM audit")->fetchColumn(); } catch (Exception $e) { $ok = false; } }
+                echo "  镜像可读：" . ($ok ? "是" : "否") . "，镜像内审计条数：" . $n . PHP_EOL;
+                exit($ok ? 0 : 1);
+            '
+            RC=$?
+        else
+            BK_DIR="/opt/you-super-markdown/backups/db"
+            mkdir -p "$BK_DIR"
+            BK="$BK_DIR/audit-pre-recover-$(date +%Y%m%d-%H%M%S).json"
+            YSM_UTILS="$WEB_ROOT" YSM_BK="$BK" php -r '
+                require_once getenv("YSM_UTILS") . "/utils.php";
+                @file_put_contents(getenv("YSM_BK"), json_encode(db_all("SELECT * FROM audit"), JSON_UNESCAPED_UNICODE));
+            ' 2>/dev/null || true
+            YSM_UTILS="$WEB_ROOT" php -r 'require_once getenv("YSM_UTILS") . "/utils.php"; exit(recoverAuditFromMirror() ? 0 : 1);'
+            RC=$?
+        fi
+        chattr +i "$MIRROR_DIR" 2>/dev/null || echo "         [警告] 镜像目录未重新加锁，请检查" >&2
+        if [ "$RECOVER_CHECK" = "1" ]; then
+            [ "$RC" -eq 0 ] || { _write_result "failed" "镜像不可读"; echo "错误：镜像不可读（请检查 $(ls -ld "$MIRROR_DIR" 2>/dev/null)）" >&2; exit 1; }
+            echo "  [检查完成] 镜像可正常读取（未修改任何数据）"
+        else
+            if [ "$RC" -eq 0 ]; then
+                YSM_UTILS="$WEB_ROOT" YSM_SRC="$([ "$FROM_REQUEST" = "1" ] && echo web || echo cli)" php -r 'require_once getenv("YSM_UTILS") . "/utils.php"; auditLog("audit_recovered", "", "从镜像恢复操作日志（来源：" . (getenv("YSM_SRC") ?: "cli") . "）");' 2>/dev/null || true
+                _write_result "success" "已从镜像恢复审计表（备份 $(basename "${BK:-}")）"
+                echo "  已从镜像恢复审计表，并校正链尾（备份：${BK:-无}）"
+            else
+                _write_result "failed" "从镜像恢复失败"
+                echo "错误：从镜像恢复审计失败" >&2
+            fi
+            [ "$FROM_REQUEST" = "1" ] && rm -f "$REQ_FILE"
+            [ "$RC" -eq 0 ] || exit 1
+        fi
+        ;;
+
     apply-update)
         # v5.0.0：--allow-unsigned 一次性受控引导开关（未部署签名公钥时放行首包，写审计日志）
         ALLOW_UNSIGNED=0
@@ -1671,6 +1749,52 @@ case "${1:-}" in
             exit 1
         fi
         echo "  跨通道规则校验通过：$FROM_VER → $TO_VER（包类型 $PKG_TYPE，通道 $CHANNEL）"
+        # v5.4.8：可信基线目录权限固化——审计镜像目录的 owner 必须是 root（www-data 仅可读、不可写），
+        #   否则 www-data 可在背书解锁窗口「竞争替换镜像文件」，把伪造镜像变成"可信镜像"。
+        #   幂等：先解锁 → 归正属主/权限 → 重新加锁。
+        MIRROR_DIR="/opt/you-super-markdown/logs"
+        if [ -d "$MIRROR_DIR" ]; then
+            chattr -i "$MIRROR_DIR" 2>/dev/null || true
+            chown root:www-data "$MIRROR_DIR" 2>/dev/null || true
+            chmod 750 "$MIRROR_DIR" 2>/dev/null || true
+            chattr +i "$MIRROR_DIR" 2>/dev/null || echo "         [警告] 镜像目录未加锁（chattr 不可用，建议安装 e2fsprogs）"
+            if [ "$(lsattr -d "$MIRROR_DIR" 2>/dev/null | awk '{print $1}' | grep -c 'i')" = "1" ]; then
+                echo "  镜像目录权限已固化：root:www-data 750（immutable 已开启）"
+            else
+                echo "  镜像目录权限已固化：root:www-data 750（immutable 未开启）"
+            fi
+        fi
+        # v5.4.8：确保"后台发起 → 守护执行"的恢复通道存在（systemd path unit，幂等；Web 无需任何 sudo 权限）
+        ensure_audit_recover_units() {
+            local udir="/etc/systemd/system"
+            cat > "$udir/ysm-audit-recover.service" <<'YSMSVC'
+[Unit]
+Description=You Super Markdown - 审计镜像恢复（由恢复请求触发，root 执行）
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ysm-admin audit-recover --from-request
+YSMSVC
+            cat > "$udir/ysm-audit-recover.path" <<'YSMPATH'
+[Unit]
+Description=You Super Markdown - 监听审计恢复请求文件
+
+[Path]
+PathExists=/opt/you-super-markdown/run/audit-recover-request.json
+Unit=ysm-audit-recover.service
+
+[Install]
+WantedBy=multi-user.target
+YSMPATH
+            systemctl daemon-reload 2>/dev/null || true
+            if systemctl enable --now ysm-audit-recover.path >/dev/null 2>&1; then
+                echo "  恢复请求通道已就绪：ysm-audit-recover.path（监听 run/audit-recover-request.json）"
+            else
+                echo "         [警告] 未能启用 ysm-audit-recover.path（后台恢复将不可用，请用 CLI）"
+            fi
+        }
+        ensure_audit_recover_units
         if [ "$PKG_TYPE" = "inc" ]; then
             if [ ! -f "$STAGE_DIR/version.json" ]; then
                 echo "错误：增量包缺少 version.json，已中止，未修改任何文件"

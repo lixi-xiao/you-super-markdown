@@ -1039,6 +1039,57 @@ function verifyAuditChain() {
     return ['valid' => true, 'count' => $n, 'delegated' => $delegated, 'pending' => $pending];
 }
 
+/** v5.4.8：从镜像恢复——Web 侧只"发起请求"（一次性、带过期），实际恢复由根守护进程执行。
+ *  原因：镜像目录已收紧为 root:www-data 750 + immutable（www-data 只读、不可写），
+ *        且镜像库为 WAL 模式，www-data 无法在无写权限目录中安全打开 → 恢复到 CLI/守护进程侧。 */
+define('AUDIT_RECOVER_REQUEST', '/opt/you-super-markdown/run/audit-recover-request.json');
+define('AUDIT_RECOVER_RESULT',  '/opt/you-super-markdown/run/audit-recover-result.json');
+
+/** 读取守护进程状态文件（guard-state.json，644，Web 可读） */
+function guardStateRead() {
+    $p = '/opt/you-super-markdown/guard-state.json';
+    if (!is_readable($p)) return [];
+    $j = json_decode((string)@file_get_contents($p), true);
+    return is_array($j) ? $j : [];
+}
+
+/** v5.4.8：镜像/守护进程状态（不依赖 Web 进程能否 stat 镜像目录） */
+function auditMirrorStatus() {
+    $st = guardStateRead();
+    $alive = !empty($st['ts']) && (time() - (int)$st['ts']) < 900;
+    return [
+        'present'       => !empty($st['mirror_present']),
+        'locked'        => !empty($st['mirror_locked']),
+        'guard_alive'   => $alive,
+        'last_recover'  => (string)($st['last_recover'] ?? ''),
+    ];
+}
+
+/** v5.4.8：提交"从镜像恢复"请求（一次性，120 秒有效；实际执行由守护进程完成） */
+function writeAuditRecoverRequest() {
+    try {
+        $nonce = bin2hex(random_bytes(16));
+    } catch (Exception $e) {
+        $nonce = bin2hex(pack('N', time()));
+    }
+    $data = [
+        'nonce'              => $nonce,
+        'created'            => time(),
+        'expires'            => time() + 120,
+        'challenge_verified' => true,
+        'requested_by'       => (string)($_SESSION['cmt_user']['nickname'] ?? '超管'),
+    ];
+    $ok = @file_put_contents(AUDIT_RECOVER_REQUEST, json_encode($data, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    return $ok !== false ? $nonce : '';
+}
+
+/** v5.4.8：读取最近一次恢复结果（守护进程写，root:www-data 640） */
+function readAuditRecoverResult() {
+    if (!is_readable(AUDIT_RECOVER_RESULT)) return [];
+    $j = json_decode((string)@file_get_contents(AUDIT_RECOVER_RESULT), true);
+    return is_array($j) ? $j : [];
+}
+
 function recoverAuditFromMirror() {
     if (!is_dir(AUDIT_MIRROR_DIR) || !file_exists(AUDIT_MIRROR_DB)) return false;
     try {

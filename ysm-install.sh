@@ -755,7 +755,8 @@ chattr -R +i "$INSTALL_BASE" 2>/dev/null || warn "chattr 不可用，母本未�
 
 # 创建日志镜像目录（chattr +i 锁定，防 PHP 权限/未知 bug 篡改审计镜像）
 mkdir -p /opt/you-super-markdown/logs
-chown www-data:www-data /opt/you-super-markdown/logs
+# v5.4.8：镜像目录 owner 必须是 root（www-data 仅可读、不可写）——防 www-data 在背书解锁窗口替换镜像
+chown root:www-data /opt/you-super-markdown/logs
 chmod 750 /opt/you-super-markdown/logs
 
 # v5.0.0 P1-4：更新请求共享目录（root 与 www-data 共享、其他用户不可写）——
@@ -771,6 +772,31 @@ chown root:www-data /opt/you-super-markdown/backups /opt/you-super-markdown/back
 chmod 775 /opt/you-super-markdown/backups /opt/you-super-markdown/backups/db /opt/you-super-markdown/backups/articles
 chattr -R +i /opt/you-super-markdown/backups/db /opt/you-super-markdown/backups/articles 2>/dev/null || warn "chattr 不可用，备份目录未锁定（建议安装 e2fsprogs）"
 chattr +i /opt/you-super-markdown/logs 2>/dev/null || warn "chattr 不可用，日志镜像目录未锁定（建议安装 e2fsprogs）"
+
+# v5.4.8：审计恢复通道（Web 发起 → root 执行）。systemd path unit 监听恢复请求文件，
+#   触发一次性 root 服务执行 `ysm-admin audit-recover --from-request`；Web 不需要任何 sudo 权限。
+cat > /etc/systemd/system/ysm-audit-recover.service <<'YSMSVC'
+[Unit]
+Description=You Super Markdown - 审计镜像恢复（由恢复请求触发，root 执行）
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ysm-admin audit-recover --from-request
+YSMSVC
+cat > /etc/systemd/system/ysm-audit-recover.path <<'YSMPATH'
+[Unit]
+Description=You Super Markdown - 监听审计恢复请求文件
+
+[Path]
+PathExists=/opt/you-super-markdown/run/audit-recover-request.json
+Unit=ysm-audit-recover.service
+
+[Install]
+WantedBy=multi-user.target
+YSMPATH
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable --now ysm-audit-recover.path >/dev/null 2>&1 || warn "未能启用 ysm-audit-recover.path（后台「从镜像恢复」将不可用，可用 CLI）"
 
 # ================================================================
 # 6.5 审计链母密钥（v5.0.0 P7：链密钥化——安装时生成一次，仅 root 独占保存）

@@ -39,6 +39,10 @@ AUDIT_KEY_FILE = '/opt/you-super-markdown/secrets/audit_key'
 # 预期 >=2 时链必须至少进入 sealed(HMAC) 段；整条链停在 legacy(sha256) 判无效（防纯 legacy 链整体伪造）。
 AUDIT_EPOCH_FILE = '/opt/you-super-markdown/secrets/audit_epoch'
 GUARD_STATE = '/opt/you-super-markdown/guard-state.json'
+# v5.4.6：背书锚点文件（放在 root:root 目录内，web 进程不可读写/删除）——
+#   用于"背书前锚点比对"，防 web 端 DELETE FROM audit 后空表被当作合法空链背书。
+#   仅在背书成功 / 从镜像恢复成功后才更新；不用 guard-state.json（每轮会被 audit_anchor() 覆盖）。
+LAST_SEAL_ANCHOR = '/opt/you-super-markdown/.last_seal_anchor'
 EMAIL_ALERT_BIN = '/usr/local/bin/ysm-alert'
 ALERT_LOG = '/opt/you-super-markdown/alert.log'  # 告警发送失败日志（v2.8.0 可追溯）
 WATCHDOG_USEC = int(os.environ.get('WATCHDOG_USEC', 0)) / 1_000_000  # systemd watchdog 间隔（秒）
@@ -582,6 +586,60 @@ def audit_anchor():
         return 0, ''
 
 
+# ===== v5.4.6：背书锚点（防"空表被当作合法空链"背书） =====
+def _anchor_abnormal(prev_count, prev_head, cur_count, cur_head, legit_clear=False):
+    """纯函数：判定"锚点骤降"是否异常（便于单测，无副作用）。
+    仅当上一轮已有足量记录（>=20 条）时才判定，避免首次安装/测试环境误报；
+    legit_clear=True（最新一条为超管 audit_cleared）视为合法重置，不判异常。"""
+    if legit_clear or prev_count < 20:
+        return False
+    if cur_count == 0:
+        return True                                   # 整表被清空
+    if cur_count < prev_count * 0.5:
+        return True                                   # 条数骤降 > 50%
+    if prev_head and cur_head and prev_head != cur_head and cur_count <= prev_count:
+        return True                                   # 链尾突变且条数未增（链被重置）
+    return False
+
+
+def _is_legit_audit_clear():
+    """是否属于"超管合法清空"（清空后最新一条为 audit_cleared）。"""
+    try:
+        con = sqlite3.connect(DB_FILE)
+        row = con.execute("SELECT action FROM audit ORDER BY rowid DESC LIMIT 1").fetchone()
+        con.close()
+        return bool(row and row[0] == 'audit_cleared')
+    except Exception:
+        return False
+
+
+def _read_seal_anchor():
+    """读上次成功背书的锚点；文件缺失/损坏 → (0, '')。"""
+    try:
+        if os.path.exists(LAST_SEAL_ANCHOR):
+            with open(LAST_SEAL_ANCHOR) as f:
+                a = json.load(f)
+            return int(a.get('count', 0)), str(a.get('head', '') or '')
+    except Exception:
+        pass
+    return 0, ''
+
+
+def _write_seal_anchor():
+    """背书/恢复成功后记录新锚点（重新取实时值；原子写 + 0600）。"""
+    try:
+        cnt, head = audit_anchor()
+        tmp = LAST_SEAL_ANCHOR + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump({'count': cnt, 'head': head, 'ts': int(time.time())}, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, LAST_SEAL_ANCHOR)
+        return cnt, head
+    except Exception as e:
+        log(f"背书锚点写入失败: {e}")
+        return 0, ''
+
+
 def verify_audit_chain(recover: bool = True) -> bool:
     """校验审计日志哈希链（读 SQLite audit 表；epoch 分段）：
     epoch1 旧段：hash = sha256(entry_json)，genesis 为空串；
@@ -657,6 +715,19 @@ def mirror_db():
         log("主库审计链校验未通过，拒绝覆盖镜像（保持上一份可信镜像）")
         send_alert("审计镜像背书已拒绝", "主库审计链校验未通过，已拒绝覆盖镜像（防伪造链污染可信镜像）")
         return False
+    # v5.4.6：背书前"锚点比对"——防 web 进程 DELETE FROM audit 后空表被当作合法空链背书。
+    #   锚点写在 root-only 目录（web 进程不可读写/删除），仅在背书/恢复成功后更新；
+    #   注意：不能复用 guard-state.json（save_guard_state() 每轮用当前值覆盖，清空后即写 0）。
+    prev_count, prev_head = _read_seal_anchor()
+    cur_count, cur_head = audit_anchor()
+    if prev_count == 0 and cur_count >= 1:
+        log(f"背书锚点缺失/首次建立（当前 {cur_count} 条）——本轮背书成功后将写入锚点")
+    if _anchor_abnormal(prev_count, prev_head, cur_count, cur_head, _is_legit_audit_clear()):
+        log(f"审计锚点异常骤降（上次 {prev_count} 条 → 本次 {cur_count} 条），拒绝覆盖镜像（保留上一份可信镜像）")
+        send_alert("审计链可能被清空",
+                   f"背书前锚点比对异常：上次 {prev_count} 条/链尾 {prev_head[:12]}…，"
+                   f"本次 {cur_count} 条/链尾 {cur_head[:12]}…。已拒绝覆盖镜像，保留上一份可信镜像。")
+        return False
     try:
         con = sqlite3.connect(DB_FILE)
         con.execute('PRAGMA wal_checkpoint(TRUNCATE)')
@@ -676,6 +747,8 @@ def mirror_db():
             shutil.copy2(DB_FILE, AUDIT_MIRROR_DB)
             if os.path.exists(AUDIT_CHAIN):
                 shutil.copy2(AUDIT_CHAIN, AUDIT_MIRROR_CHAIN)
+            # v5.4.6：背书成功 → 记录新锚点（重新读取实时值，避免用到背书前的陈旧值）
+            _write_seal_anchor()
         finally:
             _chattr(os.path.dirname(AUDIT_MIRROR_DB), '+i')
         return True
@@ -731,6 +804,8 @@ def recover_audit():
         except Exception as e:
             log(f"审计恢复链尾刷新失败: {e}")
         log("审计日志已从镜像恢复")
+        # v5.4.6：恢复来自可信镜像 → 立即刷新锚点，避免下一轮被误判为"骤降"
+        _write_seal_anchor()
         send_alert("日志已恢复", "审计日志已从镜像 SQLite 副本恢复，请检查")
     except Exception as e:
         log(f"从镜像恢复审计失败: {e}")

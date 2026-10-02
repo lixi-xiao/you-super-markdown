@@ -433,6 +433,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 auditLog('user_delete', $u['account'] ?? $delId, "删除用户: {$u['nickname']}" . ($aiPurged > 0 ? "（同时清除 AI Key {$aiPurged} 条）" : ''));
                 array_splice($users, $i, 1);
                 replaceAllUsers($users);
+                // v5.4.1：清理该用户会话/设备残留（refresh_tokens、device_fps；comments/audit/unauthorized 保留）
+                purgeUserResiduals($delId);
                 $msg = 'user_deleted';
                 break;
             }

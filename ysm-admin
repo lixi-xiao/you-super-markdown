@@ -609,10 +609,12 @@ schema_needs_migration() {
 
 # ============================================================
 # v5.4.0：字体资源直读收紧 + Nginx 站点加固片段「同步 + 校验」（方案 B）
+# v5.4.1：加固规则扩展——除 /data/fonts/ 外，新增 /data/articles/（草稿/定时文章直读）、
+#         /music/（内部处理器）、/version.json、/README.md、/HELP.md 拒绝直读，并 server_tokens off。
 #   背景：模板 nginx-site.conf 含 `location ^~ /data/fonts/ { deny all; }`，但更新器此前只同步
 #         WEB_ROOT/母本，不更新线上 nginx 配置 → 可 GET /data/fonts/*.ttf 直读字体文件（绕过受控端点）。
 #   策略（只动本项目自有 include 片段，绝不改写他人配置；全流程幂等、失败封闭）：
-#     ① 已生效则跳过（幂等）：站点配置或 `nginx -T` 已含 `location ^~ /data/fonts/` 即视为已加固；
+#     ① 已生效则跳过（幂等）：生效配置（nginx -T）或站点配置已含全部必需 location 规则即视为已加固；
 #     ② 受控同步：把包内/母本的 nginx-hardening.conf 同步到 /etc/nginx/snippets/ysm-hardening.conf，
 #        该片段以 `include` 被本项目 server 块引用（引用行由安装/运维一次性接入）；
 #     ③ 失败封闭：同步后 `nginx -t` 不通过 → 还原片段并中止（不 reload）；
@@ -632,13 +634,21 @@ nginx_site_conf() {
     return 1
 }
 
-# /data/fonts/ 拒绝规则是否已生效（生效=已加固）：先看生效配置 nginx -T，再看站点配置文件
-nginx_fonts_denied() {
-    local f
-    nginx -T 2>/dev/null | grep -qE 'location[[:space:]]+\^~[[:space:]]+/data/fonts/' && return 0
-    f=$(nginx_site_conf) && [ -n "$f" ] && grep -qE 'location[[:space:]]+\^~[[:space:]]+/data/fonts/' "$f" 2>/dev/null && return 0
+# 单条 location 规则是否已生效（先看生效配置 nginx -T，再看站点配置文件）
+nginx_rule_present() {
+    local pat="$1" f
+    nginx -T 2>/dev/null | grep -qE "$pat" && return 0
+    f=$(nginx_site_conf) && [ -n "$f" ] && grep -qE "$pat" "$f" 2>/dev/null && return 0
     return 1
 }
+
+# 全部必需的安全 location 规则到位才算「已加固」（避免只含部分规则时误判跳过，如旧片段仅有 /data/fonts/）
+nginx_hardening_ok() {
+    nginx_rule_present 'location[[:space:]]+\^~[[:space:]]+/data/fonts/'    || return 1
+    nginx_rule_present 'location[[:space:]]+\^~[[:space:]]+/data/articles/' || return 1
+    return 0
+}
+
 
 # 加固缺失/失败告警：打印提示 + 写审计 + 落 alert.log（失败不阻断）
 nginx_harden_warn() {
@@ -654,12 +664,12 @@ sync_nginx_hardening() {
     local mode="${1:-apply}" src="$WEB_ROOT/nginx-hardening.conf" conf ts bk="" changed=0
     ts=$(date +%s)
     # ① 已生效 → 幂等跳过（不写、不 reload）
-    if nginx_fonts_denied; then
-        echo "  [nginx] /data/fonts/ 拒绝规则已生效（幂等，无需改动）"
+    if nginx_hardening_ok; then
+        echo "  [nginx] 敏感目录拒绝规则已生效（幂等，无需改动）"
         return 0
     fi
     if [ "$mode" = "check" ]; then
-        nginx_harden_warn "线上未检测到 /data/fonts/ 拒绝规则"
+        nginx_harden_warn "线上未检测到完整的敏感目录拒绝规则（/data/fonts/、/data/articles/）"
         return 1
     fi
     if [ ! -f "$src" ]; then
@@ -713,24 +723,36 @@ sync_nginx_hardening() {
     if [ "$changed" = "1" ]; then
         systemctl reload nginx 2>/dev/null && echo "  [nginx] 已 reload nginx" || echo "  [nginx] 警告：nginx reload 失败"
     fi
-    if nginx_fonts_denied; then
+    if nginx_hardening_ok; then
         YSM_DETAIL="nginx 加固片段已同步并生效" php -r "require_once '$WEB_ROOT/utils.php'; auditLog('nginx_hardening_synced', 'update', getenv('YSM_DETAIL'));" 2>/dev/null || true
-        echo "  [nginx] /data/fonts/ 拒绝规则已生效"
+        echo "  [nginx] 敏感目录拒绝规则已生效（/data/fonts/、/data/articles/）"
     else
-        nginx_harden_warn "同步后仍未检测到 /data/fonts/ 拒绝规则"
+        nginx_harden_warn "同步后仍未检测到完整的敏感目录拒绝规则"
     fi
     return 0
 }
 
 # v5.4.0：敏感目录「直读」端到端探测（真实 HTTP，断言 /data/fonts/ 与 /data/ysm.db 不可直读）。
-#   与配置级检测（nginx_fonts_denied）互补——本函数直接反映线上实际响应，验证 deny 确实生效。
+# v5.4.1：新增 /data/articles/<存在的 .md> 断言（草稿/定时文章不得直读）；找不到 .md 样本则跳过并明确输出。
+#   与配置级检测（nginx_hardening_ok）互补——本函数直接反映线上实际响应，验证 deny 确实生效。
 #   失败仅告警（写审计 + alert.log + 打印修复步骤），不阻断更新、不触发回滚：
 #   避免把「域名解析/网络抖动」等误判为安全缺口而误回滚，导致站点不可用。
 sensitive_paths_probe() {
-    local d code bad="" p
+    local d code bad="" p paths=()
     d=$(get_domain)
     if [ -z "$d" ]; then echo "  [敏感目录] 跳过直读探测（无法确定域名）"; return 0; fi
-    for p in "/data/fonts/ysm-probe.ttf" "/data/ysm.db"; do
+    paths=("/data/fonts/x.ttf" "/data/ysm.db")
+    # 文章样本：取 data/articles 下任一存在的 .md（有则断言 403；无则跳过并明确输出）
+    local art_sample art_rel=""
+    art_sample=$(find "$WEB_ROOT/data/articles" -maxdepth 1 -type f -name '*.md' 2>/dev/null | head -1)
+    if [ -n "$art_sample" ]; then
+        art_rel="/data/articles/$(basename "$art_sample")"
+        paths+=("$art_rel")
+        echo "  [敏感目录] 文章样本：$art_rel"
+    else
+        echo "  [敏感目录] 跳过 /data/articles/ 探测（目录内无 .md 样本）"
+    fi
+    for p in "${paths[@]}"; do
         code=$(curl -sk -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$d$p" 2>/dev/null || echo 000)
         case "$code" in
             403|404) echo "  [敏感目录] OK：$p → HTTP $code（不可直读）";;
@@ -821,6 +843,7 @@ case "${1:-}" in
         USER_ID="${2:-}"
         if [ -z "$USER_ID" ]; then echo "用法: ysm-admin revoke-user <用户ID>"; exit 1; fi
         # v5.0.0：用户ID经 base64 环境变量传入，避免直接拼进 php -r 代码字符串
+        # v5.4.1：删除用户后一并清理其会话/设备残留（refresh_tokens、device_fps；comments/audit/unauthorized 按语义保留）
         USER_ID_B64=$(printf '%s' "$USER_ID" | base64 -w0 2>/dev/null || printf '%s' "$USER_ID" | base64)
         # v5.4.0-beta.5：吊销（删除）用户时一并清除其 AI Key + 写审计（仅记条数，不记明文 Key），杜绝孤儿密钥残留
         USER_ID_B64="$USER_ID_B64" php -r "
@@ -831,6 +854,7 @@ case "${1:-}" in
             if (\$row) \$acc = (string)(\$row['account'] ?? '');
             \$purged = aiClearUserKeys(\$uid);
             db_exec('DELETE FROM users WHERE id = ?', [\$uid]);
+            purgeUserResiduals(\$uid);
             auditLog('user_revoke', \$acc !== '' ? \$acc : \$uid, 'ysm-admin 吊销用户（同时清除 AI Key ' . \$purged . ' 条）');
             echo 'AI_KEY_PURGED=' . \$purged . PHP_EOL;
         " 2>/dev/null
@@ -1059,9 +1083,9 @@ case "${1:-}" in
             exit 1
         fi
         if sync_nginx_hardening "$MODE"; then
-            if [ "$MODE" = "check" ]; then echo "已加固：/data/fonts/ 拒绝规则在位"; else echo "加固完成"; fi
+            if [ "$MODE" = "check" ]; then echo "已加固：敏感目录拒绝规则在位（/data/fonts/、/data/articles/）"; else echo "加固完成"; fi
         else
-            if [ "$MODE" = "check" ]; then echo "未加固：线上缺少 /data/fonts/ 拒绝规则"; else echo "加固失败（详见上方输出）"; fi
+            if [ "$MODE" = "check" ]; then echo "未加固：线上缺少敏感目录拒绝规则（/data/fonts/、/data/articles/）"; else echo "加固失败（详见上方输出）"; fi
             exit 1
         fi
         ;;
@@ -1495,6 +1519,14 @@ case "${1:-}" in
             rsync -a --delete --exclude='data/' --exclude='app-config.json' --exclude='manifest.json*' "$STAGE_DIR/" "$WEB_ROOT/" 2>/dev/null
             rsync -a --delete --exclude='data/' --exclude='app-config.json' --exclude='manifest.json*' "$STAGE_DIR/" "/opt/you-super-markdown/install-base/" 2>/dev/null
         fi
+        # v5.4.1：更新后收敛 Web 根权限（防「世界可写」漂移）——非 data/ 部分 root:root + 目录 755 / 文件 644；
+        #   data/ 整体保持 www-data 可写（文章/图片/视频/缓存/DB 等运行时目录需要，见安装脚本同口径例外）。
+        #   （本步为「下一次更新起生效」：自更新时本次仍走旧逻辑，故发布时另经运维手动收敛一次。）
+        chown root:root "$WEB_ROOT" 2>/dev/null || true
+        find "$WEB_ROOT" -mindepth 1 -not -path "$WEB_ROOT/data" -not -path "$WEB_ROOT/data/*" -exec chown root:root {} + 2>/dev/null || true
+        find "$WEB_ROOT" -mindepth 1 -not -path "$WEB_ROOT/data" -not -path "$WEB_ROOT/data/*" -type d -exec chmod 755 {} + 2>/dev/null || true
+        find "$WEB_ROOT" -mindepth 1 -not -path "$WEB_ROOT/data" -not -path "$WEB_ROOT/data/*" -type f -exec chmod 644 {} + 2>/dev/null || true
+        echo "  已收敛 Web 根权限（data/ 保持 www-data 可写，其余 root:root 755/644）"
         # v3.2.0：文件已实际应用，此后失败触发自动回退（此前失败仅标记，文件未被修改）
         FILES_APPLIED="1"
         # 4.7a 提前读取更新包 changelog（v3.1.6：必须在清理 TMP_DIR 前读取，否则 version.json 已不存在；

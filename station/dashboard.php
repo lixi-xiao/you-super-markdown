@@ -215,6 +215,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                     auditLog('author_delete', $u['account'] ?? $delId, "站长删除写作者: {$u['nickname']}" . ($aiPurged > 0 ? "（同时清除 AI Key {$aiPurged} 条）" : ''));
                     array_splice($users, $i, 1);
                     replaceAllUsers($users);
+                    // v5.4.1：清理该写作者会话/设备残留（refresh_tokens、device_fps；comments/audit/unauthorized 保留）
+                    purgeUserResiduals($delId);
                     $msg = 'author_deleted';
                     break;
                 }

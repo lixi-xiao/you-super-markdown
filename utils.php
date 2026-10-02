@@ -1402,6 +1402,32 @@ function mailPalette($type) {
     return ['g1' => '#1f3a5f', 'g2' => '#2a4a75', 'badge' => '#1f3a5f', 'sub' => '安全通知 · 系统自动发送'];
 }
 
+// v5.4.1：邮件类别（两行 badge 上行用）——告警 / 通知 / 验证，配色仍沿用 mailPalette（告警红 / 验证蓝 / 通知深蓝）
+function mailCategory($type) {
+    if (preg_match('/失败|断裂|异常|告警|篡改|无法|错误|超时|拒绝|降级|封禁|越权/', (string)$type)) return '告警';
+    if (preg_match('/验证|确认|绑定|注册/', (string)$type)) return '验证';
+    return '通知';
+}
+
+// v5.4.1：从邮件 type/主题中提取「具体事件」（两行 badge 下行用）——去掉形如「[站点 类别] 」的前缀
+function mailEventText($type) {
+    $raw = trim((string)$type);
+    $ev = preg_replace('/^\[[^\]]*\]\s*/u', '', $raw);
+    return ($ev === null || trim($ev) === '') ? $raw : trim($ev);
+}
+
+// v5.4.1：两行 badge（上行=站点+类别，下行=具体事件）；纯内联样式，邮件客户端兼容，窄屏居中且可换行不截断
+function mailBadgeHtml($site, $category, $event, $bg) {
+    $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+    return '<div style="display:inline-block;max-width:100%;box-sizing:border-box;background:' . $bg
+        . ';border-radius:14px;padding:9px 22px;text-align:center;">'
+        . '<div style="color:#ffffff;font-size:15px;font-weight:600;letter-spacing:0.5px;line-height:1.5;">'
+        . $e($site) . ' ' . $e($category) . '</div>'
+        . '<div style="color:rgba(255,255,255,0.92);font-size:14px;font-weight:400;margin-top:3px;line-height:1.5;word-break:break-word;overflow-wrap:anywhere;">'
+        . $e($event) . '</div>'
+        . '</div>';
+}
+
 // HTML 邮件基础模板（v2.10.1 统一设计：顶部栏按功能分色 + 卡片放大 660px + 内容分层 + 大圆角；内联样式兼容主流邮件客户端）
 // $htmlDetail 为非空时直接作为正文区 HTML（调用方负责转义动态值），否则将 $detail 按纯文本转义后渲染（默认安全）
 function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null) {
@@ -1429,9 +1455,9 @@ function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null) 
         . '<td align="right" style="vertical-align:middle;"><div style="width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,0.16);color:#fff;font-size:19px;font-weight:700;text-align:center;line-height:44px;">' . $iconLetter . '</div></td>'
         . '</tr></table>'
         . '</td></tr>'
-        // 主内容区（分层一：类型徽标 + 正文）
+        // 主内容区（分层一：类型徽标（v5.4.1 两行：站点+类别 / 具体事件） + 正文）
         . '<tr><td style="padding:38px 40px 26px;">'
-        . '<div style="display:inline-block;background:' . $p['badge'] . ';color:#ffffff;font-size:12px;font-weight:600;padding:7px 18px;border-radius:999px;letter-spacing:0.5px;">' . $typeE . '</div>'
+        . mailBadgeHtml($site, mailCategory($type), mailEventText($type), $p['badge'])
         . '<div style="margin-top:22px;color:#2d3748;font-size:14.5px;line-height:2.0;word-break:break-all;overflow-wrap:anywhere;">' . $detailHtml . '</div>'
         . '</td></tr>'
         // 分层二：元信息面板（浅色内嵌卡）
@@ -1473,6 +1499,9 @@ function renderMailCode($site, $purposeLabel, $code, $ttlMin, $extra = []) {
         . '</td></tr>'
         . '<tr><td style="padding:40px 44px 26px;">'
         . '<div style="text-align:center;">'
+        . mailBadgeHtml($site, '验证', '邮箱验证码（有效期 ' . $ttlMin . ' 分钟）', $p['badge'])
+        . '</div>'
+        . '<div style="text-align:center;margin-top:14px;">'
         . '<div style="display:inline-block;background:#eef3fb;color:#1e3a8a;font-size:12px;font-weight:600;padding:7px 18px;border-radius:999px;">' . $purposeE . '</div>'
         . '</div>'
         // 验证码卡片（放大：圆角 18px、内距加大）
@@ -1946,6 +1975,16 @@ function consumeRefreshToken($token, $requestFp, $userTV) {
 /** 吊销用户全部 refresh token（登出/封禁/重置密码时调用） */
 function revokeUserRefreshTokens($uid) {
     db_exec('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', [$uid]);
+}
+/**
+ * v5.4.1：删除/吊销用户后清理其会话与设备残留（refresh_tokens、device_fps）。
+ * 语义保留：comments / audit / unauthorized 属于业务与审计记录，不做删除。
+ * 供 ysm-admin revoke-user、超管后台删除用户、站长后台删除写作者统一调用。
+ */
+function purgeUserResiduals($uid) {
+    if ($uid === '' || $uid === null) return;
+    db_exec('DELETE FROM refresh_tokens WHERE user_id = ?', [$uid]);
+    db_exec('DELETE FROM device_fps WHERE user_id = ?', [$uid]);
 }
 function clearRefreshCookie() {
     if (isset($_COOKIE['ysm_rt'])) {
@@ -3362,7 +3401,7 @@ function notifyUpdateAvailable($result, $channel = 'stable') {
           . "更新通道：{$chLabel}\n"
           . ($notes !== '' ? "\n【版本说明】\n{$notes}\n" : '')
           . "\n请登录超管后台「在线更新」查看，并在 SSH 执行 sudo ysm-admin apply-update 完成升级（升级前自动备份、强制验签）。";
-    $html = renderMailHtml($site, '版本更新', $body, ['server' => gethostname(), 'time' => $now]);
+    $html = renderMailHtml($site, "发现新版本 v{$latest}", $body, ['server' => gethostname(), 'time' => $now]);
     [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body, $html);
     if ($ok) {
         $config['update_notified_version'] = $latest;

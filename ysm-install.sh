@@ -478,6 +478,9 @@ server {
     ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
     ssl_prefer_server_ciphers off;
 
+    # v5.4.1：关闭 nginx 版本号暴露
+    server_tokens off;
+
     root $WEB_ROOT;
     index index.php index.html;
 
@@ -527,6 +530,32 @@ server {
 
     # v5.4.0：禁止直读字体资源目录（字体仅经受控端点提供；不随 /data/*.json、/data/*.ttf 静态规则暴露）
     location ^~ /data/fonts/ {
+        deny all;
+        return 403;
+    }
+
+    # v5.4.1：禁止直读文章源文件目录（防绕过发布状态过滤读取草稿/定时文章）
+    location ^~ /data/articles/ {
+        deny all;
+        return 403;
+    }
+
+    # v5.4.1：音乐平台内部处理器禁止直读（前台仅经 music.php 调用）
+    location ^~ /music/ {
+        deny all;
+        return 403;
+    }
+
+    # v5.4.1：信息暴露面收敛（更新元数据 / 项目文档不提供直读）
+    location = /version.json {
+        deny all;
+        return 403;
+    }
+    location = /README.md {
+        deny all;
+        return 403;
+    }
+    location = /HELP.md {
         deny all;
         return 403;
     }

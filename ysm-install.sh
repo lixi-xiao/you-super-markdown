@@ -1135,22 +1135,29 @@ configure_mail() {
     [ -z "$SMTP_FROM" ] && read -p "  发件人 (可空=账号): " SMTP_FROM
     SMTP_PORT=${SMTP_PORT:-465}
     SMTP_ENC=${SMTP_ENC:-ssl}
-    # v3.0.9：授权码改为环境变量注入（密钥不落 Web 可达盘）——
-    # ① php-fpm pool env[YSM_SMTP_PASS]（root 只读，Web/DB 均不可见）
-    # ② root 密钥文件 /opt/you-super-markdown/secrets/smtp_pass（0600，供 CLI 发信如 audit-report 注入）
+    # v3.0.9/v5.4.2：授权码改为环境注入（密钥不落 Web 可达盘）——
+    # ① Web 端：root-only 独立密钥文件 /etc/php/<ver>/fpm/pool.d/zz-ysm-secret.conf（0600 root:root，
+    #    由 php-fpm 经 pool.d/*.conf 自动 include；不写入主配置 www.conf）
+    # ② CLI/守护进程：root 密钥文件 /opt/you-super-markdown/secrets/smtp_pass（0600，临时环境变量注入）
     SECRETS_DIR="/opt/you-super-markdown/secrets"
     mkdir -p "$SECRETS_DIR"
     printf '%s' "$SMTP_PASS" > "$SECRETS_DIR/smtp_pass"
     chmod 600 "$SECRETS_DIR/smtp_pass"
-    POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/www.conf"
-    if [ -f "$POOL_CONF" ]; then
-        sed -i '/env\[YSM_SMTP_PASS\]/d' "$POOL_CONF" 2>/dev/null || true
+    POOL_DIR="/etc/php/${PHP_VER}/fpm/pool.d"
+    SECRET_CONF="$POOL_DIR/zz-ysm-secret.conf"
+    if [ -d "$POOL_DIR" ]; then
         ESC_PASS=$(printf '%s' "$SMTP_PASS" | sed 's/[\\"]/\\&/g')
-        printf '\nenv[YSM_SMTP_PASS] = "%s"\n' "$ESC_PASS" >> "$POOL_CONF"
+        printf 'env[YSM_SMTP_PASS] = "%s"\n' "$ESC_PASS" > "$SECRET_CONF"
+        chmod 600 "$SECRET_CONF" 2>/dev/null || true
+        chown root:root "$SECRET_CONF" 2>/dev/null || true
+        # 迁移：旧版 www.conf 若仍有 env 行，一并移除（sed -i 无后缀，不留含口令的 .bak）
+        if [ -f "$POOL_DIR/www.conf" ]; then
+            sed -i '/env\[YSM_SMTP_PASS\]/d' "$POOL_DIR/www.conf" 2>/dev/null || true
+        fi
         systemctl reload "php${PHP_VER}-fpm" 2>/dev/null || true
-        info "授权码已注入 php-fpm 环境变量（$POOL_CONF，Web 端不可见）"
+        info "授权码已写入 root-only 独立文件（$SECRET_CONF，0600 root:root，Web 端不可见）"
     else
-        warn "未找到 php-fpm pool 配置（$POOL_CONF），授权码仅存 root 密钥文件"
+        warn "未找到 php-fpm pool 目录（$POOL_DIR），授权码仅存 root 密钥文件"
     fi
     # 非敏感配置仍写 config 表；smtp_pass 不再落库（环境注入优先）
     SMTP_HOST_B64=$(printf '%s' "$SMTP_HOST" | base64 -w0 2>/dev/null || printf '%s' "$SMTP_HOST" | base64)

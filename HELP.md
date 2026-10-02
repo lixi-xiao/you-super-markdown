@@ -268,9 +268,9 @@ ysm-admin show-paths
 | `ysm-admin audit-report` | 生成并发送每日审计报告邮件 | ✅ |
 | `ysm-admin challenge` | 生成敏感操作确认码（300 秒、单次） | ✅ |
 | `ysm-admin notify "<消息>"` | 发送通知邮件到管理员邮箱 | ✅ |
-| `ysm-admin set-smtp-pass [--pass=<授权码>]` | 修改 SMTP 授权码（双写密钥文件 + 环境变量并重载） | ✅ |
+| `ysm-admin set-smtp-pass [--pass=<授权码>]` | 修改 SMTP 授权码（CLI 密钥文件 + root-only 独立文件 `zz-ysm-secret.conf`，重载 php-fpm） | ✅ |
 | `ysm-admin set-channel <stable\|beta>`（别名 `channel`） | 切换更新通道（stable=仅正式 Release / beta=含预发布） | — |
-| `ysm-admin check [--no-mail]` | 体检：超管邮箱 / SMTP / php-fpm 是否注入 `YSM_SMTP_PASS` / 能否发测试邮件 | — |
+| `ysm-admin check [--no-mail]` | 体检：超管邮箱 / SMTP / 口令落盘巡检（www.conf 无残留、root-only 独立文件 600、池目录无含口令备份）/ 能否发测试邮件 | — |
 | `ysm-admin cleanup-history` | 一次性清理「更新历史.md」中同版本的重复小节（先备份，仅动重复节） | — |
 | `ysm-admin deps` | 检查并一键补装功能依赖（如 php-gd） | ✅ |
 | `ysm-admin migrate [--db <路径>]` | 迁移 4.x 数据库结构到 5.0（不重启服务，完成后请重启守护） | ✅ |
@@ -298,7 +298,7 @@ SSH 执行： sudo ysm-admin apply-update
 
 > **更新历史写入（v5.3.0）**：`version.json` 的 `changelog` 写入站内「更新历史.md」文章时，**同版本以小节覆盖**（不再重复追加），新版本置顶（最新在前），重复应用结果一致（幂等）。历史遗留的重复小节用 `sudo ysm-admin cleanup-history` 一次性清理（先备份为 `.dedup-bak-<时间戳>`，仅动重复节）。
 
-> **安装强制项（v5.3.0）**：`ysm-install.sh` **强制**填写超管邮箱与 SMTP（服务器/发信账号/授权码），缺失或留空即**阻断安装**；仅强制"必须填写"，不强制"必须正确"。若 Web 端 `admin_email` 为空或 SMTP 未配置，超管后台会持续显示告警横幅，用 `sudo ysm-admin check` 可体检（含 php-fpm 是否注入 `YSM_SMTP_PASS`）。
+> **安装强制项（v5.3.0）**：`ysm-install.sh` **强制**填写超管邮箱与 SMTP（服务器/发信账号/授权码），缺失或留空即**阻断安装**；仅强制"必须填写"，不强制"必须正确"。若 Web 端 `admin_email` 为空或 SMTP 未配置，超管后台会持续显示告警横幅，用 `sudo ysm-admin check` 可体检（含 SMTP 口令落盘巡检：主配置无口令残留 / root-only 独立文件 600 / 池目录无含口令备份）。
 
 > **更新包签名**：正式包由发包人用私钥签名，服务器只保存公钥，应用前强制校验。**没有私钥无法自行制作可用的更新包**——自行拼装的包会因验签失败被拒绝，这是防篡改机制的预期行为。请只使用官方发布/提供的已签名包。
 
@@ -426,7 +426,7 @@ A：不能。告警/更新通知/每日审计报告都走 SMTP。SMTP 授权码*
 | 主题色与深浅色变量 | `css/style.css` 的 `:root` 与 `[data-theme="dark"]` 覆盖 | 品牌色由 `--accent-hue / --accent-sat / --accent-lightness` 派生；底色/文字/边框等为 `--bg / --surface / --border / --text / --text-secondary / --text-muted / --code-bg` 等；暗色模式在 `[data-theme="dark"]` 内覆盖同名变量（另有 `body[data-text-contrast="light"]` 用于背景图偏暗时整页切白字） |
 | 背景图机制 | `body` 数据属性驱动，前端 `applyBg` 读取 | `data-bg-type`、`data-bg-image`、`data-bg-api-url`、`data-bg-blur` / `data-bg-blur-level`、`data-bg-card-opacity`；运行时映射为 CSS 变量 `--bg-url`、`--bg-blur-level`、`--bg-card-opacity` 并切换 `bg-blur`/`bg-active`/`data-text-contrast` |
 | 音乐播放器（多平台歌单） | 后台「音乐设置」，存 `config` 表 | `music_playlist_id`、`music_cookies`、`music_auto_play`；平台侧接口在 `music/`（`netease.php` / `qq.php` / `kugou.php`），平台与榜单切换在前端完成、播放地址懒解析 |
-| SMTP / 告警 | `config` 表 `smtp_host` / `smtp_port` / `smtp_user` / `smtp_pass`（密文）/ `smtp_from` / `smtp_enc`；CLI `sudo ysm-admin set-smtp-pass`（见 8.1） | 授权码「密钥不落盘」：优先 php-fpm 环境变量 `YSM_SMTP_PASS`，其次 `config` 表密文，再次服务器密钥文件 `secrets/smtp_pass` |
+| SMTP / 告警 | `config` 表 `smtp_host` / `smtp_port` / `smtp_user` / `smtp_pass`（密文）/ `smtp_from` / `smtp_enc`；CLI `sudo ysm-admin set-smtp-pass`（见 8.1） | 口令口径：CLI/守护进程用 root-only 密钥文件 `secrets/smtp_pass`(0600) + 临时环境变量，**不落盘**；Web 端由 php-fpm 经 pool.d 下 root-only 独立文件 `zz-ysm-secret.conf`(0600) 注入（`config` 表密文仅作旧部署兜底） |
 | 数据目录 | 根目录 `data/` | 文章 `data/articles/*.md`、数据库 `data/ysm.db`、`data/images`、`data/videos`、`data/bg`、`data/bgm`、`data/avatars`、`data/cache`；**更新包永远不含 `data/`** |
 | 更新与打包 | 发包侧脚本 + 服务器 CLI | 发包侧用 `sign_update_package.py` 对更新包签名、用 `trigger_server_update.py` 触发服务器更新；服务器端由 `sudo ysm-admin apply-update` 校验签名与逐文件哈希后应用 |
 

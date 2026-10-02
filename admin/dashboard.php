@@ -2883,13 +2883,13 @@ $banMsg = $_GET['bmsg'] ?? '';
                 <tr><td style="color:var(--text-muted)">授权码</td>
                     <td><?php $smtpPassSrc = smtpPassSource(); ?>
                         <?php if ($smtpPassSrc === 'env'): ?>
-                        <span style="color:#34c759;font-size:0.85em">✅ 已通过服务器环境变量 <code>YSM_SMTP_PASS</code> 注入（php-fpm 配置，Web 端不可见；修改需在服务器操作）</span>
+                        <span style="color:#34c759;font-size:0.85em">✅ 已通过 php-fpm 环境变量 <code>YSM_SMTP_PASS</code> 注入（口令存于 root-only 独立文件 <code>/etc/php/*/fpm/pool.d/zz-ysm-secret.conf</code>，0600 root:root，Web 端不可见；修改用 <code>sudo ysm-admin set-smtp-pass</code>）</span>
                         <?php elseif ($smtpPassSrc === 'config'): ?>
-                        <span style="color:#f59e0b;font-size:0.85em">⚠️ 使用 config 表密文兜底。建议迁移到环境变量：在 php-fpm pool 配置添加 <code>env[YSM_SMTP_PASS] = "授权码"</code> 后 <code>systemctl reload php8.3-fpm</code></span>
+                        <span style="color:#f59e0b;font-size:0.85em">⚠️ 使用 config 表密文兜底。建议迁移到环境注入：<code>sudo ysm-admin set-smtp-pass</code>（写入 root-only 独立文件 <code>zz-ysm-secret.conf</code> 并重载 php-fpm）</span>
                         <?php elseif ($smtpPassSrc === 'file'): ?>
-                        <span style="color:#34c759;font-size:0.85em">✅ 已通过服务器密钥文件 <code>/opt/you-super-markdown/secrets/smtp_pass</code> 提供（CLI/守护进程告警可用；Web 端仍优先环境变量）</span>
+                        <span style="color:#34c759;font-size:0.85em">✅ 已通过服务器密钥文件 <code>/opt/you-super-markdown/secrets/smtp_pass</code> 提供（CLI/守护进程告警可用；Web 端仍优先 php-fpm 环境变量）</span>
                         <?php else: ?>
-                        <span style="color:#ef4444;font-size:0.85em">❌ 未配置密码。请在服务器 php-fpm pool 配置添加 <code>env[YSM_SMTP_PASS] = "授权码"</code>（独立专用发信账号），并 <code>systemctl reload php8.3-fpm</code></span>
+                        <span style="color:#ef4444;font-size:0.85em">❌ 未配置密码。请在服务器执行 <code>sudo ysm-admin set-smtp-pass</code>（写入 root-only 独立文件 <code>zz-ysm-secret.conf</code>，独立专用发信账号）</span>
                         <?php endif; ?></td></tr>
                 <tr><td style="color:var(--text-muted)">发件人（可空=账号）</td>
                     <td><input class="form-input" style="width:220px" type="text" name="smtp_from" value="<?= htmlspecialchars($smtpCfg['from']) ?>" placeholder="留空则用发信账号"></td></tr>

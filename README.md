@@ -24,8 +24,9 @@
 - **多平台音乐播放器（v4.7.4）**：网易云 / QQ音乐 / 酷狗音乐三平台 + 平台与榜单切换（热歌/新歌/飙升，网易云另含原创榜）；播放地址播放时懒解析，浏览器直连 CDN 播放、不占用服务器带宽；QQ/酷狗 128k/320k 免 Cookie。
 - **文字可读性（v4.7.2）**：浅色主题下文章与主页全部文字强制纯黑；背景图（上传图）按平均亮度自动切换文字对比色（背景暗自动切白字），保证始终高对比可读。
 
-## 近期版本变更（5.2.0 → 5.3.0）
+## 近期版本变更（5.2.0 → 5.4.2）
 
+- **v5.4.2**：**SMTP 口令存放治本加固**——Web 端发信口令不再写入世界可读的 php-fpm 主配置 `www.conf`，改存 **root-only 独立密钥文件** `/etc/php/<ver>/fpm/pool.d/zz-ysm-secret.conf`（0600 root:root，由 php-fpm 经 `pool.d/*.conf` 自动加载）；`set-smtp-pass` 与安装脚本同步改用该文件并**自动迁移**旧 `www.conf` 中的口令行（不产生含口令的 `.bak`）；体检（`sudo ysm-admin check`）与在线更新健康检查新增**口令落盘巡检三项**。**不动数据库结构与接口契约**，不可动清单（卡片背景/背景图机制/封面水墨渐隐/弹窗样式/音乐播放器外观/`.markdown-body` 正文排版）均未改动；零 CDN；本版不含 AI 相关代码。
 - **v5.4.1**：**内容访问与信息暴露面加固**——站点资源访问策略收紧：未发布的草稿与定时文章不再可经直链下载，仅站内使用的说明文件与更新信息亦不再对外直读；同步把更新器的「Nginx 加固片段同步 + 敏感目录直读校验」扩展到上述目录（幂等、失败封闭），并在体检中新增对应直读探针。另修复删除/吊销账号后其会话与设备记录残留的问题。**不动数据库结构与接口契约**，卡片背景、背景图机制、封面水墨渐隐、弹窗样式、音乐播放器外观、`.markdown-body` 正文排版均未改动；零 CDN；本版不含 AI 相关代码。
 - **v5.3.0**：新增**稳定 / 测试双更新通道**（`stable` 仅正式 Release、`beta` 含预发布，语义化版本比较正确）；检查更新发现新版本时**自动邮件通知超管**（同一版本只发一次，无 SMTP 时落盘告警）；**初始化安装强制配置超管邮箱与 SMTP**（缺失即阻断，仅强制"必须填写"、不强制"必须正确"，并提供测试邮件入口）；**更新历史改为同版本小节覆盖**（不再重复追加，历史重复可用 `sudo ysm-admin cleanup-history` 一次性清理）；新增 `sudo ysm-admin check` 邮件链路体检（含 php-fpm 是否注入 `YSM_SMTP_PASS`）；超管后台新增"更新通知不可用"告警横幅；后台**隐藏已固定的音乐预设项**（歌单 ID / 默认播放歌曲 / Cookies）。
 
@@ -221,32 +222,35 @@ ysm-admin log-verify               # 审计日志校验（应为通过）
 
 **改了线上文件又被还原了？** 正常。守护进程盯着核心文件，手动改动会被当作篡改秒级还原。要改功能就走"本地改 → 打包 → 更新"的流程。
 
-**SMTP 没配置也能收到邮件吗？** 收不到。告警/更新通知都走 SMTP。**授权码不存放在后台**——安装时写入服务器（php-fpm 环境变量），后台「邮件设置」只能改服务器/端口/账号/发件人并发送测试邮件，**授权码本身需在服务器上修改**（见下方「邮件告警」一节）；没配的话失败会记录到服务器日志，不阻断系统运行。
+**SMTP 没配置也能收到邮件吗？** 收不到。告警/更新通知都走 SMTP。**授权码不存放在后台**——安装时写入服务器（Web 端经 php-fpm 注入，存于 root-only 独立文件），后台「邮件设置」只能改服务器/端口/账号/发件人并发送测试邮件，**授权码本身需在服务器上修改**（见下方「邮件告警」一节）；没配的话失败会记录到服务器日志，不阻断系统运行。
 
 ## 邮件告警（SMTP 授权码加密）
 
-告警、更新通知、注册验证码、每日审计报告都走 SMTP 直连发送。按「密钥不落盘」原则，**授权码（密码）不在后台保存、显示或修改**，由服务器侧提供，优先级从上到下：
+告警、更新通知、注册验证码、每日审计报告都走 SMTP 直连发送。**授权码（密码）不在后台保存、显示或修改**，由服务器侧提供，优先级从上到下：
 
 | 来源 | 位置 | 说明 |
 |---|---|---|
-| ① 环境变量（推荐） | php-fpm pool 配置 `env[YSM_SMTP_PASS]` | root 只读、Web 端不可见，Web 发信优先读它 |
-| ② config 表密文（兜底） | `data/ysm.db` config 表 `smtp_pass` | AES-256-GCM 加密存储（`gcm:` 前缀，密钥由独立应用密钥派生），仅未配置环境变量时生效，供旧部署平滑过渡 |
+| ① php-fpm 环境注入（推荐） | `/etc/php/<ver>/fpm/pool.d/zz-ysm-secret.conf`（`env[YSM_SMTP_PASS]`，0600 root:root） | Web 发信读它；与主配置 `www.conf` 分离（php-fpm 经 `pool.d/*.conf` 自动加载），root 只读、Web 端不可见 |
+| ② config 表密文（兜底） | `data/ysm.db` config 表 `smtp_pass` | AES-256-GCM 加密存储（`gcm:` 前缀，密钥由独立应用密钥派生），仅未配置环境注入时生效，供旧部署平滑过渡 |
 | ③ 服务器密钥文件 | `/opt/you-super-markdown/secrets/smtp_pass` | root 0600，CLI（ysm-admin）与守护进程告警场景使用 |
 
-后台「邮件设置」只允许修改 **SMTP 服务器 / 端口 / 发信账号 / 发件人 / 加密方式**，并显示当前授权码来源状态（环境变量 ✅ / config 密文 ⚠️ / 密钥文件 ✅ / 未配置 ❌）；**授权码本身不可见、不可在后台修改**。
+后台「邮件设置」只允许修改 **SMTP 服务器 / 端口 / 发信账号 / 发件人 / 加密方式**，并显示当前授权码来源状态（php-fpm 环境注入 ✅ / config 密文 ⚠️ / 密钥文件 ✅ / 未配置 ❌）；**授权码本身不可见、不可在后台修改**。
 
-**修改授权码**需在服务器上操作（推荐方式）：
+**修改授权码**需在服务器上操作：
 
 ```bash
-# 方式一：改 php-fpm pool 配置中的 env[YSM_SMTP_PASS] 后重载（Web 发信立即生效）
-sudo nano /etc/php/8.3/fpm/pool.d/www.conf   # 找到 env[YSM_SMTP_PASS] = "旧码"，换成新码
+# 推荐：一条命令更新 CLI 密钥文件与 Web 端 root-only 独立文件，并重载 php-fpm
+sudo ysm-admin set-smtp-pass
+
+# 也可只改 Web 端：编辑 root-only 独立文件（0600 root:root），不要写进主配置 www.conf
+sudoedit /etc/php/8.3/fpm/pool.d/zz-ysm-secret.conf   # env[YSM_SMTP_PASS] = "新码"
 sudo systemctl reload php8.3-fpm
 
-# 方式二：写 root 密钥文件（CLI/守护进程告警场景；Web 端仍优先环境变量）
+# 或只改 CLI/守护进程用的 root 密钥文件
 sudo tee /opt/you-super-markdown/secrets/smtp_pass <<< "新授权码"
 ```
 
-安装时（`ysm-install.sh`）交互填写的发信账号 + 授权码会自动写入 php-fpm 环境变量与密钥文件，后台无需再填。
+安装时（`ysm-install.sh`）交互填写的发信账号 + 授权码会自动写入 root-only 独立文件（Web 端）与密钥文件（CLI），后台无需再填。
 
 ## 二次开发与自定义
 
@@ -262,7 +266,7 @@ sudo tee /opt/you-super-markdown/secrets/smtp_pass <<< "新授权码"
 | 主题色与深浅色变量 | `css/style.css` 的 `:root` 与 `[data-theme="dark"]` 覆盖 | 品牌色由 `--accent-hue / --accent-sat / --accent-lightness` 派生；底色/文字/边框等为 `--bg / --surface / --border / --text / --text-secondary / --text-muted / --code-bg` 等；暗色模式在 `[data-theme="dark"]` 内覆盖同名变量（另有 `body[data-text-contrast="light"]` 用于背景图偏暗时整页切换白字） |
 | 背景图机制 | `body` 数据属性驱动，前端 `applyBg` 读取 | `data-bg-type`（`none`/`image`/`api` 等）、`data-bg-image`、`data-bg-api-url`、`data-bg-blur` / `data-bg-blur-level`、`data-bg-card-opacity`；运行时映射为 CSS 变量 `--bg-url`、`--bg-blur-level`、`--bg-card-opacity` 并切换 `bg-blur`/`bg-active`/`data-text-contrast` |
 | 音乐播放器（多平台歌单） | 后台「音乐设置」，存 `config` 表 | `music_playlist_id`（默认热歌榜）、`music_cookies`、`music_auto_play`；平台侧接口在 `music/`（`netease.php` / `qq.php` / `kugou.php`），平台与榜单切换在前端完成、播放地址懒解析 |
-| SMTP / 告警 | `config` 表 `smtp_host` / `smtp_port` / `smtp_user` / `smtp_pass`（密文）/ `smtp_from` / `smtp_enc`；CLI `sudo ysm-admin set-smtp-pass` | 授权码遵循「密钥不落盘」：优先 php-fpm 环境变量 `YSM_SMTP_PASS`，其次 `config` 表密文，再次服务器密钥文件 `secrets/smtp_pass` |
+| SMTP / 告警 | `config` 表 `smtp_host` / `smtp_port` / `smtp_user` / `smtp_pass`（密文）/ `smtp_from` / `smtp_enc`；CLI `sudo ysm-admin set-smtp-pass` | 口令口径：CLI/守护进程用 root-only 密钥文件 `secrets/smtp_pass`(0600) + 临时环境变量，不落盘；Web 端由 php-fpm 经 root-only 独立文件 `zz-ysm-secret.conf`(0600) 注入（`config` 表密文仅作旧部署兜底） |
 | 数据目录 | 根目录 `data/` | 文章 `data/articles/*.md`、数据库 `data/ysm.db`、`data/images`、`data/videos`、`data/bg`、`data/bgm`、`data/avatars`、`data/cache`；**更新包永远不含 `data/`** |
 | 更新与打包 | 发包侧脚本 + 服务器 CLI | 发包侧用 `sign_update_package.py` 对更新包签名、用 `trigger_server_update.py` 触发服务器更新；服务器端由 `sudo ysm-admin apply-update` 校验签名与逐文件哈希后应用 |
 

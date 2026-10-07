@@ -2110,7 +2110,8 @@ YSMPATH
         echo "  Hfish 管理面板隧道已建立"
         echo "============================================"
         echo ""
-        echo "  本地访问地址: http://127.0.0.1:${PANEL_PORT}"
+        echo "  本地访问地址: https://127.0.0.1:${PANEL_PORT}/web/"
+        echo "  （HFish 控制台为 HTTPS，且路径必须带 /web/；首次打开提示证书不受信任，选择继续即可）"
         echo ""
         echo "  请在本地浏览器中打开上述地址"
         echo "  按 Ctrl+C 关闭隧道"
@@ -2134,10 +2135,18 @@ YSMPATH
         fi
         echo ""
         echo "服务状态:"
-        if systemctl is-active --quiet hfish 2>/dev/null; then
-            echo "  hfish.service: 运行中"
+        # HFish 官方脚本用 crontab + nohup 托管，无 systemd 单元
+        if systemctl is-active --quiet hfish 2>/dev/null || pgrep -f '/hfish' > /dev/null 2>&1; then
+            echo "  hfish 进程: 运行中"
+            _hfpid=$(pgrep -f 'hfish-server' | head -1)
+            [ -n "$_hfpid" ] && echo "  hfish-server PID: ${_hfpid}"
+            _hfcfg="/usr/share/hfish/config.toml"
+            [ -f "$_hfcfg" ] || _hfcfg="/opt/hfish/config.toml"
+            if [ -f "$_hfcfg" ]; then
+                echo "  监听绑定: $(grep -E 'web_addr|api_addr' "$_hfcfg" | tr -d ' ' | tr '\n' ' ')"
+            fi
         else
-            echo "  hfish.service: 未运行"
+            echo "  hfish 进程: 未运行"
         fi
         ;;
 

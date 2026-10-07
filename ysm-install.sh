@@ -1050,35 +1050,50 @@ PORTCONF
     }
 
     sleep 3
-    if systemctl is-active --quiet hfish 2>/dev/null || pgrep -x hfish > /dev/null 2>&1; then
+    if systemctl is-active --quiet hfish 2>/dev/null || pgrep -f '/hfish' > /dev/null 2>&1; then
         log "Hfish 蜜罐服务已启动"
         HFISH_INSTALLED=true
-        # 确保 systemd 托管（官方脚本可能仅用 nohup/crontab，此处统一规范管理）
-        if [ -f /etc/systemd/system/hfish.service ]; then
-            systemctl enable hfish > /dev/null 2>&1 || true
-        fi
         # 自动配置蜜獾账户：名称改为 hfish_user，密码与服务器一致
         configure_hfish_account "$HFISH_USER" "$HFISH_PASSWORD"
         # 设计指标：管理面板仅本机可访问，需经 SSH 隧道（ysm-admin hfish-panel），不提供公网 URL
         info "Hfish 管理面板: 仅本机访问（SSH 隧道 → sudo ysm-admin hfish-panel）"
         info "蜜獾账户: $HFISH_USER（密码已配置，登录后请妥善保管）"
     else
-        warn "Hfish 服务启动失败，请检查: systemctl status hfish"
+        warn "Hfish 服务启动失败（HFish 由 crontab '* * * * * /opt/hfish/hfish' 托管，非 systemd）"
         HFISH_INSTALLED=false
     fi
 
-    # 防火墙配置
-    # 设计指标：管理面板端口（HFISH_PANEL_PORT）不开放公网，仅经 ysm-admin hfish-panel SSH 隧道本机访问；
-    # 节点通信端口为蜜罐诱饵/节点通道，需公网可达才能捕获攻击者（蜜罐本意：故意暴露的诱饵），故放行
+    # 面板绑定回环（进程层硬锁）：web_addr → 127.0.0.1:PORT，即使防火墙误开公网也连不上。
+    # 【警告】api_addr 绝不可写主机名——HFish 用 clients.server_addr 主机段 + api_addr 字符串拼接
+    # 节点上报 URL，写成 "127.0.0.1:4434" 会拼成 "https://127.0.0.1127.0.0.1:4434" 导致蜜罐上报中断
+    # （线上实测踩坑）。故仅锁 web_addr；api_addr 保持 ":PORT"（绑定 0.0.0.0，由防火墙兜底封锁）。
+    _HFISH_CFG="/usr/share/hfish/config.toml"
+    [ -f "$_HFISH_CFG" ] || _HFISH_CFG="/opt/hfish/config.toml"
+    if [ -f "$_HFISH_CFG" ]; then
+        sed -i -E "s|^[[:space:]]*web_addr[[:space:]]*=.*|    web_addr = \"127.0.0.1:${HFISH_PANEL_PORT}\"|" "$_HFISH_CFG"
+        sed -i -E "s|^[[:space:]]*api_addr[[:space:]]*=.*|    api_addr = \":${HFISH_NODE_PORT}\"|" "$_HFISH_CFG"
+        # HFish 非 systemd 托管（官方脚本用 crontab + nohup），按进程方式重启以生效
+        pkill -9 -f '/hfish' > /dev/null 2>&1 || true
+        sleep 2
+        ( cd /opt/hfish && nohup ./hfish > /dev/null 2>&1 & ) > /dev/null 2>&1 || true
+        log "Hfish 面板已绑定回环 127.0.0.1:${HFISH_PANEL_PORT}（进程层硬锁，公网不可达）"
+    else
+        warn "未找到 HFish config.toml，跳过面板回环绑定（面板可能仍监听公网）"
+    fi
+
+    # 防火墙：放行【诱饵端口】——蜜罐本意是故意暴露的假服务，用于诱捕扫描/爆破；
+    # 管理面板端口（已回环绑定）与节点通信端口（单机内置节点走 loopback）一律不开放公网。
+    # 注意：云厂商安全组需另行放行这些诱饵端口（云侧无法脚本化）。
     log "配置 Hfish 防火墙规则..."
-    ufw allow "${HFISH_NODE_PORT}/tcp" comment 'Hfish node' > /dev/null 2>&1 || true
-    # 清理历史残留：旧版安装脚本（≤v2.2.x）曾把面板端口放行到公网，
-    # 此处主动删除（默认 4433 + 当前面板端口），确保旧服务器升级/重装后面板仍仅经 SSH 隧道本机可达
-    for _p in "${HFISH_PANEL_PORT}" 4433; do
+    for _dp in 445 135 139 1433 3389 6379 7879 8080 8081 9000 9200; do
+        ufw allow "${_dp}/tcp" comment 'HFish decoy' > /dev/null 2>&1 || true
+    done
+    # 清理历史残留/易误开端口：面板端口与节点端口都不放行公网
+    for _p in "${HFISH_PANEL_PORT}" 4433 "${HFISH_NODE_PORT}" 4434; do
         ufw delete allow "${_p}/tcp" > /dev/null 2>&1 || true
     done
     ufw reload > /dev/null 2>&1 || true
-    log "Hfish 防火墙规则已配置（管理面板端口 ${HFISH_PANEL_PORT} 不开放公网，仅 SSH 隧道访问）"
+    log "Hfish 防火墙已配置（放行 11 个诱饵端口；面板 ${HFISH_PANEL_PORT} 与节点 ${HFISH_NODE_PORT} 不开放公网）"
 }
 
 # 自动配置蜜獾账户（用户名 + 密码，bcrypt 存储，兼容 HFish Go 校验）

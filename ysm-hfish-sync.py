@@ -51,7 +51,13 @@ def load_site_config():
 
 
 def read_hfish_attacks(db_path):
-    """只读读取 ip_profile 攻击者画像，返回列表"""
+    """只读读取 ip_profile 攻击者画像，返回列表。
+
+    v5.4.13：**按 IP 聚合**——HFish 的 ip_profile 对同一 IP 可能有多行（不同日期各一行），
+    实测 3218 行中有 174 个 IP 重复（如某 IP 同时存在 attack_cnt=12 与 =94 两行）。
+    旧写法逐行返回会导致：① 同一 IP 在一次同步里被处理两次（重复写入）；② 等级按"最后一行"决定，
+    可能把该 IP 按 L1 而非 L2 处置。现改为同一 IP **只保留 attack_cnt 最大的一行**。
+    """
     result = []
     if not os.path.exists(db_path):
         return result, '数据库不存在: ' + db_path
@@ -61,20 +67,26 @@ def read_hfish_attacks(db_path):
         cur.execute("SELECT ip, date, attack_cnt, attack_styles_cnt, attack_honeypots_cnt, "
                     "attack_nodes_cnt, attacker_uas, attacker_hosts, attacker_accounts "
                     "FROM ip_profile")
+        best = {}
         for row in cur.fetchall():
-            result.append({
-                'ip': row[0] or '',
+            ip = row[0] or ''
+            cnt = int(row[2] or 0)
+            prev = best.get(ip)
+            if prev is not None and int(prev['attack_cnt']) >= cnt:
+                continue  # 已有更高（或相等）攻击次数的行，跳过
+            best[ip] = {
+                'ip': ip,
                 'date': str(row[1] or ''),
-                'attack_cnt': int(row[2] or 0),
+                'attack_cnt': cnt,
                 'styles': _parse_json(row[3]),
                 'honeypots': _parse_json(row[4]),
                 'nodes': _parse_json(row[5]),
                 'uas': _parse_json(row[6]),
                 'hosts': _parse_json(row[7]),
                 'accounts': _parse_json(row[8]),
-            })
+            }
         con.close()
-        return result, None
+        return list(best.values()), None
     except Exception as e:
         return result, '读取蜜罐数据库失败: %s' % e
 

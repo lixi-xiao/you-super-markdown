@@ -1323,22 +1323,45 @@ def periodic_hfish_thread():
             log(f"蜜罐同步失败: {e}")
 
 
-def periodic_alert_digest_thread():
-    """v5.4.11：联动封锁告警汇总线程（每 1 小时一封；无事件不发信）。
+def _alert_digest_pending():
+    """v5.4.12：轻量判断——是否存在未发送的汇总记录。
 
-    L1/L1.5/L2 的封锁告警改为入队，由本线程每小时调用 ysm-admin alert-digest 合并发送，
-    避免"每个 IP 每个等级一封"的邮件洪水；L3（永久封禁）仍即时发信。
+    性能优化：每 30 秒巡检若直接 spawn 一次 PHP（≈2880 次/天）过于浪费；
+    此处仅做一次本地 SQLite COUNT（走 sent 索引），**只有在有待发记录时才调用 CLI**，
+    空闲期零进程开销。
     """
+    db = os.path.join(WEB_ROOT, 'data', 'ysm.db')
+    if not os.path.exists(db):
+        return False
+    try:
+        con = sqlite3.connect('file:%s?mode=ro' % db, uri=True)
+        n = con.execute("SELECT COUNT(*) FROM alert_digest WHERE sent = 0").fetchone()[0]
+        con.close()
+        return int(n) > 0
+    except Exception:
+        return False
+
+
+def periodic_alert_digest_thread():
+    """v5.4.12：联动封锁告警汇总调度线程（每 30 秒巡检一次）。
+
+    两种通道（判定逻辑在 PHP `alertDigestTick()` 内，本线程只负责触发，绝不发信本身）：
+      ① 突发快速通道：近 5 分钟新增封锁 ≥5 条且过了冷却期 → **立刻**汇总发出（延迟 ≤30 秒）；
+      ② 常规通道：距上次汇总满 1 小时 → 汇总发出（无记录不发信）。
+    「决策 + 发信」全部在 CLI 进程内完成，**绝不占用网页请求线程**——避免攻击期 SMTP 阻塞拖慢站点。
+    """
+    time.sleep(30)
     while running:
-        time.sleep(3600)
         try:
-            r = subprocess.run(['/usr/local/bin/ysm-admin', 'alert-digest'],
-                               capture_output=True, timeout=60)
-            out = (r.stdout or b'').decode('utf-8', 'ignore').strip()
-            if out and out != 'NO_EVENTS':
-                log(f"联动封锁汇总: {out}")
+            if _alert_digest_pending():
+                r = subprocess.run(['/usr/local/bin/ysm-admin', 'alert-digest', '--auto'],
+                                   capture_output=True, timeout=60)
+                out = (r.stdout or b'').decode('utf-8', 'ignore').strip()
+                if out and out not in ('NO_EVENTS', 'WAIT'):
+                    log(f"联动封锁汇总: {out}")
         except Exception as e:
             log(f"联动封锁汇总失败: {e}")
+        time.sleep(30)
 
 
 def run_inotify_watch():

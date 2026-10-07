@@ -332,6 +332,7 @@ ysm-admin show-paths
 | `ysm-admin audit-report` | 生成并发送每日审计报告邮件 | ✅ |
 | `ysm-admin challenge` | 生成敏感操作确认码（300 秒、单次） | ✅ |
 | `ysm-admin notify "<消息>"` | 发送通知邮件到管理员邮箱 | ✅ |
+| `ysm-admin alert-digest` | 联动封锁告警汇总（L1/L1.5/L2 每小时一封、无事件不发；L3 仍即时） | ✅ |
 | `ysm-admin set-smtp-pass [--pass=<授权码>]` | 修改 SMTP 授权码（CLI 密钥文件 + root-only 独立文件 `zz-ysm-secret.conf`，重载 php-fpm） | ✅ |
 | `ysm-admin set-channel <stable\|beta>`（别名 `channel`） | 切换更新通道（stable=仅正式 Release / beta=含预发布） | — |
 | `ysm-admin check [--no-mail]` | 体检：超管邮箱 / SMTP / 口令落盘巡检（www.conf 无残留、root-only 独立文件 600、池目录无含口令备份）/ 能否发测试邮件 | — |

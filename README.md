@@ -173,6 +173,7 @@ ysm-admin log-verify               # 审计日志校验（应为通过）
 | `ysm-admin status` | 查看服务/守护状态 | 只读 |
 | `ysm-admin log-verify` | 校验审计日志有没有被动手脚 | 只读 |
 | `sudo ysm-admin audit-report` | 发送每日审计报告邮件 | 服务器每天凌晨自动跑 |
+| `sudo ysm-admin alert-digest` | 联动封锁告警汇总（L1/L1.5/L2 每小时一封；无事件不发，L3 仍即时） | 守护进程每小时自动跑 |
 | `sudo ysm-admin challenge` | 生成敏感操作确认码 | 更新前用 |
 | `sudo ysm-admin apply-update` | 执行更新（最后一步） | 见下方更新流程 |
 | `sudo ysm-admin rollback` | 回滚到上一个备份 | 更新翻车时用 |

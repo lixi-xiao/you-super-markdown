@@ -1,6 +1,6 @@
 {
   "app_name": "You Super Markdown",
-  "version": "5.4.9",
+  "version": "5.4.10",
   "repo_owner": "lixi-xiao",
   "repo_name": "you-super-markdown",
   "repo_url": "https://github.com/lixi-xiao/you-super-markdown",
@@ -9,6 +9,8 @@
   "site_url": "",
   "hfish_user": "xiao",
   "hfish_ban_threshold": 10,
+  "hfish_l2_cnt": 50,
+  "hfish_l3_cnt": 200,
   "hfish_ban_skip_private": true,
   "hfish_db_path": "/usr/share/hfish/database/hfish.db"
 }

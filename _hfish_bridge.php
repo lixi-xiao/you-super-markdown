@@ -25,6 +25,7 @@ if (!file_exists($utilsPath)) {
 }
 require_once $utilsPath;
 
-// 写入威胁事件并触发联动封锁升级
-logThreat('hfish_attack', $ip, '', 86400);  // 24h 去重窗口
-echo "OK: hfish_attack logged for $ip\n";
+// v5.4.10：仅触发联动封锁升级检查（事件已由 ysm-hfish-sync.py 按攻击次数分级写入，
+// 此处若再 logThreat 会造成评分叠加越级，故改为直接调用 maybeLinkedBlock）
+maybeLinkedBlock('ip', $ip);
+echo "OK: linked-block escalation checked for $ip\n";

@@ -122,27 +122,47 @@ def is_private_ip(ip):
         return False
 
 
-def apply_ban(ip, threshold):
-    """v4.8.0：攻击次数达到阈值 → 写入 threat_events 表走联动封禁（不再直接写 bans 表）"""
+def hfish_tier(cnt, l1_cnt, l2_cnt, l3_cnt, w_l1, w_l2, w_l3):
+    """按蜜罐攻击次数定级：返回 (等级名, 联动权重)。等级对应联动封锁 L1(15min)/L2(24h)/L3(永久)"""
+    if cnt >= l3_cnt:
+        return 'L3', w_l3
+    if cnt >= l2_cnt:
+        return 'L2', w_l2
+    if cnt >= l1_cnt:
+        return 'L1', w_l1
+    return '', 0
+
+
+def apply_ban(ip, weight):
+    """v5.4.10：按攻击次数分级封禁 → 以【对应等级的权重】写入单条 hfish_attack 事件。
+
+    关键修复：旧版权重恒为 20 且带 24h 去重，单 IP 评分上限 20，永远够不到 L1(线上 50)，
+    蜜罐数据"只进不出、从不封禁"。现改为"先清该 IP 旧 hfish_attack 事件、再写当前等级权重"，
+    保证评分恒等于当前等级（既不累加越级，也不因去重而失效）。
+    事件超过 12h 会刷新时间戳，避免威胁评分衰减（threat_decay_days）把等级削弱。
+    """
+    if weight <= 0:
+        return False
     try:
         con = sqlite3.connect(DB_FILE)
         now = int(time.time())
-        # 写入 threat_events 表（hfish_attack 事件，权重 20，24h 去重窗口）
         cur = con.cursor()
-        cur.execute(
-            "SELECT 1 FROM threat_events WHERE dim_type='ip' AND dim_key=? AND reason='hfish_attack' AND created > ? LIMIT 1",
-            (ip, now - 86400))
-        if cur.fetchone():
+        row = cur.execute(
+            "SELECT weight, created FROM threat_events WHERE dim_type='ip' AND dim_key=? AND reason='hfish_attack' LIMIT 1",
+            (ip,)).fetchone()
+        if row and int(row[0]) == weight and (now - int(row[1] or 0)) < 43200:
             con.close()
-            return False  # 24h 内已有 HFish 事件，不再重复写入
+            return False  # 等级未变且事件新鲜，无需重写
+        cur.execute(
+            "DELETE FROM threat_events WHERE dim_type='ip' AND dim_key=? AND reason='hfish_attack'", (ip,))
         import binascii, os as _os
         event_id = binascii.hexlify(_os.urandom(8)).decode('ascii')
         cur.execute(
             "INSERT INTO threat_events (id, dim_type, dim_key, weight, reason, created) VALUES (?,?,?,?,?,?)",
-            (event_id, 'ip', ip, 20, 'hfish_attack', now))
+            (event_id, 'ip', ip, weight, 'hfish_attack', now))
         con.commit()
         con.close()
-        # 调用 PHP 桥接脚本触发 maybeLinkedBlock 升级检查
+        # 调用 PHP 桥接脚本触发 maybeLinkedBlock 升级检查（仅触发，不重复写事件）
         bridge = os.path.join(WEB_ROOT, '_hfish_bridge.php')
         if os.path.exists(bridge):
             subprocess.run(['php', bridge, ip], capture_output=True, timeout=30)
@@ -177,8 +197,17 @@ def main():
     }
 
     # 封禁检查（支持内网 IP 豁免，避免内网测试环境误封真实访客）
+    # v5.4.10：按攻击次数分级——阈值→L1(15min) / l2_cnt→L2(24h) / l3_cnt→L3(永久)
     newly_banned = []
     skip_private = bool(cfg.get('hfish_ban_skip_private', True))
+    l2_cnt = int(cfg.get('hfish_l2_cnt', 50) or 50)
+    l3_cnt = int(cfg.get('hfish_l3_cnt', 200) or 200)
+    w_l1 = int(cfg.get('threat_l1', 40) or 40)
+    w_l2 = int(cfg.get('threat_l2', 150) or 150)
+    w_l3 = int(cfg.get('threat_l3', 250) or 250)
+    snapshot['l1_cnt'] = threshold
+    snapshot['l2_cnt'] = l2_cnt
+    snapshot['l3_cnt'] = l3_cnt
     if err is None:
         for a in attacks:
             if a['attack_cnt'] >= threshold:
@@ -187,8 +216,10 @@ def main():
                     a['skip'] = True
                     a['skip_reason'] = '内网/链路本地地址豁免'
                     continue  # 内网/私有 IP 豁免，仅记录不自动封禁
-                if apply_ban(a['ip'], threshold):
-                    newly_banned.append(a['ip'])
+                level, weight = hfish_tier(a['attack_cnt'], threshold, l2_cnt, l3_cnt, w_l1, w_l2, w_l3)
+                a['level'] = level
+                if apply_ban(a['ip'], weight):
+                    newly_banned.append('%s(%s)' % (a['ip'], level))
 
     # 标记封禁状态（供后台展示）
     bans = load_bans()

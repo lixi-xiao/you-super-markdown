@@ -986,6 +986,18 @@ case "${1:-}" in
         fi
         ;;
 
+    alert-digest)
+        # v5.4.11：联动封锁告警汇总（L1/L1.5/L2 合并为一封；由守护进程每小时调用，亦可手动执行测试）
+        # 输出：OK / NO_EVENTS（无告警不发信）/ NO_ADMIN_EMAIL / NO_SMTP / SMTP_FAIL:...
+        SMTP_PASS_FILE="/opt/you-super-markdown/secrets/smtp_pass"
+        if [ -f "$SMTP_PASS_FILE" ]; then
+            YSM_SMTP_PASS="$(cat "$SMTP_PASS_FILE")" php -r "require_once '$WEB_ROOT/utils.php'; echo sendAlertDigest();"
+            echo ""
+        else
+            echo "NO_SMTP_SECRET"
+        fi
+        ;;
+
     challenge)
         CODE=$(openssl rand -hex 3)
         EXPIRES=$(date -d "+300 seconds" +%s 2>/dev/null || echo $(($(date +%s) + 300)))
@@ -2154,6 +2166,7 @@ YSMPATH
         echo "  audit-report              每日审计报告（校验结果经 SMTP 发送给管理员）"
         echo "  challenge                 生成挑战码"
         echo "  notify <消息>              发送通知邮件到管理员（测试/更新/运维消息）"
+        echo "  alert-digest              联动封锁告警汇总（L1/L1.5/L2 每小时一封；无事件不发；L3 仍即时）"
         echo "  set-smtp-pass [--pass=授权码] 修改 SMTP 授权码（需 sudo；写 root-only 独立密钥文件 zz-ysm-secret.conf，自动发测试邮件）"
         echo "  apply-update [--allow-unsigned] 执行系统更新（完成后自动发通知邮件；--allow-unsigned 为一次性受控引导，未部署签名公钥时慎用）"
         echo "  deps                      检查并一键补装功能依赖（内置兜底清单，需 sudo；更新时自动按包内 deps 声明安装）"

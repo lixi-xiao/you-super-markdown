@@ -2225,7 +2225,88 @@ function maybeAlertLock($dimType, $dimKey, $score, $level) {
         [$dimType, $dimKey, time() - (int)threatCfg('threat_window', 86400)]);
     $summary = '';
     foreach ($rows as $r) $summary .= $r['reason'] . '×' . $r['c'] . '；';
-    notifyThreatAlert($dimType, $dimKey, $score, $level, rtrim($summary, '；'));
+    $summary = rtrim($summary, '；');
+    // v5.4.11：L3（永久封禁）保留即时通知；L1/L1.5/L2 入汇总队列，由守护进程每小时合并发一封（无事件不发）
+    if ($level === 'L3') {
+        notifyThreatAlert($dimType, $dimKey, $score, $level, $summary);
+        return;
+    }
+    db_exec('INSERT INTO alert_digest (dim_type, dim_key, level, score, summary, created, sent) VALUES (?,?,?,?,?,?,0)',
+        [$dimType, $dimKey, $level, (int)$score, $summary, time()]);
+}
+
+/**
+ * v5.4.11：联动封锁告警汇总——把队列内未发送的 L1/L1.5/L2 记录合并为一封邮件（每小时由守护进程调用）。
+ * 无记录即不发信；按等级分组列出「IP + 评分 + 原因摘要」；单封最多 50 条，超出在底部提示到服务器查看详情；
+ * 发送成功后标记 sent 并清理 7 天前的已发送记录。
+ * @return string OK / NO_EVENTS / NO_ADMIN_EMAIL / NO_SMTP / SMTP_FAIL:...
+ */
+function sendAlertDigest() {
+    $config = loadSiteConfig();
+    $adminEmail = trim($config['admin_email'] ?? '');
+    if ($adminEmail === '' || !email_valid($adminEmail)) return 'NO_ADMIN_EMAIL';
+    // 清理 7 天前已发送记录
+    db_exec('DELETE FROM alert_digest WHERE sent = 1 AND created < ?', [time() - 7 * 86400]);
+    $rows = db_all('SELECT id, dim_type, dim_key, level, score, summary FROM alert_digest WHERE sent = 0 ORDER BY created ASC', []);
+    if (!$rows) return 'NO_EVENTS';
+
+    $levelOrder = ['L3' => 3, 'L2' => 2, 'L1.5' => 1, 'L1' => 0];
+    $levelName = ['L3' => '永久封禁', 'L2' => '24 小时', 'L1.5' => '6 小时', 'L1' => '15 分钟'];
+    usort($rows, function ($a, $b) use ($levelOrder) {
+        $d = ($levelOrder[$b['level']] ?? -1) <=> ($levelOrder[$a['level']] ?? -1);
+        return $d !== 0 ? $d : ((int)$b['score'] <=> (int)$a['score']);
+    });
+
+    $total = count($rows);
+    $maxList = 50;
+    $shown = array_slice($rows, 0, $maxList);
+    $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+
+    $groups = [];
+    foreach ($shown as $r) { $groups[$r['level']][] = $r; }
+    $html = '';
+    $plain = '';
+    foreach ($levelOrder as $lv => $_) {
+        if (empty($groups[$lv])) continue;
+        $cnt = count($groups[$lv]);
+        $label = $lv . '（' . $levelName[$lv] . '）';
+        $html .= '<div style="margin:18px 0 8px;font-weight:700;color:#b91c1c;">' . $e($label) . ' · ' . $cnt . ' 条</div>';
+        $html .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;color:#334155;border-collapse:collapse;">';
+        $plain .= $label . ' · ' . $cnt . " 条\n";
+        foreach ($groups[$lv] as $r) {
+            $sum = ($r['summary'] ?? '') !== '' ? $r['summary'] : '—';
+            $sc = (int)$r['score'];
+            $html .= '<tr><td style="padding:6px 8px;border-bottom:1px solid #eef1f6;width:150px;word-break:break-all;">' . $e($r['dim_key']) . '</td>'
+                   . '<td style="padding:6px 8px;border-bottom:1px solid #eef1f6;width:56px;color:#b91c1c;">' . $sc . '</td>'
+                   . '<td style="padding:6px 8px;border-bottom:1px solid #eef1f6;color:#64748b;">' . $e($sum) . '</td></tr>';
+            $plain .= '  ' . $r['dim_key'] . '  评分' . $sc . '  ' . $sum . "\n";
+        }
+        $html .= '</table>';
+    }
+    if ($total > $maxList) {
+        $more = sprintf('另有 %d 条未在本邮件列出，请到服务器查看详情（超管后台「联动风控」或 sudo ysm-admin）。', $total - $maxList);
+        $html .= '<div style="margin-top:16px;color:#94a3b8;font-size:12.5px;">' . $e($more) . '</div>';
+        $plain .= "\n" . $more . "\n";
+    }
+
+    $site = $config['site_title'] ?? 'You Super Markdown';
+    $head = sprintf('本小时新增联动封锁 %d 条（L1/L1.5/L2 按等级合并汇报；L3 永久封禁仍即时通知）。', $total);
+    $detailHtml = '<div style="color:#475569;">' . $e($head) . '</div>' . $html;
+    $plainFull = $head . "\n\n" . $plain;
+    $subject = "[{$site} 告警] 联动封锁汇总（{$total} 条）";
+    $bhtml = renderMailHtml($site, '告警', $plainFull, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')], $detailHtml, '联动封锁汇总');
+
+    $smtp = getSmtpConfig();
+    if ($smtp['host'] === '' || $smtp['user'] === '' || $smtp['pass'] === '') {
+        logAlertFail('联动封锁汇总：SMTP 未配置，队列保留待下次');
+        return 'NO_SMTP';
+    }
+    [$ok, $err] = sendSmtpMail($adminEmail, $subject, $plainFull, $bhtml);
+    if (!$ok) { logAlertFail('联动封锁汇总发送失败: ' . $err); return 'SMTP_FAIL: ' . $err; }
+
+    $ids = array_map(function ($r) { return (int)$r['id']; }, $rows);
+    db_exec('UPDATE alert_digest SET sent = 1 WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')', $ids);
+    return 'OK';
 }
 /** 联动封锁邮件告警（发往 admin_email；SMTP 未配置回退 ysm-alert 脚本；统一 HTML 模板红色告警系） */
 function notifyThreatAlert($dimType, $dimKey, $score, $level, $summary) {

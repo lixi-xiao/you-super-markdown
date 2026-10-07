@@ -1323,6 +1323,24 @@ def periodic_hfish_thread():
             log(f"蜜罐同步失败: {e}")
 
 
+def periodic_alert_digest_thread():
+    """v5.4.11：联动封锁告警汇总线程（每 1 小时一封；无事件不发信）。
+
+    L1/L1.5/L2 的封锁告警改为入队，由本线程每小时调用 ysm-admin alert-digest 合并发送，
+    避免"每个 IP 每个等级一封"的邮件洪水；L3（永久封禁）仍即时发信。
+    """
+    while running:
+        time.sleep(3600)
+        try:
+            r = subprocess.run(['/usr/local/bin/ysm-admin', 'alert-digest'],
+                               capture_output=True, timeout=60)
+            out = (r.stdout or b'').decode('utf-8', 'ignore').strip()
+            if out and out != 'NO_EVENTS':
+                log(f"联动封锁汇总: {out}")
+        except Exception as e:
+            log(f"联动封锁汇总失败: {e}")
+
+
 def run_inotify_watch():
     """使用 inotify 监控文件变化"""
     global last_audit_check
@@ -1362,6 +1380,10 @@ def run_inotify_watch():
     # 启动定时蜜罐同步线程
     hfish_thread = threading.Thread(target=periodic_hfish_thread, daemon=True)
     hfish_thread.start()
+
+    # v5.4.11：启动联动封锁告警汇总线程（每小时一封）
+    digest_thread = threading.Thread(target=periodic_alert_digest_thread, daemon=True)
+    digest_thread.start()
 
     # 启动自动备份与健康检测线程
     backup_thread = threading.Thread(target=periodic_backup_thread, daemon=True)
@@ -1410,6 +1432,10 @@ def run_polling_mode():
 
     hfish_thread = threading.Thread(target=periodic_hfish_thread, daemon=True)
     hfish_thread.start()
+
+    # v5.4.11：联动封锁告警汇总线程（每小时一封）
+    digest_thread = threading.Thread(target=periodic_alert_digest_thread, daemon=True)
+    digest_thread.start()
 
     backup_thread = threading.Thread(target=periodic_backup_thread, daemon=True)
     backup_thread.start()

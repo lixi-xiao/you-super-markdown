@@ -222,6 +222,13 @@ function db_init_schema($pdo) {
     $pdo->exec('CREATE TABLE IF NOT EXISTS unauthorized (
         ip TEXT, action TEXT, user TEXT, user_id TEXT, ua TEXT, time TEXT
     )');
+    // v5.4.11：联动封锁告警汇总队列——L1/L1.5/L2 入队由守护进程每小时合并发一封（无事件不发）；L3 永久封禁仍即时通知
+    $pdo->exec('CREATE TABLE IF NOT EXISTS alert_digest (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dim_type TEXT, dim_key TEXT, level TEXT, score INTEGER,
+        summary TEXT, created INTEGER, sent INTEGER DEFAULT 0
+    )');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_alert_digest_sent ON alert_digest(sent)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
     // v5.0.0：schema 版本表（迁移器据 schema_version/epoch 判断库结构版本，与业务 meta 分离）
     $pdo->exec('CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT)');

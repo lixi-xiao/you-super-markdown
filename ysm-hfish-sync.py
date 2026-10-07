@@ -162,13 +162,28 @@ def apply_ban(ip, weight):
             (event_id, 'ip', ip, weight, 'hfish_attack', now))
         con.commit()
         con.close()
-        # 调用 PHP 桥接脚本触发 maybeLinkedBlock 升级检查（仅触发，不重复写事件）
-        bridge = os.path.join(WEB_ROOT, '_hfish_bridge.php')
-        if os.path.exists(bridge):
-            subprocess.run(['php', bridge, ip], capture_output=True, timeout=30)
         return True
     except Exception:
         return False
+
+
+def flush_bridge(ips):
+    """v5.4.12：批量触发联动升级检查——**一次** PHP 进程处理全部 IP（走 stdin）。
+
+    此前写法是对每个 IP 各 spawn 一个 PHP 进程；蜜罐历史积压（实测 760~1000 个超阈值 IP）
+    在上线后首次同步会一次性起近千进程（每个还含同步 SMTP），把 2GB 小机器 CPU 打到 90%。
+    改为批量后进程数 O(1)。
+    """
+    if not ips:
+        return
+    bridge = os.path.join(WEB_ROOT, '_hfish_bridge.php')
+    if not os.path.exists(bridge):
+        return
+    try:
+        subprocess.run(['php', bridge], input='\n'.join(ips).encode('utf-8'),
+                       capture_output=True, timeout=180)
+    except Exception:
+        pass
 
 
 def find_hfish_db(cfg):
@@ -199,6 +214,7 @@ def main():
     # 封禁检查（支持内网 IP 豁免，避免内网测试环境误封真实访客）
     # v5.4.10：按攻击次数分级——阈值→L1(15min) / l2_cnt→L2(24h) / l3_cnt→L3(永久)
     newly_banned = []
+    changed_ips = []
     skip_private = bool(cfg.get('hfish_ban_skip_private', True))
     l2_cnt = int(cfg.get('hfish_l2_cnt', 50) or 50)
     l3_cnt = int(cfg.get('hfish_l3_cnt', 200) or 200)
@@ -220,6 +236,9 @@ def main():
                 a['level'] = level
                 if apply_ban(a['ip'], weight):
                     newly_banned.append('%s(%s)' % (a['ip'], level))
+                    changed_ips.append(a['ip'])
+    # v5.4.12：所有变更 IP 汇总后**一次**PHP 进程批量触发升级检查（不再每 IP 一个进程）
+    flush_bridge(changed_ips)
 
     # 标记封禁状态（供后台展示）
     bans = load_bans()

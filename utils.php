@@ -2270,18 +2270,18 @@ function sendAlertDigest() {
         if (empty($groups[$lv])) continue;
         $cnt = count($groups[$lv]);
         $label = $lv . '（' . $levelName[$lv] . '）';
-        $html .= '<div style="margin:18px 0 8px;font-weight:700;color:#b91c1c;">' . $e($label) . ' · ' . $cnt . ' 条</div>';
-        $html .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;color:#334155;border-collapse:collapse;">';
-        $plain .= $label . ' · ' . $cnt . " 条\n";
+        $html .= '<div style="margin:20px 0 4px;font-weight:700;color:#b91c1c;font-size:14px;">' . $e($label) . ' · ' . $cnt . ' 条</div>';
+        $plain .= "\n" . $label . ' · ' . $cnt . " 条\n";
         foreach ($groups[$lv] as $r) {
             $sum = ($r['summary'] ?? '') !== '' ? $r['summary'] : '—';
             $sc = (int)$r['score'];
-            $html .= '<tr><td style="padding:6px 8px;border-bottom:1px solid #eef1f6;width:150px;word-break:break-all;">' . $e($r['dim_key']) . '</td>'
-                   . '<td style="padding:6px 8px;border-bottom:1px solid #eef1f6;width:56px;color:#b91c1c;">' . $sc . '</td>'
-                   . '<td style="padding:6px 8px;border-bottom:1px solid #eef1f6;color:#64748b;">' . $e($sum) . '</td></tr>';
-            $plain .= '  ' . $r['dim_key'] . '  评分' . $sc . '  ' . $sum . "\n";
+            // v5.4.12：改用纯 div 排版——此前用 3 列表格 + 像素列宽，手机窄屏会把"原因摘要"挤成逐字竖排
+            $html .= '<div style="padding:9px 0;border-bottom:1px solid #eef1f6;">'
+                   . '<div style="color:#334155;font-size:13.5px;font-weight:600;word-break:break-all;">' . $e($r['dim_key']) . ' · 评分 ' . $sc . '</div>'
+                   . '<div style="color:#64748b;font-size:12.5px;margin-top:3px;word-break:break-all;overflow-wrap:anywhere;">' . $e($sum) . '</div>'
+                   . '</div>';
+            $plain .= '  ' . $r['dim_key'] . ' · 评分' . $sc . ' · ' . $sum . "\n";
         }
-        $html .= '</table>';
     }
     if ($total > $maxList) {
         $more = sprintf('另有 %d 条未在本邮件列出，请到服务器查看详情（超管后台「联动风控」或 sudo ysm-admin）。', $total - $maxList);
@@ -2306,7 +2306,38 @@ function sendAlertDigest() {
 
     $ids = array_map(function ($r) { return (int)$r['id']; }, $rows);
     db_exec('UPDATE alert_digest SET sent = 1 WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')', $ids);
+    // v5.4.12：记录最近一次汇总发出时间（整点节流依据）
+    db_exec('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', ['alert_digest_last', (string)time()]);
     return 'OK';
+}
+
+/**
+ * v5.4.12：汇总调度决策（由守护进程每 30 秒调用 `ysm-admin alert-digest --auto`）。
+ *  ① 突发快速通道：近 alert_burst_window(默认300) 秒内新增未发送封锁 ≥ alert_burst_count(默认5) 条，
+ *     且距上次突发发出 ≥ alert_burst_cooldown(默认1800) 秒 → 立刻把队列全部合成一封发出；
+ *  ② 常规通道：距上次汇总发出 ≥ alert_digest_interval(默认3600) 秒 → 汇总发出；
+ *  ③ 无待发记录 → 不发信。
+ * 决策与发信都在 CLI 进程内完成，绝不占用网页请求线程（避免攻击期 SMTP 阻塞拖慢站点）。
+ * @return string OK / NO_EVENTS / WAIT / NO_ADMIN_EMAIL / NO_SMTP / SMTP_FAIL:...
+ */
+function alertDigestTick() {
+    $pending = (int)(db_one('SELECT COUNT(*) AS c FROM alert_digest WHERE sent = 0', [])['c'] ?? 0);
+    if ($pending === 0) return 'NO_EVENTS';
+    $now  = time();
+    $win  = (int)threatCfg('alert_burst_window', 300);
+    $need = (int)threatCfg('alert_burst_count', 5);
+    $cool = (int)threatCfg('alert_burst_cooldown', 1800);
+    $recent = (int)(db_one('SELECT COUNT(*) AS c FROM alert_digest WHERE sent = 0 AND created > ?', [$now - $win])['c'] ?? 0);
+    $burstLast = (int)(db_one('SELECT value FROM meta WHERE key = ?', ['alert_burst_last'])['value'] ?? 0);
+    if ($recent >= $need && ($now - $burstLast) >= $cool) {
+        db_exec('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', ['alert_burst_last', (string)$now]);
+        return sendAlertDigest();   // 突发：立刻把队列全部合成一封发出（含各等级）
+    }
+    $last = (int)(db_one('SELECT value FROM meta WHERE key = ?', ['alert_digest_last'])['value'] ?? 0);
+    if (($now - $last) >= (int)threatCfg('alert_digest_interval', 3600)) {
+        return sendAlertDigest();
+    }
+    return 'WAIT';
 }
 /** 联动封锁邮件告警（发往 admin_email；SMTP 未配置回退 ysm-alert 脚本；统一 HTML 模板红色告警系） */
 function notifyThreatAlert($dimType, $dimKey, $score, $level, $summary) {

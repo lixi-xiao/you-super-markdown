@@ -1088,8 +1088,9 @@ PORTCONF
     for _dp in 445 135 139 1433 3389 6379 7879 8080 8081 9000 9200; do
         ufw allow "${_dp}/tcp" comment 'HFish decoy' > /dev/null 2>&1 || true
     done
-    # 清理历史残留/易误开端口：面板端口与节点端口都不放行公网
-    for _p in "${HFISH_PANEL_PORT}" 4433 "${HFISH_NODE_PORT}" 4434; do
+    # 清理历史残留/易误开端口：面板端口、节点端口、以及历史遗留的 30333 一律不放行公网
+    # （v5.4.14：实测某服务器 ufw 里存在 30333 放行但无任何进程监听，属无用规则；一并清理）
+    for _p in "${HFISH_PANEL_PORT}" 4433 "${HFISH_NODE_PORT}" 4434 30333; do
         ufw delete allow "${_p}/tcp" > /dev/null 2>&1 || true
     done
     ufw reload > /dev/null 2>&1 || true

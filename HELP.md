@@ -234,7 +234,31 @@ ysm-admin show-paths
 
 > 规则：仅字母/数字/连字符，长度与首尾字符有限制，禁止保留字；设置后默认路径返回 404。具体以命令输出与后台提示为准。
 
-### 6.7 AI 写作（测试版功能，仅 `beta` 分支 / `beta` 通道）
+### 6.7 多语言（i18n）
+
+- 内置简体中文 / 繁体中文 / 英文 / 日文字库（`lang/*.php`）；首页与各页面 UI 文案整体接入。
+- 首页「语言」菜单提供两种操作：**临时切换**（只在本次浏览生效，地址追加 `?lang=xx-XX`，不持久）与**设为默认**（写入浏览器 Cookie；已登录用户同时写入账号偏好）。
+- 超管后台「界面设置 → 语言与字体」可设置**首页默认语言**、**逐个启停语言**；`zh-CN` 恒启用，停用语言会从语言菜单移除并回落到默认语言。
+- 新增语种：把结构相同的 `<code>.php` 放入 `lang/`，后台语言列表会自动出现该语种（无需改代码）。
+- 排版：按钮、导航、卡片等容器对较长译文自适应换行/收缩，避免英文、日文等长文案溢出。
+
+### 6.8 自定义字体
+
+- 超管后台「界面设置 → 语言与字体」上传 TTF / OTF / WOFF / WOFF2（≤20MB；校验扩展名、文件头魔数与 MIME）。
+- 启用后首页自动应用；关闭只停止使用、不删除文件，便于随时重新启用；「移除」会同时删除文件。
+- 字体文件存于 `data/fonts/`，前台不能直读该目录，统一经受控端点 `font.php` 输出（长缓存 + `nosniff`）。
+- 注册用户可在首页「字体」面板选择字体，偏好跟随账号（未启用自定义字体时不显示该入口）。
+
+### 6.9 友站（友情链接）
+
+- 首页「友站」入口打开卡片墙；数据来自 `api.php?action=links_list`，只返回启用中的友链。
+- **站长后台**与**超管后台**均有「友站管理」页签：新增 / 编辑 / 启停 / 删除 / 单条巡检。
+- 新增时填写站点地址可一键抓取站点名、描述与 favicon 预填。抓取带 SSRF 防护：只允许公网地址、单跳不自动跟随重定向、响应体限长。
+- 守护进程每 12 小时自动巡检一次，掉链会标记状态并邮件告警（同一轮只发一封汇总）。
+
+---
+
+### 6.10 AI 写作（测试版功能，仅 `beta` 分支 / `beta` 通道）
 
 > 本功能**仅在 beta 测试版提供**（`beta` 分支 / beta 通道）；**正式版（`master` / stable 通道）不含此功能**。功能不稳定、行为可能随迭代变更，请勿用于生产。
 
@@ -288,7 +312,7 @@ ysm-admin show-paths
 - 超管只能在站级层面配置：**总开关**、**按角色开关**（站长 / 写作者）、**服务商白名单**（内置服务商中启用哪些）。
 - 超管**不接触任何人的 Key**：**不可查看、不可导出**，仅在必要时可对某用户执行「**清除**」（清除后该用户需重新配置）；配置变更与清除均记入审计。
 
-### 6.8 分支 / 通道与版本号（beta 版说明）
+### 6.11 分支 / 通道与版本号（beta 版说明）
 
 - **`-beta` 后缀的含义**：`-beta` 表示**测试版 / 预发布**（如 `5.4.0-beta`）。语义化比较里 **预发布低于同号正式版**（`5.4.0-beta < 5.4.0`）；迭代后缀 `-beta.2`、`-beta.3`… **数值递增**（`-beta.2 < -beta.10`）。
 - **分支 ↔ 通道**：`master` 分支对应 **stable 稳定通道**（版本号 `vX.Y.Z`）；`beta` 分支对应 **beta 测试通道**（版本号 `vX.Y.Z-beta`）。站点切换：`sudo ysm-admin set-channel beta` / `sudo ysm-admin set-channel stable`（或后台「在线更新」页签）。
@@ -497,6 +521,8 @@ A：不能。告警/更新通知/每日审计报告都走 SMTP。SMTP 授权码*
 | 主题色与深浅色变量 | `css/style.css` 的 `:root` 与 `[data-theme="dark"]` 覆盖 | 品牌色由 `--accent-hue / --accent-sat / --accent-lightness` 派生；底色/文字/边框等为 `--bg / --surface / --border / --text / --text-secondary / --text-muted / --code-bg` 等；暗色模式在 `[data-theme="dark"]` 内覆盖同名变量（另有 `body[data-text-contrast="light"]` 用于背景图偏暗时整页切白字） |
 | 背景图机制 | `body` 数据属性驱动，前端 `applyBg` 读取 | `data-bg-type`、`data-bg-image`、`data-bg-api-url`、`data-bg-blur` / `data-bg-blur-level`、`data-bg-card-opacity`；运行时映射为 CSS 变量 `--bg-url`、`--bg-blur-level`、`--bg-card-opacity` 并切换 `bg-blur`/`bg-active`/`data-text-contrast` |
 | 音乐播放器（多平台歌单） | 后台「音乐设置」，存 `config` 表 | `music_playlist_id`、`music_cookies`、`music_auto_play`；平台侧接口在 `music/`（`netease.php` / `qq.php` / `kugou.php`），平台与榜单切换在前端完成、播放地址懒解析 |
+| 多语言 / 默认语言 / 语言启停 / 自定义字体 | `config` 表 `default_lang` / `disabled_langs` / `custom_font_enabled` / `custom_font_name`；字库 `lang/*.php`；字体文件 `data/fonts/` | 后台入口「界面设置 → 语言与字体」；新增语种只需新增 `lang/<code>.php`（含 `@phrases` 运行时短语表）；字体经 `font.php` 受控输出，`data/fonts/` 禁止直读 |
+| 友站（友情链接） | `links` 表 + 站长/超管后台「友站管理」 | 字段 `site_name / url / desc / favicon / status / sort / place_time / last_check / check_count`；前台经 `api.php?action=links_list` 只读 `active`；巡检由守护进程每 12 小时触发 |
 | SMTP / 告警 | `config` 表 `smtp_host` / `smtp_port` / `smtp_user` / `smtp_pass`（密文）/ `smtp_from` / `smtp_enc`；CLI `sudo ysm-admin set-smtp-pass`（见 8.1） | 口令口径：CLI/守护进程用 root-only 密钥文件 `secrets/smtp_pass`(0600) + 临时环境变量，**不落盘**；Web 端由 php-fpm 经 pool.d 下 root-only 独立文件 `zz-ysm-secret.conf`(0600) 注入（`config` 表密文仅作旧部署兜底） |
 | 数据目录 | 根目录 `data/` | 文章 `data/articles/*.md`、数据库 `data/ysm.db`、`data/images`、`data/videos`、`data/bg`、`data/bgm`、`data/avatars`、`data/cache`；**更新包永远不含 `data/`** |
 | 更新与打包 | 发包侧脚本 + 服务器 CLI | 发包侧用 `sign_update_package.py` 对更新包签名、用 `trigger_server_update.py` 触发服务器更新；服务器端由 `sudo ysm-admin apply-update` 校验签名与逐文件哈希后应用 |

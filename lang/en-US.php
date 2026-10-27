@@ -1,5 +1,5 @@
-<?php
-// v6.0.0-beta：en-US 词典（首期）——缺键自动回落 zh-CN
+﻿<?php
+// v6.0.0：en-US 词典（首期）——缺键自动回落 zh-CN
 return [
     'site.name' => 'You Super Markdown',
     'tagline' => 'Turn every note into lasting knowledge',
@@ -78,7 +78,7 @@ return [
 
         // v6.0.1：补全首页/账号/音乐/提示等运行时文案（此前缺失会回落中文）
         '关闭' => 'Close', '展开' => 'Expand', '收起' => 'Collapse',
-        '展开标签' => 'Show all tags', '收起标签' => 'Collapse tags', '清空' => 'Clear',
+        '清空' => 'Clear',
         '查看全部' => 'View all', '回到顶部' => 'Back to top', '调整主题色' => 'Adjust accent color',
         '展开侧边栏' => 'Expand sidebar', '快捷键帮助 (?)' => 'Keyboard shortcuts (?)',
         '显示/隐藏密码' => 'Show/hide password', '隐藏密码' => 'Hide password',

@@ -250,13 +250,13 @@ function db_init_schema($pdo) {
     // v5.4.0-beta：AI 出站调用限速表（与 music_rates 同构：ip + 指纹，防滥用放大外呼）
     $pdo->exec('CREATE TABLE IF NOT EXISTS ai_rates (ip TEXT, fp TEXT, user_id TEXT, t INTEGER)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_ai_rates_ip_t ON ai_rates(ip, t)');
-    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_ai_rates_uid_t ON ai_rates(user_id, t)');
-    // v6.0.0-beta：ai_rates 幂等补 user_id 列（老库已建成但缺列）
-    $cols = [];
-    foreach ($pdo->query('PRAGMA table_info(ai_rates)') as $c) { $cols[] = strtolower($c['name']); }
-    if (!in_array('user_id', $cols, true)) {
+    // v6.0.0-beta：ai_rates 幂等补 user_id 列（老库已建成但缺列）——必须先补列再建 user_id 索引
+    $aiCols = [];
+    foreach ($pdo->query('PRAGMA table_info(ai_rates)') as $c) { $aiCols[] = strtolower($c['name']); }
+    if (!in_array('user_id', $aiCols, true)) {
         $pdo->exec('ALTER TABLE ai_rates ADD COLUMN user_id TEXT');
     }
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_ai_rates_uid_t ON ai_rates(user_id, t)');
     // v6.0.0-beta：AI 并发闸（user_id 唯一；started 为过期租约，防死锁）
     $pdo->exec('CREATE TABLE IF NOT EXISTS ai_inflight (
         user_id TEXT PRIMARY KEY,

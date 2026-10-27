@@ -1277,10 +1277,12 @@ if ($action === 'ai_config' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         'styles' => aiStyleOptions(),
         'langs' => aiLangOptions(),
         'privacy_ack' => aiPrivacyAcked($actor['id']),
+        'privacy_version' => aiPrivacyVersion(),
         'keys' => aiKeysForClient($actor['id']),
         'default_provider' => aiDefaultProvider($actor['id']),
         'thinking' => aiThinkingEnabled($actor['id']),
         'thinking_support' => aiThinkingSupportMap(),
+        'breaker' => aiBreakerMap(),
     ]);
 }
 
@@ -1295,12 +1297,18 @@ if ($action === 'ai_models' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     ]);
 }
 
-// POST ai_privacy_ack：每角色首次使用确认"内容将发送至第三方服务商"（记录已同意，避免每次弹）
+// POST ai_privacy_ack：确认「内容将发送至第三方服务商」的当前版本告知（版本变更需重新确认）
 if ($action === 'ai_privacy_ack' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $actor = aiActionUser();
+    $body = aiJsonBody();
+    $ver = trim((string)($body['version'] ?? ''));
+    // 只接受当前版本；传了旧版本说明前端页面过期，要求刷新后重新确认
+    if ($ver !== '' && $ver !== aiPrivacyVersion()) {
+        sendJson(['success' => false, 'error' => '隐私提示已更新，请刷新页面后重新确认', 'need_reload' => true, 'privacy_version' => aiPrivacyVersion()], 409);
+    }
     aiSetPrivacyAck($actor['id']);
-    auditLog('ai_privacy_ack', $actor['id'], '确认 AI 隐私提示');
-    sendJson(['success' => true]);
+    auditLog('ai_privacy_ack', $actor['id'], '确认 AI 隐私提示 version=' . aiPrivacyVersion());
+    sendJson(['success' => true, 'privacy_version' => aiPrivacyVersion()]);
 }
 
 // GET ai_keys：返回该账号各服务商状态（已配置(****末四位)/未配置 + 是否默认），无明文
@@ -1417,6 +1425,17 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($provider === '' || aiProviderBaseUrl($provider) === '') {
         sendJson(['success' => false, 'error' => '请先在后台配置 AI Key'], 400);
     }
+    // v6.2.0-beta：服务商熔断中 → 直接降级（不消耗配额、不计限速、不产生外呼）
+    if (aiBreakerOpen($provider)) {
+        auditLog('ai_call', $provider, '服务商熔断中，请求已降级', 'failed');
+        sendJson([
+            'success' => false,
+            'error' => aiBreakerNotice($provider),
+            'degraded' => true,
+            'retry_after' => aiBreakerRemaining($provider),
+            'breaker' => aiBreakerMap(),
+        ], 503);
+    }
     $row = db_one('SELECT * FROM ai_keys WHERE user_id = ? AND provider = ?', [$actor['id'], $provider]);
     if (!$row) sendJson(['success' => false, 'error' => '该服务商尚未配置 Key'], 400);
     $apiKey = aiDecryptKey($row['key_cipher']);
@@ -1462,17 +1481,22 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $t0 = microtime(true);
     $stream = !empty($body['stream']);
     if (!$stream) {
-        $res = aiHttpJson($url, $apiKey, array_merge($payload, ['stream' => false]), (int)$rt['timeout']);
+        $res = aiHttpProvider($provider, $url, $apiKey, array_merge($payload, ['stream' => false]), (int)$rt['timeout']);
         // 服务商不接受思考参数 → 忽略该参数重试一次（不报错、不阻断；重试成功才标记为不支持）
-        if (!$res['ok'] && $think !== [] && (int)$res['code'] === 400) {
-            $retry = aiHttpJson($url, $apiKey, array_merge($basePayload, ['stream' => false]), (int)$rt['timeout']);
+        if (!$res['ok'] && empty($res['degraded']) && $think !== [] && (int)$res['code'] === 400) {
+            $retry = aiHttpProvider($provider, $url, $apiKey, array_merge($basePayload, ['stream' => false]), (int)$rt['timeout']);
             if ($retry['ok']) { aiThinkingMarkUnsupported($provider); $res = $retry; }
         }
         $ms = (int)((microtime(true) - $t0) * 1000);
         if (!$res['ok']) {
-            $reason = aiReadableError($res['code'], $res['err'], $res['raw']);
+            $reason = !empty($res['degraded'])
+                ? (string)($res['message'] ?? aiBreakerNotice($provider))
+                : aiReadableError($res['code'], $res['err'], $res['raw']);
             auditLog('ai_call', $provider . '/' . $model, "动作={$act}; 耗时={$ms}ms; 失败", 'failed');
-            sendJson(['success' => false, 'error' => $reason !== '' ? $reason : '调用失败'], 400);
+            sendJson(['success' => false, 'error' => $reason !== '' ? $reason : '调用失败',
+                      'degraded' => !empty($res['degraded']),
+                      'retry_after' => (int)($res['retry_after'] ?? 0),
+                      'breaker' => aiBreakerMap()], !empty($res['degraded']) ? 503 : 400);
         }
         $out = (string)($res['data']['choices'][0]['message']['content'] ?? '');
         auditLog('ai_call', $provider . '/' . $model, "动作={$act}; 耗时={$ms}ms; 成功");
@@ -1490,8 +1514,10 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     aiSseEmit(['event' => 'start', 'provider' => $provider, 'model' => $model]);
     $acc = ''; $rawHead = '';
     // 单次流式尝试：成功即边走边推 delta；返回 [ok, code, cerr]
-    $attempt = function ($reqPayload) use ($url, $apiKey, $rt, &$acc, &$rawHead) {
+    $attempt = function ($reqPayload) use ($url, $apiKey, $rt, $provider, &$acc, &$rawHead) {
         $acc = ''; $rawHead = ''; $buf = '';
+        // v6.2.0-beta：熔断打开期间不做流式外呼（半开探测走这里：冷却结束后的首次调用即探测）
+        if (aiBreakerOpen($provider)) return [false, 503, 'breaker'];
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
@@ -1524,6 +1550,8 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $cerr = curl_error($ch);
         curl_close($ch);
+        // 记录熔断（流式：拿到内容或 2xx 视为成功）
+        aiBreakerRecord($provider, ($acc !== '' || ($ok !== false && $code >= 200 && $code < 400)), $code, $cerr);
         return [$ok, $code, $cerr];
     };
     list($ok, $code, $cerr) = $attempt(array_merge($payload, ['stream' => true]));
@@ -1534,8 +1562,10 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $ms = (int)((microtime(true) - $t0) * 1000);
     if ($acc === '' && ($ok === false || $code >= 400)) {
-        $reason = aiReadableError($code, $cerr, $rawHead);
-        aiSseEmit(['event' => 'error', 'message' => $reason !== '' ? $reason : '调用失败']);
+        $degraded = aiBreakerOpen($provider);
+        $reason = $degraded ? aiBreakerNotice($provider) : aiReadableError($code, $cerr, $rawHead);
+        aiSseEmit(['event' => 'error', 'message' => $reason !== '' ? $reason : '调用失败',
+                   'degraded' => $degraded, 'retry_after' => aiBreakerRemaining($provider)]);
         auditLog('ai_call', $provider . '/' . $model, "动作={$act}; 耗时={$ms}ms; 失败", 'failed');
     } else {
         aiSseEmit(['event' => 'done', 'chars' => mb_strlen($acc)]);

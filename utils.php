@@ -1503,6 +1503,8 @@ function aiTranslateMd($md, $targetLang, $actor) {
     $base = aiProviderBaseUrl($provider);
     $url = rtrim($base, '/') . '/chat/completions';
     $rt = aiModelRuntime($provider, $model);
+    // v6.2.0-beta：熔断打开期间直接降级，不做整篇（多段）外呼
+    if (aiBreakerOpen($provider)) return [false, aiBreakerNotice($provider)];
     // 段落切分：保留空行分隔（markdown 结构与代码块完整保留）
     $paras = preg_split('/(\r?\n){2,}/u', (string)$md);
     $out = [];
@@ -1513,10 +1515,14 @@ function aiTranslateMd($md, $targetLang, $actor) {
             $out[] = $seg; // 单段超限回落原文
             continue;
         }
+        // 段中途触发熔断 → 终止整篇，避免产出「半译半原文」的译本
+        if (aiBreakerOpen($provider)) return [false, aiBreakerNotice($provider)];
         $messages = aiBuildMessages('translate', $seg, '', $targetLang);
-        $res = aiHttpJson($url, $apiKey, ['model' => $model, 'messages' => $messages, 'stream' => false], (int)$rt['timeout']);
+        $res = aiHttpProvider($provider, $url, $apiKey, ['model' => $model, 'messages' => $messages, 'stream' => false], (int)$rt['timeout']);
         if ($res['ok']) {
             $out[] = (string)($res['data']['choices'][0]['message']['content'] ?? '');
+        } elseif (!empty($res['degraded'])) {
+            return [false, (string)($res['message'] ?? aiBreakerNotice($provider))];
         } else {
             $out[] = $seg; // 段失败回落原文
         }
@@ -1638,15 +1644,21 @@ function aiClearUserKeys($uid) {
     return $n;
 }
 
-/** 隐私提示：每角色（账号）首次使用确认一次 */
+/** v6.2.0-beta：数据出境 / 第三方处理告知的版本号。
+ *  文案或处理范围发生实质变化时必须递增——旧确认作废，使用者会被要求重新确认。 */
+define('AI_PRIVACY_VERSION', '2026-10');
+function aiPrivacyVersion() { return AI_PRIVACY_VERSION; }
+/** 隐私提示：按「说明版本」确认（版本变化即需重新确认，不再是终身一次） */
 function aiPrivacyAcked($uid) {
     if ($uid === '') return false;
     $r = db_one('SELECT value FROM meta WHERE key = ?', ['ai_privacy_ack:' . $uid]);
-    return !empty($r);
+    return $r && trim((string)$r['value']) === AI_PRIVACY_VERSION;
 }
-function aiSetPrivacyAck($uid) {
-    if ($uid === '') return;
-    db_exec('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', ['ai_privacy_ack:' . $uid, date('c')]);
+function aiSetPrivacyAck($uid, $version = '') {
+    if ($uid === '') return false;
+    $v = $version !== '' ? $version : AI_PRIVACY_VERSION;
+    db_exec('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', ['ai_privacy_ack:' . $uid, $v]);
+    return $v === AI_PRIVACY_VERSION;
 }
 
 // ---- v5.4.3-beta.2：思考模式（账号级，默认关闭）----
@@ -1832,6 +1844,85 @@ function aiReadableError($httpCode, $curlErr = '', $raw = '') {
     return '调用失败（HTTP ' . (int)$httpCode . '）';
 }
 
+/** v6.2.0-beta：第三方依赖降级熔断（按服务商维度，全站共享）。
+ *  连续 3 次「网络不可达 / 5xx / 429 / 408」→ 打开熔断 5 分钟，期间直接返回可读降级提示、不再外呼；
+ *  冷却结束后的第一次调用即半开探测，成功即闭合、失败则重新计时。
+ *  仅 Key/模型类错误（400/401/403/404/422）不计入熔断——那是个体配置问题，不应牵连全站。 */
+define('AI_BREAKER_THRESHOLD', 3);
+define('AI_BREAKER_COOLDOWN', 300);
+function aiBreakerKey($pid) { return 'ai_breaker:' . $pid; }
+function aiBreakerState($pid) {
+    $r = db_one('SELECT value FROM meta WHERE key = ?', [aiBreakerKey($pid)]);
+    $s = $r ? json_decode((string)$r['value'], true) : null;
+    if (!is_array($s)) $s = ['fails' => 0, 'until' => 0, 'last' => 0, 'code' => 0];
+    return $s;
+}
+/** 熔断是否打开（打开期间禁止外呼） */
+function aiBreakerOpen($pid) {
+    if ($pid === '') return false;
+    $s = aiBreakerState($pid);
+    return !empty($s['until']) && (int)$s['until'] > time();
+}
+function aiBreakerRemaining($pid) {
+    $s = aiBreakerState($pid);
+    $left = (int)($s['until'] ?? 0) - time();
+    return $left > 0 ? $left : 0;
+}
+/** 打开期间的统一可读提示（含剩余分钟数，不暴露上游细节） */
+function aiBreakerNotice($pid) {
+    $m = max(1, (int)ceil(aiBreakerRemaining($pid) / 60));
+    return 'AI 服务暂时不可用（已熔断，约 ' . $m . ' 分钟后自动恢复）';
+}
+/** 记录一次外呼结果，维护熔断状态 */
+function aiBreakerRecord($pid, $ok, $code = 0, $curlErr = '') {
+    if ($pid === '') return;
+    $code = (int)$code;
+    $s = aiBreakerState($pid);
+    if ($ok) {
+        if ((int)$s['fails'] !== 0 || !empty($s['until'])) {
+            db_exec('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)',
+                [aiBreakerKey($pid), json_encode(['fails' => 0, 'until' => 0, 'last' => time(), 'code' => 0])]);
+        }
+        return;
+    }
+    // 个体配置类错误不计熔断
+    if (in_array($code, [400, 401, 403, 404, 422], true)) return;
+    $systemic = ($code === 0 && $curlErr !== '') || $code >= 500 || $code === 429 || $code === 408;
+    if (!$systemic) return;
+    $s['fails'] = (int)$s['fails'] + 1;
+    $s['last'] = time();
+    $s['code'] = $code;
+    if ($s['fails'] >= AI_BREAKER_THRESHOLD && empty($s['until'])) {
+        $s['until'] = time() + AI_BREAKER_COOLDOWN;
+        @error_log('ai breaker open: ' . $pid . ' (fails=' . $s['fails'] . ', code=' . $code . ')');
+    }
+    db_exec('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)',
+        [aiBreakerKey($pid), json_encode($s)]);
+}
+/** 面向界面：各启用服务商的熔断状态（open/remaining_seconds），供前端提示降级 */
+function aiBreakerMap() {
+    $out = [];
+    foreach (aiEnabledProviderIds() as $pid) {
+        $out[$pid] = ['open' => aiBreakerOpen($pid), 'remaining' => aiBreakerRemaining($pid)];
+    }
+    return $out;
+}
+
+/** 带熔断的出站调用（唯一推荐入口）：熔断打开时直接降级，不产生外呼；
+ *  $ignoreBreaker=true 用于管理端「连通性测试」，让管理员能主动探测恢复。 */
+function aiHttpProvider($provider, $url, $apiKey, $payload, $timeout = 60, $ignoreBreaker = false) {
+    if ($provider !== '' && !$ignoreBreaker && aiBreakerOpen($provider)) {
+        return ['ok' => false, 'code' => 503, 'data' => null, 'raw' => '', 'err' => '',
+                'degraded' => true, 'retry_after' => aiBreakerRemaining($provider),
+                'message' => aiBreakerNotice($provider)];
+    }
+    $res = aiHttpJson($url, $apiKey, $payload, $timeout);
+    if ($provider !== '') {
+        aiBreakerRecord($provider, !empty($res['ok']), (int)($res['code'] ?? 0), (string)($res['err'] ?? ''));
+    }
+    return $res;
+}
+
 /** 统一 JSON POST（Authorization: Bearer）；返回 ['ok','code','data','raw','err']。
  *  仅允许调用白名单 base_url 拼出的地址（SSRF 防护：调用方已保证 base 来自白名单）。 */
 function aiHttpJson($url, $apiKey, $payload, $timeout = 60) {
@@ -1889,7 +1980,8 @@ function aiConnectivityTest($providerId, $apiKey, $model) {
         'max_tokens' => 1,
         'stream' => false,
     ];
-    $res = aiHttpJson($url, trim($apiKey), $payload, 30);
+    // 管理端主动探测：忽略熔断（成功即闭合），但不跳过安全校验
+    $res = aiHttpProvider($providerId, $url, trim($apiKey), $payload, 30, true);
     if (!empty($res['blocked'])) return [false, '目标地址不可用（已被安全策略拦截）'];
     if ($res['ok']) return [true, 'ok'];
     $reason = aiReadableError($res['code'], $res['err'], $res['raw']);

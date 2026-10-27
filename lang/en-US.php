@@ -1132,5 +1132,9 @@ return [
         '；适合更新包已下载到本地、不想从仓库拉取的场景。' => '; suitable when the package is already downloaded locally and you do not want to pull from the repository.',
         '？' => '?',
         '？禁用后该用户无法登录/评论，已登录会话立即失效' => '? After disabling, this user cannot sign in or comment, and active sessions expire immediately',
+        'AI 服务暂时不可用（已熔断，约 {n} 分钟后自动恢复）' => 'AI service is temporarily unavailable (circuit open; retrying in about {n} min)',
+        '隐私提示已更新，请刷新页面后重新确认' => 'The privacy notice has been updated. Refresh the page and confirm again.',
+        '告知版本：' => 'Notice version: ',
+        '（说明更新后需重新确认）' => ' (re-confirmation is required after the notice changes)',
     ],
 ];

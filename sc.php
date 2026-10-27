@@ -924,6 +924,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
         <h3>隐私提示</h3>
         <p>你选中的内容将发送至<b>你选择的第三方服务商</b>（AI 服务商）进行处理。请勿处理包含个人隐私或敏感信息的文本。</p>
         <p>额度由你的账号自担；本站仅做代理转发，不记录正文。</p>
+        <p class="ai-privacy-ver">告知版本：<b id="aiPrivacyVer"><?= htmlspecialchars(aiPrivacyVersion()) ?></b>（说明更新后需重新确认）</p>
         <div class="ai-apply-row" style="justify-content:flex-end">
             <button type="button" class="ai-btn" id="aiPrivacyCancel">取消</button>
             <button type="button" class="ai-btn ai-btn-primary" id="aiPrivacyOk">我已知晓，继续</button>
@@ -1313,6 +1314,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     }
 
     function buildForm() {
+        if (cfg.privacy_version && $('aiPrivacyVer')) $('aiPrivacyVer').textContent = cfg.privacy_version;
         // v5.4.2-beta：先套用本地记住的动作（决定 chip 高亮），再构建表单
         var pref = loadPref();
         if (pref.action && cfg.actions && cfg.actions[pref.action] !== undefined) curAction = pref.action;
@@ -1369,7 +1371,10 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
 
     $('aiPrivacyOk').addEventListener('click', function() {
         $('aiPrivacyMask').style.display = 'none';
-        api('ai_privacy_ack', 'POST', {}).then(function(d) { if (d && d.success) cfg.privacy_ack = true; });
+        api('ai_privacy_ack', 'POST', { version: (cfg && cfg.privacy_version) || '' }).then(function(d) {
+            if (d && d.success) cfg.privacy_ack = true;
+            else if (d && d.need_reload) { cfg.privacy_ack = false; setStatus('隐私提示已更新，请刷新页面后重新确认', 'err'); }
+        });
     });
     $('aiPrivacyCancel').addEventListener('click', function() { $('aiPrivacyMask').style.display = 'none'; });
 
@@ -1405,6 +1410,13 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         if (!k || !k.configured) {
             setStatus('该服务商尚未配置 Key，请先到后台「AI 写作」配置', 'err');
             refreshProviderHint();
+            return;
+        }
+        // v6.2.0-beta：服务商熔断中 → 前端直接降级提示，不再发起请求
+        var br = cfg.breaker && cfg.breaker[pid];
+        if (br && br.open) {
+            var mins = Math.max(1, Math.ceil((br.remaining || 0) / 60));
+            setStatus('AI 服务暂时不可用（已熔断，约 ' + mins + ' 分钟后自动恢复）', 'err');
             return;
         }
         var style = $('aiStyle').value, lang = $('aiLang').value;

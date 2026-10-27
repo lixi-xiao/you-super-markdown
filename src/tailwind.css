@@ -870,6 +870,94 @@
     font-size: 0.82em;
     color: var(--text-muted);
   }
+  /* 手机端热门榜折叠状态文字（真实文本节点，便于 i18n 翻译） */
+  #homeAside .home-popular-state { display: none; }
+
+  /* ── v6.0.1：副栏友情链接卡片（热门文章下方） ─────────── */
+  #homeAside .home-links {
+    padding: 14px;
+    border-radius: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+  }
+  #homeAside .home-links-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  #homeAside .home-links-title {
+    font-size: 0.92em;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    color: var(--text);
+  }
+  #homeAside .home-links-more {
+    flex-shrink: 0;
+    padding: 2px 6px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--accent);
+    font-size: 0.76em;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  #homeAside .home-links-more:hover { background: var(--accent-light); }
+  #homeAside .home-links-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 112px), 1fr));
+    gap: 8px;
+  }
+  #homeAside .home-link-chip {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.8em;
+    line-height: 1.3;
+    transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+  }
+  #homeAside .home-link-chip:hover {
+    border-color: var(--accent);
+    background: var(--accent-light);
+    transform: translateY(-1px);
+  }
+  #homeAside .home-link-fav {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    overflow: hidden;
+    object-fit: cover;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 800;
+  }
+  #homeAside .home-link-name {
+    min-width: 0;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* 手机端标签云折叠按钮（桌面端隐藏） */
+  #categoryBar .tag-cloud-toggle { display: none; }
 
   /* ── v5.2.2：已选标签 chip 内联进筛选区（不再单起一整行）──
      由 js/main.js 把 chip 渲染进 .category-bar-right（与一级标签同排、可横向滑动），
@@ -937,20 +1025,18 @@
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
     }
-    #homeAside .home-popular-title::after {
-      content: "展开";
+    #homeAside .home-popular-state {
+      display: inline;
       flex: 0 0 auto;
       font-size: 0.74em;
       font-weight: 600;
       color: var(--accent);
     }
-    #homeAside .home-popular.is-open .home-popular-title::after { content: "收起"; }
     #homeAside .home-popular:not(.is-open) .home-popular-list { display: none; }
 
     /* ② 分类 / 标签云：单行横向滚动（一行可横向滑动），杜绝纵向堆叠 */
     #homeAside #categoryBar .category-bar-left,
-    #homeAside #categoryBar .category-bar-right,
-    #homeAside #categoryBar .tag-cloud {
+    #homeAside #categoryBar .category-bar-right {
       flex-wrap: nowrap;
       overflow-x: auto;
       overflow-y: hidden;
@@ -959,11 +1045,32 @@
       -webkit-overflow-scrolling: touch;
     }
     #homeAside #categoryBar .category-bar-left::-webkit-scrollbar,
-    #homeAside #categoryBar .category-bar-right::-webkit-scrollbar,
-    #homeAside #categoryBar .tag-cloud::-webkit-scrollbar { display: none; }
+    #homeAside #categoryBar .category-bar-right::-webkit-scrollbar { display: none; }
     #homeAside #categoryBar .tag-cloud-row { padding-top: 8px; }
     #homeAside #categoryBar .category-bar-item { padding: 5px 11px; }
     #homeAside #categoryBar .tag-cloud-item { padding: 3px 10px; }
+
+    /* v6.0.1：标签云在手机上默认只显示两行，点「展开标签」看全部（避免副栏被标签占满首屏） */
+    #homeAside #categoryBar .tag-cloud {
+      flex-wrap: wrap;
+      max-height: 62px;
+      overflow: hidden;
+    }
+    #homeAside #categoryBar .tag-cloud-row.is-expanded .tag-cloud { max-height: none; }
+    #categoryBar .tag-cloud-toggle {
+      display: block;
+      width: 100%;
+      margin-top: 8px;
+      padding: 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--bg);
+      color: var(--accent);
+      font-size: 0.72em;
+      font-weight: 700;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
 
     /* 已选标签筛选条：进一步紧凑 */
     #categoryBar .tag-filter-chip,
@@ -976,6 +1083,16 @@
     #homeView .home-aside { gap: 14px; }
     #homeAside #categoryBar.category-bar { padding: 12px; border-radius: 16px; }
     #homeAside .home-popular { padding: 12px; border-radius: 16px; }
+    #homeAside .home-links { padding: 12px; border-radius: 16px; }
+    #homeAside .home-links-list { gap: 7px; }
+    #homeAside .home-link-chip { padding: 6px 8px; font-size: 0.78em; }
+    /* 友站卡片墙：手机端单列，避免两列挤压与描述换行过多 */
+    #linksView.links-view { padding: 4px 0 28px; }
+    #linksView .links-head { margin-bottom: 14px; }
+    #linksView .links-title { font-size: 1.15em; }
+    #linksView .links-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    #linksView .link-card { padding: 12px 14px; border-radius: 14px; }
+    #linksView .link-desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   }
 }
 
@@ -1145,6 +1262,24 @@
     #topBar .brand { max-width: 30vw; }
     #topBar .icon-btn { width: 32px; height: 32px; }
     #topBar .header-right { gap: 3px; min-width: 0; }
+  }
+
+  /* ── v6.0.1：顶栏在手机端收口（v6.0.0 新增友站/语言按钮后，≤390px 会横向溢出约 38px）──
+     做法：隐藏顶部「友站」图标（副栏已有友站卡片入口）→ 压缩按钮尺寸与间距 → 品牌可收缩。
+     实测 390px 视口下整页不再产生横向滚动。 */
+  @media (max-width: 640px) {
+    #topBar { padding-left: 12px; padding-right: 12px; }
+    #topBar .header-left { flex: 1 1 auto; min-width: 0; }
+    #topBar .brand { max-width: 34vw; min-width: 0; }
+    #topBar .header-right { flex: 0 0 auto; gap: 2px; min-width: 0; }
+    #topBar #btnLinks { display: none; }
+    #topBar .icon-btn { width: 30px; height: 30px; }
+    #topBar .icon-btn svg { width: 16px; height: 16px; }
+  }
+  @media (max-width: 360px) {
+    #topBar #btnColor { display: none; }
+    #topBar .icon-btn { width: 29px; height: 29px; }
+    #topBar .brand { max-width: 30vw; }
   }
 }
 

@@ -23,7 +23,7 @@
         'script', 'style', 'noscript', 'code', 'pre', 'textarea', 'kbd', 'samp',
         '.markdown-body', '#readingView .markdown-body',
         '#cardsGrid', '#archiveView', '#searchResults', '#sidebarFileList',
-        '#sidebarTocList', '#tocFileList', '.home-popular-list', '.announcement-section',
+        '#sidebarTocList', '#tocFileList', '.home-popular-list', '.home-links-list', '.announcement-section',
         '.cmt-list', '.comment-list', '.cmt-content', '.comment-content',
         '#userDropdownName', '.user-dropdown-avatar'
     ].join(',');

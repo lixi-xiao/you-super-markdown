@@ -1198,8 +1198,16 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
                 <div class="category-bar" id="categoryBar"></div>
                 <!-- v5.2.0：副栏热门榜（前端按热度分排序取前 5，数据同 list 接口，不新增接口） -->
                 <section class="home-popular" id="homePopular">
-                    <div class="home-popular-title">热门文章</div>
+                    <div class="home-popular-title">热门文章<span class="home-popular-state" aria-hidden="true">展开</span></div>
                     <div class="home-popular-list" id="homePopularList"></div>
+                </section>
+                <!-- v6.0.1：副栏友情链接（「热门文章」下方直接可见；超出 6 个时提供「全部」入口） -->
+                <section class="home-links" id="homeLinks" style="display:none">
+                    <div class="home-links-head">
+                        <div class="home-links-title">友情链接</div>
+                        <button type="button" class="home-links-more" id="homeLinksMore" onclick="ysmOpenLinks()" style="display:none">全部</button>
+                    </div>
+                    <div class="home-links-list" id="homeLinksList"></div>
                 </section>
             </aside>
         </div>
@@ -1574,6 +1582,28 @@ window.ysmCloseLinks = function(){
     if (lv) lv.style.display = 'none';
     if (hv) hv.style.display = '';
 };
+// v6.0.1：副栏友情链接卡片（与卡片墙共用只读接口；最多展示 6 个，超出时显示「全部」）
+(function(){
+    var sec = document.getElementById('homeLinks');
+    var list = document.getElementById('homeLinksList');
+    var more = document.getElementById('homeLinksMore');
+    if (!sec || !list) return;
+    var esc = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+    fetch('api.php?action=links_list').then(function(r){ return r.json(); }).then(function(d){
+        var links = (d && d.links) || [];
+        if (!links.length) return;
+        list.innerHTML = links.slice(0, 6).map(function(x){
+            var name = esc(x.site_name), url = esc(x.url), desc = esc(x.desc), fav = esc(x.favicon);
+            var favHtml = fav
+                ? '<img class="home-link-fav" src="' + fav + '" alt="" loading="lazy" onerror="this.parentNode.textContent=\'' + (name.charAt(0).toUpperCase() || '🔗') + '\'">'
+                : '<span class="home-link-fav">' + (name.charAt(0).toUpperCase() || '🔗') + '</span>';
+            return '<a class="home-link-chip" href="' + url + '" target="_blank" rel="noopener nofollow" title="' + desc + '">' +
+                   favHtml + '<span class="home-link-name">' + name + '</span></a>';
+        }).join('');
+        if (more && links.length > 6) more.style.display = '';
+        sec.style.display = '';
+    }).catch(function(){});
+})();
 document.addEventListener('click', function(e){
     var langMenu = document.getElementById('langDropdown');
     if (!langMenu) return;

@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/utils.php';
+require_once __DIR__ . '/lib/i18n.php';
 secureSessionStart();
 header('Content-Type: application/json; charset=utf-8');
 
@@ -86,16 +87,19 @@ function finalizeLogin($u, $reqFp) {
         'signature' => $u['signature'] ?? '',
         'role' => $u['role'] ?? 'user',
         'email' => $u['email'] ?? '',
+        'home_font' => $u['home_font'] ?? '',
+        'home_lang' => $u['home_lang'] ?? '',
         'pw_hash' => $u['password'],
     ];
     $newTV = bumpUserTV($u['id']);
     $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
+    $_SESSION['cmt_sfp'] = getRequestStableFp() !== '' ? computeStableFp(getRequestStableFp()) : '';
     $_SESSION['cmt_tv'] = $newTV;
     $_SESSION['cmt_login_ts'] = time();
     // v5.3.1：完整认证完成 → 建立独立的后台会话（与前台登录态解耦；过期只失效该标记）
     establishBackendSession();
     if (($u['role'] ?? '') !== ROLE_SUPER_ADMIN) {
-        issueRefreshToken($u['id'], $_SESSION['cmt_fp'], $newTV);
+        issueRefreshToken($u['id'], $_SESSION['cmt_fp'], $newTV, $_SESSION['cmt_sfp'] ?? '');
     }
     $clientIP = getClientIP();
     loginFailClear($clientIP, $u['account'] ?? '');
@@ -141,6 +145,9 @@ function verifySessionUser() {
                 return null;
             }
             $_SESSION['cmt_user']['role'] = $candidate['role'] ?? 'user';
+            // v6.0.0：账号级偏好每次请求与库同步（升级前旧会话也能立即生效）
+            $_SESSION['cmt_user']['home_font'] = $candidate['home_font'] ?? '';
+            $_SESSION['cmt_user']['home_lang'] = $candidate['home_lang'] ?? '';
             return $_SESSION['cmt_user'];
         }
     }
@@ -484,7 +491,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
         'email' => $mailBox,
         'password' => password_hash($secret, PASSWORD_DEFAULT),
         'avatar' => $avatarLink, 'signature' => '', 'role' => 'user',
-        'created' => date('Y-m-d H:i:s')
+        'created' => date('Y-m-d H:i:s'), 'home_font' => '', 'home_lang' => ''
     ];
     $roster[] = $fresh;
     replaceAllUsers($roster);
@@ -493,14 +500,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     // v4.5.0：注册即绑定环境指纹 + token_version（并发踢旧）+ 签发 refresh token
     $tvStamp = bumpUserTV($fresh['id']);
     $_SESSION['cmt_fp'] = computeSessionFp($fpToken);
+    $_SESSION['cmt_sfp'] = getRequestStableFp() !== '' ? computeStableFp(getRequestStableFp()) : '';
     $_SESSION['cmt_tv'] = $tvStamp;
     // v4.6.0：记录登录时间（后台 24h 过期按登录时间算）
     $_SESSION['cmt_login_ts'] = time();
-    issueRefreshToken($fresh['id'], $_SESSION['cmt_fp'], $tvStamp);
+    issueRefreshToken($fresh['id'], $_SESSION['cmt_fp'], $tvStamp, $_SESSION['cmt_sfp'] ?? '');
     $_SESSION['cmt_user'] = [
         'id' => $fresh['id'], 'account' => $qqNo, 'nickname' => $displayName,
         'avatar' => $avatarLink, 'signature' => '', 'role' => 'user',
         'email' => $mailBox,   // v2.10.0：注册即写邮箱，供个人设置展示/更换
+        'home_font' => '', 'home_lang' => '',
         'pw_hash' => $fresh['password']
     ];
     $publicUser = sanitizeUserForClient($_SESSION['cmt_user']);
@@ -749,6 +758,7 @@ if ($action === 'refresh' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if (!$found) { clearRefreshCookie(); sendJson(['success' => false, 'error' => '账号不存在'], 401); }
     $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
+    $_SESSION['cmt_sfp'] = getRequestStableFp() !== '' ? computeStableFp(getRequestStableFp()) : '';
     $_SESSION['cmt_tv'] = (int)$curTV;
     // v4.6.0：保持原登录时间（refresh 不重置）。
     // v5.3.1：前台续期**不重建后台会话**（cmt_backend_ts 仅在完整认证时写入）——站长/写作者后台
@@ -761,6 +771,8 @@ if ($action === 'refresh' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         'signature' => $found['signature'] ?? '',
         'role' => $found['role'] ?? 'user',
         'email' => $found['email'] ?? '',
+        'home_font' => $found['home_font'] ?? '',
+        'home_lang' => $found['home_lang'] ?? '',
         'pw_hash' => $found['password']
     ];
     $safeUser = sanitizeUserForClient($_SESSION['cmt_user']);
@@ -847,6 +859,8 @@ if ($action === 'user-status') {
                 'id' => $u['id'],
                 'nickname' => $u['nickname'] ?? '',
                 'role' => $role,
+                'home_font' => $u['home_font'] ?? '',
+                'home_lang' => $u['home_lang'] ?? '',
             ],
             'canAccessAdmin' => $canAccessAdmin,
             'adminUrl' => $adminUrl,
@@ -861,16 +875,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'update_profile') {
     // v4.5.0：环境校验（改昵称/签名/密码等敏感操作）
     if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
     $payload = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($payload)) $payload = [];
+    // v6.0.0：支持「仅偏好」提交（字体/语言），昵称缺省时保留原值
+    $hasPref = array_key_exists('home_font', $payload) || array_key_exists('home_lang', $payload);
     $displayName = trim($payload['nickname'] ?? '');
-    $motto = trim($payload['signature'] ?? '');
+    $motto = array_key_exists('signature', $payload) ? trim((string)$payload['signature']) : (string)($actor['signature'] ?? '');
+    if ($displayName === '' && $hasPref) $displayName = (string)($actor['nickname'] ?? '');
     if (empty($displayName)) sendJson(['success' => false, 'error' => '昵称不能为空'], 400);
     $displayName = mb_substr($displayName, 0, 20, 'UTF-8');
     $motto = mb_substr($motto, 0, 16, 'UTF-8');
+    // 字体/语言白名单校验（非法值保持原值）
+    $newFont = $actor['home_font'] ?? '';
+    if (array_key_exists('home_font', $payload)) {
+        $f = (string)$payload['home_font'];
+        $newFont = in_array($f, ['', 'default', 'custom'], true) ? $f : $newFont;
+    }
+    $newLang = $actor['home_lang'] ?? '';
+    if (array_key_exists('home_lang', $payload)) {
+        $l = (string)$payload['home_lang'];
+        $validLangs = function_exists('ysmSupportedLangs') ? array_keys(ysmSupportedLangs()) : ['zh-CN'];
+        $newLang = in_array($l, $validLangs, true) ? $l : $newLang;
+    }
     $roster = fetchAllUsers();
     foreach ($roster as &$entry) {
         if ($entry['id'] === $actor['id']) {
             $entry['nickname'] = $displayName;
             $entry['signature'] = $motto;
+            $entry['home_font'] = $newFont;
+            $entry['home_lang'] = $newLang;
             break;
         }
     }
@@ -878,6 +910,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'update_profile') {
     replaceAllUsers($roster);
     $_SESSION['cmt_user']['nickname'] = $displayName;
     $_SESSION['cmt_user']['signature'] = $motto;
+    $_SESSION['cmt_user']['home_font'] = $newFont;
+    $_SESSION['cmt_user']['home_lang'] = $newLang;
     sendJson(['success' => true, 'user' => sanitizeUserForClient($_SESSION['cmt_user'])]);
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'admin_setup') {
@@ -1398,11 +1432,25 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // 按模型取运行时参数（单次输入上限 / 最大输出 / 超时）
     $rt = aiModelRuntime($provider, $model);
     if (mb_strlen($text) > $rt['max_input_chars']) sendJson(['success' => false, 'error' => '选中文本过长（本模型上限 ' . $rt['max_input_chars'] . ' 字）'], 400);
-    // 出站限速（复用 ai_rates；防滥用放大外呼）
+    // v6.0.0-beta：AI 加固注入顺序 —— 日配额 → 并发闸（shutdown 释放 + 租约兜底）→ 账号维度限速
+    $uid = $actor['id'];
+    if (aiDailyQuotaExceeded($uid)) {
+        auditLog('ai_call', $provider . '/' . $model, '每日配额已用完，拒绝调用', 'failed');
+        sendJson(['success' => false, 'error' => '今日 AI 配额已用完，请明日再试'], 429);
+    }
+    if (!aiInflightAcquire($uid)) sendJson(['success' => false, 'error' => '当前已在处理请求，请稍后再试'], 429);
+    register_shutdown_function(function () use ($uid) { aiInflightRelease($uid); });
+    if (aiRateBlockedUid($uid)) {
+        auditLog('ai_call', $provider . '/' . $model, '账号维度调用过频，拒绝', 'failed');
+        sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
+    }
+    // 出站限速（复用 ai_rates；防滥用放大外呼，IP+指纹维度并存）
     $ip = getClientIP();
     $fp = $_SESSION['cmt_fp'] ?? '';
     if (aiRateBlocked($ip, $fp)) sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
     aiRateHit($ip, $fp);
+    aiRateHitUid($uid);
+    aiDailyQuotaAdd($uid);
     $messages = aiBuildMessages($act, $text, $style, $lang);
     // 请求基线：模型 + 消息（+ 按模型配置的最大输出）；思考参数按账号开关与服务商能力追加。
     // 提示词约束（只输出正文）完全由 messages 决定，思考参数改动不影响之。
@@ -1495,6 +1543,143 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         auditLog('ai_call', $provider . '/' . $model, "动作={$act}; 耗时={$ms}ms; 成功");
     }
     exit;
+}
+
+// ===== v6.0.0-beta：AI 内容翻译（写作者/站长触发）与友站管理（站长专属）=====
+/** 判定 actor 是否可管理某篇（author_id 匹配，或旧文章按 author 昵称匹配；站长/写作者均可），
+ *  站长角色可管全部其站内文章；写作者仅管自己。 */
+function canManageArticleFp($meta, $actor) {
+    $role = $actor['role'] ?? '';
+    if ($role === ROLE_STATION_ADMIN) return true;
+    if ($role !== ROLE_AUTHOR) return false;
+    $myId = $actor['id'] ?? '';
+    $myNick = $actor['nickname'] ?? '';
+    return ($meta['author_id'] ?? '') === $myId
+        || (empty($meta['author_id']) && ($meta['author'] ?? '') === $myNick);
+}
+/** v6.0.0-beta：AI 翻译要读源文（写作者只能读自己的）（同 sc.php 判定口径） */
+function articleSourcePath($slug) {
+    if ($slug === '' || !preg_match('/^[\p{L}\p{N}_\-\s\.\(\)（）]+$/u', $slug)) return null;
+    $p = __DIR__ . '/data/articles/' . basename($slug);
+    return is_file($p) ? $p : null;
+}
+
+// POST ai_translate：写作者/站长触发某篇生成指定语种译本（预生成落 article_translations；用户前台只读）
+if ($action === 'ai_translate' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $actor = aiActionUserAllowed();
+    aiRequireFreshBackendSession();
+    $body = aiJsonBody();
+    $slug = trim((string)($body['slug'] ?? ''));
+    $lang = (string)($body['lang'] ?? '');
+    // v6.0.0-beta：目标语言必须是 i18n 字库内已有的 locale（只翻有字库的语言，缺字典即拒绝）
+    if ($lang === '' || !isset(ysmSupportedLangs()[$lang])) sendJson(['success' => false, 'error' => '该语言暂无字库，暂不可翻译'], 400);
+    $path = articleSourcePath($slug);
+    if (!$path) sendJson(['success' => false, 'error' => '文章不存在'], 404);
+    $meta = readArticleMeta($path);
+    if (!canManageArticleFp($meta, $actor)) {
+        logUnauthorized('越权尝试翻译他人文章: ' . $slug);
+        sendJson(['success' => false, 'error' => '只能翻译自己管理的文章'], 403);
+    }
+    $uid = $actor['id'];
+    if (aiDailyQuotaExceeded($uid)) sendJson(['success' => false, 'error' => '今日 AI 配额已用完，请明日再试'], 429);
+    if (!aiInflightAcquire($uid)) sendJson(['success' => false, 'error' => '当前已在处理请求，请稍后再试'], 429);
+    register_shutdown_function(function () use ($uid) { aiInflightRelease($uid); });
+    if (aiRateBlockedUid($uid)) sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
+    $src = (string)@file_get_contents($path);
+    list($ok, $result) = aiTranslateMd($src, $lang, $actor);
+    aiRateHit(getClientIP(), $_SESSION['cmt_fp'] ?? '');
+    aiRateHitUid($uid);
+    aiDailyQuotaAdd($uid);
+    if (!$ok) sendJson(['success' => false, 'error' => $result], 400);
+    db_exec('INSERT INTO article_translations (article_id, target_lang, md, src_digest, status, model, created_at, updated_at) '
+        . 'VALUES (?,?,?,?,\'done\',?,?,?) ON CONFLICT(article_id, target_lang) DO UPDATE SET md=excluded.md, src_digest=excluded.src_digest, status=\'done\', updated_at=excluded.updated_at',
+        [$slug, $lang, $result, hash('sha256', $src), (string)($body['provider'] ?? ''), time(), time()]);
+    auditLog('ai_translate', $slug, '生成译本 lang=' . $lang);
+    sendJson(['success' => true, 'lang' => $lang]);
+}
+
+// GET links_list：前台只读——只出 active 友链（访客可访问，无需登录）
+if ($action === 'links_list') {
+    $rows = db_all("SELECT id, site_name, url, favicon, desc, sort FROM links WHERE status = 'active' ORDER BY sort ASC, place_time DESC");
+    sendJson(['success' => true, 'links' => $rows]);
+}
+// GET links_meta：站长录入辅助——抓取站点信息预填（仅站长）
+if ($action === 'links_meta' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $actor = checkRole(ROLE_STATION_ADMIN);
+    $url = trim((string)($_GET['url'] ?? ''));
+    if ($url === '') sendJson(['success' => false, 'error' => '请填写站点地址'], 400);
+    // 统一补全 https
+    if (!preg_match('#^https?://#i', $url)) $url = 'https://' . $url;
+    $r = linkFetchMeta($url);
+    sendJson($r);
+}
+// POST links_save / links_delete / links_status / links_sort：站长专属管理
+function linksAwaitStationAdmin() {
+    $actor = checkRole(ROLE_STATION_ADMIN);
+    aiRequireFreshBackendSession();
+    return $actor;
+}
+if ($action === 'links_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    linksAwaitStationAdmin();
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $b = aiJsonBody();
+    $name = trim((string)($b['site_name'] ?? ''));
+    $url = trim((string)($b['url'] ?? ''));
+    $desc = trim((string)($b['desc'] ?? ''));
+    $favicon = trim((string)($b['favicon'] ?? ''));
+    if (mb_strlen($name) > 60) sendJson(['success' => false, 'error' => '站点名过长'], 400);
+    if (mb_strlen($desc) > 200) sendJson(['success' => false, 'error' => '描述过长'], 400);
+    if ($name === '' || $url === '' || !preg_match('#^https?://#i', $url)) sendJson(['success' => false, 'error' => '站点名与地址必填，地址须为 http(s)'], 400);
+    if ($favicon !== '' && !preg_match('#^https?://#i', $favicon)) sendJson(['success' => false, 'error' => 'favicon 须为 http(s) 地址'], 400);
+    $id = (int)($b['id'] ?? 0);
+    $sort = (int)($b['sort'] ?? 0);
+    if ($id > 0) {
+        db_exec('UPDATE links SET site_name=?, url=?, desc=?, favicon=?, sort=? WHERE id=?', [$name, $url, $desc, $favicon, $sort, $id]);
+        auditLog('links_edit', $url, '编辑友链 ' . $name);
+    } else {
+        $exists = db_one('SELECT 1 AS x FROM links WHERE url = ?', [$url]);
+        if ($exists) sendJson(['success' => false, 'error' => '该站点已存在'], 400);
+        db_exec('INSERT INTO links (site_name, url, desc, favicon, status, place_time, sort, source) VALUES (?,?,?,?,\'active\',?,?,? )',
+            [$name, $url, $desc, $favicon, time(), $sort, 'manual']);
+        auditLog('links_add', $url, '新增友链 ' . $name);
+    }
+    sendJson(['success' => true]);
+}
+if ($action === 'links_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    linksAwaitStationAdmin();
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $b = aiJsonBody();
+    $id = (int)($b['id'] ?? 0);
+    $row = db_one('SELECT site_name, url FROM links WHERE id = ?', [$id]);
+    db_exec('DELETE FROM links WHERE id = ?', [$id]);
+    if ($row) auditLog('links_delete', $row['url'], '删除友链 ' . $row['site_name']);
+    sendJson(['success' => true]);
+}
+if ($action === 'links_status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    linksAwaitStationAdmin();
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $b = aiJsonBody();
+    $id = (int)($b['id'] ?? 0);
+    $status = in_array((string)($b['status'] ?? ''), ['active', 'pending', 'dead', 'disabled'], true) ? (string)$b['status'] : '';
+    if ($status === '') sendJson(['success' => false, 'error' => '状态无效'], 400);
+    db_exec('UPDATE links SET status = ? WHERE id = ?', [$status, $id]);
+    auditLog('links_status', 'link#' . $id, '状态改为 ' . $status);
+    sendJson(['success' => true]);
+}
+// GET links_admin：站长后台列表（含状态/巡检信息）
+if ($action === 'links_admin' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $actor = checkRole(ROLE_STATION_ADMIN);
+    sendJson(['success' => true, 'links' => db_all('SELECT * FROM links ORDER BY sort ASC, place_time DESC')]);
+}
+// GET links_check：站长触发单条掉链巡检（只读校验）
+if ($action === 'links_check' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $actor = checkRole(ROLE_STATION_ADMIN);
+    $id = (int)($_GET['id'] ?? 0);
+    $row = db_one('SELECT url FROM links WHERE id = ?', [$id]);
+    if (!$row) sendJson(['success' => false, 'error' => '友链不存在'], 404);
+    $alive = linkCheckAlive((string)$row['url']);
+    db_exec('UPDATE links SET last_check = ?, check_count = check_count + 1, status = ? WHERE id = ?', [time(), $alive ? 'active' : 'dead', $id]);
+    sendJson(['success' => true, 'alive' => $alive]);
 }
 
 sendJson(['success' => false, 'error' => '未知操作'], 400);

@@ -915,6 +915,63 @@ case "${1:-}" in
         echo "用户已吊销: $USER_ID"
         ;;
 
+    ai-key-rotate)
+        # v6.0.0-beta：AI Key 加密密钥应急手动轮换（守护进程每 90 天自动 + 双钥过渡 + 渐进重加密 + 自动 GC）
+        #   用法: sudo ysm-admin ai-key-rotate [--now]
+        AI_FORCE=0
+        if [ "${2:-}" = "--now" ]; then AI_FORCE=1; fi
+        AI_FORCE="$AI_FORCE" php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$force = (int)getenv('AI_FORCE');
+            if (!\$force && aiKeyRotationNeeded() === false) { echo 'SKIP'; exit; }
+            list(\$ok, \$err) = aiKeyRotate();
+            if (!\$ok) { echo 'FAIL:' . \$err; exit; }
+            list(\$done) = aiReencryptBatch(500);
+            list(\$gc) = aiKeyGc(30);
+            echo 'OK reencrypt=' . \$done . ' gc=' . \$gc;
+            auditLog('ai_key_rotate', 'ai_enc_key', '手动轮换密钥；重加密 ' . \$done . ' 条；GC ' . \$gc . ' 个归档');
+        " 2>/dev/null
+        ;;
+
+    ai-maintenance)
+        # v6.0.0-beta：守护进程周期性自动运维（轮换检查 + 渐进重加密 + 归档 GC）——yaml/sysd 每天调用一次
+        php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$out = [];
+            if (aiKeyRotationNeeded()) {
+                list(\$ok, \$err) = aiKeyRotate();
+                if (!\$ok) { echo 'ROTATE_FAIL:' . \$err; exit; }
+                list(\$done) = aiReencryptBatch(500);
+                \$out[] = 'rotate_ok reencrypt=' . \$done;
+            } else {
+                list(\$done) = aiReencryptBatch(100);
+                if (\$done > 0) \$out[] = 'reencrypt=' . \$done;
+            }
+            list(\$gc) = aiKeyGc(30);
+            if (\$gc > 0) \$out[] = 'gc=' . \$gc;
+            echo \$out ? implode(' ', \$out) : 'IDLE';
+        " 2>/dev/null
+        ;;
+
+    link-sweep)
+        # v6.0.0-beta：友链掉链巡检（只读校验 + 告警站长；守护进程每天调用一次）
+        php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$rows = db_all(\"SELECT id, site_name, url, last_check FROM links WHERE status IN ('active','pending') LIMIT 200\");
+            \$dead = 0; \$ok = 0; \$skipped = 0;
+            foreach (\$rows as \$r) {
+                // 巡检节流：同一条 12 小时内最多查一次
+                if ((int)(\$r['last_check'] ?? 0) > time() - 43200) { \$skipped++; continue; }
+                \$alive = linkCheckAlive((string)\$r['url']);
+                db_exec('UPDATE links SET last_check = ?, check_count = check_count + 1, status = ? WHERE id = ?',
+                    [time(), \$alive ? 'active' : 'dead', \$r['id']]);
+                if (\$alive) { \$ok++; } else { \$dead++; auditLog('link_sweep', \$r['site_name'], '友链巡检判定掉链'); }
+            }
+            if (\$dead > 0) { sendAlert('友站掉链提醒', '本次巡检发现 ' . \$dead . ' 条友链掉链，请在后台友站管理确认撤留。'); }
+            echo 'ok=' . \$ok . ' dead=' . \$dead . ' skipped=' . \$skipped;
+        " 2>/dev/null
+        ;;
+
     backup)
         BACKUP_DIR="/opt/you-super-markdown/backups"
         mkdir -p "$BACKUP_DIR"

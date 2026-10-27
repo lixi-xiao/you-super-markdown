@@ -43,5 +43,17 @@
             return e;
         }
     }
+    // v6.0.0-beta（E）：稳定指纹——忽略分辨率原始值（旋转互换）、忽略 canvas 末段字节、时区按 ±2h 归桶。
+    // 供已信任设备在登录态环境校验时放宽比对（手机端漂移不再误判换设备）；未知设备/高敏写入仍用原始 ysmGetFp。
+    window.ysmGetStableFp = function () {
+        try {
+            var tz = (new Date()).getTimezoneOffset();
+            var tzBucket = Math.round(tz / 120) * 120;
+            var s = [ navigator.language || "", String(tzBucket), navigator.userAgent ];
+            return ysmFnvHash(s.join("|")) + ysmFnvHash(s.join("~"));
+        } catch (err) {
+            return "";
+        }
+    };
     window.ysmGetFp = ysmGetFp;
 })();

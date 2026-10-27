@@ -171,7 +171,7 @@ function resolvePublicIp($host) {
 }
 // SSRF 安全抓取：单跳实现——一次解析 + 固定解析后的 IP 直连（Host/SNI 保留原域名），消除 DNS rebinding TOCTOU
 // 返回 ['code'=>int,'location'=>string,'body'=>string]；非 http/https、内网/未识别主机、请求失败 → false
-function fetchHttpOnce($url, $ua) {
+function fetchHttpOnce($url, $ua, $maxBytes = 0) {
     $parts = parse_url($url);
     if (!is_array($parts)) return false;
     $scheme = strtolower($parts['scheme'] ?? '');
@@ -205,7 +205,9 @@ function fetchHttpOnce($url, $ua) {
             'capture_peer_cert' => false,
         ];
     }
-    $body = @file_get_contents($targetUrl, false, stream_context_create($opts));
+    $body = $maxBytes > 0
+        ? @file_get_contents($targetUrl, false, stream_context_create($opts), 0, $maxBytes)
+        : @file_get_contents($targetUrl, false, stream_context_create($opts));
     if ($body === false) return false;
     $code = 0;
     $location = '';
@@ -230,12 +232,12 @@ function resolveRedirectUrl($base, $loc) {
 }
 // SSRF 安全抓取（对外）：最多跟随 3 跳，每一跳目标都必须为公网且非内网（复用 isPrivateHost/resolvePublicIp）；
 // 非 http/https、跳数超限、目标内网 → 失败。返回响应体字符串或 false（对既有调用方保持兼容）。
-function fetchHttpContent($url, $ua = null) {
+function fetchHttpContent($url, $ua = null, $maxBytes = 0) {
     // v4.1.15：支持自定义 UA（封面图片池用桌面 UA 拉取横屏壁纸）
     $ua = $ua !== null ? $ua : (appConfig('app_name', 'You Super Markdown') . "/" . APP_VERSION);
     $maxHops = 3;
     for ($hop = 0; $hop <= $maxHops; $hop++) {
-        $res = fetchHttpOnce($url, $ua);
+        $res = fetchHttpOnce($url, $ua, $maxBytes);
         if ($res === false) return false;
         $code = (int)($res['code'] ?? 0);
         if (in_array($code, [301, 302, 303, 307, 308], true)) {
@@ -258,11 +260,12 @@ function replaceAllUsers($users) {
     // v2.5.4：INSERT OR REPLACE 防止列表内重复 id 触发唯一约束冲突导致事务回滚
     // v2.9.0：列清单加入 email（注册验证引入，漏列会导致全量替换时邮箱丢失）
     // v4.5.0：列清单加入 tv（token_version 并发踢旧，漏列会导致全量替换时所有会话被误踢）
+    // v6.0.0：列清单加入 home_font / home_lang（账号级默认首页字体与基础语言，漏列会丢失）
     $pdo = db();
     $pdo->beginTransaction();
     try {
         $pdo->exec('DELETE FROM users');
-        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, account, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled, last_login, login_count, tv) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, account, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled, last_login, login_count, tv, home_font, home_lang) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
         foreach ($users as $u) {
             $st->execute([
                 $u['id'] ?? '', $u['account'] ?? '', $u['nickname'] ?? '', $u['password'] ?? '',
@@ -271,6 +274,8 @@ function replaceAllUsers($users) {
                 $u['email'] ?? '', (int)($u['disabled'] ?? 0),
                 $u['last_login'] ?? '', (int)($u['login_count'] ?? 0),
                 (int)($u['tv'] ?? 0),
+                in_array(($u['home_font'] ?? ''), ['', 'default', 'custom'], true) ? $u['home_font'] : '',
+                preg_match('/^[A-Za-z-]+$/', (string)($u['home_lang'] ?? '')) ? $u['home_lang'] : '',
             ]);
         }
         $pdo->commit();
@@ -364,6 +369,13 @@ function loadSiteConfig() {
         // 安装与更新流程在能确定服务器出口/域名解析 IP 时自动登记（--auto）；亦可用
         // `sudo ysm-admin set-self-ip --add=<ip>` 维护。
         'threat_self_ips' => [],
+        // v6.0.0：首页默认语言（限定 ysmSupportedLangs() 内的 code；用户未手选、无匹配 Accept-Language 时兜底）
+        'default_lang' => 'zh-CN',
+        // v6.0.0：自定义首页字体（替换内置萝莉体；超管后台启用+上传后首页自动展示）
+        'custom_font_enabled' => false,
+        'custom_font_name' => '',   // 相对站点根路径，如：data/fonts/xx.ttf（前端 url() 直接使用）
+        // v6.0.0：前台已停用的语言代码（超管后台可逐个启停；zh-CN 恒启用不可停）
+        'disabled_langs' => [],
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;
@@ -1329,6 +1341,10 @@ function aiRoleAllowed($role) {
     return false;
 }
 
+// ---- v6.0.0-beta：AI Key 加密密钥双钥自动过渡 ----
+// 当前钥固定路径（加密新数据用）；轮换后旧钥另存为 <AI_ENC_KEY_FILE>.<ts> 作为归档钥（解密旧密文）。
+// AES-GCM 头（IV+tag）固定，故同一 key 用同一机制解出的旧密文，只要归档钥仍在即可解密 → 无跨钥解密问题。
+
 /** 读取 AI Key 加密密钥（不存在则安全生成；均不可写时返回空 → 加密失败即拒绝保存） */
 function getAiEncKey() {
     foreach ([AI_ENC_KEY_FILE, AI_ENC_KEY_FALLBACK] as $f) {
@@ -1344,7 +1360,40 @@ function getAiEncKey() {
     }
     return '';
 }
-/** 加密 AI Key（AES-256-GCM；返回 'gcm:'+base64(iv|tag|cipher)） */
+/** 当前钥路径（返回可读路径，空表示不可用） */
+function aiEncKeyPath() {
+    foreach ([AI_ENC_KEY_FILE, AI_ENC_KEY_FALLBACK] as $f) {
+        if (is_readable($f) && trim((string)@file_get_contents($f)) !== '') return $f;
+    }
+    return '';
+}
+/** 解密尝试的 Key 候选：[当前钥, ...归档钥]（仅当前钥存在时非空） */
+function getAiDecryptKeys() {
+    $cur = getAiEncKey();
+    if ($cur === '') return [];
+    $keys = [$cur];
+    $base = aiEncKeyPath();
+    if ($base !== '') {
+        $dir = dirname($base);
+        $prefix = basename($base) . '.';
+        if (is_dir($dir)) {
+            $files = @scandir($dir);
+            if (is_array($files)) {
+                $archive = [];
+                foreach ($files as $fn) {
+                    if (strpos($fn, $prefix) === 0 && is_readable($dir . '/' . $fn)) {
+                        $v = trim((string)@file_get_contents($dir . '/' . $fn));
+                        if ($v !== '' && $v !== $cur) $archive[] = $v;
+                    }
+                }
+                // 新→旧：时间戳后缀大者优先（排最后还有多个则按内容去重）
+                $keys = array_merge($keys, array_values(array_unique($archive)));
+            }
+        }
+    }
+    return $keys;
+}
+/** 加密 AI Key（AES-256-GCM；返回 'gcm:'+base64(iv|tag|cipher)）；始终用当前钥 */
 function aiEncryptKey($plain) {
     if ($plain === '') return '';
     $secret = getAiEncKey();
@@ -1356,16 +1405,81 @@ function aiEncryptKey($plain) {
     if ($cipher === false) return '';
     return 'gcm:' . base64_encode($iv . $tag . $cipher);
 }
-/** 解密 AI Key */
+/** 解密 AI Key：循环尝试当前钥与归档钥，任一成功即返回明文 */
 function aiDecryptKey($stored) {
     if (!is_string($stored) || strpos($stored, 'gcm:') !== 0) return '';
-    $secret = getAiEncKey();
-    if ($secret === '') return '';
     $raw = base64_decode(substr($stored, 4));
     if ($raw === false || strlen($raw) < 28) return '';
-    $key = hash('sha256', 'ysm-ai:' . $secret, true);
-    $plain = openssl_decrypt(substr($raw, 28), 'aes-256-gcm', $key, OPENSSL_RAW_DATA, substr($raw, 0, 12), substr($raw, 12, 16));
-    return $plain === false ? '' : $plain;
+    $iv = substr($raw, 0, 12); $tag = substr($raw, 12, 16); $ct = substr($raw, 28);
+    foreach (getAiDecryptKeys() as $secret) {
+        $key = hash('sha256', 'ysm-ai:' . $secret, true);
+        $plain = openssl_decrypt($ct, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+        if ($plain !== false && $plain !== '') return $plain;
+    }
+    return '';
+}
+/** 是否到达轮换窗口（当前钥生成/最后修改时间距今 ≥ ttlDays；无时间戳可判断时按文件 mtime） */
+function aiKeyRotationNeeded($ttlDays = 90) {
+    $cur = aiEncKeyPath();
+    if ($cur === '') return false;
+    $t = is_readable($cur) ? @filemtime($cur) : 0;
+    if ($t === 0) return false;
+    return (time() - (int)$t) >= $ttlDays * 86400;
+}
+/** 轮换：将当前钥归档为 <路径>.<ts>，写入全新随机钥。归档保留（供解密旧密文 + 渐进重加密）。 */
+function aiKeyRotate() {
+    $path = aiEncKeyPath();
+    if ($path === '') return [false, '当前密钥不可用'];
+    $cur = getAiEncKey();
+    $ts = time();
+    $archive = $path . '.' . $ts;
+    if (@file_put_contents($archive, $cur . "\n", LOCK_EX) === false) return [false, '归档失败'];
+    @chmod($archive, 0600);
+    $new = bin2hex(random_bytes(32));
+    if (@file_put_contents($path, $new, LOCK_EX) === false) { @unlink($archive); return [false, '写入新钥失败']; }
+    @chmod($path, 0600);
+    return [true, '', $ts];
+}
+/** 渐进重加密：把所有仍用非当前钥加密的 ai_keys 密文用当前钥重加密（每轮最多 $batch 行） */
+function aiReencryptBatch($batch = 100) {
+    $current = getAiEncKey();
+    if ($current === '') return [0, 0];
+    $curKey = hash('sha256', 'ysm-ai:' . $current, true);
+    $rows = db_all('SELECT user_id, provider, key_cipher FROM ai_keys LIMIT ?', [$batch]);
+    // 逐行判断：直接尝试解密，能解出明文即用当前钥重加密
+    $done = 0; $churn = 0;
+    foreach ($rows as $r) {
+        $plain = aiDecryptKey($r['key_cipher']);
+        if ($plain === '') continue;
+        $tag = ''; $iv = random_bytes(12);
+        $cipher = openssl_encrypt($plain, 'aes-256-gcm', $curKey, OPENSSL_RAW_DATA, $iv, $tag);
+        if ($cipher === false) continue;
+        $newCipher = 'gcm:' . base64_encode($iv . $tag . $cipher);
+        if ($newCipher === $r['key_cipher']) continue; // 已是当前钥
+        db_exec('UPDATE ai_keys SET key_cipher = ?, updated = ? WHERE user_id = ? AND provider = ?',
+            [$newCipher, time(), $r['user_id'], $r['provider']]);
+        $done++; $churn++;
+    }
+    return [$done, $churn];
+}
+/** 归档钥自动 GC：删除早于 $olderDays 的归档钥（该日之前应已全部重加密完毕） */
+function aiKeyGc($olderDays = 30) {
+    $base = aiEncKeyPath();
+    if ($base === '') return [0, []];
+    $dir = dirname($base); $prefix = basename($base) . '.';
+    $cutoff = time() - $olderDays * 86400;
+    $removed = []; $cnt = 0;
+    if (!is_dir($dir)) return [0, []];
+    foreach ((array)@scandir($dir) as $fn) {
+        if (strpos($fn, $prefix) !== 0) continue;
+        $suffix = substr($fn, strlen($prefix));
+        if (!ctype_digit($suffix)) continue;
+        if ((int)$suffix < $cutoff) {
+            $full = $dir . '/' . $fn;
+            if (@unlink($full)) { $cnt++; $removed[] = $fn; }
+        }
+    }
+    return [$cnt, $removed];
 }
 /** 明文 Key 掩码（仅保留末四位；绝不明文回显的展示口径） */
 function aiMaskKey($plain) {
@@ -1373,6 +1487,83 @@ function aiMaskKey($plain) {
     if ($plain === '') return '';
     if (strlen($plain) <= 4) return '****';
     return '****' . substr($plain, -4);
+}
+
+// ---- v6.0.0-beta：AI 内容翻译（写作者/站长后台触发；预生成译本缓存，用户前台只读） ----
+/** 分段翻译整篇 Markdown：按空行分段，逐段送 AI，段失败回落原文（不阻断整篇）与保留结构。
+ *  $sender: 触发者 actor（用于复用一个已取好的 provider/key；空则自动按默认服务商）。 */
+function aiTranslateMd($md, $targetLang, $actor) {
+    $provider = aiDefaultProvider($actor['id']);
+    if ($provider === '' || aiProviderBaseUrl($provider) === '') return [false, '请先配置 AI Key'];
+    $row = db_one('SELECT * FROM ai_keys WHERE user_id = ? AND provider = ?', [$actor['id'], $provider]);
+    if (!$row) return [false, '该服务商尚未配置 Key'];
+    $apiKey = aiDecryptKey($row['key_cipher']);
+    if ($apiKey === '') return [false, 'Key 不可用，请重新配置'];
+    $model = trim((string)$row['model']);
+    $base = aiProviderBaseUrl($provider);
+    $url = rtrim($base, '/') . '/chat/completions';
+    $rt = aiModelRuntime($provider, $model);
+    // 段落切分：保留空行分隔（markdown 结构与代码块完整保留）
+    $paras = preg_split('/(\r?\n){2,}/u', (string)$md);
+    $out = [];
+    foreach ($paras as $i => $seg) {
+        $seg = trim($seg);
+        if ($seg === '') { $out[] = ''; continue; }
+        if (mb_strlen($seg) > (int)$rt['max_input_chars']) {
+            $out[] = $seg; // 单段超限回落原文
+            continue;
+        }
+        $messages = aiBuildMessages('translate', $seg, '', $targetLang);
+        $res = aiHttpJson($url, $apiKey, ['model' => $model, 'messages' => $messages, 'stream' => false], (int)$rt['timeout']);
+        if ($res['ok']) {
+            $out[] = (string)($res['data']['choices'][0]['message']['content'] ?? '');
+        } else {
+            $out[] = $seg; // 段失败回落原文
+        }
+    }
+    return [true, implode("\n\n", $out)];
+}
+/** 读某文章某语种译本，返回 [status, md(可空), meta]，判 stale（源文 digest 变化） */
+function articleTranslationStatus($aid, $lang) {
+    $row = db_one('SELECT * FROM article_translations WHERE article_id = ? AND target_lang = ?', [$aid, $lang]);
+    if (!$row) return [null, null, null];
+    $src = (string)@file_get_contents(__DIR__ . '/data/articles/' . $aid);
+    $digest = $src !== '' && $src !== false ? hash('sha256', $src) : '';
+    $status = ($digest !== '' && $digest !== $row['src_digest']) ? 'stale' : $row['status'];
+    return [$status, $row['md'], $row];
+}
+
+// ---- v6.0.0-beta：友站（站长专属；录入辅助抓取 + 掉链巡检，只读校验） ----
+/** 抓取目标站点元数据用于录入预填（name/desc/favicon 服务端缓存）；不执行 JS、限大小、白名单协议 */
+function linkFetchMeta($url) {
+    $parts = parse_url($url);
+    $scheme = strtolower($parts['scheme'] ?? '');
+    $host = strtolower($parts['host'] ?? '');
+    if (!in_array($scheme, ['http', 'https'], true) || $host === '' || isPrivateHost($host)) {
+        return ['ok' => false, 'error' => '仅允许公网 http/https 地址'];
+    }
+    // SSRF 安全：复用全局单跳校验抓取（禁自动跟随重定向；每跳均校验公网/非内网），并限制响应体大小
+    $body = fetchHttpContent($url, 'YSM-LinkBot/1.0', 400000);
+    if ($body === false) return ['ok' => false, 'error' => '抓取失败或页面过大'];
+    $name = ''; $desc = ''; $favicon = '';
+    if (preg_match('/<title[^>]*>(.*?)<\/title>/is', $body, $m)) $name = trim(strip_tags(html_entity_decode($m[1])));
+    if (preg_match('/<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']/is', $body, $m)) $desc = trim(html_entity_decode($m[1]));
+    elseif (preg_match('/<meta[^>]+content=["\'](.*?)["\'][^>]+name=["\']description["\']/is', $body, $m)) $desc = trim(html_entity_decode($m[1]));
+    if (preg_match('/<link[^>]+rel=["\']?(?:shortcut\s+)?icon["\']?[^>]+href=["\'](.*?)["\']/is', $body, $m)) $favicon = trim(html_entity_decode($m[1]));
+    if ($name === '' && $desc === '') return ['ok' => false, 'error' => '未能识别站点信息'];
+    return ['ok' => true, 'name' => mb_substr($name, 0, 60), 'desc' => mb_substr($desc, 0, 200), 'favicon' => $favicon !== '' ? $favicon : (rtrim(dirname($url), '/') . '/favicon.ico')];
+}
+/** 掉链/存活校验（只读；不跟随重定向，仅单跳校验；3xx 视为存活） */
+function linkCheckAlive($url) {
+    $parts = parse_url($url);
+    $scheme = strtolower($parts['scheme'] ?? '');
+    $host = strtolower(trim((string)($parts['host'] ?? '')));
+    if (!in_array($scheme, ['http', 'https'], true) || $host === '' || isPrivateHost($host)) return false;
+    // SSRF 安全：单跳直连已校验 IP，禁自动跟随重定向；只读取 1 字节以判定状态码
+    $res = fetchHttpOnce($url, 'YSM-LinkBot/1.0', 1);
+    if ($res === false) return false;
+    $code = (int)($res['code'] ?? 0);
+    return $code >= 200 && $code < 400;
 }
 
 /** 该账号已配置的 Key 行 */
@@ -1577,6 +1768,48 @@ function aiRateBlocked($ip, $fp, $max = 20, $window = 60) {
 }
 function aiRateHit($ip, $fp) {
     db_rate_add('ai_rates', $ip, $fp);
+}
+/** v6.0.0-beta：账号维度限速（滑动窗口内账号调用次数 > max 判定超限；与 IP+指纹并存计数） */
+function aiRateBlockedUid($uid, $max = 20, $window = 60) {
+    return (int)db_one('SELECT COUNT(*) AS c FROM ai_rates WHERE user_id = ? AND t > ?', [$uid, time() - $window])['c'] >= $max;
+}
+function aiRateHitUid($uid) {
+    db_exec('INSERT INTO ai_rates (ip, fp, user_id, t) VALUES (?, ?, ?, ?)', [getClientIP(), $_SESSION['cmt_fp'] ?? '', $uid, time()]);
+}
+
+// ---- v6.0.0-beta：AI 并发闸（user_id 唯一，过期租约防死锁；调用方用 register_shutdown 确保释放） ----
+function aiInflightAcquire($uid, $lease = 120) {
+    if ($uid === '') return false;
+    $now = time();
+    // 已占用且未过期 → 拒绝（严格并发）
+    $row = db_one('SELECT started FROM ai_inflight WHERE user_id = ?', [$uid]);
+    if ($row && (int)$row['started'] > $now - $lease) return false;
+    // 无占用或租约过期 → 原子占位（INSERT OR REPLACE 在并发下仍可能冲突，捕获唯一键异常视为并发失败）
+    try {
+        db_exec('INSERT INTO ai_inflight (user_id, started) VALUES (?, ?) '
+            . 'ON CONFLICT(user_id) DO UPDATE SET started = excluded.started', [$uid, $now]);
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+function aiInflightRelease($uid) {
+    if ($uid === '') return;
+    db_exec('DELETE FROM ai_inflight WHERE user_id = ?', [$uid]);
+}
+/** v6.0.0-beta：每日配额（写死常量；预留 config.ai_daily_quota 可配置，缺省回落常量） */
+define('AI_DAILY_QUOTA', 300);
+function aiDailyQuotaExceeded($uid) {
+    if ($uid === '') return true;
+    $d = gmdate('Ymd'); // 自然日（UTC）
+    $row = db_one('SELECT cnt FROM ai_daily WHERE d = ? AND user_id = ?', [$d, $uid]);
+    return $row ? (int)$row['cnt'] >= AI_DAILY_QUOTA : false;
+}
+function aiDailyQuotaAdd($uid) {
+    if ($uid === '') return;
+    $d = gmdate('Ymd');
+    db_exec('INSERT INTO ai_daily (d, user_id, cnt) VALUES (?, ?, 1) '
+        . 'ON CONFLICT(d, user_id) DO UPDATE SET cnt = cnt + 1', [$d, $uid]);
 }
 
 /** 将服务商响应/错误映射为可读原因（脱敏：只返回固定可读文案 + HTTP 码/错误类别，
@@ -2322,6 +2555,40 @@ function fpMatches($boundFp, $requestFp) {
     if ($boundFp === '' || $requestFp === '') return false;
     return hash_equals((string)$boundFp, computeSessionFp($requestFp));
 }
+// ---- v6.0.0-beta：手机指纹漂移修复（E）----
+// 根因：前端原始指纹是「lang|时区|分辨率|canvas|UA」的不可拆散哈希，手机端旋转/无痕/时区漂移 → 严格 hash_equals 即误判换设备。
+// 方案：前端额外上报一个「稳定指纹」（忽略分辨率原始值、忽略 canvas 末段字节、时区按 ±2h 归桶），
+//       服务端对「已信任设备」（device_fps 已登记的管理角色用户）放宽到稳定指纹比对；陌生/高敏操作仍严格。
+/** 读取前端上报的稳定指纹头 X-FpS（格式同 X-Fp：16-64 位 hex） */
+function getRequestStableFp() {
+    $fp = trim((string)($_SERVER['HTTP_X_FPS'] ?? ''));
+    return ($fp !== '' && preg_match('/^[a-f0-9]{16,64}$/i', $fp)) ? strtolower($fp) : '';
+}
+/** 计算服务端绑定「稳定指纹」（稳定指纹 + UA；与 computeSessionFp 同构，仅输入换成稳定指纹） */
+function computeStableFp($stableClientFp) {
+    $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 256);
+    return hash('sha256', ($stableClientFp !== '' ? (string)$stableClientFp : 'no-fp') . '|' . $ua);
+}
+/** 用户是否「已信任设备」：管理角色（超管/站长/写作者）且在 device_fps 至少登记过一次（曾通过邮箱二次验证） */
+function isTrustedDevice($uid) {
+    if ($uid === '') return false;
+    $u = db_one('SELECT role FROM users WHERE id = ?', [$uid]);
+    $role = $u['role'] ?? '';
+    if (!in_array($role, [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) return false;
+    $row = db_one('SELECT 1 AS x FROM device_fps WHERE user_id = ? LIMIT 1', [$uid]);
+    return (bool)$row;
+}
+/**
+ * 放宽态比对：物理值都查将绑定指纹与请求指纹做严格比对；已信任设备则额外接受「稳定指纹」匹配。
+ * $boundStableFp：签发时绑定的稳定指纹（可为空=旧会话，此时仅走严格路径，安全不改写过账）。
+ */
+function fpRelaxedMatches($boundFp, $requestFp, $boundStableFp = '', $requestStableFp = '') {
+    if (fpMatches($boundFp, $requestFp)) return true;
+    if ($boundStableFp !== '' && $requestStableFp !== '') {
+        return hash_equals((string)$boundStableFp, computeStableFp($requestStableFp));
+    }
+    return false;
+}
 /**
  * 校验当前登录态会话的环境与版本：
  * - 未登录 → false
@@ -2335,6 +2602,11 @@ function requireSessionEnv() {
     if (!isset($_SESSION['cmt_tv'])) return false;
     $uid = $_SESSION['cmt_user']['id'] ?? '';
     if ($uid === '' || (int)$_SESSION['cmt_tv'] !== getUserTV($uid)) return false;
+    // v6.0.0-beta（E）：已信任设备（管理角色 + device_fps 已登记）且有稳定指纹绑定 → 放宽到稳定指纹，
+    // 手机端旋转/canvas/时区漂移不再被误判换设备；未知设备/无稳定绑定仍走严格比对（安全基线）。
+    if (isTrustedDevice($uid) && trim((string)($_SESSION['cmt_sfp'] ?? '')) !== '') {
+        return fpRelaxedMatches($_SESSION['cmt_fp'], getRequestFp(), $_SESSION['cmt_sfp'], getRequestStableFp());
+    }
     return fpMatches($_SESSION['cmt_fp'], getRequestFp());
 }
 
@@ -2353,10 +2625,10 @@ function bumpUserTV($uid) {
 // v4.6.0：前台登录态长效 30 天（REFRESH_TTL 7 天 → 30 天）；超管不签发 refresh（严格 30 分钟 JWT）
 const REFRESH_TTL = 2592000; // 30 天
 /** 签发 refresh token（写库 + 写 httpOnly Cookie），返回明文 token */
-function issueRefreshToken($uid, $sessionFp, $tv) {
+function issueRefreshToken($uid, $sessionFp, $tv, $sessionSfp = '') {
     $token = bin2hex(random_bytes(32));
-    db_exec('INSERT INTO refresh_tokens (id, user_id, token_hash, fp, tv, expires, created) VALUES (?,?,?,?,?,?,?)',
-        [bin2hex(random_bytes(8)), $uid, hash('sha256', $token), (string)$sessionFp, (int)$tv, time() + REFRESH_TTL, time()]);
+    db_exec('INSERT INTO refresh_tokens (id, user_id, token_hash, fp, sfp, tv, expires, created) VALUES (?,?,?,?,?,?,?,?)',
+        [bin2hex(random_bytes(8)), $uid, hash('sha256', $token), (string)$sessionFp, (string)$sessionSfp, (int)$tv, time() + REFRESH_TTL, time()]);
     setcookie('ysm_rt', $token, [
         'expires' => time() + REFRESH_TTL,
         'path' => '/',
@@ -2367,16 +2639,23 @@ function issueRefreshToken($uid, $sessionFp, $tv) {
     return $token;
 }
 /**
- * 消费 refresh token：校验存在/未吊销/未过期/指纹匹配/tv 匹配，成功返回记录数组，失败返回 null。
- * 换环境（指纹不匹配）/被踢（tv 落后）→ 无效，触发重新登录。
+ * 消费 refresh token：校验存在/未吊销/未过期/tv 匹配；环境指纹放行规则（v6.0.0-beta 加固）：
+ *  - 已信任设备（管理角色 + device_fps 已登记）→ 允许「稳定指纹」放宽（旋转/canvas/时区漂移不踢）
+ *  - 未知设备 / 无稳定指纹绑定 / 高敏写入 → 一律严格指纹比对，不降级
  */
 function consumeRefreshToken($token, $requestFp, $userTV) {
     if (!is_string($token) || strlen($token) !== 64 || !ctype_xdigit($token)) return null;
     $row = db_one('SELECT * FROM refresh_tokens WHERE token_hash = ?', [hash('sha256', $token)]);
     if (!$row || !empty($row['revoked'])) return null;
     if ((int)$row['expires'] < time()) { db_exec('DELETE FROM refresh_tokens WHERE id = ?', [$row['id']]); return null; }
-    if (!hash_equals((string)$row['fp'], computeSessionFp($requestFp))) return null;
     if ((int)$row['tv'] !== (int)$userTV) return null;
+    $uid = $row['user_id'];
+    // 已信任设备且签发了稳定指纹 → 放宽比对；否则严格
+    if (isTrustedDevice($uid) && trim((string)($row['sfp'] ?? '')) !== '') {
+        if (!fpRelaxedMatches((string)$row['fp'], $requestFp, (string)$row['sfp'], getRequestStableFp())) return null;
+    } else {
+        if (!hash_equals((string)$row['fp'], computeSessionFp($requestFp))) return null;
+    }
     db_exec('UPDATE refresh_tokens SET last_used = ? WHERE id = ?', [time(), $row['id']]);
     return $row;
 }

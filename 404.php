@@ -1,5 +1,6 @@
 <?php http_response_code(404);
 require_once __DIR__ . '/utils.php';
+require_once __DIR__ . '/lib/i18n.php';
 $siteCfg = loadSiteConfig();
 $siteName = $siteCfg['site_title'] ?? 'You Super Markdown';
 $bgType = $siteCfg['bg_type'] ?? 'none';
@@ -9,7 +10,7 @@ $bgBlur = !empty($siteCfg['bg_blur_enabled']) ? '1' : '0';
 $bgBlurLevel = intval($siteCfg['bg_blur_level'] ?? 0);
 $bgCardOpacity = intval($siteCfg['bg_card_opacity'] ?? 100);?>
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="<?= htmlspecialchars(ysmLocale()) ?>" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -84,5 +85,8 @@ $bgCardOpacity = intval($siteCfg['bg_card_opacity'] ?? 100);?>
         </div>
     </div>
 </div>
+<!-- v6.0.0：i18n 运行时文案接入 -->
+<script>window.I18N = <?= json_encode(ysmClientI18n(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+<script src="/js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
 </body>
 </html>

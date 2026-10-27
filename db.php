@@ -50,7 +50,9 @@ function db_init_schema($pdo) {
         disabled INTEGER DEFAULT 0,
         last_login TEXT,
         login_count INTEGER DEFAULT 0,
-        tv INTEGER DEFAULT 0
+        tv INTEGER DEFAULT 0,
+        home_font TEXT,
+        home_lang TEXT
     )');
     // v4.5.0：refresh token 表（双 token 短时效：登录态过期后用 refresh 自动续期，
     // 绑定环境指纹 + token_version，换环境/踢旧后失效）
@@ -67,6 +69,21 @@ function db_init_schema($pdo) {
     )');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires)');
+    // v6.0.0-beta：refresh_tokens 幂等补 sfp 列（已信任设备的稳定指纹子集；未升级则保持旧行为）
+    $cols = [];
+    foreach ($pdo->query('PRAGMA table_info(refresh_tokens)') as $c) { $cols[] = strtolower($c['name']); }
+    if (!in_array('sfp', $cols, true)) {
+        $pdo->exec('ALTER TABLE refresh_tokens ADD COLUMN sfp TEXT');
+    }
+    // v6.0.0：users 幂等补列（home_font 账号默认首页字体 / home_lang 账号基础语言；老库自动升级）
+    $ucols = [];
+    foreach ($pdo->query('PRAGMA table_info(users)') as $c) { $ucols[] = strtolower($c['name']); }
+    if (!in_array('home_font', $ucols, true)) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN home_font TEXT DEFAULT ''");
+    }
+    if (!in_array('home_lang', $ucols, true)) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN home_lang TEXT DEFAULT ''");
+    }
     // v2.9.0：邮箱验证码表（注册 / 写作者验证 / 超管确认链路）
     $pdo->exec('CREATE TABLE IF NOT EXISTS email_codes (
         id TEXT PRIMARY KEY,
@@ -222,8 +239,54 @@ function db_init_schema($pdo) {
     )');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_ai_keys_user ON ai_keys(user_id)');
     // v5.4.0-beta：AI 出站调用限速表（与 music_rates 同构：ip + 指纹，防滥用放大外呼）
-    $pdo->exec('CREATE TABLE IF NOT EXISTS ai_rates (ip TEXT, fp TEXT, t INTEGER)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ai_rates (ip TEXT, fp TEXT, user_id TEXT, t INTEGER)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_ai_rates_ip_t ON ai_rates(ip, t)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_ai_rates_uid_t ON ai_rates(user_id, t)');
+    // v6.0.0-beta：ai_rates 幂等补 user_id 列（老库已建成但缺列）
+    $cols = [];
+    foreach ($pdo->query('PRAGMA table_info(ai_rates)') as $c) { $cols[] = strtolower($c['name']); }
+    if (!in_array('user_id', $cols, true)) {
+        $pdo->exec('ALTER TABLE ai_rates ADD COLUMN user_id TEXT');
+    }
+    // v6.0.0-beta：AI 并发闸（user_id 唯一；started 为过期租约，防死锁）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ai_inflight (
+        user_id TEXT PRIMARY KEY,
+        started INTEGER
+    )');
+    // v6.0.0-beta：AI 每日配额（自然日 + 账号）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ai_daily (
+        d TEXT,
+        user_id TEXT,
+        cnt INTEGER DEFAULT 0,
+        PRIMARY KEY (d, user_id)
+    )');
+    // v6.0.0-beta：AI 内容翻译译本缓存（预生成、用户只读；stale 提示作者手动重翻）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS article_translations (
+        article_id TEXT,
+        target_lang TEXT,
+        md TEXT,
+        src_digest TEXT,
+        status TEXT DEFAULT \'done\',
+        model TEXT,
+        created_at INTEGER,
+        updated_at INTEGER,
+        PRIMARY KEY (article_id, target_lang)
+    )');
+    // v6.0.0-beta：友站（站长专属管理；访客只读）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        site_name TEXT,
+        url TEXT UNIQUE,
+        favicon TEXT,
+        desc TEXT,
+        status TEXT DEFAULT \'active\',
+        place_time INTEGER,
+        last_check INTEGER,
+        check_count INTEGER DEFAULT 0,
+        sort INTEGER DEFAULT 0,
+        source TEXT DEFAULT \'manual\'
+    )');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_links_status_sort ON links(status, sort)');
     // v2.5.4 性能优化：频率计数表索引
     // (ip, t) 复合索引加速 db_rate_count() 的按 IP 窗口计数；t 单列索引加速 30 天过期清理
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_login_fails_ip_t ON login_fails(ip, t)');
@@ -266,6 +329,8 @@ function db_init_schema($pdo) {
     // v5.0.0 P7（审计链加固）：全新安装即使用新 HMAC 链，故 epoch=2（epoch1=旧 sha256 链，epoch2=新 HMAC 链）
     $pdo->exec("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '5.0.0')");
     $pdo->exec("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('epoch', '2')");
+    // v6.0.0-beta：AI 加固 / 翻译 / 友站 schema 标记（幂等 join 到既有 ui/业务 meta）
+    $pdo->exec("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('ai_schema', 'ai_inflight|ai_rates.user_id|ai_daily|article_translations|links')");
 }
 
 /**

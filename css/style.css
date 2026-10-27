@@ -1,4 +1,4 @@
-@font-face{font-family:'ChineseFont';src:url('../fonts/luoliti.ttf') format('truetype');font-weight:normal;font-style:normal;font-display:swap;unicode-range:U+4E00-9FFF,U+3400-4DBF,U+20000-2A6DF,U+3000-303F,U+FF00-FFEF,U+2E80-2EFF,U+31C0-31EF,U+FE10-FE1F,U+FE30-FE4F;}
+/* v6.0.0：内置萝莉体已移除；自定义字体由超管后台上传，仅在启用时由 index.php 动态注入 @font-face */
 :root{--accent-hue: 220;--accent-sat: 60%;--accent-lightness: 50%;--accent: hsl(var(--accent-hue), var(--accent-sat), var(--accent-lightness));--accent-hover: hsl(var(--accent-hue), calc(var(--accent-sat) + 10%), calc(var(--accent-lightness) - 10%));--accent-light: hsl(var(--accent-hue), var(--accent-sat), 90%);--code-bg: hsl(var(--accent-hue), var(--accent-sat), 96%);--bg: hsl(var(--accent-hue), 60%, 96%);--surface: #ffffff;--border: #dce7f5;--text: #000000;--text-secondary: #0b1220;--text-muted: #111827;--shadow-sm: 0 1px 2px rgba(0,0,0,0.04);--shadow: 0 2px 8px rgba(0,0,0,0.05), 0 1px 3px rgba(0,0,0,0.04);--shadow-md: 0 4px 16px rgba(0,0,0,0.06), 0 2px 6px rgba(0,0,0,0.04);--radius: 14px;--radius-sm: 10px;--header-height: 56px;--fixed-icon-bg: #f0f4ff;--fixed-icon-color: #6b7a99;--base-font-size: 14px;}
 *{margin:0;padding:0;box-sizing:border-box;}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;}
@@ -794,6 +794,46 @@ kbd{display:inline-flex;align-items:center;justify-content:center;min-width:28px
 .user-dropdown-name{font-size:14px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .user-dropdown-role{font-size:11px;color:var(--text-muted);margin-top:1px;}
 .user-dropdown-divider{height:1px;background:var(--border);margin:0 12px;}
+.lang-dropdown{position:fixed;top:calc(var(--header-height,56px) + 6px);right:12px;width:150px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.12);z-index:299;padding:6px 0;overflow:hidden;}
+[data-theme="dark"] .lang-dropdown{background:#1c2128;border-color:#30363d;}
+.lang-dropdown .lang-option{display:block;padding:9px 16px;font-size:13px;color:var(--text-secondary);cursor:pointer;text-decoration:none;transition:all 0.15s;}
+.lang-dropdown .lang-option:hover{background:var(--accent-light);color:var(--accent);}
+[data-theme="dark"] .lang-dropdown .lang-option:hover{background:hsla(var(--accent-hue),var(--accent-sat),30%,0.15);}
+/* ===== v6.0.0：多语言排版适配（英语/日语/繁中文本更长，禁止固定宽度/强制单行造成溢出或截断） ===== */
+.lang-dropdown{width:auto;min-width:168px;max-width:min(300px,92vw);}
+.lang-dropdown .lang-dropdown-title{padding:8px 16px 4px;font-size:11px;line-height:1.4;letter-spacing:0.04em;color:var(--text-muted);}
+.lang-dropdown .lang-option{display:flex;align-items:center;gap:8px;white-space:normal;word-break:break-word;line-height:1.45;}
+.lang-dropdown .lang-option.active{color:var(--accent);font-weight:600;}
+.lang-dropdown .lang-option.active::after{content:'✓';margin-left:auto;font-size:12px;}
+.lang-dropdown .lang-dropdown-foot{margin-top:4px;padding:8px 10px;border-top:1px solid var(--border);}
+.lang-dropdown .lang-base-btn{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--accent);font-size:12.5px;line-height:1.35;white-space:normal;word-break:break-word;cursor:pointer;transition:all 0.15s;}
+.lang-dropdown .lang-base-btn:hover{border-color:var(--accent);}
+/* 非中文界面：按钮/标签/菜单允许换行，长单词不撑破容器 */
+html:not([lang="zh-CN"]) .font-type-btn,
+html:not([lang="zh-CN"]) .lang-base-btn,
+html:not([lang="zh-CN"]) .btn,
+html:not([lang="zh-CN"]) .sidebar-link,
+html:not([lang="zh-CN"]) .user-dropdown-item{white-space:normal;word-break:break-word;line-height:1.4;}
+/* 非中文卡片标题：改为最多两行截断（英文标题通常远长于中文） */
+html:not([lang="zh-CN"]) .card-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.45;}
+html:not([lang="zh-CN"]) .card-tags .tag,
+html:not([lang="zh-CN"]) .tag{white-space:normal;word-break:break-word;}
+/* 英语断词 + 日语行高微调 */
+html[lang="en-US"] .markdown-body{line-height:1.75;hyphens:auto;}
+html[lang="ja-JP"] .markdown-body{line-height:1.9;}
+/* ===== v6.0.0：友站（友情链接）卡片墙 ===== */
+.links-view{padding:8px 4px 40px;}
+.links-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0 18px;flex-wrap:wrap;}
+.links-title{font-size:1.35em;font-weight:650;color:var(--text);}
+.links-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;}
+.link-card{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--border);border-radius:12px;background:var(--surface);text-decoration:none;color:var(--text);transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;min-width:0;}
+.link-card:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:var(--shadow-md);}
+.link-fav{width:36px;height:36px;border-radius:9px;object-fit:cover;flex-shrink:0;background:var(--bg);}
+.link-fav-ph{display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:var(--accent);background:var(--accent-light);}
+.link-body{display:flex;flex-direction:column;gap:4px;min-width:0;}
+.link-name{font-size:14px;font-weight:600;line-height:1.4;word-break:break-word;}
+.link-desc{font-size:12.5px;color:var(--text-secondary);line-height:1.55;word-break:break-word;}
+.links-empty{padding:48px 16px;text-align:center;color:var(--text-muted);font-size:14px;}
 [data-theme="dark"] .user-dropdown-divider{background:#30363d;}
 .user-dropdown-item{display:flex;align-items:center;gap:10px;padding:11px 18px;cursor:pointer;font-size:13.5px;color:var(--text-secondary);transition:all 0.15s;}
 .user-dropdown-item:hover{background:var(--accent-light);color:var(--accent);}

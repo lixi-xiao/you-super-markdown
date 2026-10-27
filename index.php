@@ -1,5 +1,7 @@
 <?php
 require_once __DIR__ . '/utils.php';
+// v6.0.0-beta：i18n 外壳框架（严谨：缺键自动回落 zh-CN，生命周期内自动发现 lang/ 新语种）
+require_once __DIR__ . '/lib/i18n.php';
 secureSessionStart();
 
 // v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
@@ -225,7 +227,7 @@ function ysmRenderShortNotFound($siteName, $siteConf = []) {
     ];
     header('Content-Type: text/html; charset=utf-8');
     ?><!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="<?= htmlspecialchars(ysmLocale()) ?>" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -658,7 +660,7 @@ if ($action === 'read') {
         $shareCtx = ysmShareContext();
         $readTarget = ysmShareUrl($filename);
         header('Content-Type: text/html; charset=utf-8');
-        echo "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n";
+        echo "<!doctype html>\n<html lang=\"" . htmlspecialchars(ysmLocale(), ENT_QUOTES, 'UTF-8') . "\">\n<head>\n";
         echo '<meta charset="utf-8">' . "\n";
         echo '<title>' . htmlspecialchars($shareCtx['title'], ENT_QUOTES, 'UTF-8') . "</title>\n";
         ysmShareRenderMeta($shareCtx);
@@ -689,6 +691,17 @@ if ($action === 'read') {
         }
     }
     $content = preg_replace('/<!--META.*?-->\n?/s', '', $content);
+    // v6.0.0：按当前浏览语言读取 AI 译本（无译本/zh-CN/语言已停用时保持原文；stale 译本照常展示但标注）
+    $__trLang = ysmLocale();
+    $__trStatus = null;
+    if ($__trLang !== 'zh-CN') {
+        [$__trStatus, $__trMd] = articleTranslationStatus($filename, $__trLang);
+        if (is_string($__trMd) && trim($__trMd) !== '') {
+            $content = preg_replace('/<!--META.*?-->\n?/s', '', $__trMd);
+        } else {
+            $__trStatus = null; // 无译本 → 视为原文
+        }
+    }
     // v3.3.17：站内大图超过 3MB 默认展示缩略图、不加载原图（轻量站——富媒体文章里的
     //          MB 级大图（如航拍截图）点进文章不再拖慢加载；原图保留但页面不再请求）。
     //          仅站内 data/images/ 图片、跳过 gif（动图保动画）与已是缩略图的引用。
@@ -717,6 +730,8 @@ if ($action === 'read') {
         'content' => $content, 'size' => filesize($filepath),
         'modified' => date('Y-m-d H:i', filemtime($filepath)),
         'wordCount' => $wordCount,
+        'lang' => $__trLang,
+        'translationStatus' => $__trStatus,
         'views' => (int)db_one('SELECT views FROM page_views WHERE article = ?', [$filename])['views'] ?? 0
     ], JSON_UNESCAPED_UNICODE);
     exit;
@@ -921,7 +936,7 @@ if ($action === 'rss_guide') {
     $feedCount = count(collectPublishedArticles());
     ?>
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="<?= htmlspecialchars(ysmLocale()) ?>" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -979,6 +994,9 @@ if ($action === 'rss_guide') {
         <p class="rss-guide-foot">也可以直接复制地址到任意支持订阅的客户端使用。</p>
     </div>
 </div>
+<!-- v6.0.0：i18n 运行时文案接入 -->
+<script>window.I18N = <?= json_encode(ysmClientI18n(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+<script src="js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
 </body>
 </html>
     <?php
@@ -986,7 +1004,7 @@ if ($action === 'rss_guide') {
 }
 ?>
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="<?= htmlspecialchars(ysmLocale()) ?>" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1022,6 +1040,18 @@ if ($action === 'rss_guide') {
     <!-- v5.1.0 P2-1：Tailwind 外壳样式（先于 style.css 加载，旧样式仍作兜底覆盖） -->
     <link rel="stylesheet" href="/css/tw.min.css?v=<?= @filemtime(__DIR__ . '/css/tw.min.css') ?>">
     <link rel="stylesheet" href="css/style.css?v=<?= filemtime(__DIR__ . '/css/style.css') ?>">
+    <!-- v6.0.0：自定义首页字体（超管后台启用时经 font.php 受控输出；未启用则完全不加载字体文件） -->
+    <?php
+    $__ysmFontFile = basename((string)($siteConf['custom_font_name'] ?? ''));
+    $__ysmFontOn = !empty($siteConf['custom_font_enabled']) && $__ysmFontFile !== '' && is_file(__DIR__ . '/data/fonts/' . $__ysmFontFile);
+    if ($__ysmFontOn):
+        $__ysmFontUrl = '/font.php?f=' . rawurlencode($__ysmFontFile) . '&v=' . (@filemtime(__DIR__ . '/data/fonts/' . $__ysmFontFile) ?: 1);
+        $__ysmFontFmt = preg_match('/\.woff2$/i', $__ysmFontFile) ? 'woff2' : (preg_match('/\.woff$/i', $__ysmFontFile) ? 'woff' : (preg_match('/\.otf$/i', $__ysmFontFile) ? 'opentype' : 'truetype'));
+    ?>
+    <style>
+    @font-face{font-family:'ChineseFont';src:url('<?= htmlspecialchars($__ysmFontUrl, ENT_QUOTES, 'UTF-8') ?>') format('<?= $__ysmFontFmt ?>');font-weight:normal;font-style:normal;font-display:swap;unicode-range:U+4E00-9FFF,U+3400-4DBF,U+20000-2A6DF,U+3000-303F,U+FF00-FFEF,U+2E80-2EFF,U+31C0-31EF,U+FE10-FE1F,U+FE30-FE4F;}
+    </style>
+    <?php endif; ?>
 </head>
 <?php
 // v4.2.0：API 背景——空值回退固定 16:9 图片源；追加 `_t` 时间参数防浏览器缓存，每次进站换一张随机背景
@@ -1029,10 +1059,12 @@ $bgApi = trim((string)($siteConf['bg_api_url'] ?? ''));
 if (($siteConf['bg_type'] ?? 'none') === 'api' && $bgApi === '') $bgApi = FIXED_IMG_API;
 if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t=' . time();
 ?>
-<body data-guest-comments="<?= !empty($siteConf['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($siteConf['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($siteConf['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($bgApi) ?>" data-bg-blur="<?= !empty($siteConf['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($siteConf['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($siteConf['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($siteConf['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($siteConf['music_auto_play'] ?? '') ?>" data-bg-music="<?= (!empty($siteConf['bg_music_enabled']) && is_file(__DIR__ . '/data/bgm/background.mp3')) ? '1' : '0' ?>">
+<body data-ysm-custom-font="<?= !empty($__ysmFontOn) ? '1' : '0' ?>" data-guest-comments="<?= !empty($siteConf['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($siteConf['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($siteConf['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($bgApi) ?>" data-bg-blur="<?= !empty($siteConf['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($siteConf['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($siteConf['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($siteConf['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($siteConf['music_auto_play'] ?? '') ?>" data-bg-music="<?= (!empty($siteConf['bg_music_enabled']) && is_file(__DIR__ . '/data/bgm/background.mp3')) ? '1' : '0' ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand truncate max-w-[40vw] sm:max-w-none" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($siteHeading) ?></a></div>
     <div class="header-right">
+        <!-- v6.0.0：友站入口（友情链接卡片墙） -->
+        <button class="icon-btn" id="btnLinks" title="友情链接" onclick="ysmOpenLinks()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
         <!-- v4.1.0：RSS 订阅入口（点击进友好引导页，不再直接弹 XML；阅读器自动发现仍走 ?action=rss） -->
         <a class="icon-btn rss-btn" id="btnRss" title="RSS 订阅" href="/index.php?action=rss_guide" target="_blank" rel="noopener" aria-label="RSS 订阅">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -1051,9 +1083,21 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         <button class="icon-btn" id="btnThemeToggle" title="明暗切换"><svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
         <button class="icon-btn" id="btnKbdHelp" title="快捷键帮助 (?)" onclick="toggleKbdHelp()"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/></svg></button>
         <button class="icon-btn" id="btnColor" title="调整主题色"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 0 1 0 20 4 4 0 0 1-4-4v-2a2 2 0 0 0-2-2H4a2 2 0 0 1-2-2 10 10 0 0 1 10-10z"/><circle cx="8" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="14" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="18" cy="10" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></button>
+        <!-- v6.0.0-beta：i18n 语言切换器（自动发现 lang/ 下语言；切换写 Cookie + 刷新） -->
+        <button class="icon-btn" id="btnLang" title="切换语言"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button>
         <button class="icon-btn" id="btnUser" title="用户"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
     </div>
 </header>
+<!-- v6.0.0：语言切换菜单（点击 = 临时浏览语言，不持久；「设为默认」才持久到浏览器/账号） -->
+<div class="lang-dropdown" id="langDropdown" style="display:none;">
+    <div class="lang-dropdown-title">当前浏览语言</div>
+    <?php $__ysmCurLang = ysmLocale(); foreach (ysmSupportedLangs() as $lc => $info): ?>
+    <a class="lang-option<?= $lc === $__ysmCurLang ? ' active' : '' ?>" data-lang="<?= htmlspecialchars($lc) ?>" href="#" onclick="event.preventDefault();ysmSetLang('<?= htmlspecialchars($lc) ?>');"><?= htmlspecialchars($info['name']) ?></a>
+    <?php endforeach; ?>
+    <div class="lang-dropdown-foot">
+        <button type="button" class="lang-base-btn" onclick="ysmSetBaseLang('<?= htmlspecialchars($__ysmCurLang) ?>')">设为默认语言</button>
+    </div>
+</div>
 <!-- 用户下拉菜单 -->
 <div class="user-dropdown" id="userDropdown">
     <div class="user-dropdown-header" id="userDropdownHeader">
@@ -1123,7 +1167,9 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         <span style="font-weight:600; color:var(--text);">字体设置</span>
         <div class="font-type-buttons" id="fontTypeButtons">
             <button class="font-type-btn active" data-font="default">默认</button>
-            <button class="font-type-btn" data-font="custom">萝莉体</button>
+            <?php if (!empty($__ysmFontOn)): ?>
+            <button class="font-type-btn" data-font="custom">自定义字体</button>
+            <?php endif; ?>
         </div>
         <div class="font-size-slider">
             <span style="font-size:14px; color:var(--text-secondary);">A</span>
@@ -1157,6 +1203,15 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
                 </section>
             </aside>
         </div>
+    </div>
+    <!-- v6.0.0：友站（友情链接）卡片墙 -->
+    <div class="links-view" id="linksView" style="display:none">
+        <div class="links-head">
+            <h2 class="links-title">友情链接</h2>
+            <button type="button" class="btn btn-outline" onclick="ysmCloseLinks()">返回</button>
+        </div>
+        <div class="links-grid" id="linksGrid"></div>
+        <div class="links-empty" id="linksEmpty" style="display:none">暂无友情链接</div>
     </div>
     <div class="reading-view" id="readingView">
         <div class="markdown-body" id="markdownBody"></div>
@@ -1449,10 +1504,89 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
 window.YSM_FILE = <?= json_encode($_GET['file'] ?? '', JSON_UNESCAPED_UNICODE) ?>;
 // v3.1.6：公告卡片数据（服务端已转义标题/摘要，tags/cover 由文章提取）
 // v5.0.0 P1-2：加 JSON_HEX_* 标志，防标题/摘要中的闭合脚本标签或引号逃逸（XSS）
-window.YSM_ANNOUNCEMENTS = <?= json_encode($announcementCards, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+window.YSM_ANNOUNCEMENTS = <?= json_encode($announcementCards, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+// v6.0.0-beta：i18n 前端字典（当前语言 + zh 合并；JS 用 I18N.t(key)，缺键已回落）
+window.I18N = <?= json_encode(ysmClientI18n(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+window.I18N.t = function(k, v){ v = v || {}; var s = (I18N.dict && I18N.dict[k]) || k; for (var p in v) s = s.split('{'+p+'}').join(v[p]); return s; };
+// v6.0.0：语言切换——临时浏览语言（?lang=，不写 Cookie/账号），只有「设为默认」才持久
+window.YSM_CURRENT_LANG = <?= json_encode(ysmLocale(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+window.ysmSetLang = function(lc){
+    try {
+        var u = new URL(location.href);
+        u.searchParams.set('lang', lc);
+        location.href = u.toString();
+    } catch (e) {
+        location.href = location.pathname + '?lang=' + encodeURIComponent(lc);
+    }
+};
+window.ysmSetBaseLang = function(lc){
+    // 1) 浏览器基础语言（持久）
+    try { document.cookie = 'ysm_lang=' + encodeURIComponent(lc) + '; path=/; max-age=31536000; SameSite=Lax'; } catch (e) {}
+    // 2) 登录用户：同时绑定账号（跨设备跟随，best-effort）
+    try {
+        if (window.YSM_LOGGED_IN) {
+            fetch('api.php?action=update_profile', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ home_lang: lc })
+            }).catch(function () {});
+        }
+    } catch (e) {}
+    // 3) 清掉临时 ?lang= 参数后刷新，立即回到基础语言
+    try {
+        var u = new URL(location.href);
+        u.searchParams.delete('lang');
+        location.href = u.toString();
+    } catch (e) { location.reload(); }
+};
+// v6.0.0：友站（友情链接）卡片墙——访客只读，数据来自 ?action=links_list
+window.ysmOpenLinks = function(){
+    var hv = document.getElementById('homeView');
+    var rv = document.getElementById('readingView');
+    var lv = document.getElementById('linksView');
+    if (hv) hv.style.display = 'none';
+    if (rv) rv.style.display = 'none';
+    if (lv) lv.style.display = 'block';
+    var grid = document.getElementById('linksGrid');
+    var empty = document.getElementById('linksEmpty');
+    if (!grid) return;
+    grid.innerHTML = '';
+    if (empty) { empty.style.display = 'none'; empty.textContent = '暂无友情链接'; }
+    fetch('api.php?action=links_list').then(function(r){ return r.json(); }).then(function(d){
+        var links = (d && d.links) || [];
+        if (!links.length) { if (empty) empty.style.display = 'block'; return; }
+        var esc = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+        grid.innerHTML = links.map(function(x){
+            var name = esc(x.site_name), url = esc(x.url), desc = esc(x.desc), fav = esc(x.favicon);
+            var favHtml = fav
+                ? '<img class="link-fav" src="' + fav + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+                : '<span class="link-fav link-fav-ph">' + (name.charAt(0).toUpperCase() || '🔗') + '</span>';
+            return '<a class="link-card" href="' + url + '" target="_blank" rel="noopener nofollow">' + favHtml +
+                   '<span class="link-body"><span class="link-name">' + name + '</span><span class="link-desc">' + desc + '</span></span></a>';
+        }).join('');
+    }).catch(function(){
+        if (empty) { empty.textContent = '加载失败'; empty.style.display = 'block'; }
+    });
+};
+window.ysmCloseLinks = function(){
+    var lv = document.getElementById('linksView');
+    var hv = document.getElementById('homeView');
+    if (lv) lv.style.display = 'none';
+    if (hv) hv.style.display = '';
+};
+document.addEventListener('click', function(e){
+    var langMenu = document.getElementById('langDropdown');
+    if (!langMenu) return;
+    var isBtn = e.target.closest && e.target.closest('#btnLang');
+    var isOpt = e.target.closest && e.target.closest('.lang-option');
+    if (isBtn) { langMenu.style.display = langMenu.style.display === 'block' ? 'none' : 'block'; return; }
+    if (!isOpt) langMenu.style.display = 'none';
+});</script>
 <script src="js/main.js?v=<?= filemtime(__DIR__ . '/js/main.js') ?>" defer></script>
 <!-- v5.1.0 P3：外壳增强（滚动边界 / 键盘焦点环）；纯增量，与 main.js 无重叠 -->
 <script src="js/ui.js?v=<?= @filemtime(__DIR__ . '/js/ui.js') ?>" defer></script>
+<!-- v6.0.0：i18n 运行时文案接入（首页全部 UI 文案按当前语言翻译；文章/评论等用户内容不翻译） -->
+<script src="js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>" defer></script>
 <script>
 // 背景图片应用
 (function() {

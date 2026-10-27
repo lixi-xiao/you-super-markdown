@@ -1,5 +1,7 @@
 <?php
 require_once __DIR__ . '/../utils.php';
+// v6.0.0：语言启停列表（ysmAllLangs / ysmSupportedLangs）
+require_once __DIR__ . '/../lib/i18n.php';
 secureSessionStart();
 
 // 超管检查：必须通过 OTP 登录，且 JWT 有效
@@ -894,6 +896,111 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_FILES['bg_image']) || isse
     }
 }
 // 封禁相关函数（全局可用，代理到 utils.php 的 SQLite 实现）
+// ===== v6.0.0：语言与字体设置（首页默认语言 / 语言启停 / 自定义字体开关） =====
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_lang_save'])) {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: dashboard.php?tab=ui&msg=csrf_error');
+        exit;
+    }
+    $allLangCodes = function_exists('ysmAllLangs') ? array_keys(ysmAllLangs()) : ['zh-CN'];
+    // 语言启停：表单提交「启用的语言」；zh-CN 恒启用；dis = 全部 − 启用
+    $enabled = [];
+    foreach ((array)($_POST['enabled_langs'] ?? []) as $el) {
+        $el = (string)$el;
+        if (in_array($el, $allLangCodes, true)) $enabled[] = $el;
+    }
+    $enabled[] = 'zh-CN';
+    $enabled = array_values(array_unique($enabled));
+    $config['disabled_langs'] = array_values(array_diff($allLangCodes, $enabled));
+    // 首页默认语言（必须是已启用语言；否则回落 zh-CN）
+    $dftLang = trim($_POST['default_lang'] ?? '');
+    $config['default_lang'] = in_array($dftLang, $enabled, true) ? $dftLang : 'zh-CN';
+    // 自定义字体开关（关闭不清文件，便于随时重新启用）
+    $config['custom_font_enabled'] = !empty($_POST['custom_font_enabled']);
+    saveSiteConfig($config);
+    auditLog('lang_font_config', 'site_config', '修改首页默认语言/语言启停/字体开关');
+    header('Location: dashboard.php?tab=ui&msg=saved');
+    exit;
+}
+// ===== v6.0.0：自定义字体上传 / 移除（替换内置萝莉体） =====
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['_font_remove']) || isset($_FILES['custom_font']))) {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? '')) {
+        header('Location: dashboard.php?tab=ui&msg=csrf_error');
+        exit;
+    }
+    $fontDir = __DIR__ . '/../data/fonts/';
+    if (!is_dir($fontDir)) @mkdir($fontDir, 0755, true);
+    // 移除
+    if (!empty($_POST['_font_remove'])) {
+        $old = (string)($config['custom_font_name'] ?? '');
+        if ($old !== '' && strpos($old, 'data/fonts/') === 0) {
+            $p = __DIR__ . '/../' . $old;
+            if (is_file($p)) @unlink($p);
+        }
+        $config['custom_font_name'] = '';
+        $config['custom_font_enabled'] = false;
+        saveSiteConfig($config);
+        auditLog('custom_font_remove', 'custom_font', '移除自定义字体');
+        header('Location: dashboard.php?tab=ui&msg=saved');
+        exit;
+    }
+    // 上传
+    $file = $_FILES['custom_font'] ?? null;
+    if (!$file || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        header('Location: dashboard.php?tab=ui&msg=upload_error');
+        exit;
+    }
+    if (($file['size'] ?? 0) <= 0 || $file['size'] > 20 * 1024 * 1024) {
+        header('Location: dashboard.php?tab=ui&msg=upload_error');
+        exit;
+    }
+    $extMap = ['ttf', 'otf', 'woff', 'woff2'];
+    $origExt = strtolower(pathinfo((string)$file['name'], PATHINFO_EXTENSION));
+    if (!in_array($origExt, $extMap, true)) {
+        header('Location: dashboard.php?tab=ui&msg=upload_error');
+        exit;
+    }
+    // 魔数校验（防伪装文件）：wOFF / wOF2 / TrueType(\x00\x01\x00\x00) / OpenType(OTTO) / Apple true
+    $fh = @fopen($file['tmp_name'], 'rb');
+    $magic = $fh ? fread($fh, 4) : '';
+    if ($fh) fclose($fh);
+    $magicOk = ($origExt === 'woff' && $magic === 'wOFF')
+        || ($origExt === 'woff2' && $magic === 'wOF2')
+        || (in_array($origExt, ['ttf', 'otf'], true) && in_array($magic, ["\x00\x01\x00\x00", 'OTTO', 'true'], true));
+    if (!$magicOk) {
+        auditLog('custom_font_upload_fail', (string)$file['name'], '字体文件头不合法');
+        header('Location: dashboard.php?tab=ui&msg=upload_error');
+        exit;
+    }
+    // MIME 复核（finfo 可用时；octet-stream 常见于字体，放行）
+    if (class_exists('finfo')) {
+        $fi = new finfo(FILEINFO_MIME_TYPE);
+        $mime = (string)$fi->file($file['tmp_name']);
+        if ($mime !== '' && stripos($mime, 'font') === false
+            && !in_array($mime, ['application/octet-stream', 'application/vnd.ms-opentype', 'application/font-sfnt'], true)) {
+            auditLog('custom_font_upload_fail', (string)$file['name'], 'MIME 不合法：' . $mime);
+            header('Location: dashboard.php?tab=ui&msg=upload_error');
+            exit;
+        }
+    }
+    $fname = 'font_' . date('Ymd') . '_' . bin2hex(random_bytes(6)) . '.' . $origExt;
+    if (!move_uploaded_file($file['tmp_name'], $fontDir . $fname)) {
+        header('Location: dashboard.php?tab=ui&msg=upload_error');
+        exit;
+    }
+    // 删旧文件（仅限 data/fonts/ 内）
+    $old = (string)($config['custom_font_name'] ?? '');
+    if ($old !== '' && strpos($old, 'data/fonts/') === 0) {
+        $p = __DIR__ . '/../' . $old;
+        if (is_file($p) && basename($p) !== $fname) @unlink($p);
+    }
+    $config['custom_font_name'] = 'data/fonts/' . $fname;
+    $config['custom_font_enabled'] = true;
+    saveSiteConfig($config);
+    auditLog('custom_font_upload', $config['custom_font_name'], '上传自定义字体');
+    header('Location: dashboard.php?tab=ui&msg=uploaded');
+    exit;
+}
 function loadBans() {
     return loadBansList();
 }
@@ -901,6 +1008,10 @@ function saveBans($bans) {
     return replaceAllBans($bans);
 }
 $banMsg = $_GET['bmsg'] ?? '';
+// v6.0.0：语言与字体卡片数据（全部语言含停用项；新增 lang/*.php 自动出现）
+$allLangsAdmin = function_exists('ysmAllLangs') ? ysmAllLangs() : ['zh-CN' => ['name' => '简体中文', 'code' => 'zh-CN']];
+$disabledLangs = (array)($config['disabled_langs'] ?? []);
+$customFontName = (string)($config['custom_font_name'] ?? '');
 ?>
 <!DOCTYPE html>
 <html lang="zh-CN" data-admin="super">
@@ -953,6 +1064,11 @@ $banMsg = $_GET['bmsg'] ?? '';
         <a href="dashboard.php?tab=ui" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'ui' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
             主界面及功能设置
+        </a>
+        <!-- v6.0.0：友站（友情链接）管理 -->
+        <a href="dashboard.php?tab=links" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'links' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            友站管理
         </a>
         <a href="dashboard.php?tab=update" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'update' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -1027,7 +1143,7 @@ $banMsg = $_GET['bmsg'] ?? '';
     <?php
     $tab = $_GET['tab'] ?? 'overview';
     // v5.0.0 P2：tab 白名单校验（对齐 station/author 后台），非法值回落 overview
-    if (!in_array($tab, ['overview', 'users', 'logs', 'config', 'security', 'ui', 'update', 'guard', 'data', 'hfish', 'mail', 'verify', 'threat', 'ai'], true)) $tab = 'overview';
+    if (!in_array($tab, ['overview', 'users', 'logs', 'config', 'security', 'ui', 'update', 'guard', 'data', 'hfish', 'mail', 'verify', 'threat', 'ai', 'links'], true)) $tab = 'overview';
     $superCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_SUPER_ADMIN));
     $stationCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_STATION_ADMIN));
     $authorCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_AUTHOR));
@@ -2072,6 +2188,68 @@ $banMsg = $_GET['bmsg'] ?? '';
             <button type="submit" class="btn btn-primary">保存配置</button>
         </div>
     </form>
+
+    <!-- ===== v6.0.0：语言与字体（首页默认语言 / 语言启停 / 自定义字体） ===== -->
+    <form method="post" class="card">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+        <input type="hidden" name="_lang_save" value="1">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            语言与字体
+        </div>
+        <div class="form-group">
+            <label class="form-label">首页默认语言</label>
+            <select class="form-input" name="default_lang">
+                <?php foreach ($allLangsAdmin as $lc => $info): $isDis = in_array($lc, $disabledLangs, true); ?>
+                <option value="<?= htmlspecialchars($lc) ?>" <?= ($config['default_lang'] ?? 'zh-CN') === $lc ? 'selected' : '' ?> <?= $isDis ? 'disabled' : '' ?>><?= htmlspecialchars($info['name']) ?>（<?= htmlspecialchars($lc) ?>）<?= $isDis ? ' · 已停用' : '' ?></option>
+                <?php endforeach; ?>
+            </select>
+            <p class="form-hint">访客未手动选择、且浏览器语言不在启用列表时的首页默认语言（仅可选已启用语言）。</p>
+        </div>
+        <div class="form-group">
+            <label class="form-label">启用的语言</label>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+                <?php foreach ($allLangsAdmin as $lc => $info): $on = !in_array($lc, $disabledLangs, true); ?>
+                <label class="toggle-row" style="gap:12px;align-items:center">
+                    <span style="flex:1;min-width:0;word-break:break-word"><?= htmlspecialchars($info['name']) ?> <code style="opacity:.6;font-size:12px"><?= htmlspecialchars($lc) ?></code></span>
+                    <span class="toggle"><input type="checkbox" name="enabled_langs[]" value="<?= htmlspecialchars($lc) ?>" <?= $on ? 'checked' : '' ?> <?= $lc === 'zh-CN' ? 'disabled checked' : '' ?>><span class="slider"></span></span>
+                </label>
+                <?php endforeach; ?>
+            </div>
+            <p class="form-hint">关闭后前台语言切换器不再显示该语言（zh-CN 恒启用）。新增 <code>lang/*.php</code> 语言文件后，会自动出现在此列表。</p>
+        </div>
+        <div class="toggle-row">
+            <div><div class="toggle-label">在首页启用自定义字体</div><div class="toggle-desc">需先上传字体文件；启用后访客默认展示该字体，登录用户可按账号覆盖</div></div>
+            <label class="toggle"><input type="checkbox" name="custom_font_enabled" <?= !empty($config['custom_font_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:12px">
+            <button type="submit" class="btn btn-primary">保存语言与字体设置</button>
+        </div>
+    </form>
+
+    <form method="post" enctype="multipart/form-data" class="card">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+        <input type="hidden" name="_font_upload" value="1">
+        <div class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="9" y1="20" x2="15" y2="20"/></svg>
+            自定义字体文件
+        </div>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;word-break:break-all">
+            当前字体：<?= $customFontName !== '' ? htmlspecialchars($customFontName) : '未上传（内置萝莉体已移除）' ?>
+            <?= !empty($config['custom_font_enabled']) ? ' · <span style="color:#16a34a">已启用</span>' : ' · <span style="color:var(--text-muted)">未启用</span>' ?>
+        </p>
+        <div class="upload-area">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <div class="upload-text">点击上传字体文件</div>
+            <div class="upload-hint">支持 TTF / OTF / WOFF / WOFF2，最大 20MB；上传后自动启用</div>
+            <input type="file" name="custom_font" accept=".ttf,.otf,.woff,.woff2" onchange="if(this.files.length)this.form.submit()">
+        </div>
+        <?php if ($customFontName !== ''): ?>
+        <div style="margin-top:10px">
+            <button type="submit" class="btn btn-outline" name="_font_remove" value="1" onclick="return confirm('确定移除当前自定义字体？')">移除当前字体</button>
+        </div>
+        <?php endif; ?>
+    </form>
     <script>
     (function() {
         var typeCards = document.querySelectorAll('.bg-type-card[data-type]');
@@ -2134,6 +2312,59 @@ $banMsg = $_GET['bmsg'] ?? '';
         updatePreview();
     })();
     </script>
+
+    <?php elseif ($tab === 'links'): ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            友站管理
+        </div>
+        <div class="page-subtitle">友情链接维护（前台仅展示「启用」状态）；支持抓取站点信息预填与掉链巡检</div>
+    </div>
+    <div id="linksAdmin" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>">
+        <div class="card">
+            <div class="card-title" id="linkFormTitle">新增友链</div>
+            <div class="form-group">
+                <label class="form-label">站点名</label>
+                <input class="form-input" id="linkName" maxlength="60" placeholder="对方站点名称">
+            </div>
+            <div class="form-group">
+                <label class="form-label">站点地址</label>
+                <div class="api-url-group">
+                    <input class="form-input" id="linkUrl" placeholder="https://example.com">
+                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn">抓取预填</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">描述（可选）</label>
+                <input class="form-input" id="linkDesc" maxlength="200" placeholder="一句话介绍">
+            </div>
+            <div class="form-group">
+                <label class="form-label">图标地址（可选）</label>
+                <input class="form-input" id="linkFavicon" placeholder="https://example.com/favicon.ico">
+            </div>
+            <div class="form-group">
+                <label class="form-label">排序（越小越前）</label>
+                <input class="form-input" id="linkSort" type="number" value="0" style="max-width:160px">
+            </div>
+            <div id="linkFormMsg" class="form-hint"></div>
+            <div style="display:flex;justify-content:flex-end;gap:10px">
+                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none">取消编辑</button>
+                <button type="button" class="btn btn-primary" id="linkSaveBtn">保存</button>
+            </div>
+            <input type="hidden" id="linkId" value="">
+        </div>
+        <div class="card">
+            <div class="card-title">友链列表</div>
+            <div class="table-wrap">
+                <table id="linksTable">
+                    <tr><th>站点</th><th>状态</th><th>排序</th><th>最近巡检</th><th>操作</th></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+    <script src="../js/fp.js?v=<?= @filemtime(__DIR__ . '/../js/fp.js') ?>"></script>
+    <script src="../js/links-admin.js?v=<?= @filemtime(__DIR__ . '/../js/links-admin.js') ?>"></script>
 
     <?php elseif ($tab === 'update'): ?>
     <div class="page-header">

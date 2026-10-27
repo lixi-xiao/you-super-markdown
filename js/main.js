@@ -46,9 +46,19 @@
         if (typeof window.ysmGetFp === "function" && window.ysmGetFp !== ysmGetFp) return window.ysmGetFp();
         return ysmFpLocal();
     }
+    // v6.0.0-beta（E）：稳定指纹兜底实现（未加载 fp.js 的页面；算法与 fp.js 一致，忽略分辨率/时区归桶）
+    function ysmGetStableFp() {
+        if (typeof window.ysmGetStableFp === "function" && window.ysmGetStableFp !== ysmGetStableFp) return window.ysmGetStableFp();
+        try {
+            var tzB = Math.round((new Date()).getTimezoneOffset() / 120) * 120;
+            var s = [ navigator.language || "", String(tzB), navigator.userAgent ];
+            return ysmFnvHash(s.join("|")) + ysmFnvHash(s.join("~"));
+        } catch (t) { return ""; }
+    }
     // 暴露给后台/OTP 入口页面使用（后台原生表单无自定义头，用上报校验模式）
     if (typeof window.ysmGetFp !== "function") window.ysmGetFp = ysmGetFp;
-    // v4.5.0：所有 api.php 请求统一携带 X-Fp（登录态接口服务端校验环境）
+    if (typeof window.ysmGetStableFp !== "function") window.ysmGetStableFp = ysmGetStableFp;
+    // v4.5.0：所有 api.php 请求统一携带 X-Fp（登录态接口服务端校验环境）+ v6.0.0-beta X-FpS（稳定指纹）
         (function ysmPatchFetch() {
         var e = window.fetch;
         if (!e) return;
@@ -57,7 +67,8 @@
             var i = String(t);
             if (i.indexOf("api.php") !== -1) {
                 n.headers = Object.assign({}, n.headers || {}, {
-                    "X-Fp": ysmGetFp()
+                    "X-Fp": ysmGetFp(),
+                    "X-FpS": ysmGetStableFp()
                 });
             }
             return e.call(this, t, n);
@@ -679,7 +690,33 @@
         se.textContent = e + "px";
         localStorage.setItem("md-font-size", e);
     }
-    const _e = localStorage.getItem("md-font-type") || "default";
+    function recordHomeFont(f) {
+        // v6.0.0：登录用户切换字体 → 账号绑定（跨设备跟随）；未登录仅本地 localStorage 生效
+        try {
+            if (window.YSM_LOGGED_IN && (f === "default" || f === "custom")) {
+                fetch("api.php?action=update_profile", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ home_font: f })
+                }).catch(function() {});
+            }
+        } catch (err) {}
+    }
+    // v6.0.0：站点启用自定义字体时，未手选过字体的访客默认即展示自定义字体
+    const _e = localStorage.getItem("md-font-type") || (((document.body && document.body.dataset.ysmCustomFont === "1") && document.querySelector('.font-type-btn[data-font="custom"]')) ? "custom" : "default");
+    // v6.0.0：登录后按账号应用默认首页字体（账号优先；站点未启用自定义字体时回落默认）
+    window.ysmApplyAccountFont = function (f) {
+        try {
+            if (f !== "custom" && f !== "default") return;
+            var enabled = document.body && document.body.dataset.ysmCustomFont === "1";
+            var target = enabled ? f : "default";
+            if (target === "custom" && !document.querySelector('.font-type-btn[data-font="custom"]')) target = "default";
+            applyFontType(target);
+            document.querySelectorAll(".font-type-btn").forEach(function (btn) {
+                btn.classList.toggle("active", btn.dataset.font === target);
+            });
+        } catch (err) {}
+    };
     const $e = localStorage.getItem("md-font-size") || 14;
     applyFontType(_e);
     applyFontSize($e);
@@ -690,6 +727,7 @@
             ie.forEach(e => e.classList.remove("active"));
             e.classList.add("active");
             applyFontType(e.dataset.font);
+            recordHomeFont(e.dataset.font);
         });
     });
     ae.addEventListener("input", () => applyFontSize(ae.value));
@@ -4427,6 +4465,11 @@
         }
         function updateDropdown(e) {
             if (e) {
+                window.YSM_LOGGED_IN = true;
+                // v6.0.0：按账号应用默认首页字体（跨设备跟随）
+                if (typeof window.ysmApplyAccountFont === "function" && (e.home_font === "custom" || e.home_font === "default")) {
+                    window.ysmApplyAccountFont(e.home_font);
+                }
                 var t = e.nickname || "用户";
                 var d = e.role || "user";
                 // v2.6.5：超管在主页显示「超管」身份，但无登录/管理/退出入口（需到超管后台退出）

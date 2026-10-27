@@ -1364,6 +1364,38 @@ def periodic_alert_digest_thread():
         time.sleep(30)
 
 
+def periodic_v6_maintenance_thread():
+    """v6.0.0-beta：AI 密钥轮换 / AI 翻译配额与友链巡检的低频自动运维线程（每 6 小时巡检，每天实际执行一次）。
+
+    通过 ysm-admin 子命令调用 PHP 决策（轮换窗口判断 / 渐进重加密 / 归档 GC / 友链掉链巡检），
+    决策与写库全部在 CLI 进程内完成，绝不占用网页请求线程。
+    """
+    last_ai = 0
+    last_link = 0
+    while running:
+        time.sleep(3600 * 6)
+        try:
+            now = time.time()
+            # AI 密钥轮换 + 渐进重加密 + GC：每天至多一次，失败不阻塞下次巡检
+            if now - last_ai >= 86400:
+                last_ai = now
+                r = subprocess.run(['/usr/local/bin/ysm-admin', 'ai-maintenance'], capture_output=True, timeout=120)
+                out = (r.stdout or b'').decode('utf-8', 'ignore').strip()
+                if out and out != 'IDLE' and not out.startswith('ROTATE_FAIL'):
+                    log(f"AI 密钥自动运维: {out}")
+                elif out.startswith('ROTATE_FAIL'):
+                    log(f"AI 密钥轮换失败: {out}")
+            # 友链掉链巡检：每天两次
+            if now - last_link >= 43200:
+                last_link = now
+                r = subprocess.run(['/usr/local/bin/ysm-admin', 'link-sweep'], capture_output=True, timeout=120)
+                out = (r.stdout or b'').decode('utf-8', 'ignore').strip()
+                if out:
+                    log(f"友链巡检: {out}")
+        except Exception as e:
+            log(f"v6.0.0 自动运维失败: {e}")
+
+
 def run_inotify_watch():
     """使用 inotify 监控文件变化"""
     global last_audit_check
@@ -1416,6 +1448,10 @@ def run_inotify_watch():
     ut_thread = threading.Thread(target=upload_trigger_thread, daemon=True)
     ut_thread.start()
 
+    # v6.0.0-beta：AI 密钥轮换 / 友链巡检自动运维线程
+    v6_thread = threading.Thread(target=periodic_v6_maintenance_thread, daemon=True)
+    v6_thread.start()
+
     # 初始全量校验
     verify_all_files()
 
@@ -1466,6 +1502,10 @@ def run_polling_mode():
     # v3.3.5：上传触发快速备份线程
     ut_thread = threading.Thread(target=upload_trigger_thread, daemon=True)
     ut_thread.start()
+
+    # v6.0.0-beta：AI 密钥轮换 / 友链巡检自动运维线程（轮询模式同样启用）
+    v6_thread = threading.Thread(target=periodic_v6_maintenance_thread, daemon=True)
+    v6_thread.start()
 
     verify_all_files()
 

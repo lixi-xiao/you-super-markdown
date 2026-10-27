@@ -149,15 +149,15 @@ case $OS in
         log "检测到 PHP 版本: $PHP_VER"
         # 依赖安装：失败时显示错误（v2.10.2 修复：原 > /dev/null 2>&1 + set -e 使失败静默终止，无法定位）
         # v4.6.0：补装 ffmpeg（背景音乐转码依赖，与更新通道 deps 声明一致）
-        if ! apt-get install -y nginx "php${PHP_VER}-fpm" "php${PHP_VER}-cli" "php${PHP_VER}-zip" "php${PHP_VER}-mbstring" "php${PHP_VER}-curl" "php${PHP_VER}-sqlite3" "php${PHP_VER}-gd" ffmpeg certbot python3 python3-pip ufw 2>&1 | tail -15; then
+        if ! apt-get install -y nginx "php${PHP_VER}-fpm" "php${PHP_VER}-cli" "php${PHP_VER}-opcache" "php${PHP_VER}-zip" "php${PHP_VER}-mbstring" "php${PHP_VER}-curl" "php${PHP_VER}-sqlite3" "php${PHP_VER}-gd" ffmpeg certbot python3 python3-pip ufw 2>&1 | tail -15; then
             warn "标准包名安装失败（php${PHP_VER} 可能不在当前源），尝试通用包名..."
-            if ! apt-get install -y nginx php-fpm php-cli php-zip php-mbstring php-curl php-sqlite3 php-gd ffmpeg certbot python3 python3-pip ufw 2>&1 | tail -15; then
+            if ! apt-get install -y nginx php-fpm php-cli php-opcache php-zip php-mbstring php-curl php-sqlite3 php-gd ffmpeg certbot python3 python3-pip ufw 2>&1 | tail -15; then
                 warn "依赖安装失败！请检查 apt 源/网络后重新运行本脚本；上方输出为具体错误"
             fi
         fi
         ;;
     centos|rhel|fedora)
-        yum install -y -q nginx php php-fpm php-zip php-mbstring php-curl php-pdo php-sqlite3 php-gd ffmpeg certbot python3 python3-pip > /dev/null 2>&1
+        yum install -y -q nginx php php-fpm php-opcache php-zip php-mbstring php-curl php-pdo php-sqlite3 php-gd ffmpeg certbot python3 python3-pip > /dev/null 2>&1
         ;;
     *)
         warn "未识别的系统，请手动安装: nginx, php8.x, python3, certbot"
@@ -241,6 +241,7 @@ configure_php_fpm_pool() {
     log "PHP-FPM 池已调优（备份 $bak）：max_children=$max_children start=$start_servers min=$min_spare max=$max_spare max_requests=$max_requests"
 }
 # v6.0.0（A）：启用 PHP-FPM opcache（字节码缓存；脚本随包"只进不删"，签名校验不受影响）
+# v6.2.0：先确认扩展真实存在再写 ini（此前无条件写 zend_extension 并向用户报告"已启用"，扩展缺失时名不副实）
 configure_php_opcache() {
     local fpm_ini=""
     if [ -n "${PHP_VER:-}" ]; then fpm_ini="/etc/php/${PHP_VER}/fpm/php.ini"; else
@@ -248,11 +249,24 @@ configure_php_opcache() {
     fi
     [ -n "$fpm_ini" ] || fpm_ini="/etc/php/8.3/fpm/php.ini"
     [ -f "$fpm_ini" ] || { log "未找到 FPM php.ini，跳过 opcache 配置"; return 0; }
+
+    # 扩展存在性检测：优先 FPM 自身的模块列表，其次 extension_dir/opcache.so
+    local has_ext=0 fpm_bin="" extdir=""
+    fpm_bin=$(command -v "php-fpm${PHP_VER}" 2>/dev/null || command -v php-fpm 2>/dev/null || true)
+    if [ -n "$fpm_bin" ] && "$fpm_bin" -m 2>/dev/null | grep -qi 'Zend OPcache'; then has_ext=1; fi
+    if [ "$has_ext" = "0" ]; then
+        extdir=$(php -r 'echo ini_get("extension_dir");' 2>/dev/null || true)
+        [ -n "$extdir" ] && [ -f "$extdir/opcache.so" ] && has_ext=1
+    fi
+    if [ "$has_ext" = "0" ]; then
+        warn "未检测到 php-opcache 扩展（应安装 php${PHP_VER}-opcache），已跳过 opcache 配置（不会写入无效的 zend_extension）"
+        return 0
+    fi
+
     local bak="$fpm_ini.ysm.bak.$RANDOM"
     cp -a "$fpm_ini" "$bak" 2>/dev/null || true
-    # 默认未加载扩展（Debian php-fpm 通常无 opcache.so，但可在不破坏现有 ini 的前提下写入启用项；
-    # 若扩展缺失则 opcache.enable=1 不生效但对运行无副作用）
-    for k in "zend_extension=opcache" "opcache.enable=1" "opcache.enable_cli=0" "opcache.memory_consumption=128" "opcache.interned_strings_buffer=8" "opcache.max_accelerated_files=10000" "opcache.revalidate_freq=60" "opcache.fast_shutdown=1"; do
+    # v6.2.0：revalidate_freq 60→2，避免更新后最长 60 秒仍执行旧字节码
+    for k in "zend_extension=opcache" "opcache.enable=1" "opcache.enable_cli=0" "opcache.memory_consumption=128" "opcache.interned_strings_buffer=8" "opcache.max_accelerated_files=10000" "opcache.validate_timestamps=1" "opcache.revalidate_freq=2" "opcache.fast_shutdown=1"; do
         key="${k%%=*}"
         if grep -q "^${key}\b" "$fpm_ini" 2>/dev/null; then
             sed -i "s|^${key}.*|$k|" "$fpm_ini"
@@ -262,7 +276,14 @@ configure_php_opcache() {
             echo "$k" >> "$fpm_ini"
         fi
     done
-    log "PHP-FPM opcache 已启用（备份 $bak）：enable=1 memory=128M files=10000 revalidate=60s"
+    # 让新 ini 生效（安装阶段 FPM 可能尚未启动，失败不阻断）
+    for f in "php${PHP_VER}-fpm" php-fpm; do
+        if systemctl list-unit-files "$f.service" >/dev/null 2>&1; then
+            systemctl reload "$f" 2>/dev/null || systemctl restart "$f" 2>/dev/null || true
+            break
+        fi
+    done
+    log "PHP-FPM opcache 已启用（备份 $bak）：enable=1 memory=128M files=10000 revalidate=2s"
 }
 configure_php_timezone
 configure_php_fpm_pool
@@ -533,7 +554,32 @@ fi
 # 证书就绪后追加 443 server（完整安全配置）并 reload
 if [ "$CERT_OK" = true ] || [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
     CERT_OK=true
-    cat >> "$NGINX_CONF" << EOF
+# v6.2.0：可选 fastcgi_cache（默认关闭；YSM_ENABLE_FASTCGI_CACHE=1 时生成）
+YSM_CACHE_CFG=""
+if [ "${YSM_ENABLE_FASTCGI_CACHE:-0}" = "1" ]; then
+    mkdir -p /etc/nginx/conf.d /var/cache/nginx/ysm
+    cat > /etc/nginx/conf.d/ysm-fastcgi-cache.conf << 'CACHE_EOF'
+# v6.2.0：fastcgi_cache 缓存区（由 ysm-install.sh 在 YSM_ENABLE_FASTCGI_CACHE=1 时生成）
+fastcgi_cache_path /var/cache/nginx/ysm levels=1:2 keys_zone=ysm_cache:32m inactive=10m max_size=256m;
+CACHE_EOF
+    YSM_CACHE_CFG='# v6.2.0：fastcgi_cache（登录态/动态接口/管理页强制旁路）
+        set $ysm_skip_cache 1;
+        if ($request_method = GET) { set $ysm_skip_cache 0; }
+        if ($cookie_PHPSESSID) { set $ysm_skip_cache 1; }
+        if ($cookie_ysm_lang) { set $ysm_skip_cache 1; }
+        if ($request_uri ~* "^/(api\.php|admin|station|author|sc\.php)") { set $ysm_skip_cache 1; }
+        fastcgi_cache ysm_cache;
+        fastcgi_cache_valid 200 30s;
+        fastcgi_cache_bypass $ysm_skip_cache;
+        fastcgi_no_cache $ysm_skip_cache;
+        fastcgi_cache_lock on;
+        fastcgi_cache_use_stale error timeout updating;'
+    log "fastcgi_cache 已启用（YSM_ENABLE_FASTCGI_CACHE=1）"
+else
+    log "fastcgi_cache 未启用（默认关闭；需要时以 YSM_ENABLE_FASTCGI_CACHE=1 重新运行安装脚本）"
+fi
+
+cat >> "$NGINX_CONF" << EOF
 server {
     listen 443 ssl http2;
     server_name $DOMAIN;
@@ -672,6 +718,7 @@ server {
         fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
         include fastcgi_params;
         fastcgi_read_timeout 300;
+        $YSM_CACHE_CFG
     }
 
     # 静态文件缓存
@@ -681,6 +728,19 @@ server {
     }
 }
 EOF
+    # v6.2.0：http 级通用优化显式化（Debian 默认值之上；worker_processes 保持系统默认 auto，不改 nginx.conf）
+    mkdir -p /etc/nginx/conf.d
+    cat > /etc/nginx/conf.d/ysm-global.conf << 'GLOBAL_EOF'
+# v6.2.0：You Super Markdown 全局参数（由安装脚本生成）
+keepalive_timeout 65;
+keepalive_requests 1000;
+gzip on;
+gzip_vary on;
+gzip_min_length 1024;
+gzip_comp_level 5;
+gzip_proxied any;
+gzip_types text/plain text/css text/xml application/json application/javascript application/xml image/svg+xml;
+GLOBAL_EOF
     if nginx -t 2>/dev/null; then
         systemctl reload nginx > /dev/null 2>&1 || true
         log "Nginx HTTPS 配置完成"

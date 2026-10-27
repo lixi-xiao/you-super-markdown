@@ -314,7 +314,7 @@ if (is_dir($articlesDir)) {
         <div class="table-wrap">
         <table>
             <tr><th style="width:120px">项目</th><th>内容</th></tr>
-            <tr><td style="color:var(--text-muted)">登录账号（QQ）</td><td><code><?= htmlspecialchars($currentUser['account'] ?? '') ?></code>（不可修改）</td></tr>
+            <tr><td style="color:var(--text-muted)">用户名</td><td><code><?= htmlspecialchars($currentUser['account'] ?? '') ?></code>（不可修改）</td></tr>
             <tr><td style="color:var(--text-muted)">绑定邮箱</td><td><?= htmlspecialchars($currentUser['email'] ?? '未绑定') ?></td></tr>
             <tr><td style="color:var(--text-muted)">角色</td><td>写作者</td></tr>
         </table>
@@ -433,11 +433,11 @@ function bindLogoutSubmit(e) {
         }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.success) {
                 var left = 60;
-                sendBtn.textContent = left + 's 后重发';
+                sendBtn.textContent = ysmT('{n}s 后重发').replace('{n}', left);
                 var t = setInterval(function() {
                     left--;
-                    if (left <= 0) { clearInterval(t); sendBtn.textContent = '获取验证码'; sendBtn.disabled = false; }
-                    else sendBtn.textContent = left + 's 后重发';
+                    if (left <= 0) { clearInterval(t); sendBtn.textContent = ysmT('获取验证码'); sendBtn.disabled = false; }
+                    else sendBtn.textContent = ysmT('{n}s 后重发').replace('{n}', left);
                 }, 1000);
             } else {
                 alert(d.error || ysmT('发送失败'));
@@ -474,7 +474,7 @@ exit;
                 if (res && res.success === false) {
                     var _b = document.createElement('div');
                     _b.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99999;background:#dc2626;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:92vw';
-                    _b.textContent = '登录环境已变化（换设备/浏览器/隐私模式），保存等操作将被拦截，请重新登录';
+                    _b.textContent = ysmT('登录环境已变化（换设备/浏览器/隐私模式），保存等操作将被拦截，请重新登录');
                     document.body.appendChild(_b);
                     setTimeout(function() { if (_b.parentNode) _b.parentNode.removeChild(_b); }, 7000);
                 }

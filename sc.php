@@ -862,7 +862,7 @@ document.querySelectorAll('.modal-overlay').forEach(function(m) {
 });
 
 function openDeleteConfirmModal(fn, dn) {
-    document.getElementById('deleteModalText').textContent = '确定要删除「' + dn + '」吗？此操作不可撤销。';
+    document.getElementById('deleteModalText').textContent = ysmT('确定要删除「{name}」吗？此操作不可撤销。').replace('{name}', dn);
     document.getElementById('deleteConfirmFile').value = fn;
     document.getElementById('deleteModal').classList.add('active');
 }
@@ -928,10 +928,10 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
     var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content
         || (document.querySelector('input[name="csrf_token"]') || {}).value || '';
     btn.addEventListener('click', function() {
-        if (!input.files.length) { hint.textContent = '请先选择 zip 压缩包'; return; }
+        if (!input.files.length) { hint.textContent = ysmT('请先选择 zip 压缩包'); return; }
         var file = input.files[0];
-        if (!/\.zip$/i.test(file.name)) { hint.textContent = '仅支持 .zip 文件'; return; }
-        if (file.size > 80 * 1024 * 1024) { hint.textContent = '压缩包超过 80MB 上限'; return; }
+        if (!/\.zip$/i.test(file.name)) { hint.textContent = ysmT('仅支持 .zip 文件'); return; }
+        if (file.size > 80 * 1024 * 1024) { hint.textContent = ysmT('压缩包超过 80MB 上限'); return; }
         if (!window.confirm(ysmT('确认导入该富媒体压缩包？'))) return;
         var fd = new FormData();
         fd.append('rich_zip', file);
@@ -947,7 +947,7 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
         btn.disabled = true;
         hint.textContent = '';
         pwrap.style.display = 'block';
-        ptext.textContent = '上传中 0%';
+        ptext.textContent = ysmT('上传中 0%');
         psize.textContent = (file.size / 1048576).toFixed(2) + ' MB';
         pbar.style.width = '0%';
         var xhr = new XMLHttpRequest();
@@ -956,7 +956,7 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
             if (e.lengthComputable) {
                 var pct = Math.round(e.loaded / e.total * 100);
                 pbar.style.width = pct + '%';
-                ptext.textContent = '上传中 ' + pct + '%';
+                ptext.textContent = ysmT('上传中 {n}%').replace('{n}', pct);
                 psize.textContent = (e.loaded / 1048576).toFixed(2) + ' / ' + (e.total / 1048576).toFixed(2) + ' MB';
             }
         };
@@ -965,14 +965,14 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
                 // 服务端 302 已由 XHR 跟随，最终 URL 带 rich_zip 结果参数 → 刷新显示结果
                 location.href = xhr.responseURL || 'sc.php';
             } else {
-                ptext.textContent = '上传失败（HTTP ' + xhr.status + '）';
+                ptext.textContent = ysmT('上传失败（HTTP {code}）').replace('{code}', xhr.status);
                 pbar.style.width = '0%';
                 btn.disabled = false;
-                hint.textContent = '请重试或检查服务器上传限制';
+                hint.textContent = ysmT('请重试或检查服务器上传限制');
             }
         };
         xhr.onerror = function() {
-            ptext.textContent = '网络错误，上传失败';
+            ptext.textContent = ysmT('网络错误，上传失败');
             btn.disabled = false;
         };
         xhr.send(fd);
@@ -983,7 +983,7 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
 (function() {
     var ta = document.getElementById('contentArea'), ct = document.getElementById('charCount');
     if (!ta || !ct) return;
-    function updateEditorCharCount() { var l = ta.value.replace(/\s/g,'').length; ct.textContent = l > 0 ? l + ' 字' : ''; }
+    function updateEditorCharCount() { var l = ta.value.replace(/\s/g,'').length; ct.textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : ''; }
     ta.addEventListener('input', updateEditorCharCount);
 })();
 
@@ -1028,12 +1028,12 @@ function openArticleEditor(fn) {
             }
             if (annChk && d.is_announce) annChk.checked = true;
             var l = d.content.replace(/\s/g,'').length;
-            document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
+            document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
         });
 }
 document.getElementById('editContent')?.addEventListener('input', function() {
     var l = this.value.replace(/\s/g,'').length;
-    document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
+    document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
 });
 
 // v3.1.6：文章图片上传（站长/写作者；上传成功后以 Markdown 语法插入光标处）
@@ -1047,7 +1047,7 @@ document.getElementById('editContent')?.addEventListener('input', function() {
         if (!this.files.length) return;
         var file = this.files[0];
         var csrf = (document.querySelector('#editModal input[name=csrf_token]') || {}).value || '';
-        hint.textContent = '上传中...';
+        hint.textContent = ysmT('上传中...');
         var fd = new FormData();
         fd.append('image', file);
         fetch('api.php?action=article_image_upload', {
@@ -1055,17 +1055,17 @@ document.getElementById('editContent')?.addEventListener('input', function() {
             headers: { 'X-CSRF-Token': csrf },
             body: fd
         }).then(function(r) { return r.json(); }).then(function(d) {
-            if (!d.success) { hint.textContent = '上传失败：' + (d.error || '未知错误'); return; }
-            hint.textContent = '已上传 ✓';
+            if (!d.success) { hint.textContent = ysmT('上传失败：') + (d.error || ysmT('未知错误')); return; }
+            hint.textContent = ysmT('已上传 ✓');
             var ta = document.getElementById('editContent');
-            var ins = '\n![图片](' + d.url + ')\n';
+            var ins = '\n![' + ysmT('图片') + '](' + d.url + ')\n';
             var start = ta.selectionStart, end = ta.selectionEnd;
             ta.value = ta.value.slice(0, start) + ins + ta.value.slice(end);
             ta.selectionStart = ta.selectionEnd = start + ins.length;
             ta.focus();
             var l = ta.value.replace(/\s/g,'').length;
-            document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
-        }).catch(function() { hint.textContent = '网络错误，上传失败'; });
+            document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
+        }).catch(function() { hint.textContent = ysmT('网络错误，上传失败'); });
         this.value = '';
     });
 })();
@@ -1080,9 +1080,9 @@ document.getElementById('editContent')?.addEventListener('input', function() {
     input.addEventListener('change', function() {
         if (!this.files.length) return;
         var file = this.files[0];
-        if (file.size > 20 * 1024 * 1024) { hint.textContent = '视频需 ≤20MB，请先压缩后再传'; this.value = ''; return; }
+        if (file.size > 20 * 1024 * 1024) { hint.textContent = ysmT('视频需 ≤20MB，请先压缩后再传'); this.value = ''; return; }
         var csrf = (document.querySelector('#editModal input[name=csrf_token]') || {}).value || '';
-        hint.textContent = '上传中...';
+        hint.textContent = ysmT('上传中...');
         var fd = new FormData();
         fd.append('video', file);
         fetch('api.php?action=article_video_upload', {
@@ -1090,17 +1090,17 @@ document.getElementById('editContent')?.addEventListener('input', function() {
             headers: { 'X-CSRF-Token': csrf },
             body: fd
         }).then(function(r) { return r.json(); }).then(function(d) {
-            if (!d.success) { hint.textContent = '上传失败：' + (d.error || '未知错误'); return; }
-            hint.textContent = '已上传 ✓';
+            if (!d.success) { hint.textContent = ysmT('上传失败：') + (d.error || ysmT('未知错误')); return; }
+            hint.textContent = ysmT('已上传 ✓');
             var ta = document.getElementById('editContent');
-            var ins = '\n!video[视频](' + d.url + ')\n';
+            var ins = '\n!video[' + ysmT('视频') + '](' + d.url + ')\n';
             var start = ta.selectionStart, end = ta.selectionEnd;
             ta.value = ta.value.slice(0, start) + ins + ta.value.slice(end);
             ta.selectionStart = ta.selectionEnd = start + ins.length;
             ta.focus();
             var l = ta.value.replace(/\s/g,'').length;
-            document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
-        }).catch(function() { hint.textContent = '网络错误，上传失败'; });
+            document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
+        }).catch(function() { hint.textContent = ysmT('网络错误，上传失败'); });
         this.value = '';
     });
 })();

@@ -35,12 +35,14 @@ if (!$row || $row['status'] !== 'verify_pending' || ($row['email'] ?? '') !== $e
 }
 ?>
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="<?= ysmLocale() ?>">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="csrf-token" content="<?= htmlspecialchars(generateCsrfToken()) ?>">
 <title>邮箱验证 - <?= htmlspecialchars($title) ?></title>
+<script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+<script src="/js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -148,7 +150,7 @@ if (!$row || $row['status'] !== 'verify_pending' || ($row['email'] ?? '') !== $e
     var form = btn ? btn.form : null;
     if (form) form.addEventListener('submit', function() {
         btn.disabled = true;
-        btn.textContent = '验证中...';
+        btn.textContent = ysmT('验证中...');
     });
 </script>
 </body>

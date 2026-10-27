@@ -1,5 +1,7 @@
 <?php
 require_once __DIR__ . '/db.php';
+// v6.2.0：邮件等非页面出口也要按收件人语言取词（ysmTIn/ysmDict），基础设施统一在此加载
+if (is_file(__DIR__ . '/lib/i18n.php')) require_once __DIR__ . '/lib/i18n.php';
 define('APP_CONFIG_FILE', __DIR__ . '/app-config.json');
 function loadAppConfig() {
     static $config = null;
@@ -265,7 +267,7 @@ function replaceAllUsers($users) {
     $pdo->beginTransaction();
     try {
         $pdo->exec('DELETE FROM users');
-        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, account, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled, last_login, login_count, tv, home_font) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, account, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled, last_login, login_count, tv, home_font, home_lang, username) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
         foreach ($users as $u) {
             $st->execute([
                 $u['id'] ?? '', $u['account'] ?? '', $u['nickname'] ?? '', $u['password'] ?? '',
@@ -275,6 +277,8 @@ function replaceAllUsers($users) {
                 $u['last_login'] ?? '', (int)($u['login_count'] ?? 0),
                 (int)($u['tv'] ?? 0),
                 in_array(($u['home_font'] ?? ''), ['', 'default', 'custom'], true) ? $u['home_font'] : '',
+                (string)($u['home_lang'] ?? ''),
+                (string)($u['username'] ?? ''),
             ]);
         }
         $pdo->commit();
@@ -1286,6 +1290,31 @@ function saveSmtpConfig($host, $port, $user, $pass, $from, $enc) {
 }
 
 // 邮件类型 → 配色方案（v2.10.1：顶部栏按功能分色——告警红 / 恢复绿 / 验证蓝 / 默认深蓝）
+// v6.2.0：邮件按「收件人语言」输出——优先收件邮箱所属账号的 home_lang，其次站点默认语言，最后 zh-CN
+function ysmMailLang($email) {
+    static $cache = [];
+    $email = strtolower(trim((string)$email));
+    if ($email === '') return 'zh-CN';
+    if (isset($cache[$email])) return $cache[$email];
+    $lang = '';
+    foreach (fetchAllUsers() as $u) {
+        if (strtolower(trim((string)($u['email'] ?? ''))) === $email) { $lang = (string)($u['home_lang'] ?? ''); break; }
+    }
+    $supported = function_exists('ysmSupportedLangs') ? ysmSupportedLangs() : ['zh-CN' => []];
+    if ($lang === '' || !isset($supported[$lang])) {
+        $lang = (string)(loadSiteConfig()['default_lang'] ?? '');
+    }
+    if ($lang === '' || !isset($supported[$lang])) $lang = 'zh-CN';
+    $cache[$email] = $lang;
+    return $lang;
+}
+
+/** 邮件用取词（不转义；调用方负责 HTML 转义） */
+function ysmMailT($zh, $lang, $vars = []) {
+    if (function_exists('ysmTIn')) return ysmTIn($zh, $lang, $vars, false);
+    return (string)$zh;
+}
+
 function mailPalette($type) {
     if (preg_match('/失败|断裂|异常|告警|篡改|无法|错误|超时/', (string)$type)) {
         return ['g1' => '#7f1d1d', 'g2' => '#b91c1c', 'badge' => '#c0392b', 'sub' => '安全告警 · 请及时处理'];
@@ -1349,7 +1378,7 @@ function mailBadgeHtml($site, $category, $event, $bg) {
 // HTML 邮件基础模板（v2.10.1 统一设计：顶部栏按功能分色 + 卡片放大 660px + 内容分层 + 大圆角；内联样式兼容主流邮件客户端）
 // $htmlDetail 为非空时直接作为正文区 HTML（调用方负责转义动态值），否则将 $detail 按纯文本转义后渲染（默认安全）
 // $badgeEvent 可选：两行 badge 的「下行（具体事件）」显式文案；为空则从 $type/$detail 自动解析（见 mailResolveEvent）
-function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null, $badgeEvent = null) {
+function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null, $badgeEvent = null, $lang = 'zh-CN') {
     $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
     $siteE = $e($site);
     $typeE = $e($type);
@@ -1361,11 +1390,15 @@ function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null, 
         $detailHtml = nl2br($e($detail));
     }
     $p = mailPalette($type);
+    // v6.2.0：按收件人语言翻译固定文案（未命中回落中文）
+    $subLabel = ysmMailT($p['sub'], $lang);
     // v5.4.1：两行 badge 解析——上行=站点+类别，下行=具体事件（空/与类别相同则按 $detail 兜底）
     $badgeCat = mailCategory($type);
     $badgeEv = mailResolveEvent($badgeCat, $badgeEvent !== null ? $badgeEvent : $type, $detail);
+    $badgeCatT = ysmMailT($badgeCat, $lang);
+    $badgeEvT = ysmMailT($badgeEv, $lang);
     $iconLetter = mb_substr($siteE, 0, 1, 'UTF-8');
-    return '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+    return '<!DOCTYPE html><html lang="' . $e($lang) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
         . '<body style="margin:0;padding:0;background:#eef1f6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;padding:32px 12px;"><tr><td align="center">'
         . '<table role="presentation" width="660" cellpadding="0" cellspacing="0" style="table-layout:fixed;max-width:660px;width:100%;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #dde3ec;box-shadow:0 16px 44px rgba(15,42,82,0.12);">'
@@ -1373,31 +1406,31 @@ function renderMailHtml($site, $type, $detail, $extra = [], $htmlDetail = null, 
         . '<tr><td style="background:linear-gradient(135deg,' . $p['g1'] . ' 0%,' . $p['g2'] . ' 100%);padding:30px 38px;">'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
         . '<td style="vertical-align:middle;"><div style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:0.5px;">' . $siteE . '</div>'
-        . '<div style="color:rgba(255,255,255,0.72);font-size:12px;margin-top:6px;">' . $p['sub'] . '</div></td>'
+        . '<div style="color:rgba(255,255,255,0.72);font-size:12px;margin-top:6px;">' . $e($subLabel) . '</div></td>'
         . '<td align="right" style="vertical-align:middle;"><div style="width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,0.16);color:#fff;font-size:19px;font-weight:700;text-align:center;line-height:44px;">' . $iconLetter . '</div></td>'
         . '</tr></table>'
         . '</td></tr>'
         // 主内容区（分层一：类型徽标（v5.4.1 两行：站点+类别 / 具体事件） + 正文）
         . '<tr><td style="padding:38px 40px 26px;">'
-        . mailBadgeHtml($site, $badgeCat, $badgeEv, $p['badge'])
+        . mailBadgeHtml($site, $badgeCatT, $badgeEvT, $p['badge'])
         . '<div style="margin-top:22px;color:#2d3748;font-size:14.5px;line-height:2.0;word-break:break-all;overflow-wrap:anywhere;">' . $detailHtml . '</div>'
         . '</td></tr>'
         // 分层二：元信息面板（浅色内嵌卡）
         . '<tr><td style="padding:0 40px 34px;">'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="table-layout:fixed;background:#f7f9fc;border-radius:14px;border:1px solid #eaeef4;padding:14px 20px;font-size:12.5px;color:#5b6b80;">'
-        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">服务器</td><td style="word-break:break-all;overflow-wrap:anywhere;">' . $server . '</td></tr>'
-        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">时间</td><td>' . $time . '</td></tr>'
+        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">' . $e(ysmMailT('服务器', $lang)) . '</td><td style="word-break:break-all;overflow-wrap:anywhere;">' . $server . '</td></tr>'
+        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">' . $e(ysmMailT('时间', $lang)) . '</td><td>' . $time . '</td></tr>'
         . '</table>'
         . '</td></tr>'
         // 页脚
-        . '<tr><td style="background:#f7f9fc;padding:18px 40px;border-top:1px solid #eaeef4;color:#93a2b4;font-size:11px;text-align:center;line-height:1.9;">You Super Markdown · 此邮件为系统自动发送，请勿直接回复<br>如非本人操作请忽略，谨防泄露验证信息</td></tr>'
+        . '<tr><td style="background:#f7f9fc;padding:18px 40px;border-top:1px solid #eaeef4;color:#93a2b4;font-size:11px;text-align:center;line-height:1.9;">You Super Markdown · ' . $e(ysmMailT('此邮件为系统自动发送，请勿直接回复', $lang)) . '<br>' . $e(ysmMailT('如非本人操作请忽略，谨防泄露验证信息', $lang)) . '</td></tr>'
         . '</table>'
         . '</td></tr></table>'
         . '</body></html>';
 }
 
 // 验证码邮件专用模板（v2.10.1 统一设计：蓝色顶栏 + 验证码卡放大 + 分层 + 大圆角）
-function renderMailCode($site, $purposeLabel, $code, $ttlMin, $extra = []) {
+function renderMailCode($site, $purposeLabel, $code, $ttlMin, $extra = [], $lang = 'zh-CN') {
     $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
     $siteE = $e($site);
     $purposeE = $e($purposeLabel);
@@ -1408,20 +1441,20 @@ function renderMailCode($site, $purposeLabel, $code, $ttlMin, $extra = []) {
     $ttlMin = max(1, (int)$ttlMin);
     $p = mailPalette('验证'); // 验证码统一蓝色系
     $iconLetter = mb_substr($siteE, 0, 1, 'UTF-8');
-    $out = '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+    $out = '<!DOCTYPE html><html lang="' . $e($lang) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
         . '<body style="margin:0;padding:0;background:#eef1f6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;padding:32px 12px;"><tr><td align="center">'
         . '<table role="presentation" width="660" cellpadding="0" cellspacing="0" style="max-width:660px;width:100%;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #dde3ec;box-shadow:0 16px 44px rgba(15,42,82,0.12);">'
         . '<tr><td style="background:linear-gradient(135deg,' . $p['g1'] . ' 0%,' . $p['g2'] . ' 100%);padding:30px 38px;">'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
         . '<td style="vertical-align:middle;"><div style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:0.5px;">' . $siteE . '</div>'
-        . '<div style="color:rgba(255,255,255,0.72);font-size:12px;margin-top:6px;">' . $p['sub'] . '</div></td>'
+        . '<div style="color:rgba(255,255,255,0.72);font-size:12px;margin-top:6px;">' . $e(ysmMailT($p['sub'], $lang)) . '</div></td>'
         . '<td align="right" style="vertical-align:middle;"><div style="width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,0.16);color:#fff;font-size:19px;font-weight:700;text-align:center;line-height:44px;">' . $iconLetter . '</div></td>'
         . '</tr></table>'
         . '</td></tr>'
         . '<tr><td style="padding:40px 44px 26px;">'
         . '<div style="text-align:center;">'
-        . mailBadgeHtml($site, '验证', '邮箱验证码（有效期 ' . $ttlMin . ' 分钟）', $p['badge'])
+        . mailBadgeHtml($site, ysmMailT('验证', $lang), ysmMailT('邮箱验证码（有效期 ' . $ttlMin . ' 分钟）', $lang), $p['badge'])
         . '</div>'
         . '<div style="text-align:center;margin-top:14px;">'
         . '<div style="display:inline-block;background:#eef3fb;color:#1e3a8a;font-size:12px;font-weight:600;padding:7px 18px;border-radius:999px;">' . $purposeE . '</div>'
@@ -1429,30 +1462,30 @@ function renderMailCode($site, $purposeLabel, $code, $ttlMin, $extra = []) {
         // 验证码卡片（放大：圆角 18px、内距加大）
         . '<div style="text-align:center;margin-top:26px;">'
         . '<div style="display:inline-block;background:#f0f4ff;border:2px dashed #b9cbe6;border-radius:18px;padding:26px 46px;">'
-        . '<div style="color:#8a97ad;font-size:12px;margin-bottom:12px;letter-spacing:1px;">您的验证码</div>'
+        . '<div style="color:#8a97ad;font-size:12px;margin-bottom:12px;letter-spacing:1px;">' . $e(ysmMailT('您的验证码', $lang)) . '</div>'
         . '<div style="font-family:Consolas,Menlo,monospace;font-size:40px;font-weight:700;letter-spacing:5px;color:#1e3a8a;">' . $codeFmt . '</div>'
         . '</div>'
         . '</div>'
         . '<div style="text-align:center;margin-top:22px;">'
-        . '<span style="display:inline-block;background:#fff3e0;color:#b26a00;font-size:12px;font-weight:600;padding:6px 16px;border-radius:999px;">有效期 ' . $ttlMin . ' 分钟 · 一次性使用</span>'
+        . '<span style="display:inline-block;background:#fff3e0;color:#b26a00;font-size:12px;font-weight:600;padding:6px 16px;border-radius:999px;">' . $e(ysmMailT('有效期 ' . $ttlMin . ' 分钟 · 一次性使用', $lang)) . '</span>'
         . '</div>';
     $link = (string)($extra['link'] ?? '');
     if ($link !== '') {
         $out .= '<div style="text-align:center;margin-top:24px;">'
-            . '<a href="' . $e($link) . '" style="display:inline-block;background:linear-gradient(135deg,' . $p['g1'] . ' 0%,' . $p['g2'] . ' 100%);color:#ffffff;font-size:14px;font-weight:600;padding:14px 38px;border-radius:999px;text-decoration:none;">前往完成验证</a>'
+            . '<a href="' . $e($link) . '" style="display:inline-block;background:linear-gradient(135deg,' . $p['g1'] . ' 0%,' . $p['g2'] . ' 100%);color:#ffffff;font-size:14px;font-weight:600;padding:14px 38px;border-radius:999px;text-decoration:none;">' . $e(ysmMailT('前往完成验证', $lang)) . '</a>'
             . '</div>';
     }
     // 分层：安全提示面板
     $out .= '<div style="margin-top:26px;padding:16px 20px;background:#f7f9fc;border:1px solid #eaeef4;border-radius:14px;color:#5b6b80;font-size:12.5px;line-height:1.9;">'
-        . '如果这不是您本人的操作，请忽略本邮件，您的账号不会受到任何影响。<br>请勿将验证码转发给任何人，工作人员不会向您索要验证码。'
+        . $e(ysmMailT('如果这不是您本人的操作，请忽略本邮件，您的账号不会受到任何影响。', $lang)) . '<br>' . $e(ysmMailT('请勿将验证码转发给任何人，工作人员不会向您索要验证码。', $lang))
         . '</div>'
         // 分层：元信息面板
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;background:#f7f9fc;border-radius:14px;border:1px solid #eaeef4;padding:14px 20px;font-size:12.5px;color:#5b6b80;">'
-        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">服务器</td><td>' . $server . '</td></tr>'
-        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">时间</td><td>' . $time . '</td></tr>'
+        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">' . $e(ysmMailT('服务器', $lang)) . '</td><td>' . $server . '</td></tr>'
+        . '<tr><td style="padding:6px 0;width:72px;color:#93a2b4;">' . $e(ysmMailT('时间', $lang)) . '</td><td>' . $time . '</td></tr>'
         . '</table>'
         . '</td></tr>'
-        . '<tr><td style="background:#f7f9fc;padding:18px 40px;border-top:1px solid #eaeef4;color:#93a2b4;font-size:11px;text-align:center;line-height:1.9;">You Super Markdown · 此邮件为系统自动发送，请勿直接回复</td></tr>'
+        . '<tr><td style="background:#f7f9fc;padding:18px 40px;border-top:1px solid #eaeef4;color:#93a2b4;font-size:11px;text-align:center;line-height:1.9;">You Super Markdown · ' . $e(ysmMailT('此邮件为系统自动发送，请勿直接回复', $lang)) . '</td></tr>'
         . '</table>'
         . '</td></tr></table>'
         . '</body></html>';
@@ -1599,7 +1632,7 @@ function notifyLoginEvent($u, $clientIP) {
     $now = date('Y-m-d H:i:s');
     $body = "时间：{$now}\n"
           . "服务器：{$host}\n"
-          . "账号：{$u['nickname']}（" . maskQQ($u['account'] ?? '') . "）\n"
+          . "账号：{$u['nickname']}（" . ($u['username'] ?? ($u['account'] ?? '')) . "）\n"
           . "角色：{$roleName}\n"
           . "IP：{$clientIP}";
     $html = renderMailHtml($site, $subject, $body, ['server' => $host, 'time' => $now]);
@@ -1628,7 +1661,7 @@ function notifyPasswordReset($u, $clientIP, $mode) {
     $modeLabel = $mode === 'admin_reset' ? '超管协助重置码' : '邮箱验证码自助找回';
     $now = date('Y-m-d H:i:s');
     $subject = "[{$site} 通知] 账号密码已重置";
-    $body = "账号：{$u['nickname']}（" . maskQQ($u['account'] ?? '') . "）\n"
+    $body = "账号：{$u['nickname']}（" . ($u['username'] ?? ($u['account'] ?? '')) . "）\n"
           . "角色：{$u['role']}\n"
           . "重置方式：{$modeLabel}\n"
           . "IP：{$clientIP}\n"
@@ -2020,6 +2053,63 @@ function sanitizeUserForClient($u) {
     return $u;
 }
 
+// ---- v6.2.0：用户名（登录 ID）——归一化 / 校验 / 查重 / 默认头像 ----
+/** 归一化：全角转半角、去零宽字符、小写、去首尾空白 */
+function ysmUsernameNormalize($s) {
+    $s = (string)$s;
+    if (function_exists('mb_convert_kana')) $s = mb_convert_kana($s, 'as', 'UTF-8');
+    $s = preg_replace('/[\x{200B}-\x{200D}\x{FEFF}]/u', '', $s);
+    $s = trim($s);
+    return function_exists('mb_strtolower') ? mb_strtolower($s, 'UTF-8') : strtolower($s);
+}
+
+/** 校验用户名；成功返回 true，失败返回可读原因。$allowNumeric 仅用于兼容存量 QQ 数字账号 */
+function ysmUsernameValidate($s, $allowNumeric = false) {
+    $s = ysmUsernameNormalize($s);
+    if (!preg_match('/^[a-z0-9][a-z0-9_-]{2,19}$/', $s)) {
+        return '用户名需为 3-20 位字母、数字、下划线或连字符，且以字母或数字开头';
+    }
+    if (!$allowNumeric && !preg_match('/[a-z]/', $s)) {
+        return '用户名必须包含至少一个字母';
+    }
+    $reserved = ['admin', 'root', 'system', 'sys', 'api', 'login', 'logout', 'register', 'me', 'user', 'users', 'author', 'station', 'superadmin', 'support', 'help', 'null', 'none', 'undefined'];
+    if (in_array($s, $reserved, true) || strpos($s, 'u_') === 0 || strpos($s, 'ysm_') === 0) {
+        return '该用户名为系统保留，请换一个';
+    }
+    return true;
+}
+
+/** 用户名是否已被占用（大小写不敏感；$exceptId 用于改名时排除自己） */
+function ysmUsernameTaken($username, $exceptId = '') {
+    $u = ysmUsernameNormalize($username);
+    if ($u === '') return false;
+    foreach (fetchAllUsers() as $x) {
+        if ($exceptId !== '' && (string)($x['id'] ?? '') === (string)$exceptId) continue;
+        if (ysmUsernameNormalize($x['username'] ?? '') === $u) return true;
+    }
+    return false;
+}
+
+/** 生成不会被占用的用户名（迁移用；冲突时追加 _2/_3） */
+function ysmUsernamePick($account, $id) {
+    $base = ysmUsernameNormalize($account);
+    if (!preg_match('/^[a-z0-9][a-z0-9_-]{2,19}$/', $base)) $base = 'u_' . substr(sha1((string)$id), 0, 8);
+    $cand = $base;
+    $i = 2;
+    while (ysmUsernameTaken($cand)) {
+        $cand = substr($base, 0, 16) . '_' . $i;
+        $i++;
+    }
+    return $cand;
+}
+
+/** 默认头像（首字母/缩写 SVG，站内生成，无外链） */
+function ysmAvatarUrl($username, $size = 100) {
+    $u = ysmUsernameNormalize($username);
+    if ($u === '') return '';
+    return '/avatar.php?u=' . rawurlencode($u) . '&s=' . max(24, min(256, (int)$size));
+}
+
 // ---- v6.0.0：友站（站长专属；录入辅助抓取 + 掉链巡检，只读校验） ----
 /** 抓取目标站点元数据用于录入预填（name/desc/favicon；不执行 JS、限大小、白名单协议） */
 function linkFetchMeta($url) {
@@ -2165,13 +2255,15 @@ function email_code_send($email, $purpose, $target = '', $operatorRole = '', $li
     ]);
     $site = $cfg['site_title'] ?? 'You Super Markdown';
     $now = date('Y-m-d H:i:s');
-    $subject = "[{$site}] 邮箱验证码";
-    $body = "您的验证码为：{$code}\n\n"
-          . "有效期为 " . intdiv($ttl, 60) . " 分钟，仅限一次性使用。\n";
+    // v6.2.0：按收件人账号语言输出（未绑定邮箱/游客 → 站点默认语言）
+    $lang = function_exists('ysmMailLang') ? ysmMailLang($email) : 'zh-CN';
+    $subject = "[{$site}] " . ysmMailT('邮箱验证码', $lang);
+    $body = ysmMailT('您的验证码为：', $lang) . $code . "\n\n"
+          . ysmMailT('有效期为 ' . intdiv($ttl, 60) . ' 分钟，仅限一次性使用。', $lang) . "\n";
     if ($link !== '') {
-        $body .= "请点击以下链接输入验证码完成验证：\n{$link}\n\n";
+        $body .= ysmMailT('请点击以下链接输入验证码完成验证：', $lang) . "\n{$link}\n\n";
     }
-    $body .= "若非本人操作，请忽略本邮件。\n时间：{$now}";
+    $body .= ysmMailT('若非本人操作，请忽略本邮件。', $lang) . "\n" . ysmMailT('时间：', $lang) . $now;
     // v2.9.0：验证码邮件用专用大号展示模板（3-3 分组 / 有效期徽标 / 防泄露提示 / 自助验证链接）
     // v2.10.0：purpose 扩展 email_change（更换绑定邮箱），统一走同一模板
     $purposeLabels = [
@@ -2181,12 +2273,12 @@ function email_code_send($email, $purpose, $target = '', $operatorRole = '', $li
         'device_login' => '新设备登录验证',
         'password_reset' => '找回密码验证',
     ];
-    $purposeLabel = $purposeLabels[$purpose] ?? '邮箱验证';
+    $purposeLabel = ysmMailT($purposeLabels[$purpose] ?? '邮箱验证', $lang);
     $html = renderMailCode($site, $purposeLabel, $code, intdiv($ttl, 60), [
         'server' => safeRequestHost(),
         'time' => $now,
         'link' => $link,
-    ]);
+    ], $lang);
     [$ok, $err] = sendSmtpMail($email, $subject, $body, $html);
     if (!$ok) {
         logAlertFail("验证码邮件发送失败({$purpose} → {$email}): {$err}");
@@ -2668,16 +2760,19 @@ function get_pending_author_by_id($id) {
 function update_pending_author_status($id, $status) {
     db_exec("UPDATE pending_author_creates SET status = ?, confirmed_at = ? WHERE id = ?", [$status, date('Y-m-d H:i:s'), $id]);
 }
-/** 创建写作者账号（超管确认后执行）；邮箱/QQ 冲突返回 false */
+/** 创建写作者账号（超管确认后执行）；邮箱/用户名冲突返回 false */
 function create_author_from_pending($row) {
+    $username = ysmUsernameNormalize($row['username'] ?? '');
+    if ($username === '') $username = ysmUsernameNormalize($row['account'] ?? '');
     $users = fetchAllUsers();
     foreach ($users as $u) {
-        if (($u['account'] ?? '') === $row['account']) return false;
+        if ($username !== '' && ysmUsernameNormalize($u['username'] ?? '') === $username) return false;
         if (!empty($u['email']) && ($u['email'] ?? '') === $row['email']) return false;
     }
     $users[] = [
         'id' => genId(),
-        'account' => $row['account'],
+        'account' => $username,
+        'username' => $username,
         'email' => $row['email'],
         'nickname' => $row['nickname'],
         'password' => $row['password_hash'],
@@ -2703,7 +2798,7 @@ function sendAdminConfirmMail($pendingId, $token, $nick, $account, $email) {
     $now = date('Y-m-d H:i:s');
     $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
     $subject = "[{$site}] 写作者创建确认";
-    $body = "站长申请创建写作者：\n昵称：{$nick}\nQQ：{$account}\n邮箱：{$email}\n\n"
+    $body = "站长申请创建写作者：\n昵称：{$nick}\n用户名：{$account}\n邮箱：{$email}\n\n"
           . "点击以下链接确认（" . intdiv($ttl, 3600) . " 小时内有效，一次性）：\n{$link}\n\n时间：{$now}";
     // v2.9.0：确认邮件信息卡（昵称/QQ/邮箱）+ 渐变确认按钮
     $htmlDetail = '<div style="text-align:center;">'
@@ -2711,7 +2806,7 @@ function sendAdminConfirmMail($pendingId, $token, $nick, $account, $email) {
         . '</div>'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px;background:#f8fafc;border:1px solid #edf0f5;border-radius:12px;">'
         . '<tr><td style="padding:14px 20px;width:76px;color:#a0aec0;font-size:12px;">昵称</td><td style="padding:14px 20px;color:#2d3748;font-size:14px;font-weight:600;">' . $e($nick) . '</td></tr>'
-        . '<tr><td style="padding:10px 20px;width:76px;color:#a0aec0;font-size:12px;border-top:1px solid #edf0f5;">QQ</td><td style="padding:10px 20px;color:#2d3748;font-size:14px;border-top:1px solid #edf0f5;">' . $e($account) . '</td></tr>'
+        . '<tr><td style="padding:10px 20px;width:76px;color:#a0aec0;font-size:12px;border-top:1px solid #edf0f5;">用户名</td><td style="padding:10px 20px;color:#2d3748;font-size:14px;border-top:1px solid #edf0f5;">' . $e($account) . '</td></tr>'
         . '<tr><td style="padding:10px 20px;width:76px;color:#a0aec0;font-size:12px;border-top:1px solid #edf0f5;">邮箱</td><td style="padding:10px 20px;color:#2d3748;font-size:14px;border-top:1px solid #edf0f5;">' . $e($email) . '</td></tr>'
         . '</table>'
         . '<div style="text-align:center;margin-top:26px;">'

@@ -956,8 +956,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* 手机端标签云折叠按钮（桌面端隐藏） */
-  #categoryBar .tag-cloud-toggle { display: none; }
 
   /* ── v5.2.2：已选标签 chip 内联进筛选区（不再单起一整行）──
      由 js/main.js 把 chip 渲染进 .category-bar-right（与一级标签同排、可横向滑动），
@@ -1036,7 +1034,8 @@
 
     /* ② 分类 / 标签云：单行横向滚动（一行可横向滑动），杜绝纵向堆叠 */
     #homeAside #categoryBar .category-bar-left,
-    #homeAside #categoryBar .category-bar-right {
+    #homeAside #categoryBar .category-bar-right,
+    #homeAside #categoryBar .tag-cloud {
       flex-wrap: nowrap;
       overflow-x: auto;
       overflow-y: hidden;
@@ -1045,53 +1044,11 @@
       -webkit-overflow-scrolling: touch;
     }
     #homeAside #categoryBar .category-bar-left::-webkit-scrollbar,
-    #homeAside #categoryBar .category-bar-right::-webkit-scrollbar { display: none; }
+    #homeAside #categoryBar .category-bar-right::-webkit-scrollbar,
+    #homeAside #categoryBar .tag-cloud::-webkit-scrollbar { display: none; }
     #homeAside #categoryBar .tag-cloud-row { padding-top: 8px; }
     #homeAside #categoryBar .category-bar-item { padding: 5px 11px; }
     #homeAside #categoryBar .tag-cloud-item { padding: 3px 10px; }
-
-    /* v6.0.2：标签云在手机上默认只显示两行；两行高度由 JS 实测写入 --ysm-tag2h，
-       避免固定值裁出「半个标签」。仅当确实超过两行时才由 JS 加 .has-toggle 显示按钮。 */
-    #homeAside #categoryBar .tag-cloud {
-      flex-wrap: wrap;
-      max-height: var(--ysm-tag2h, 56px);
-      overflow: hidden;
-    }
-    #homeAside #categoryBar .tag-cloud-row.is-expanded .tag-cloud { max-height: none; }
-    /* 标签云占满一行，按钮换到下一行居中（.tag-cloud-row 基础样式是单行 flex + 父级 overflow:hidden，
-       不换行会把按钮挤到可视区外，看起来像「按钮莫名消失」） */
-    #homeAside #categoryBar .tag-cloud-row { flex-wrap: wrap; align-items: flex-start; }
-    #homeAside #categoryBar .tag-cloud { flex: 1 1 100%; }
-    #categoryBar .tag-cloud-row.has-toggle .tag-cloud-toggle {
-      flex: 1 1 100%;
-      justify-content: center;
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      margin: 2px auto 0;
-      padding: 4px 10px;
-      border: 0;
-      border-radius: 6px;
-      background: transparent;
-      color: var(--accent);
-      font-size: 0.72em;
-      font-weight: 600;
-      line-height: 1.6;
-      cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-    }
-    #categoryBar .tag-cloud-row.has-toggle .tag-cloud-toggle::after {
-      content: "";
-      width: 5px;
-      height: 5px;
-      border-right: 1.5px solid currentColor;
-      border-bottom: 1.5px solid currentColor;
-      transform: rotate(45deg) translateY(-1px);
-      transition: transform 0.18s ease;
-    }
-    #categoryBar .tag-cloud-row.is-expanded .tag-cloud-toggle::after {
-      transform: rotate(-135deg) translateY(-1px);
-    }
 
     /* 已选标签筛选条：进一步紧凑 */
     #categoryBar .tag-filter-chip,

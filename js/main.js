@@ -594,6 +594,8 @@
     let Be = "";
     // v5.2.1：标签改为多选（数组），过滤语义为 AND（同时命中全部已选标签）
         let Me = [];
+    // v6.0.1：手机端标签云默认折叠（仅展示两行），用户展开后保持展开状态直到再次收起
+        let ysmTagCloudOpen = false;
  // v4.0.0：标签聚合过滤
         let He = false;
  // v4.0.0：归档视图开关
@@ -1180,6 +1182,8 @@
             if (popTitle) {
                 popTitle.addEventListener("click", function() {
                     popSec.classList.toggle("is-open");
+                    var st = popTitle.querySelector(".home-popular-state");
+                    if (st) st.textContent = popSec.classList.contains("is-open") ? "收起" : "展开";
                 });
             }
         }
@@ -1258,7 +1262,8 @@
         // v4.1.1：标签云独立一行（不再与分类按钮同排挤压导致重叠/挤出）
                 var d = "";
         if (Be === "" && a.length > 0) {
-            d = `<div class="tag-cloud-row"><div class="tag-cloud">${a.slice(0, 20).map(e => `<span class="tag-cloud-item${isTagSelected(e) ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div></div>`;
+            d = `<div class="tag-cloud-row${ysmTagCloudOpen ? " is-expanded" : ""}"><div class="tag-cloud">${a.slice(0, 20).map(e => `<span class="tag-cloud-item${isTagSelected(e) ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div>` +
+                `<button type="button" class="tag-cloud-toggle">${ysmTagCloudOpen ? "收起标签" : "展开标签"}</button></div>`;
         }
         var clr = Me.length ? '<span class="tag-filter-clear" data-clear="1">清空</span>' : "";
         var m = `<div class="category-bar-right">${f}${l}${clr}</div>`;
@@ -1305,6 +1310,14 @@
                 renderHomeContent();
             });
         });
+        // v6.0.1：手机端标签云「展开/收起」（桌面端由 CSS 隐藏该按钮）
+        var tagToggle = e.querySelector(".tag-cloud-toggle");
+        if (tagToggle) {
+            tagToggle.addEventListener("click", function() {
+                ysmTagCloudOpen = !ysmTagCloudOpen;
+                renderCategoryBar();
+            });
+        }
         // v4.1.4：分类栏/标签云启用横向滚动（滚轮+拖拽），超出部分电脑端可查看
         // v5.2.2：已选标签 chip 现内联在 .category-bar-right 内，随其横向滚动，无需单独处理
         enableHScroll(e.querySelector(".category-bar-left"));

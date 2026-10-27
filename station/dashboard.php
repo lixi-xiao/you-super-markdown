@@ -1352,6 +1352,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <script src="../js/links-admin.js?v=<?= @filemtime(__DIR__ . '/../js/links-admin.js') ?>"></script>
     <?php endif; ?>
 
+    <?php if ($tab === 'links'): ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            友站管理
+        </div>
+        <div class="page-subtitle">友情链接维护（前台仅展示「启用」状态）；支持抓取站点信息预填与掉链巡检</div>
+    </div>
+    <div id="linksAdmin" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>">
+        <div class="card">
+            <div class="card-title" id="linkFormTitle">新增友链</div>
+            <div class="form-group">
+                <label class="form-label">站点名</label>
+                <input class="form-input" id="linkName" maxlength="60" placeholder="对方站点名称">
+            </div>
+            <div class="form-group">
+                <label class="form-label">站点地址</label>
+                <div class="api-url-group">
+                    <input class="form-input" id="linkUrl" placeholder="https://example.com">
+                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn">抓取预填</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">描述（可选）</label>
+                <input class="form-input" id="linkDesc" maxlength="200" placeholder="一句话介绍">
+            </div>
+            <div class="form-group">
+                <label class="form-label">图标地址（可选）</label>
+                <input class="form-input" id="linkFavicon" placeholder="https://example.com/favicon.ico">
+            </div>
+            <div class="form-group">
+                <label class="form-label">排序（越小越前）</label>
+                <input class="form-input" id="linkSort" type="number" value="0" style="max-width:160px">
+            </div>
+            <div id="linkFormMsg" class="form-hint"></div>
+            <div style="display:flex;justify-content:flex-end;gap:10px">
+                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none">取消编辑</button>
+                <button type="button" class="btn btn-primary" id="linkSaveBtn">保存</button>
+            </div>
+            <input type="hidden" id="linkId" value="">
+        </div>
+        <div class="card">
+            <div class="card-title">友链列表</div>
+            <div class="table-wrap">
+                <table id="linksTable">
+                    <tr><th>站点</th><th>状态</th><th>排序</th><th>最近巡检</th><th>操作</th></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+    <script src="../js/fp.js?v=<?= @filemtime(__DIR__ . '/../js/fp.js') ?>"></script>
+    <script src="../js/links-admin.js?v=<?= @filemtime(__DIR__ . '/../js/links-admin.js') ?>"></script>
+    <?php endif; ?>
+
     <?php if ($tab === 'images'): ?>
     <?php
     // v4.0.0：图片资源管理——列出 data/images 下全部图片（缩略图 + 大小 + 修改时间），支持删除

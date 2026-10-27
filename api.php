@@ -716,7 +716,90 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         notifyPasswordReset($target, $clientIP, $ok2 ? 'admin_reset' : 'self_reset');
         sendJson(['success' => true]);
     }
-    sendJson(['success' => false, 'error' => '未知操作'], 400);
+}
+// ===== v6.0.0：友站（友情链接） =====
+// GET links_list：前台只读——只出 active 友链（访客可访问）
+if ($action === 'links_list') {
+    sendJson(['success' => true, 'links' => db_all("SELECT id, site_name, url, favicon, desc, sort FROM links WHERE status = 'active' ORDER BY sort ASC, place_time DESC")]);
+}
+/** 站长专属操作的前置校验（角色 + 环境） */
+function linksRequireStationAdmin() {
+    $actor = checkRole(ROLE_STATION_ADMIN);
+    if (!$actor) sendJson(['success' => false, 'error' => '无权限'], 403);
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    return $actor;
+}
+// GET links_meta：录入辅助——抓取站点信息预填
+if ($action === 'links_meta' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    linksRequireStationAdmin();
+    $url = trim((string)($_GET['url'] ?? ''));
+    if ($url === '') sendJson(['success' => false, 'error' => '请填写站点地址'], 400);
+    if (!preg_match('#^https?://#i', $url)) $url = 'https://' . $url;
+    sendJson(linkFetchMeta($url));
+}
+// POST links_save：新增/编辑
+if ($action === 'links_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    linksRequireStationAdmin();
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $b = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($b)) $b = [];
+    $name = trim((string)($b['site_name'] ?? ''));
+    $url = trim((string)($b['url'] ?? ''));
+    $desc = trim((string)($b['desc'] ?? ''));
+    $favicon = trim((string)($b['favicon'] ?? ''));
+    if (mb_strlen($name) > 60) sendJson(['success' => false, 'error' => '站点名过长'], 400);
+    if (mb_strlen($desc) > 200) sendJson(['success' => false, 'error' => '描述过长'], 400);
+    if ($name === '' || $url === '' || !preg_match('#^https?://#i', $url)) sendJson(['success' => false, 'error' => '站点名与地址必填，地址须为 http(s)'], 400);
+    if ($favicon !== '' && !preg_match('#^https?://#i', $favicon)) sendJson(['success' => false, 'error' => 'favicon 须为 http(s) 地址'], 400);
+    $id = (int)($b['id'] ?? 0);
+    $sort = (int)($b['sort'] ?? 0);
+    if ($id > 0) {
+        db_exec('UPDATE links SET site_name=?, url=?, desc=?, favicon=?, sort=? WHERE id=?', [$name, $url, $desc, $favicon, $sort, $id]);
+        auditLog('links_edit', $url, '编辑友链 ' . $name);
+    } else {
+        if (db_one('SELECT 1 AS x FROM links WHERE url = ?', [$url])) sendJson(['success' => false, 'error' => '该站点已存在'], 400);
+        db_exec('INSERT INTO links (site_name, url, desc, favicon, status, place_time, sort, source) VALUES (?,?,?,?,\'active\',?,?,?)', [$name, $url, $desc, $favicon, time(), $sort, 'manual']);
+        auditLog('links_add', $url, '新增友链 ' . $name);
+    }
+    sendJson(['success' => true]);
+}
+// POST links_delete
+if ($action === 'links_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    linksRequireStationAdmin();
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $b = json_decode(file_get_contents('php://input'), true);
+    $id = (int)($b['id'] ?? 0);
+    $row = db_one('SELECT site_name, url FROM links WHERE id = ?', [$id]);
+    db_exec('DELETE FROM links WHERE id = ?', [$id]);
+    if ($row) auditLog('links_delete', $row['url'], '删除友链 ' . $row['site_name']);
+    sendJson(['success' => true]);
+}
+// POST links_status：启用/停用/标记掉链
+if ($action === 'links_status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    linksRequireStationAdmin();
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $b = json_decode(file_get_contents('php://input'), true);
+    $id = (int)($b['id'] ?? 0);
+    $status = (string)($b['status'] ?? '');
+    if (!in_array($status, ['active', 'pending', 'dead', 'disabled'], true)) sendJson(['success' => false, 'error' => '状态无效'], 400);
+    db_exec('UPDATE links SET status = ? WHERE id = ?', [$status, $id]);
+    auditLog('links_status', 'link#' . $id, '状态改为 ' . $status);
+    sendJson(['success' => true]);
+}
+// GET links_admin：站长后台列表
+if ($action === 'links_admin' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    linksRequireStationAdmin();
+    sendJson(['success' => true, 'links' => db_all('SELECT * FROM links ORDER BY sort ASC, place_time DESC')]);
+}
+// GET links_check：单条掉链巡检（只读校验后写回状态）
+if ($action === 'links_check' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    linksRequireStationAdmin();
+    $id = (int)($_GET['id'] ?? 0);
+    $row = db_one('SELECT url FROM links WHERE id = ?', [$id]);
+    if (!$row) sendJson(['success' => false, 'error' => '友链不存在'], 404);
+    $alive = linkCheckAlive((string)$row['url']);
+    db_exec('UPDATE links SET last_check = ?, check_count = check_count + 1, status = ? WHERE id = ?', [time(), $alive ? 'active' : 'dead', $id]);
+    sendJson(['success' => true, 'alive' => $alive]);
 }
 
 

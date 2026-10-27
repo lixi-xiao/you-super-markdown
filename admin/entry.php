@@ -1,5 +1,8 @@
 <?php
 require_once __DIR__ . '/../utils.php';
+// v6.1.0：服务端输出层 i18n
+require_once __DIR__ . '/../lib/i18n-output.php';
+ysmI18nStart();
 secureSessionStart();
 
 // v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
@@ -197,7 +200,7 @@ if (!$needDeviceVerify && is_array($pendingNow)
 }
 ?>
 <!DOCTYPE html>
-<html lang="zh-CN" data-admin="super">
+<html lang="<?= ysmLocale() ?>" data-admin="super">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -205,6 +208,9 @@ if (!$needDeviceVerify && is_array($pendingNow)
 <!-- v5.1.0 P2-5：新外壳样式（先于 admin.css 加载，旧样式仍作兜底；仅追加，不改既有选择器） -->
 <link rel="stylesheet" href="/css/tw.min.css?v=<?= @filemtime(__DIR__ . '/../css/tw.min.css') ?>">
 <link rel="stylesheet" href="/css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
+<!-- v6.1.0：后台 JS 动态文案运行时翻译 -->
+<script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+<script src="/js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/../js/i18n-live.js') ?>"></script>
 </head>
 <body id="adminEntryPage" class="entry-page">
     <div class="entry-card">

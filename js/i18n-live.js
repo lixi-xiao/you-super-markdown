@@ -13,6 +13,16 @@
 
     var CONF = window.I18N || {};
     var LANG = CONF.lang || 'zh-CN';
+
+    // v6.1.0：无论是否非中文都提供 window.ysmT——模板里统一用 ysmT('中文') 包住动态文案，
+    // 简体界面下原样返回，避免 undefined 报错。
+    if (typeof window.ysmT !== 'function') {
+        window.ysmT = function (s) { return String(s == null ? '' : s); };
+    }
+    try {
+        if (window.I18N && typeof window.I18N.s !== 'function') window.I18N.s = window.ysmT;
+    } catch (e) {}
+
     if (!LANG || LANG === 'zh-CN') return;
 
     var PHRASES = CONF.phrases || {};

@@ -170,7 +170,8 @@
                 return;
             }
             if (act === 'delete') {
-                if (!confirm('确定删除「' + (row.site_name || '') + '」？')) return;
+                var tt = window.ysmT || function (s) { return s; };
+                if (!confirm(tt('确定删除「') + (row.site_name || '') + tt('」？'))) return;
                 api('../api.php?action=links_delete', { method: 'POST', body: JSON.stringify({ id: id }) })
                     .then(function (d) { if (d && d.success) load(); });
             }

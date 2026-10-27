@@ -1,11 +1,10 @@
 <?php
 /**
- * v6.0.0-beta：i18n UI 外壳框架
+ * v6.0.0：i18n UI 外壳框架
  *
  * 设计要点：
  *  - 自动发现：扫描 ../lang/*.php 生成语言列表，不加新语种文件即自动出现在切换器（不强写注册表）。
  *  - 缺键回落：任何 dict 缺失的 key 都回落到 zh-CN（唯一真源），永不空白。
- *  - 优先 ndict → json → 后端 php dict（兼容处理）。
  *  - locale 解析链：?lang= → Cookie → Accept-Language → zh-CN 兜底。
  */
 
@@ -21,8 +20,7 @@ if (!function_exists('ysmSupportedLangs')) {
         foreach ($files as $f) {
             if (preg_match('/^([A-Za-z-]+)\.php$/', $f, $m)) {
                 $code = $m[1];
-                $name = $names[$code] ?? ucfirst(preg_replace('/[-]/', ' ', $code));
-                $langs[$code] = ['name' => $name, 'code' => $code];
+                $langs[$code] = ['name' => $names[$code] ?? ucfirst(preg_replace('/[-]/', ' ', $code)), 'code' => $code];
             }
         }
         if (!isset($langs['zh-CN'])) $langs['zh-CN'] = ['name' => '简体中文', 'code' => 'zh-CN'];
@@ -54,7 +52,7 @@ if (!function_exists('ysmSupportedLangs')) {
         return $langs;
     }
 
-    /** 读取某语言词典（含回落 zh-CN 合并；zh-CN 为真源，缺键由底层 t() 再回落） */
+    /** 读取某语言词典（zh-CN 由底层 t() 兜底） */
     function ysmDict($lang) {
         static $dicts = [];
         $lang = (string)$lang;
@@ -83,8 +81,7 @@ if (!function_exists('ysmSupportedLangs')) {
         // 浏览器基础语言（游客或账号未设置时）
         if (!empty($_COOKIE['ysm_lang'])) $try[] = (string)$_COOKIE['ysm_lang'];
         if (!empty($_SERVER['HTTP_ACCEPT_LANGUAGE'])) {
-            $al = (string)$_SERVER['HTTP_ACCEPT_LANGUAGE'];
-            foreach (explode(',', $al) as $part) {
+            foreach (explode(',', (string)$_SERVER['HTTP_ACCEPT_LANGUAGE']) as $part) {
                 $tag = trim(explode(';', $part)[0]);
                 if ($tag !== '') $try[] = $tag;
             }
@@ -93,11 +90,15 @@ if (!function_exists('ysmSupportedLangs')) {
             $cand = trim((string)$cand);
             if ($cand === '') continue;
             if (in_array($cand, $supported, true)) { $locale = $cand; return $locale; }
-            // 模糊匹配（如 'zh' → zh-CN；'en' → en-US）
             $base = strtolower(explode('-', $cand)[0]);
             foreach ($supported as $s) {
                 if (strtolower(explode('-', $s)[0]) === $base) { $locale = $s; return $locale; }
             }
+        }
+        // v6.0.0：兜底语言改读「首页默认语言」（超管后台可配），未配置或无匹配时回落 zh-CN
+        if (function_exists('loadSiteConfig')) {
+            $dft = (string)(loadSiteConfig()['default_lang'] ?? '');
+            if ($dft !== '' && in_array($dft, $supported, true)) { $locale = $dft; return $locale; }
         }
         $locale = 'zh-CN';
         return $locale;
@@ -123,21 +124,85 @@ if (!function_exists('ysmSupportedLangs')) {
         return htmlspecialchars($str, ENT_QUOTES, 'UTF-8');
     }
 
-    /** 前端注入用：返回 [lang, dict(当前语言+zh 合并), phrases(UI 原文文案表)] */
-    function ysmClientI18n() {
+    /** 前端注入用：返回 [lang, dict(当前语言+zh 合并)]；$scope='admin' 时附带后台词组 */
+    function ysmClientI18n($scope = 'front') {
         $lang = ysmLocale();
         $dict = array_merge(ysmDict('zh-CN'), ysmDict($lang));
         $phrases = [];
         if ($lang !== 'zh-CN') {
             $d = ysmDict($lang);
             if (isset($d['@phrases']) && is_array($d['@phrases'])) $phrases = $d['@phrases'];
+            // v6.1.0：后台词组单独存放，避免前台每页注入上百 KB
+            if ($scope === 'admin' && isset($d['@admin_phrases']) && is_array($d['@admin_phrases'])) {
+                $phrases = array_merge($phrases, $d['@admin_phrases']);
+            }
         }
         return ['lang' => $lang, 'dict' => $dict, 'langs' => ysmSupportedLangs(), 'phrases' => $phrases];
     }
 
-    /** 日期格式化（Intl 风格；PHP 侧用简单映射，不引入扩展依赖） */
+    /** 短语取词（v6.1.0）：以简体中文原文为 msgid，支持 {name} 占位；缺键回落原文 */
+    function ysmT($zh, $vars = [], $escape = true) {
+        $zh = (string)$zh;
+        $out = $zh;
+        $lang = ysmLocale();
+        if ($lang !== 'zh-CN') {
+            $d = ysmDict($lang);
+            $ph = (isset($d['@phrases']) && is_array($d['@phrases'])) ? $d['@phrases'] : [];
+            // v6.1.0：后台/接口文案单独存放，查词时一并参与
+            if (isset($d['@admin_phrases']) && is_array($d['@admin_phrases'])) {
+                $ph = array_merge($ph, $d['@admin_phrases']);
+            }
+            if (isset($ph[$zh])) {
+                $out = (string)$ph[$zh];
+            } else {
+                foreach ($ph as $k => $v) {
+                    $k = (string)$k;
+                    if (strpos($k, '{') === false) continue;
+                    $segs = preg_split('/\{[a-zA-Z0-9_]+\}/', $k);
+                    $rx = '/^' . implode('(.+?)', array_map(function ($s) { return preg_quote($s, '/'); }, $segs)) . '$/u';
+                    if (preg_match($rx, $zh, $m)) {
+                        $idx = 0;
+                        $out = preg_replace_callback('/\{[a-zA-Z0-9_]+\}/', function () use ($m, &$idx) {
+                            $idx++;
+                            return isset($m[$idx]) ? $m[$idx] : '';
+                        }, (string)$v);
+                        break;
+                    }
+                }
+            }
+        }
+        foreach ($vars as $k => $v) {
+            $out = str_replace('{' . $k . '}', (string)$v, $out);
+        }
+        return $escape ? htmlspecialchars($out, ENT_QUOTES, 'UTF-8') : $out;
+    }
+
+    /** ysmT 的直接输出版本 */
+    function ysmE($zh, $vars = []) {
+        echo ysmT($zh, $vars);
+    }
+
+    /**
+     * v6.1.0：JSON 出口翻译——递归把 error / message / msg 字段按当前语言替换。
+     * 只翻「整句命中词表」的文案，未收录的中文原样保留（不猜测）。
+     */
+    function ysmTranslateApiPayload($data) {
+        if (!is_array($data)) return $data;
+        foreach ($data as $k => $v) {
+            if (is_array($v)) {
+                $data[$k] = ysmTranslateApiPayload($v);
+                continue;
+            }
+            if (!is_string($v) || $v === '') continue;
+            if (!in_array($k, ['error', 'message', 'msg'], true)) continue;
+            if (!preg_match('/[\x{4e00}-\x{9fff}]/u', $v)) continue;
+            $data[$k] = ysmT($v, [], false);
+        }
+        return $data;
+    }
+
+    /** 日期格式化（PHP 侧简单映射，不引入 Intl 扩展依赖） */
     function fmtDate($ts, $pattern = 'Y-m-d', $lang = null) {
-        $lang = $lang === null ? ysmLocale() : (string)$lang;
         return date($pattern, $ts);
     }
 }

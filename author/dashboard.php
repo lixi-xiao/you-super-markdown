@@ -1,5 +1,8 @@
 <?php
 require_once __DIR__ . '/../utils.php';
+// v6.1.0：服务端输出层 i18n
+require_once __DIR__ . '/../lib/i18n-output.php';
+ysmI18nStart();
 secureSessionStart();
 
 if (!checkRole(ROLE_AUTHOR)) {
@@ -177,12 +180,15 @@ if (is_dir($articlesDir)) {
 }
 ?>
 <!DOCTYPE html>
-<html lang="zh-CN" data-admin="author">
+<html lang="<?= ysmLocale() ?>" data-admin="author">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>写作者后台 - <?= htmlspecialchars($siteTitle) ?></title>
 <link rel="stylesheet" href="../css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
+<!-- v6.1.0：后台 JS 动态文案（弹窗/提示/异步渲染）运行时翻译 -->
+<script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+<script src="../js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/../js/i18n-live.js') ?>"></script>
 </head>
 <body>
 
@@ -442,7 +448,7 @@ function bindLogoutSubmit(e) {
         if (!emailInput) return;
         var email = emailInput.value.trim();
         var re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-        if (!re.test(email)) { alert('请输入正确的邮箱'); return; }
+        if (!re.test(email)) { alert(ysmT('请输入正确的邮箱')); return; }
         var csrfEl = document.querySelector('input[name=csrf_token]');
         var csrf = csrfEl ? csrfEl.value : '';
         sendBtn.disabled = true;
@@ -460,10 +466,10 @@ function bindLogoutSubmit(e) {
                     else sendBtn.textContent = left + 's 后重发';
                 }, 1000);
             } else {
-                alert(d.error || '发送失败');
+                alert(d.error || ysmT('发送失败'));
                 sendBtn.disabled = false;
             }
-        }).catch(function() { alert('网络错误'); sendBtn.disabled = false; });
+        }).catch(function() { alert(ysmT('网络错误')); sendBtn.disabled = false; });
     });
 })();
 </script>

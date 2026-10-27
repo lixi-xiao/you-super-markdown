@@ -1,5 +1,8 @@
 <?php
 require_once __DIR__ . '/utils.php';
+// v6.1.0：服务端输出层 i18n
+require_once __DIR__ . '/lib/i18n-output.php';
+ysmI18nStart();
 secureSessionStart();
 
 // 权限检查：站长或写作者可访问
@@ -474,7 +477,7 @@ $richZipErrMsg = [
 $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 ?>
 <!DOCTYPE html>
-<html lang="zh-CN" data-admin="station">
+<html lang="<?= ysmLocale() ?>" data-admin="station">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -483,6 +486,9 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 <!-- v5.4.0-beta：AI 浮层组件样式（tw.min.css 先于 admin.css 加载，仅追加 .ai-* 组件类，不改既有选择器） -->
 <link rel="stylesheet" href="css/tw.min.css?v=<?= @filemtime(__DIR__ . '/css/tw.min.css') ?>">
 <link rel="stylesheet" href="css/admin.css?v=<?= @filemtime(__DIR__ . '/css/admin.css') ?>">
+<!-- v6.1.0：后台 JS 动态文案运行时翻译 -->
+<script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+<script src="js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
 </head>
 <body>
 
@@ -1003,7 +1009,7 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
         var file = input.files[0];
         if (!/\.zip$/i.test(file.name)) { hint.textContent = '仅支持 .zip 文件'; return; }
         if (file.size > 80 * 1024 * 1024) { hint.textContent = '压缩包超过 80MB 上限'; return; }
-        if (!window.confirm('确认导入该富媒体压缩包？')) return;
+        if (!window.confirm(ysmT('确认导入该富媒体压缩包？'))) return;
         var fd = new FormData();
         fd.append('rich_zip', file);
         fd.append('csrf_token', csrf);

@@ -1,5 +1,8 @@
 <?php
 require_once __DIR__ . '/../utils.php';
+// v6.1.0：服务端输出层 i18n
+require_once __DIR__ . '/../lib/i18n-output.php';
+ysmI18nStart();
 secureSessionStart();
 
 if (!checkRole(ROLE_STATION_ADMIN)) {
@@ -449,12 +452,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 }
 ?>
 <!DOCTYPE html>
-<html lang="zh-CN" data-admin="station">
+<html lang="<?= ysmLocale() ?>" data-admin="station">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>站长后台 - <?= htmlspecialchars($siteTitle) ?></title>
 <link rel="stylesheet" href="../css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
+<!-- v6.1.0：后台 JS 动态文案（弹窗/提示/异步渲染）运行时翻译 -->
+<script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+<script src="../js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/../js/i18n-live.js') ?>"></script>
 </head>
 <body>
 
@@ -626,7 +632,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['created'] ?? '') ?></td>
                 <td>
                     <button type="button" class="btn-link" onclick="stOpenDetail(this)" data-detail='<?= htmlspecialchars(json_encode(stAuthorDetail($a, $st_statComments, $st_statArticles, $stMyNick), JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>'>查看参数</button>
-                    <form method="post" style="display:inline" onsubmit="return confirm('确定删除 <?= htmlspecialchars($a['nickname'] ?? '') ?>？')">
+                    <form method="post" style="display:inline" onsubmit="return confirm(ysmT('确定删除') + ' <?= htmlspecialchars($a['nickname'] ?? '') ?>' + ysmT('？'))">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="action" value="delete_author">
                         <input type="hidden" name="user_id" value="<?= htmlspecialchars($a['id']) ?>">
@@ -843,7 +849,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             previewCard.style.background = 'rgba(255,255,255,' + opacity + ')';
             var labels = []; if (blur > 0) labels.push('模糊 ' + blur + 'px'); labels.push('卡片 ' + Math.round(opacity*100) + '%'); previewBlurLabel.textContent = labels.join(' · ');
         }
-        window.removeBgImage = function() { if (confirm('确定移除背景图片？')) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
+        window.removeBgImage = function() { if (confirm(ysmT('确定移除背景图片？'))) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
         document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicAutoPlay').value = document.getElementById('musicAutoPlayInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); });
         <?php if ($bgType === 'api' && $bgApiUrl): ?>
@@ -1152,7 +1158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($an['date']) ?></td>
                 <td>
                     <button type="button" class="btn-link" onclick="stEditAnnounce(this)" data-id="<?= htmlspecialchars($an['id']) ?>" data-type="<?= htmlspecialchars($an['type']) ?>" data-article="<?= htmlspecialchars($an['article']) ?>" data-title="<?= htmlspecialchars($an['title']) ?>" data-summary="<?= htmlspecialchars($an['summary']) ?>" data-body="<?= htmlspecialchars($an['body'] ?? '') ?>">编辑</button>
-                    <form method="post" style="display:inline" onsubmit="return confirm('确定删除该公告？')">
+                    <form method="post" style="display:inline" onsubmit="return confirm(ysmT('确定删除该公告？'))">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="announce_action" value="delete">
                         <input type="hidden" name="a_id" value="<?= htmlspecialchars($an['id']) ?>">
@@ -1467,7 +1473,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <td><?= htmlspecialchars($img['modified']) ?></td>
                 <td><?= $ref > 0 ? '<span style="color:#2563eb">' . $ref . ' 篇</span>' : '<span style="color:#94a3b8">未引用</span>' ?></td>
                 <td>
-                    <form method="post" style="display:inline" onsubmit="return confirm('确定删除图片「<?= htmlspecialchars($img['name']) ?>」吗？'<?= $ref > 0 ? ' + \'\\n\\n警告：该图片正被 ' . $ref . ' 篇文章引用，删除后这些文章将无法显示此图。\'' : '' ?>)">
+                    <form method="post" style="display:inline" onsubmit="return confirm(ysmT('确定删除图片「') + '<?= htmlspecialchars($img['name']) ?>' + ysmT('」吗？')<?= $ref > 0 ? ' + \'\\n\\n\' + ysmT(\'警告：该图片正被 \') + ' . $ref . ' + ysmT(\' 篇文章引用，删除后这些文章将无法显示此图。\')' : '' ?>)">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="image_delete" value="<?= htmlspecialchars($img['name']) ?>">
                         <button type="submit" class="btn btn-sm btn-danger">删除</button>
@@ -1554,7 +1560,7 @@ function bindLogoutSubmit(e) {
         if (!emailInput) return;
         var email = emailInput.value.trim();
         var re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-        if (!re.test(email)) { alert('请输入正确的邮箱'); return; }
+        if (!re.test(email)) { alert(ysmT('请输入正确的邮箱')); return; }
         var csrfEl = document.querySelector('input[name=csrf_token]');
         var csrf = csrfEl ? csrfEl.value : '';
         sendBtn.disabled = true;
@@ -1572,10 +1578,10 @@ function bindLogoutSubmit(e) {
                     else sendBtn.textContent = left + 's 后重发';
                 }, 1000);
             } else {
-                alert(d.error || '发送失败');
+                alert(d.error || ysmT('发送失败'));
                 sendBtn.disabled = false;
             }
-        }).catch(function() { alert('网络错误'); sendBtn.disabled = false; });
+        }).catch(function() { alert(ysmT('网络错误')); sendBtn.disabled = false; });
     });
 })();
 // v3.0.6：名下写作者参数弹窗（仅展示服务端已过滤的本站长名下写作者，无越权/遍历面）
@@ -1622,7 +1628,7 @@ function stImportMd(input, titleId, bodyId, summaryId) {
     var f = input.files && input.files[0];
     if (!f) return;
     if (!/\.(md|markdown|txt)$/i.test(f.name) && f.type.indexOf('text') !== 0) {
-        alert('请选择 .md / .markdown / .txt 文件'); input.value = ''; return;
+        alert(ysmT('请选择 .md / .markdown / .txt 文件')); input.value = ''; return;
     }
     var rd = new FileReader();
     rd.onload = function() {
@@ -1636,7 +1642,7 @@ function stImportMd(input, titleId, bodyId, summaryId) {
             document.getElementById(summaryId).value = plain.slice(0, 200);
         }
     };
-    rd.onerror = function() { alert('文件读取失败'); };
+    rd.onerror = function() { alert(ysmT('文件读取失败')); };
     rd.readAsText(f, 'UTF-8');
 }
 // v3.2.3：发布表单 .md 导入绑定

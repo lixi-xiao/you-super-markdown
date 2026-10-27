@@ -2744,6 +2744,82 @@ function sanitizeUserForClient($u) {
     return $u;
 }
 
+/** 启用中的友链数量（v6.1.0：无友链时前台不渲染入口，避免进入空视图） */
+function countActiveLinks() {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $r = db_one("SELECT COUNT(*) AS c FROM links WHERE status = 'active'");
+    $cache = (int)($r['c'] ?? 0);
+    return $cache;
+}
+
+// ---- v6.1.0：搜索模糊匹配（分词 AND + 子序列 + 容错 1 字） ----
+/** 归一化：全角转半角、转小写、连续空白压成一个空格 */
+function ysmSearchNormalize($s) {
+    $s = (string)$s;
+    if (function_exists('mb_convert_kana')) $s = mb_convert_kana($s, 'as', 'UTF-8');
+    $s = mb_strtolower($s, 'UTF-8');
+    $s = preg_replace('/[\x{3000}\s]+/u', ' ', $s);
+    return trim((string)$s);
+}
+
+/** 查询串 → 关键词数组（按空白/常见分隔符切分，去重，最多 5 个） */
+function ysmSearchTokens($q) {
+    $q = ysmSearchNormalize($q);
+    if ($q === '') return [];
+    $parts = preg_split('/[\s,，、;；|·]+/u', $q, -1, PREG_SPLIT_NO_EMPTY);
+    $parts = array_values(array_unique(array_filter((array)$parts, function ($t) { return $t !== ''; })));
+    return array_slice($parts, 0, 5);
+}
+
+/** 单个关键词是否模糊命中：① 精确子串 ② 子序列（允许插字/错序） ③ 长度≥4 时删 1 字后仍命中 */
+function ysmFuzzyHit($tok, $hay) {
+    $tok = (string)$tok;
+    $hay = (string)$hay;
+    if ($tok === '' || $hay === '') return false;
+    if (mb_strpos($hay, $tok, 0, 'UTF-8') !== false) return true;
+    $tlen = mb_strlen($tok, 'UTF-8');
+    $hlen = mb_strlen($hay, 'UTF-8');
+    $hasCjk = (bool)preg_match('/[\x{4e00}-\x{9fff}]/u', $tok);
+    // 子序列：中文 ≥2 字、英文 ≥3 字才启用，避免过短关键词产生大量误命中
+    if ((($hasCjk && $tlen >= 2) || (!$hasCjk && $tlen >= 3)) && $tlen <= $hlen) {
+        $i = 0;
+        for ($j = 0; $j < $hlen && $i < $tlen; $j++) {
+            if (mb_substr($hay, $j, 1, 'UTF-8') === mb_substr($tok, $i, 1, 'UTF-8')) $i++;
+        }
+        if ($i === $tlen) return true;
+    }
+    // 容错：多打/记错一个字符（删 1 字后仍能命中）
+    if ($tlen >= 4) {
+        for ($k = 0; $k < $tlen; $k++) {
+            $probe = mb_substr($tok, 0, $k, 'UTF-8') . mb_substr($tok, $k + 1, null, 'UTF-8');
+            if ($probe !== '' && mb_strpos($hay, $probe, 0, 'UTF-8') !== false) return true;
+        }
+    }
+    return false;
+}
+
+/** 关键词在多个字段中的命中情况：[是否命中, 最佳字段, 得分] */
+function ysmSearchScore($tok, $fields) {
+    // 字段权重：标题 > 标签 > 摘要/作者 > 正文
+    $weights = ['title' => 5, 'tags' => 3, 'digest' => 2, 'author' => 2, 'body' => 1];
+    foreach ($weights as $key => $w) {
+        $hay = $fields[$key] ?? '';
+        if ($hay === '') continue;
+        if (mb_strpos($hay, $tok, 0, 'UTF-8') !== false) {
+            return [true, $key, $w];
+        }
+    }
+    foreach ($weights as $key => $w) {
+        $hay = $fields[$key] ?? '';
+        if ($hay === '') continue;
+        if (ysmFuzzyHit($tok, $hay)) {
+            return [true, $key, max(1, (int)floor($w / 2))];
+        }
+    }
+    return [false, '', 0];
+}
+
 /** 邮箱是否已被账户占用 */
 function email_exists($email) {
     $r = db_one('SELECT COUNT(*) AS c FROM users WHERE email = ?', [$email]);

@@ -941,7 +941,7 @@
             var a = (e.tags || []).map(function(e) {
                 return '<span class="ann-card-tag">#' + escapeHTML(e) + "</span>";
             }).join("");
-            return '<div class="ann-card' + (e.cover ? " has-media" : "") + '"' + t + ">" + '<div class="ann-card-left">' + 
+            return '<div class="ann-card' + (e.cover ? " has-media" : "") + '" role="button" tabindex="0"' + t + ">" + '<div class="ann-card-left">' + 
             // v3.3.16：类型徽章与标题同一行（移动到标题旁边），不再是标题上方独立一行
             '<div class="ann-card-title-row">' + i + '<h3 class="ann-card-title">' + escapeHTML(e.title) + "</h3></div>" + '<div class="ann-card-meta">' + '<span class="ann-meta-item"><span class="ann-meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>' + escapeHTML(e.date) + "</span>" + (e.words ? '<span class="ann-meta-item"><span class="ann-meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>' + (e.words / 1e3).toFixed(1) + "k字</span>" : "") + "</div>" + (e.summary ? '<p class="ann-card-summary">' + escapeHTML(e.summary) + "</p>" : "") + (a ? '<div class="ann-card-tags">' + a + "</div>" : "") + '<span class="ann-card-more">' + (e.article ? "查看文章 →" : "查看详情 →") + "</span>" + "</div>" + n + "</div>";
         }).join("");
@@ -950,6 +950,13 @@
                 e.querySelectorAll(".ann-card[data-file]").forEach(function(e) {
             e.addEventListener("click", function() {
                 loadFile(e.getAttribute("data-file"));
+            });
+            // v6.1.0：键盘可达（Enter / 空格）
+            e.addEventListener("keydown", function(ev) {
+                if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
+                    ev.preventDefault();
+                    loadFile(e.getAttribute("data-file"));
+                }
             });
         });
         // v3.1.8：无关联文章公告点击 → 弹出完整内容
@@ -961,6 +968,17 @@
                     if (e.id === t) n = e;
                 });
                 if (n) openAnnounceDetail(n);
+            });
+            e.addEventListener("keydown", function(ev) {
+                if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
+                    ev.preventDefault();
+                    var t = e.getAttribute("data-ann-id");
+                    var n = null;
+                    (window.YSM_ANNOUNCEMENTS || []).forEach(function(x) {
+                        if (x.id === t) n = x;
+                    });
+                    if (n) openAnnounceDetail(n);
+                }
             });
         });
         // v5.2.2：手机端公告摘要默认折成一行——点击摘要展开/收起全文（阻止冒泡，避免误触整卡跳转）；

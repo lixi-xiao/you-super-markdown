@@ -2,6 +2,9 @@
 require_once __DIR__ . '/utils.php';
 // v6.0.0-beta：i18n 外壳框架（严谨：缺键自动回落 zh-CN，生命周期内自动发现 lang/ 新语种）
 require_once __DIR__ . '/lib/i18n.php';
+// v6.1.0：服务端输出层 i18n——非中文时在输出前把整页文本/属性替换为当前语言
+require_once __DIR__ . '/lib/i18n-output.php';
+ysmI18nStart();
 secureSessionStart();
 
 // v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
@@ -25,6 +28,9 @@ function isStationAdmin() {
     return checkRole(ROLE_STATION_ADMIN);
 }
 function sendJson($respData, $httpStatus = 200) {
+    // v6.1.0：先丢弃 HTML 翻译缓冲，再按词表翻译 error/message 字段
+    if (function_exists('ysmI18nFlush')) ysmI18nFlush();
+    if (function_exists('ysmTranslateApiPayload')) $respData = ysmTranslateApiPayload($respData);
     http_response_code($httpStatus);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode($respData, JSON_UNESCAPED_UNICODE);
@@ -350,6 +356,8 @@ foreach (getAnnouncements(20) as $annItem) {
 // 音乐播放器：网易云通道无需 Cookie 即可播放（v4.4.2 移除 QQ 音乐通道后，热歌榜/歌单均免 Cookie），
 // v4.6.1：原逻辑按 music_cookies 判断导致未配置 Cookie 时整条音乐入口不可达——改为常显
 $musicEnabled = true;
+// v6.1.0：启用中的友链数量（为 0 时前台不渲染入口/副栏区块，避免进入空视图）
+$__ysmActiveLinks = countActiveLinks();
 // 置顶列表读写由 utils.php 提供（SQLite）；此处仅作全局别名
 // 自定义入口路径路由（L1 隐藏入口扩展）
 $reqUri = $_SERVER['REQUEST_URI'] ?? '';
@@ -812,7 +820,9 @@ function collectPublishedArticles($q = '') {
     $items = [];
     $annFiles = array_flip(array_column(db_all("SELECT article FROM announcement WHERE article != ''"), 'article'));
     $nowStamp = date('Y-m-d H:i');
-    $needle = mb_strtolower(trim($q), 'UTF-8');
+    // v6.1.0：模糊搜索——分词 AND + 子序列 + 容错 1 字 + 相关度排序
+    $tokens = ysmSearchTokens($q);
+    $hasQuery = !empty($tokens);
     if ($mdFiles) {
         usort($mdFiles, function($a, $b) { return filemtime($b) - filemtime($a); });
         foreach ($mdFiles as $entryFile) {
@@ -849,10 +859,28 @@ function collectPublishedArticles($q = '') {
                 $digest = mb_substr($plainText, 0, 120, 'UTF-8');
                 if (mb_strlen($plainText, 'UTF-8') > 120) $digest .= '...';
             }
-            // 全文搜索：标题 / 标签 / 摘要 / 正文关键词匹配（忽略大小写）
-            if ($needle !== '') {
-                $hayText = mb_strtolower($cardTitle . ' ' . $flat . ' ' . implode(' ', $tagList) . ' ' . $digest . ' ' . $writer, 'UTF-8');
-                if (mb_strpos($hayText, $needle, 0, 'UTF-8') === false) continue;
+            // v6.1.0：全文模糊搜索——每个关键词都必须命中（AND），记录最佳命中字段与得分
+            $score = 0;
+            $matched = [];
+            if ($hasQuery) {
+                $fields = [
+                    'title'  => ysmSearchNormalize($cardTitle),
+                    'tags'   => ysmSearchNormalize(implode(' ', $tagList)),
+                    'digest' => ysmSearchNormalize($digest),
+                    'author' => ysmSearchNormalize($writer),
+                    'body'   => ysmSearchNormalize($flat),
+                ];
+                $allHit = true;
+                foreach ($tokens as $tok) {
+                    [$hit, $where, $pts] = ysmSearchScore($tok, $fields);
+                    if (!$hit) { $allHit = false; break; }
+                    $score += $pts;
+                    if ($where !== '') $matched[$where] = true;
+                }
+                if (!$allHit) continue;
+                // 标题命中额外加权，保证"标题就是答案"的排在最前
+                if (isset($matched['title'])) $score += 5;
+                $matched = array_keys($matched);
             }
             $items[] = [
                 'name' => $leafFile,
@@ -864,8 +892,19 @@ function collectPublishedArticles($q = '') {
                 'modified' => date('Y-m-d', filemtime($entryFile)),
                 'modifiedTimestamp' => filemtime($entryFile),
                 'size' => filesize($entryFile),
+                'score' => $score,
+                'matched' => $matched,
             ];
         }
+    }
+    // v6.1.0：有关键词时按相关度排序（同分按发布时间倒序）
+    if ($hasQuery && $items) {
+        usort($items, function ($a, $b) {
+            $sa = (int)($a['score'] ?? 0);
+            $sb = (int)($b['score'] ?? 0);
+            if ($sa !== $sb) return $sb <=> $sa;
+            return (int)($b['modifiedTimestamp'] ?? 0) <=> (int)($a['modifiedTimestamp'] ?? 0);
+        });
     }
     return $items;
 }
@@ -941,7 +980,7 @@ if ($action === 'rss_guide') {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
-<title>RSS 订阅 · <?= htmlspecialchars($siteHeading) ?></title>
+<title><?= ysmT('RSS 订阅 · {site}', ['site' => $siteHeading]) ?></title>
 <!-- v5.0.0：RSS 指引页站点级分享卡片（爬虫只读 head、不执行 JS） -->
 <?php ysmShareRenderMeta(ysmShareContext()); ?>
 <script>
@@ -980,18 +1019,18 @@ if ($action === 'rss_guide') {
 <div class="rss-guide-page">
     <div class="rss-guide-card">
         <h1>📡 RSS 订阅</h1>
-        <p>本站提供标准 RSS 2.0 订阅源（最近 <?= intval($feedCount) ?> 篇文章，发布后自动更新）。用任意 RSS 阅读器添加下面地址即可追更：</p>
+        <p><?= ysmT('本站提供标准 RSS 2.0 订阅源（最近 {n} 篇文章，发布后自动更新）。用任意 RSS 阅读器添加下面地址即可追更：', ['n' => intval($feedCount)]) ?></p>
         <div class="rss-guide-url">
             <input type="text" readonly value="<?= htmlspecialchars($rssAbs) ?>" id="rssGuideUrl">
-            <button class="btn btn-primary" type="button" onclick="var i=document.getElementById('rssGuideUrl'); i.select(); try{document.execCommand('copy');}catch(e){}; this.textContent='已复制'; setTimeout(()=>this.textContent='复制地址',1600);">复制地址</button>
+            <button class="btn btn-primary" type="button" onclick="var i=document.getElementById('rssGuideUrl'); i.select(); try{document.execCommand('copy');}catch(e){}; this.textContent='<?= ysmT('已复制') ?>'; setTimeout(()=>this.textContent='<?= ysmT('复制地址') ?>',1600);"><?= ysmT('复制地址') ?></button>
         </div>
         <ol class="rss-guide-list">
-            <li>1️⃣ 打开你常用的 RSS 阅读器（如 Feedly、Inoreader、NetNewsWire，或浏览器 RSS 扩展）</li>
-            <li>2️⃣ 选择「添加订阅 / Add Feed」，粘贴上面的地址</li>
-            <li>3️⃣ 之后新文章发布，阅读器会自动拉取提醒，无需再打开本站</li>
+            <li><?= ysmT('1️⃣ 打开你常用的 RSS 阅读器（如 Feedly、Inoreader、NetNewsWire，或浏览器 RSS 扩展）') ?></li>
+            <li><?= ysmT('2️⃣ 选择「添加订阅 / Add Feed」，粘贴上面的地址') ?></li>
+            <li><?= ysmT('3️⃣ 之后新文章发布，阅读器会自动拉取提醒，无需再打开本站') ?></li>
         </ol>
-        <p style="margin-bottom:0"><a href="/index.php?action=rss" target="_blank" rel="noopener">查看原始 XML 订阅源 →</a></p>
-        <p class="rss-guide-foot">也可以直接复制地址到任意支持订阅的客户端使用。</p>
+        <p style="margin-bottom:0"><a href="/index.php?action=rss" target="_blank" rel="noopener"><?= ysmT('查看原始 XML 订阅源 →') ?></a></p>
+        <p class="rss-guide-foot"><?= ysmT('也可以直接复制地址到任意支持订阅的客户端使用。') ?></p>
     </div>
 </div>
 <!-- v6.0.0：i18n 运行时文案接入 -->
@@ -1063,8 +1102,10 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand truncate max-w-[40vw] sm:max-w-none" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($siteHeading) ?></a></div>
     <div class="header-right">
-        <!-- v6.0.0：友站入口（友情链接卡片墙） -->
+        <!-- v6.0.0：友站入口（友情链接卡片墙）；v6.1.0：无启用友链时不渲染 -->
+        <?php if ($__ysmActiveLinks > 0): ?>
         <button class="icon-btn" id="btnLinks" title="友情链接" onclick="ysmOpenLinks()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+        <?php endif; ?>
         <!-- v4.1.0：RSS 订阅入口（点击进友好引导页，不再直接弹 XML；阅读器自动发现仍走 ?action=rss） -->
         <a class="icon-btn rss-btn" id="btnRss" title="RSS 订阅" href="/index.php?action=rss_guide" target="_blank" rel="noopener" aria-label="RSS 订阅">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -1088,15 +1129,12 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         <button class="icon-btn" id="btnUser" title="用户"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
     </div>
 </header>
-<!-- v6.0.0：语言切换菜单（点击 = 临时浏览语言，不持久；「设为默认」才持久到浏览器/账号） -->
+<!-- v6.1.0：语言切换菜单（点击即写 Cookie + 账号，不再区分「临时」与「设为默认」） -->
 <div class="lang-dropdown" id="langDropdown" style="display:none;">
-    <div class="lang-dropdown-title">当前浏览语言</div>
+    <div class="lang-dropdown-title">切换语言</div>
     <?php $__ysmCurLang = ysmLocale(); foreach (ysmSupportedLangs() as $lc => $info): ?>
     <a class="lang-option<?= $lc === $__ysmCurLang ? ' active' : '' ?>" data-lang="<?= htmlspecialchars($lc) ?>" href="#" onclick="event.preventDefault();ysmSetLang('<?= htmlspecialchars($lc) ?>');"><?= htmlspecialchars($info['name']) ?></a>
     <?php endforeach; ?>
-    <div class="lang-dropdown-foot">
-        <button type="button" class="lang-base-btn" onclick="ysmSetBaseLang('<?= htmlspecialchars($__ysmCurLang) ?>')">设为默认语言</button>
-    </div>
 </div>
 <!-- 用户下拉菜单 -->
 <div class="user-dropdown" id="userDropdown">
@@ -1201,7 +1239,9 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
                     <div class="home-popular-title">热门文章<span class="home-popular-state" aria-hidden="true">展开</span></div>
                     <div class="home-popular-list" id="homePopularList"></div>
                 </section>
-                <!-- v6.0.1：副栏友情链接（「热门文章」下方直接可见；超出 6 个时提供「全部」入口） -->
+                <!-- v6.0.1：副栏友情链接（「热门文章」下方直接可见；超出 6 个时提供「全部」入口）
+                     v6.1.0：无启用友链时整块不渲染 -->
+                <?php if ($__ysmActiveLinks > 0): ?>
                 <section class="home-links" id="homeLinks" style="display:none">
                     <div class="home-links-head">
                         <div class="home-links-title">友情链接</div>
@@ -1209,17 +1249,26 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
                     </div>
                     <div class="home-links-list" id="homeLinksList"></div>
                 </section>
+                <?php endif; ?>
             </aside>
         </div>
     </div>
-    <!-- v6.0.0：友站（友情链接）卡片墙 -->
+    <!-- v6.0.0：友站（友情链接）卡片墙；v6.1.0：补 ×/ESC/深链退出，空态可直接返回 -->
     <div class="links-view" id="linksView" style="display:none">
         <div class="links-head">
+            <button type="button" class="links-back-btn" onclick="ysmCloseLinks()" aria-label="返回">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg><span>返回</span>
+            </button>
             <h2 class="links-title">友情链接</h2>
-            <button type="button" class="btn btn-outline" onclick="ysmCloseLinks()">返回</button>
+            <button type="button" class="links-close-btn" onclick="ysmCloseLinks()" aria-label="关闭">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
         </div>
         <div class="links-grid" id="linksGrid"></div>
-        <div class="links-empty" id="linksEmpty" style="display:none">暂无友情链接</div>
+        <div class="links-empty" id="linksEmpty" style="display:none">
+            <div class="links-empty-text">暂无友情链接</div>
+            <button type="button" class="btn btn-outline" onclick="ysmCloseLinks()">返回首页</button>
+        </div>
     </div>
     <div class="reading-view" id="readingView">
         <div class="markdown-body" id="markdownBody"></div>
@@ -1510,56 +1559,57 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
 </div>
 <script>window.YSM_SITE_TITLE = <?= json_encode($siteHeading, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 window.YSM_FILE = <?= json_encode($_GET['file'] ?? '', JSON_UNESCAPED_UNICODE) ?>;
+// v6.1.0：登录态标记（语言/字体偏好写账号时需要；此前未定义导致偏好从未同步到账号）
+window.YSM_LOGGED_IN = <?= !empty($_SESSION['cmt_user']['id']) ? 'true' : 'false' ?>;
 // v3.1.6：公告卡片数据（服务端已转义标题/摘要，tags/cover 由文章提取）
 // v5.0.0 P1-2：加 JSON_HEX_* 标志，防标题/摘要中的闭合脚本标签或引号逃逸（XSS）
 window.YSM_ANNOUNCEMENTS = <?= json_encode($announcementCards, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 // v6.0.0-beta：i18n 前端字典（当前语言 + zh 合并；JS 用 I18N.t(key)，缺键已回落）
 window.I18N = <?= json_encode(ysmClientI18n(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 window.I18N.t = function(k, v){ v = v || {}; var s = (I18N.dict && I18N.dict[k]) || k; for (var p in v) s = s.split('{'+p+'}').join(v[p]); return s; };
-// v6.0.0：语言切换——临时浏览语言（?lang=，不写 Cookie/账号），只有「设为默认」才持久
-window.YSM_CURRENT_LANG = <?= json_encode(ysmLocale(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+// v6.1.0：语言切换——点击即持久（浏览器 Cookie + 已登录账号），随后清掉 ?lang 刷新
 window.ysmSetLang = function(lc){
-    try {
-        var u = new URL(location.href);
-        u.searchParams.set('lang', lc);
-        location.href = u.toString();
-    } catch (e) {
-        location.href = location.pathname + '?lang=' + encodeURIComponent(lc);
-    }
-};
-window.ysmSetBaseLang = function(lc){
-    // 1) 浏览器基础语言（持久）
+    if (!lc) return;
+    // 1) 浏览器语言（1 年）
     try { document.cookie = 'ysm_lang=' + encodeURIComponent(lc) + '; path=/; max-age=31536000; SameSite=Lax'; } catch (e) {}
-    // 2) 登录用户：同时绑定账号（跨设备跟随，best-effort）
+    // 2) 登录用户：绑定账号（跨设备跟随；keepalive 保证跳转后请求仍能发出）
     try {
         if (window.YSM_LOGGED_IN) {
             fetch('api.php?action=update_profile', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ home_lang: lc })
+                body: JSON.stringify({ home_lang: lc }),
+                keepalive: true
             }).catch(function () {});
         }
     } catch (e) {}
-    // 3) 清掉临时 ?lang= 参数后刷新，立即回到基础语言
+    // 3) 清掉临时 ?lang 参数后刷新，让服务端按新语言输出
     try {
         var u = new URL(location.href);
         u.searchParams.delete('lang');
         location.href = u.toString();
     } catch (e) { location.reload(); }
 };
+// v6.1.0：保留别名，避免旧书签/旧页面调用报错
+window.ysmSetBaseLang = window.ysmSetLang;
 // v6.0.0：友站（友情链接）卡片墙——访客只读，数据来自 ?action=links_list
-window.ysmOpenLinks = function(){
+// v6.1.0：支持 #links 深链与浏览器返回；补 ESC / × 关闭；空态可直接回首页
+window.ysmLinksPushed = false;
+window.ysmOpenLinks = function(fromHistory){
     var hv = document.getElementById('homeView');
     var rv = document.getElementById('readingView');
     var lv = document.getElementById('linksView');
     if (hv) hv.style.display = 'none';
     if (rv) rv.style.display = 'none';
     if (lv) lv.style.display = 'block';
+    if (!fromHistory) {
+        try { history.pushState({ ysmView: 'links' }, '', '#links'); window.ysmLinksPushed = true; } catch (e) {}
+    }
     var grid = document.getElementById('linksGrid');
     var empty = document.getElementById('linksEmpty');
     if (!grid) return;
     grid.innerHTML = '';
-    if (empty) { empty.style.display = 'none'; empty.textContent = '暂无友情链接'; }
+    if (empty) { empty.style.display = 'none'; }
     fetch('api.php?action=links_list').then(function(r){ return r.json(); }).then(function(d){
         var links = (d && d.links) || [];
         if (!links.length) { if (empty) empty.style.display = 'block'; return; }
@@ -1573,15 +1623,33 @@ window.ysmOpenLinks = function(){
                    '<span class="link-body"><span class="link-name">' + name + '</span><span class="link-desc">' + desc + '</span></span></a>';
         }).join('');
     }).catch(function(){
-        if (empty) { empty.textContent = '加载失败'; empty.style.display = 'block'; }
+        if (empty) { empty.style.display = 'block'; }
     });
 };
-window.ysmCloseLinks = function(){
+window.ysmCloseLinks = function(fromHistory){
+    // 由用户主动关闭时，优先用历史回退，保证浏览器返回键与页面状态一致
+    if (!fromHistory && window.ysmLinksPushed) {
+        window.ysmLinksPushed = false;
+        try { history.back(); return; } catch (e) {}
+    }
     var lv = document.getElementById('linksView');
     var hv = document.getElementById('homeView');
     if (lv) lv.style.display = 'none';
     if (hv) hv.style.display = '';
+    if (location.hash === '#links') {
+        try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+    }
 };
+window.addEventListener('popstate', function(){
+    if (location.hash === '#links') { window.ysmOpenLinks(true); }
+    else { window.ysmLinksPushed = false; window.ysmCloseLinks(true); }
+});
+document.addEventListener('keydown', function(e){
+    if (e.key !== 'Escape') return;
+    var lv = document.getElementById('linksView');
+    if (lv && lv.style.display !== 'none') { window.ysmCloseLinks(); }
+});
+if (location.hash === '#links') { window.ysmOpenLinks(true); }
 // v6.0.1：副栏友情链接卡片（与卡片墙共用只读接口；最多展示 6 个，超出时显示「全部」）
 (function(){
     var sec = document.getElementById('homeLinks');

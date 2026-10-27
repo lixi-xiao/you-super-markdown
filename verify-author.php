@@ -1,5 +1,8 @@
 <?php
 require_once __DIR__ . '/utils.php';
+// v6.1.0：服务端输出层 i18n
+require_once __DIR__ . '/lib/i18n-output.php';
+ysmI18nStart();
 secureSessionStart();
 
 $siteCfg = loadSiteConfig();

@@ -1271,7 +1271,7 @@
                 var d = "";
         if (Be === "" && a.length > 0) {
             d = `<div class="tag-cloud-row${ysmTagCloudOpen ? " is-expanded" : ""}"><div class="tag-cloud">${a.slice(0, 20).map(e => `<span class="tag-cloud-item${isTagSelected(e) ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div>` +
-                `<button type="button" class="tag-cloud-toggle">${ysmTagCloudOpen ? "收起标签" : "展开标签"}</button></div>`;
+                `<button type="button" class="tag-cloud-toggle">${ysmTagCloudOpen ? "收起" : "展开"}</button></div>`;
         }
         var clr = Me.length ? '<span class="tag-filter-clear" data-clear="1">清空</span>' : "";
         var m = `<div class="category-bar-right">${f}${l}${clr}</div>`;
@@ -1318,9 +1318,26 @@
                 renderHomeContent();
             });
         });
-        // v6.0.1：手机端标签云「展开/收起」（桌面端由 CSS 隐藏该按钮）
+        // v6.0.2：手机端标签云折叠——仅当标签确实超过两行时才出现「展开/收起」按钮
+        //   · 两行高度按首个标签的实际行高计算（写进 --ysm-tag2h），避免固定值导致半行被裁
+        //   · 标签本来就放得下时不显示按钮（v6.0.1 在标签很少时也会冒出按钮，属多余）
+        //   · 是否显示由 .has-toggle 类控制，桌面端（CSS 断点外）自然隐藏，旋转屏幕不会残留
+        var tagCloud = e.querySelector(".tag-cloud");
         var tagToggle = e.querySelector(".tag-cloud-toggle");
-        if (tagToggle) {
+        var tagRow = e.querySelector(".tag-cloud-row");
+        if (tagCloud && tagToggle && tagRow) {
+            var tagItems = tagCloud.querySelectorAll(".tag-cloud-item");
+            if (tagItems.length) {
+                var rowH = tagItems[0].offsetHeight || 24;
+                var twoRows = rowH * 2 + 6;
+                tagCloud.style.setProperty("--ysm-tag2h", twoRows + "px");
+                // 临时解除高度限制，测量标签真实总高度后判断是否需要折叠
+                var prevMax = tagCloud.style.maxHeight;
+                tagCloud.style.maxHeight = "none";
+                var fullH = tagCloud.scrollHeight;
+                tagCloud.style.maxHeight = prevMax;
+                tagRow.classList.toggle("has-toggle", ysmTagCloudOpen || fullH > twoRows + 2);
+            }
             tagToggle.addEventListener("click", function() {
                 ysmTagCloudOpen = !ysmTagCloudOpen;
                 renderCategoryBar();

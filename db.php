@@ -67,6 +67,11 @@ function db_init_schema($pdo) {
         revoked INTEGER DEFAULT 0,
         last_used INTEGER
     )');
+    // v6.0.0：旧库 refresh_tokens 可能缺 user_id/expires——幂等补列后再建索引
+    $rtCols = [];
+    foreach ($pdo->query('PRAGMA table_info(refresh_tokens)') as $c) { $rtCols[] = strtolower($c['name']); }
+    if (!in_array('user_id', $rtCols, true)) { $pdo->exec('ALTER TABLE refresh_tokens ADD COLUMN user_id TEXT'); }
+    if (!in_array('expires', $rtCols, true)) { $pdo->exec('ALTER TABLE refresh_tokens ADD COLUMN expires INTEGER'); }
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires)');
     // v6.0.0（E）：refresh_tokens 幂等补 sfp 列（已信任设备的稳定指纹子集；未升级则保持旧行为）
@@ -116,6 +121,10 @@ function db_init_schema($pdo) {
         last_seen INTEGER,
         UNIQUE (user_id, fp_hash)
     )');
+    // v6.0.0：旧库 device_fps 可能缺 user_id（历史结构差异）——先幂等补列再建索引，避免升级后首页 500
+    $dfCols = [];
+    foreach ($pdo->query('PRAGMA table_info(device_fps)') as $c) { $dfCols[] = strtolower($c['name']); }
+    if (!in_array('user_id', $dfCols, true)) { $pdo->exec('ALTER TABLE device_fps ADD COLUMN user_id TEXT'); }
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_device_fps_user ON device_fps(user_id)');
     // v4.7.0：联动威胁评分事件流水（维度=ip|fp，滑动窗口求和；超阈值触发联动封锁）
     $pdo->exec('CREATE TABLE IF NOT EXISTS threat_events (

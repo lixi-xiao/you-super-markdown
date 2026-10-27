@@ -27,17 +27,19 @@ if (!$row) {
             $okResult = true;
         } else {
             update_pending_author_status($row['id'], 'rejected');
-            $result = '创建失败：该 QQ 号或邮箱已被其他账号占用，请与站长联系处理。';
+            $result = '创建失败：该用户名或邮箱已被其他账号占用，请与站长联系处理。';
         }
     }
 }
 ?>
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="<?= ysmLocale() ?>">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>超管确认 - <?= htmlspecialchars($title) ?></title>
+<script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+<script src="/js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {

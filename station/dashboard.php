@@ -115,7 +115,7 @@ if (is_dir(__DIR__ . '/../data/articles')) {
 $stMyNick = $currentUser['nickname'] ?? '';
 function stAuthorDetail($a, $statComments, $statArticles, $myNick) {
     return [
-        'nickname' => $a['nickname'] ?? '', 'account' => maskQQ($a['account'] ?? ''),
+        'nickname' => $a['nickname'] ?? '', 'account' => (string)($a['username'] ?? ($a['account'] ?? '')),
         'email' => $a['email'] ?? '未绑定', 'station' => $myNick,
         'disabled' => !empty($a['disabled']),
         'created' => $a['created'] ?? '', 'signature' => $a['signature'] ?? '',
@@ -145,13 +145,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             }
         } elseif ($_POST['action'] === 'create_author') {
             $newNick = trim($_POST['nickname'] ?? '');
-            $newAccount = trim($_POST['account'] ?? '');
+            // v6.2.0：登录 ID 改为自定义用户名（兼容旧字段 account）
+            $newUsername = ysmUsernameNormalize($_POST['username'] ?? ($_POST['account'] ?? ''));
             $newPwd = trim($_POST['password'] ?? '');
             $newEmail = trim($_POST['email'] ?? '');
-            // v2.11.0：滑块人机验证已彻底移除；新增 QQ 号格式校验（5-12 位数字，防注入/异常账号）
-            if (!preg_match('/^[1-9][0-9]{4,11}$/', $newAccount)) {
+            $nameChk = ysmUsernameValidate($newUsername);
+            if ($nameChk !== true) {
                 $msg = 'account_invalid';
-            } elseif ($newNick && $newAccount && $newPwd) {
+            } elseif ($newNick && $newUsername && $newPwd) {
                 $vp = validatePassword($newPwd);
                 if ($vp !== true) {
                     $msg = 'pw_weak';
@@ -162,15 +163,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                         elseif (email_exists($newEmail)) { $msg = 'email_duplicate'; }
                         else {
                             $accountExists = false;
-                            foreach ($users as $uu) { if (($uu['account'] ?? '') === $newAccount) { $accountExists = true; break; } }
+                            foreach ($users as $uu) { if (ysmUsernameNormalize($uu['username'] ?? '') === $newUsername) { $accountExists = true; break; } }
                             if ($accountExists) {
                                 $msg = 'account_duplicate';
                             } else {
                                 // 建 verify_pending 中间态（等写作者通过邮件链接自助验证码）
                                 [$pid, ] = create_pending_author(
-                                    $newEmail, $newNick, $newAccount,
+                                    $newEmail, $newNick, $newUsername,
                                     password_hash($newPwd, PASSWORD_DEFAULT), $myId, '', 'verify_pending'
                                 );
+                                db_exec('UPDATE pending_author_creates SET username = ? WHERE id = ?', [$newUsername, $pid]);
                                 $host = safeRequestHost();   // v5.0.0：Host 头净化（防伪造 Host 注入验证链接）
                                 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
                                 $vlink = "{$scheme}://{$host}/verify-author.php?pid={$pid}&email=" . rawurlencode($newEmail);
@@ -179,7 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                                     update_pending_author_status($pid, 'expired');
                                     $msg = 'send_fail';
                                 } else {
-                                    auditLog('author_create_init', $newAccount, "站长发起创建写作者: {$newNick}（等待写作者验证邮箱）");
+                                    auditLog('author_create_init', $newUsername, "站长发起创建写作者: {$newNick}（等待写作者验证邮箱）");
                                     $msg = 'code_sent_await_author';
                                 }
                             }
@@ -187,13 +189,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                     } else {
                         // 双重确认关闭：直接创建（原逻辑）
                         $accountExists = false;
-                        foreach ($users as $uu) { if (($uu['account'] ?? '') === $newAccount) { $accountExists = true; break; } }
+                        foreach ($users as $uu) { if (ysmUsernameNormalize($uu['username'] ?? '') === $newUsername) { $accountExists = true; break; } }
                         if ($accountExists) {
                             $msg = 'account_duplicate';
                         } else {
                             $users[] = [
                                 'id' => bin2hex(random_bytes(8)),
-                                'account' => $newAccount,
+                                'account' => $newUsername, 'username' => $newUsername,
                                 'email' => $newEmail,
                                 'nickname' => $newNick,
                                 'password' => password_hash($newPwd, PASSWORD_DEFAULT),
@@ -215,7 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 if ($u['id'] === $delId && ($u['role'] ?? '') === ROLE_AUTHOR && ($u['station_id'] ?? '') === $myId) {
                     // v5.4.0-beta.5：站长删除写作者 → 一并清除该写作者的 AI Key（防"账号已删、密钥残留"）
                     $aiPurged = aiClearUserKeys($delId);
-                    auditLog('author_delete', $u['account'] ?? $delId, "站长删除写作者: {$u['nickname']}" . ($aiPurged > 0 ? "（同时清除 AI Key {$aiPurged} 条）" : ''));
+                    auditLog('author_delete', $u['username'] ?? ($u['account'] ?? $delId), "站长删除写作者: {$u['nickname']}" . ($aiPurged > 0 ? "（同时清除 AI Key {$aiPurged} 条）" : ''));
                     array_splice($users, $i, 1);
                     replaceAllUsers($users);
                     // v5.4.1：清理该写作者会话/设备残留（refresh_tokens、device_fps；comments/audit/unauthorized 保留）
@@ -481,7 +483,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <div class="sidebar-title"><span>站长</span>后台</div>
         <div class="sidebar-user">
-            <div class="sidebar-user-avatar"><?php if (!empty($currentUser['account'])): ?><img src="https://q1.qlogo.cn/g?b=qq&nk=<?= urlencode($currentUser['account']) ?>&s=100" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
+            <div class="sidebar-user-avatar"><?php if (!empty($currentUser['account'])): ?><img src="<?= htmlspecialchars(ysmAvatarUrl($currentUser['username'] ?? ($currentUser['account'] ?? ''), 100)) ?>" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
             <div class="sidebar-user-info">
                 <div class="sidebar-user-name"><?= htmlspecialchars($currentUser['nickname'] ?? '站长') ?></div>
                 <div class="sidebar-user-role">站长</div>
@@ -548,7 +550,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 <div class="main">
     <?php if ($msg === 'author_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者已创建</div><?php endif; ?>
     <?php if ($msg === 'code_sent_await_author'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>已提交！验证码已发送到写作者邮箱，请其打开邮件链接自助验证；验证通过后将通知超管确认</div><?php endif; ?>
-    <?php if ($msg === 'account_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>QQ号格式不正确（应为 5-12 位数字）</div><?php endif; ?>
+    <?php if ($msg === 'account_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>用户名格式不正确（3-20 位字母/数字/下划线/连字符）</div><?php endif; ?>
     <?php if ($msg === 'email_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱格式不正确</div><?php endif; ?>
     <?php if ($msg === 'email_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该邮箱已被使用</div><?php endif; ?>
     <?php if ($msg === 'send_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>验证码发送失败（请确认 SMTP 邮件配置）</div><?php endif; ?>
@@ -586,8 +588,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                     <input class="form-input" name="nickname" placeholder="写作者昵称">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">QQ号（5-12 位数字）</label>
-                    <input class="form-input" name="account" placeholder="登录账号" pattern="[1-9][0-9]{4,11}" title="QQ号应为 5-12 位数字">
+                    <label class="form-label">用户名（3-20 位字母/数字/下划线/连字符，登录用）</label>
+                    <input class="form-input" name="username" placeholder="例如 xiao_writer" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,19}" title="3-20 位字母、数字、下划线或连字符">
                 </div>
                 <div class="form-group">
                     <label class="form-label">密码（至少 8 位，含大小写字母与数字）</label>
@@ -624,11 +626,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <?php else: ?>
         <div class="table-wrap">
         <table>
-            <tr><th>昵称</th><th>QQ</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th>昵称</th><th>用户名</th><th>创建时间</th><th>操作</th></tr>
             <?php foreach ($myAuthors as $a): ?>
             <tr>
                 <td><?= htmlspecialchars($a['nickname'] ?? '') ?></td>
-                <td style="color:var(--text-muted)"><?= htmlspecialchars(maskQQ($a['account'] ?? '')) ?></td>
+                <td style="color:var(--text-muted)"><?= htmlspecialchars($a['username'] ?? ($a['account'] ?? '')) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['created'] ?? '') ?></td>
                 <td>
                     <button type="button" class="btn-link" onclick="stOpenDetail(this)" data-detail='<?= htmlspecialchars(json_encode(stAuthorDetail($a, $st_statComments, $st_statArticles, $stMyNick), JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>'>查看参数</button>
@@ -840,14 +842,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         function updatePreview() {
             var blur = blurToggle.checked ? parseInt(blurSlider.value) : 0;
             var opacity = parseInt(opacitySlider.value) / 100;
-            if (currentType === 'none') { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = '无背景'; }
-            else if (currentType === 'image' && bgImagePath.value) { previewBox.style.backgroundImage = 'url(../' + bgImagePath.value + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = '自定义图片'; }
-            else if (currentType === 'api') { if (previewApiSrc) { previewBox.style.backgroundImage = 'url(' + previewApiSrc + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = 'API 图片'; } else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = bgApiUrl.value.trim() ? 'API（请先测试）' : '待配置'; } }
-            else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = '待配置'; }
+            if (currentType === 'none') { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = ysmT('无背景'); }
+            else if (currentType === 'image' && bgImagePath.value) { previewBox.style.backgroundImage = 'url(../' + bgImagePath.value + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = ysmT('自定义图片'); }
+            else if (currentType === 'api') { if (previewApiSrc) { previewBox.style.backgroundImage = 'url(' + previewApiSrc + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = ysmT('API 图片'); } else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = bgApiUrl.value.trim() ? ysmT('API（请先测试）') : ysmT('待配置'); } }
+            else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = ysmT('待配置'); }
             previewBox.style.backgroundSize = 'cover'; previewBox.style.backgroundPosition = 'center';
             previewBlur.style.backdropFilter = 'blur(' + blur + 'px)'; previewBlur.style.webkitBackdropFilter = 'blur(' + blur + 'px)';
             previewCard.style.background = 'rgba(255,255,255,' + opacity + ')';
-            var labels = []; if (blur > 0) labels.push('模糊 ' + blur + 'px'); labels.push('卡片 ' + Math.round(opacity*100) + '%'); previewBlurLabel.textContent = labels.join(' · ');
+            var labels = []; if (blur > 0) labels.push(ysmT('模糊 {n}px').replace('{n}', blur)); labels.push(ysmT('卡片 {n}%').replace('{n}', Math.round(opacity*100))); previewBlurLabel.textContent = labels.join(' · ');
         }
         window.removeBgImage = function() { if (confirm(ysmT('确定移除背景图片？'))) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
@@ -1199,7 +1201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <div class="table-wrap">
         <table>
             <tr><th style="width:120px">项目</th><th>内容</th></tr>
-            <tr><td style="color:var(--text-muted)">登录账号（QQ）</td><td><code><?= htmlspecialchars($currentUser['account'] ?? '') ?></code>（不可修改）</td></tr>
+            <tr><td style="color:var(--text-muted)">用户名</td><td><code><?= htmlspecialchars($currentUser['account'] ?? '') ?></code>（不可修改）</td></tr>
             <tr><td style="color:var(--text-muted)">绑定邮箱</td><td><?= htmlspecialchars($currentUser['email'] ?? '未绑定') ?></td></tr>
             <tr><td style="color:var(--text-muted)">角色</td><td>站长</td></tr>
         </table>
@@ -1571,11 +1573,11 @@ function bindLogoutSubmit(e) {
         }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.success) {
                 var left = 60;
-                sendBtn.textContent = left + 's 后重发';
+                sendBtn.textContent = ysmT('{n}s 后重发').replace('{n}', left);
                 var t = setInterval(function() {
                     left--;
-                    if (left <= 0) { clearInterval(t); sendBtn.textContent = '获取验证码'; sendBtn.disabled = false; }
-                    else sendBtn.textContent = left + 's 后重发';
+                    if (left <= 0) { clearInterval(t); sendBtn.textContent = ysmT('获取验证码'); sendBtn.disabled = false; }
+                    else sendBtn.textContent = ysmT('{n}s 后重发').replace('{n}', left);
                 }, 1000);
             } else {
                 alert(d.error || ysmT('发送失败'));
@@ -1594,22 +1596,22 @@ function stOpenDetail(btn) {
     var d = {};
     try { d = JSON.parse(btn.getAttribute('data-detail') || '{}'); } catch (e) { return; }
     var rows = [
-        ['昵称', d.nickname], ['UID（QQ）', d.account], ['邮箱', d.email],
-        ['归属站长', d.station], ['状态', d.disabled ? '已禁用' : '正常'],
-        ['创建时间', d.created], ['签名', d.signature || '—'],
-        ['最后登录', d.last_login]
+        [ysmT('昵称'), d.nickname], [ysmT('用户名'), d.username || d.account], [ysmT('邮箱'), d.email],
+        [ysmT('归属站长'), d.station], [ysmT('状态'), d.disabled ? ysmT('已禁用') : ysmT('正常')],
+        [ysmT('创建时间'), d.created], [ysmT('签名'), d.signature || '—'],
+        [ysmT('最后登录'), d.last_login]
     ];
-    var stats = [['登录次数', d.login_count], ['评论数', d.comments], ['文章数', d.articles]];
+    var stats = [[ysmT('登录次数'), d.login_count], [ysmT('评论数'), d.comments], [ysmT('文章数'), d.articles]];
     var h = '<div class="user-detail-grid">';
     rows.forEach(function(r) {
         h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + stEsc(r[1]) + '</span></div>';
     });
-    h += '</div><div class="user-detail-sec">关联统计</div><div class="user-detail-grid">';
+    h += '</div><div class="user-detail-sec">' + ysmT('关联统计') + '</div><div class="user-detail-grid">';
     stats.forEach(function(r) {
         h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + stEsc(r[1]) + '</span></div>';
     });
     h += '</div>';
-    document.getElementById('stDetailTitle').textContent = '写作者参数 - ' + (d.nickname || d.account || '');
+    document.getElementById('stDetailTitle').textContent = ysmT('写作者参数 -') + ' ' + (d.nickname || d.username || d.account || '');
     document.getElementById('stDetailBody').innerHTML = h;
     document.getElementById('stDetailModal').style.display = 'flex';
 }
@@ -1684,7 +1686,7 @@ exit;
                 if (res && res.success === false) {
                     var _b = document.createElement('div');
                     _b.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99999;background:#dc2626;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:92vw';
-                    _b.textContent = '登录环境已变化（换设备/浏览器/隐私模式），保存等操作将被拦截，请重新登录';
+                    _b.textContent = ysmT('登录环境已变化（换设备/浏览器/隐私模式），保存等操作将被拦截，请重新登录');
                     document.body.appendChild(_b);
                     setTimeout(function() { if (_b.parentNode) _b.parentNode.removeChild(_b); }, 7000);
                 }

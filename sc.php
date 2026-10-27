@@ -940,7 +940,7 @@ document.querySelectorAll('.modal-overlay').forEach(function(m) {
 });
 
 function openDeleteConfirmModal(fn, dn) {
-    document.getElementById('deleteModalText').textContent = '确定要删除「' + dn + '」吗？此操作不可撤销。';
+    document.getElementById('deleteModalText').textContent = ysmT('确定要删除「{name}」吗？此操作不可撤销。').replace('{name}', dn);
     document.getElementById('deleteConfirmFile').value = fn;
     document.getElementById('deleteModal').classList.add('active');
 }
@@ -1006,10 +1006,10 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
     var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content
         || (document.querySelector('input[name="csrf_token"]') || {}).value || '';
     btn.addEventListener('click', function() {
-        if (!input.files.length) { hint.textContent = '请先选择 zip 压缩包'; return; }
+        if (!input.files.length) { hint.textContent = ysmT('请先选择 zip 压缩包'); return; }
         var file = input.files[0];
-        if (!/\.zip$/i.test(file.name)) { hint.textContent = '仅支持 .zip 文件'; return; }
-        if (file.size > 80 * 1024 * 1024) { hint.textContent = '压缩包超过 80MB 上限'; return; }
+        if (!/\.zip$/i.test(file.name)) { hint.textContent = ysmT('仅支持 .zip 文件'); return; }
+        if (file.size > 80 * 1024 * 1024) { hint.textContent = ysmT('压缩包超过 80MB 上限'); return; }
         if (!window.confirm(ysmT('确认导入该富媒体压缩包？'))) return;
         var fd = new FormData();
         fd.append('rich_zip', file);
@@ -1025,7 +1025,7 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
         btn.disabled = true;
         hint.textContent = '';
         pwrap.style.display = 'block';
-        ptext.textContent = '上传中 0%';
+        ptext.textContent = ysmT('上传中 0%');
         psize.textContent = (file.size / 1048576).toFixed(2) + ' MB';
         pbar.style.width = '0%';
         var xhr = new XMLHttpRequest();
@@ -1034,7 +1034,7 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
             if (e.lengthComputable) {
                 var pct = Math.round(e.loaded / e.total * 100);
                 pbar.style.width = pct + '%';
-                ptext.textContent = '上传中 ' + pct + '%';
+                ptext.textContent = ysmT('上传中 {n}%').replace('{n}', pct);
                 psize.textContent = (e.loaded / 1048576).toFixed(2) + ' / ' + (e.total / 1048576).toFixed(2) + ' MB';
             }
         };
@@ -1043,14 +1043,14 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
                 // 服务端 302 已由 XHR 跟随，最终 URL 带 rich_zip 结果参数 → 刷新显示结果
                 location.href = xhr.responseURL || 'sc.php';
             } else {
-                ptext.textContent = '上传失败（HTTP ' + xhr.status + '）';
+                ptext.textContent = ysmT('上传失败（HTTP {code}）').replace('{code}', xhr.status);
                 pbar.style.width = '0%';
                 btn.disabled = false;
-                hint.textContent = '请重试或检查服务器上传限制';
+                hint.textContent = ysmT('请重试或检查服务器上传限制');
             }
         };
         xhr.onerror = function() {
-            ptext.textContent = '网络错误，上传失败';
+            ptext.textContent = ysmT('网络错误，上传失败');
             btn.disabled = false;
         };
         xhr.send(fd);
@@ -1061,7 +1061,7 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
 (function() {
     var ta = document.getElementById('contentArea'), ct = document.getElementById('charCount');
     if (!ta || !ct) return;
-    function updateEditorCharCount() { var l = ta.value.replace(/\s/g,'').length; ct.textContent = l > 0 ? l + ' 字' : ''; }
+    function updateEditorCharCount() { var l = ta.value.replace(/\s/g,'').length; ct.textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : ''; }
     ta.addEventListener('input', updateEditorCharCount);
 })();
 
@@ -1106,12 +1106,12 @@ function openArticleEditor(fn) {
             }
             if (annChk && d.is_announce) annChk.checked = true;
             var l = d.content.replace(/\s/g,'').length;
-            document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
+            document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
         });
 }
 document.getElementById('editContent')?.addEventListener('input', function() {
     var l = this.value.replace(/\s/g,'').length;
-    document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
+    document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
 });
 
 // v3.1.6：文章图片上传（站长/写作者；上传成功后以 Markdown 语法插入光标处）
@@ -1125,7 +1125,7 @@ document.getElementById('editContent')?.addEventListener('input', function() {
         if (!this.files.length) return;
         var file = this.files[0];
         var csrf = (document.querySelector('#editModal input[name=csrf_token]') || {}).value || '';
-        hint.textContent = '上传中...';
+        hint.textContent = ysmT('上传中...');
         var fd = new FormData();
         fd.append('image', file);
         fetch('api.php?action=article_image_upload', {
@@ -1133,17 +1133,17 @@ document.getElementById('editContent')?.addEventListener('input', function() {
             headers: { 'X-CSRF-Token': csrf },
             body: fd
         }).then(function(r) { return r.json(); }).then(function(d) {
-            if (!d.success) { hint.textContent = '上传失败：' + (d.error || '未知错误'); return; }
-            hint.textContent = '已上传 ✓';
+            if (!d.success) { hint.textContent = ysmT('上传失败：') + (d.error || ysmT('未知错误')); return; }
+            hint.textContent = ysmT('已上传 ✓');
             var ta = document.getElementById('editContent');
-            var ins = '\n![图片](' + d.url + ')\n';
+            var ins = '\n![' + ysmT('图片') + '](' + d.url + ')\n';
             var start = ta.selectionStart, end = ta.selectionEnd;
             ta.value = ta.value.slice(0, start) + ins + ta.value.slice(end);
             ta.selectionStart = ta.selectionEnd = start + ins.length;
             ta.focus();
             var l = ta.value.replace(/\s/g,'').length;
-            document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
-        }).catch(function() { hint.textContent = '网络错误，上传失败'; });
+            document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
+        }).catch(function() { hint.textContent = ysmT('网络错误，上传失败'); });
         this.value = '';
     });
 })();
@@ -1158,9 +1158,9 @@ document.getElementById('editContent')?.addEventListener('input', function() {
     input.addEventListener('change', function() {
         if (!this.files.length) return;
         var file = this.files[0];
-        if (file.size > 20 * 1024 * 1024) { hint.textContent = '视频需 ≤20MB，请先压缩后再传'; this.value = ''; return; }
+        if (file.size > 20 * 1024 * 1024) { hint.textContent = ysmT('视频需 ≤20MB，请先压缩后再传'); this.value = ''; return; }
         var csrf = (document.querySelector('#editModal input[name=csrf_token]') || {}).value || '';
-        hint.textContent = '上传中...';
+        hint.textContent = ysmT('上传中...');
         var fd = new FormData();
         fd.append('video', file);
         fetch('api.php?action=article_video_upload', {
@@ -1168,17 +1168,17 @@ document.getElementById('editContent')?.addEventListener('input', function() {
             headers: { 'X-CSRF-Token': csrf },
             body: fd
         }).then(function(r) { return r.json(); }).then(function(d) {
-            if (!d.success) { hint.textContent = '上传失败：' + (d.error || '未知错误'); return; }
-            hint.textContent = '已上传 ✓';
+            if (!d.success) { hint.textContent = ysmT('上传失败：') + (d.error || ysmT('未知错误')); return; }
+            hint.textContent = ysmT('已上传 ✓');
             var ta = document.getElementById('editContent');
-            var ins = '\n!video[视频](' + d.url + ')\n';
+            var ins = '\n!video[' + ysmT('视频') + '](' + d.url + ')\n';
             var start = ta.selectionStart, end = ta.selectionEnd;
             ta.value = ta.value.slice(0, start) + ins + ta.value.slice(end);
             ta.selectionStart = ta.selectionEnd = start + ins.length;
             ta.focus();
             var l = ta.value.replace(/\s/g,'').length;
-            document.getElementById('editCharCount').textContent = l > 0 ? l + ' 字' : '';
-        }).catch(function() { hint.textContent = '网络错误，上传失败'; });
+            document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
+        }).catch(function() { hint.textContent = ysmT('网络错误，上传失败'); });
         this.value = '';
     });
 })();
@@ -1234,6 +1234,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
 //   显示耗时（上游若回 usage 则一并显示 token）、未配置 Key 时给出「去配置 Key」引导、移动端底部操作条吸底。
 // ============================================================================
 (function() {
+    var T = window.ysmT || function(s) { return s; };
     var $ = function(id) { return document.getElementById(id); };
     var drawer = $('aiDrawer');
     var ta = $('editContent');
@@ -1270,7 +1271,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     // 统一读取后端可读原因：env_invalid 优先（提示重新登录），其次 error / message
     function reasonOf(d, fallback) {
         d = d || {};
-        if (d.env_invalid) return '登录环境已变化，请重新登录';
+        if (d.env_invalid) return T('登录环境已变化，请重新登录');
         return d.message || d.error || fallback;
     }
 
@@ -1304,9 +1305,9 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         var pid = $('aiProvider').value, k = null, i;
         for (i = 0; i < (cfg.keys || []).length; i++) if (cfg.keys[i].provider === pid) k = cfg.keys[i];
         var hint = $('aiProviderHint');
-        if (k && k.configured) hint.innerHTML = '已配置 ' + esc(k.hint) + ' · 模型 ' + esc(k.model || '未填');
+        if (k && k.configured) hint.innerHTML = T('已配置 {a} · 模型 {b}').replace('{a}', function() { return esc(k.hint); }).replace('{b}', function() { return esc(k.model || T('未填')); });
         // v5.4.2-beta：未配置 Key 时给出直达「AI 写作」配置页的入口
-        else hint.innerHTML = '未配置：请先配置该服务商的 Key <a class="ai-hint-link" href="' + esc(aiConfigUrl) + '">去配置 Key</a>';
+        else hint.innerHTML = T('未配置：请先配置该服务商的 Key') + ' <a class="ai-hint-link" href="' + esc(aiConfigUrl) + '">' + T('去配置 Key') + '</a>';
     }
     function syncActionFields() {
         $('aiStyleWrap').style.display = (curAction === 'style') ? '' : 'none';
@@ -1357,7 +1358,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
 
     function openDrawer() {
         var s = ta.selectionStart, e = ta.selectionEnd, sel = ta.value.slice(s, e);
-        if (!sel.trim()) { alert('请先在编辑框中选中要处理的文本'); return; }
+        if (!sel.trim()) { alert(T('请先在编辑框中选中要处理的文本')); return; }
         captured = sel; lastSel = { start: s, end: e };
         $('aiSrc').textContent = sel;
         $('aiResultWrap').style.display = 'none';
@@ -1373,7 +1374,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         $('aiPrivacyMask').style.display = 'none';
         api('ai_privacy_ack', 'POST', { version: (cfg && cfg.privacy_version) || '' }).then(function(d) {
             if (d && d.success) cfg.privacy_ack = true;
-            else if (d && d.need_reload) { cfg.privacy_ack = false; setStatus('隐私提示已更新，请刷新页面后重新确认', 'err'); }
+            else if (d && d.need_reload) { cfg.privacy_ack = false; setStatus(T('隐私提示已更新，请刷新页面后重新确认'), 'err'); }
         });
     });
     $('aiPrivacyCancel').addEventListener('click', function() { $('aiPrivacyMask').style.display = 'none'; });
@@ -1393,22 +1394,22 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         $('aiDiffOld').innerHTML = dv.old;
         $('aiDiffNew').innerHTML = dv['new'];
         var extra = '';
-        if (started) extra += ' · 用时 ' + ((Date.now() - started) / 1000).toFixed(1) + 's';
+        if (started) extra += ' · ' + T('用时 {n}s').replace('{n}', ((Date.now() - started) / 1000).toFixed(1));
         if (tokenUsage) {
             var tk = (tokenUsage.total_tokens != null) ? tokenUsage.total_tokens
                 : ((tokenUsage.completion_tokens || 0) + (tokenUsage.prompt_tokens || 0));
             if (tk) extra += ' · tokens ' + tk;
         }
-        setStatus('完成（' + result.length + ' 字' + extra + '）：可插入 / 替换', 'ok');
+        setStatus(T('完成（{a} 字{b}）：可插入 / 替换').replace('{a}', function() { return result.length; }).replace('{b}', function() { return extra; }), 'ok');
     }
 
     function run() {
         if (busy) return;
-        if (!cfg.privacy_ack) { $('aiPrivacyMask').style.display = 'flex'; setStatus('请先确认隐私提示', 'err'); return; }
+        if (!cfg.privacy_ack) { $('aiPrivacyMask').style.display = 'flex'; setStatus(T('请先确认隐私提示'), 'err'); return; }
         var pid = $('aiProvider').value, k = null, i;
         for (i = 0; i < (cfg.keys || []).length; i++) if (cfg.keys[i].provider === pid) k = cfg.keys[i];
         if (!k || !k.configured) {
-            setStatus('该服务商尚未配置 Key，请先到后台「AI 写作」配置', 'err');
+            setStatus(T('该服务商尚未配置 Key，请先到后台「AI 写作」配置'), 'err');
             refreshProviderHint();
             return;
         }
@@ -1416,11 +1417,11 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         var br = cfg.breaker && cfg.breaker[pid];
         if (br && br.open) {
             var mins = Math.max(1, Math.ceil((br.remaining || 0) / 60));
-            setStatus('AI 服务暂时不可用（已熔断，约 ' + mins + ' 分钟后自动恢复）', 'err');
+            setStatus(T('AI 服务暂时不可用（已熔断，约 {n} 分钟后自动恢复）').replace('{n}', function() { return mins; }), 'err');
             return;
         }
         var style = $('aiStyle').value, lang = $('aiLang').value;
-        busy = true; setRunBtns('busy'); setStatus('生成中…（可取消）', 'busy');
+        busy = true; setRunBtns('busy'); setStatus(T('生成中…（可取消）'), 'busy');
         result = ''; finalized = false; tokenUsage = null;
         var started = Date.now();
         controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
@@ -1436,9 +1437,9 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         }).then(function(resp) {
             var ct = resp.headers.get('content-type') || '';
             if (ct.indexOf('application/json') >= 0) {
-                return resp.json().then(function(d) { err = reasonOf(d, '调用失败'); });
+                return resp.json().then(function(d) { err = reasonOf(d, T('调用失败')); });
             }
-            if (!resp.body || !resp.body.getReader) { err = '当前浏览器不支持流式读取'; return; }
+            if (!resp.body || !resp.body.getReader) { err = T('当前浏览器不支持流式读取'); return; }
             var reader = resp.body.getReader(), dec = new TextDecoder(), buf = '';
             function handleBlock(block) {
                 block.split('\n').forEach(function(line) {
@@ -1448,7 +1449,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
                         result += ev.text;
                         $('aiDiffNew').textContent = result;
                         $('aiDiffNew').scrollTop = $('aiDiffNew').scrollHeight;
-                    } else if (ev.event === 'error') { err = ev.message || '调用失败'; }
+                    } else if (ev.event === 'error') { err = ev.message || T('调用失败'); }
                     else if (ev.event === 'usage') { tokenUsage = ev.usage || ev; }
                 });
             }
@@ -1465,11 +1466,11 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         }).then(function() {
             busy = false; controller = null;
             if (err) { setRunBtns('error'); setStatus(err, 'err'); return; }
-            if (result) { setRunBtns('idle'); finalize(started); } else { setRunBtns('error'); setStatus('未获得结果', 'err'); }
+            if (result) { setRunBtns('idle'); finalize(started); } else { setRunBtns('error'); setStatus(T('未获得结果'), 'err'); }
         }).catch(function(e) {
             busy = false; controller = null;
-            if (e && e.name === 'AbortError') { setRunBtns('error'); setStatus('已取消', 'err'); }
-            else { setRunBtns('error'); setStatus((e && e.message) || '网络错误', 'err'); }
+            if (e && e.name === 'AbortError') { setRunBtns('error'); setStatus(T('已取消'), 'err'); }
+            else { setRunBtns('error'); setStatus((e && e.message) || T('网络错误'), 'err'); }
         });
     }
 
@@ -1488,7 +1489,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         ta.focus();
         ta.selectionStart = ta.selectionEnd = lastSel.end;
         $('aiUndoBtn').style.display = '';
-        setStatus(mode === 'replace' ? '已替换' : '已插入', 'ok');
+        setStatus(mode === 'replace' ? T('已替换') : T('已插入'), 'ok');
     }
 
     $('aiRunBtn').addEventListener('click', run);
@@ -1502,7 +1503,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         ta.value = undoValue; undoValue = null;
         ta.dispatchEvent(new Event('input', { bubbles: true }));
         $('aiUndoBtn').style.display = 'none';
-        setStatus('已撤销', 'ok');
+        setStatus(T('已撤销'), 'ok');
     });
     $('aiDrawerClose').addEventListener('click', closeDrawer);
     var btn = $('btnAiWrite');
@@ -1511,7 +1512,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     // 选中文本后在编辑框右上角浮出入口（侧边浮层触发）
     var fab = document.createElement('div');
     fab.className = 'ai-fab';
-    fab.textContent = 'AI 写作';
+    fab.textContent = T('AI 写作');
     fab.style.display = 'none';
     document.body.appendChild(fab);
     fab.addEventListener('mousedown', function(e) { e.preventDefault(); openDrawer(); });

@@ -95,7 +95,7 @@ $initial = mb_substr($u['nickname'] ?: '?', 0, 1, 'UTF-8');
         <div class="up-name"><?= htmlspecialchars($u['nickname']) ?><span class="up-badge <?= $roleBadgeClass ?>"><?= htmlspecialchars($roleLabel) ?></span></div>
         <div class="up-sign"><?= htmlspecialchars($u['signature'] ?: '这个人很懒，还没有留下签名~') ?></div>
         <div class="up-meta">
-            <div><b><?= htmlspecialchars(substr($u['account'] ?: '--', 0, 3)) ?>***</b><br>QQ</div>
+            <div><b><?= htmlspecialchars($u['username'] ?? ($u['account'] ?: '--')) ?></b><br>用户名</div>
             <div><b><?= htmlspecialchars($u['created'] ?: '--') ?></b><br>注册时间</div>
         </div>
         <a class="up-back" href="./">← 返回主页</a>

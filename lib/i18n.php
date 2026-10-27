@@ -183,6 +183,45 @@ if (!function_exists('ysmSupportedLangs')) {
     }
 
     /**
+     * v6.2.0：按指定语言取词（邮件等「收件人语言 ≠ 当前请求语言」的场景）。
+     * 逻辑与 ysmT 一致：精确命中 → {n} 模式命中 → 回落原文；默认不转义（邮件正文由调用方负责转义）。
+     */
+    function ysmTIn($zh, $lang, $vars = [], $escape = false) {
+        $zh = (string)$zh;
+        $out = $zh;
+        $lang = (string)$lang;
+        if ($lang !== '' && $lang !== 'zh-CN') {
+            $d = ysmDict($lang);
+            $ph = (isset($d['@phrases']) && is_array($d['@phrases'])) ? $d['@phrases'] : [];
+            if (isset($d['@admin_phrases']) && is_array($d['@admin_phrases'])) {
+                $ph = array_merge($ph, $d['@admin_phrases']);
+            }
+            if (isset($ph[$zh])) {
+                $out = (string)$ph[$zh];
+            } else {
+                foreach ($ph as $k => $v) {
+                    $k = (string)$k;
+                    if (strpos($k, '{') === false) continue;
+                    $segs = preg_split('/\{[a-zA-Z0-9_]+\}/', $k);
+                    $rx = '/^' . implode('(.+?)', array_map(function ($s) { return preg_quote($s, '/'); }, $segs)) . '$/u';
+                    if (preg_match($rx, $zh, $m)) {
+                        $idx = 0;
+                        $out = preg_replace_callback('/\{[a-zA-Z0-9_]+\}/', function () use ($m, &$idx) {
+                            $idx++;
+                            return isset($m[$idx]) ? $m[$idx] : '';
+                        }, (string)$v);
+                        break;
+                    }
+                }
+            }
+        }
+        foreach ($vars as $k => $v) {
+            $out = str_replace('{' . $k . '}', (string)$v, $out);
+        }
+        return $escape ? htmlspecialchars($out, ENT_QUOTES, 'UTF-8') : $out;
+    }
+
+    /**
      * v6.1.0：JSON 出口翻译——递归把 error / message / msg 字段按当前语言替换。
      * 只翻「整句命中词表」的文案，未收录的中文原样保留（不猜测）。
      */

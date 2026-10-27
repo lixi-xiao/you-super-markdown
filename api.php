@@ -82,6 +82,8 @@ function finalizeLogin($u, $reqFp) {
     $avatar = $u['avatar'] ?? resolveAvatarUrl($u['account'] ?? '');
     $_SESSION['cmt_user'] = [
         'id' => $u['id'], 'account' => $u['account'],
+        // v6.2.0：用户名（登录 ID）进入会话，前端/个人设置直接可用
+        'username' => $u['username'] ?? ($u['account'] ?? ''),
         'nickname' => $u['nickname'] ?? '',
         'avatar' => $avatar,
         'signature' => $u['signature'] ?? '',
@@ -176,7 +178,8 @@ function sendJson($responseData, $httpStatus = 200) {
 }
 
 function resolveAvatarUrl($account) {
-    return 'https://q1.qlogo.cn/g?b=qq&nk=' . urlencode($account) . '&s=100';
+    // v6.2.0：不再请求 qlogo 外链，改用站内首字母 SVG（登录标识即用户名）
+    return function_exists('ysmAvatarUrl') ? ysmAvatarUrl($account, 100) : '';
 }
 function attachReplyTo(&$branch, $parentKey, $answer) {
     foreach ($branch as &$node) {
@@ -274,22 +277,11 @@ if ($action === 'send_register_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 if ($action === 'avatar') {
-    // v2.6.3：收紧——仅登录用户可用，防止未登录批量探测 QQ 号（配合评论脱敏，前台已无匿名头像需求）
+    // v6.2.0：头像统一由站内 avatar.php 生成（首字母 SVG），不再回源第三方/QQ 头像
     if (!verifySessionUser()) sendJson(['success' => false, 'error' => '请先登录'], 403);
-    $account = trim($_GET['account'] ?? '');
-    if (empty($account)) sendJson(['success' => false, 'error' => '缺少QQ号'], 400);
-    $remoteUrl = resolveAvatarUrl($account);
-    $streamCtx = stream_context_create(['http' => ['timeout' => 5, 'method' => 'GET']]);
-    $blob = @file_get_contents($remoteUrl, false, $streamCtx);
-    if ($blob !== false && strlen($blob) > 100) {
-        header('Content-Type: image/jpeg');
-        header('Cache-Control: public, max-age=86400');
-        echo $blob;
-    } else {
-        header('Content-Type: image/svg+xml');
-        header('Cache-Control: public, max-age=86400');
-        echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="#8b95a5"/><text x="50" y="58" text-anchor="middle" fill="#fff" font-size="40" font-family="sans-serif">' . htmlspecialchars(mb_substr($account, 0, 1, 'UTF-8')) . '</text></svg>';
-    }
+    $name = ysmUsernameNormalize($_GET['username'] ?? ($_GET['account'] ?? ''));
+    if ($name === '') sendJson(['success' => false, 'error' => '缺少用户名'], 400);
+    header('Location: /avatar.php?u=' . rawurlencode($name) . '&s=100', true, 302);
     exit;
 }
 // ===== v2.9.0：站长创建写作者——发送验证码到写作者邮箱（需站长登录 + CSRF；v2.11.0 起滑块已移除） =====
@@ -467,15 +459,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
         }
         sendJson(['success' => true, 'user' => null]);
     }
-    $qqNo = trim($payload['account'] ?? '');
+    // v6.2.0：登录 ID 改为自定义用户名（兼容旧前端字段名 account）
+    $rawName = trim((string)($payload['username'] ?? ($payload['account'] ?? '')));
+    $username = ysmUsernameNormalize($rawName);
     $displayName = trim($payload['nickname'] ?? '');
     $secret = $payload['password'] ?? '';
     $mailBox = trim($payload['email'] ?? '');
     $otp = $payload['code'] ?? '';
-    if (empty($qqNo) || empty($secret)) sendJson(['success' => false, 'error' => 'QQ号和密码不能为空'], 400);
+    if (empty($username) || empty($secret)) sendJson(['success' => false, 'error' => '用户名和密码不能为空'], 400);
+    $nameChk = ysmUsernameValidate($username);
+    if ($nameChk !== true) sendJson(['success' => false, 'error' => $nameChk], 400);
     $pwChk = validatePassword($secret);
     if ($pwChk !== true) sendJson(['success' => false, 'error' => $pwChk], 400);
-    if (empty($displayName)) $displayName = '用户' . substr($qqNo, -4);
+    if (empty($displayName)) $displayName = $username;
     $displayName = mb_substr($displayName, 0, 20, 'UTF-8');
     // v2.11.0：滑块人机验证已彻底移除
     // v2.9.0 邮箱验证码（开关启用时：邮箱格式 + 唯一 + 验证码一次性校验）
@@ -486,10 +482,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
         if (!$mailOk) sendJson(['success' => false, 'error' => $mailErr], 400);
     }
     $roster = fetchAllUsers();
-    foreach ($roster as $candidate) { if (($candidate['account'] ?? '') === $qqNo) sendJson(['success' => false, 'error' => '该QQ号已注册'], 409); }
-    $avatarLink = resolveAvatarUrl($qqNo);
+    foreach ($roster as $candidate) {
+        if (ysmUsernameNormalize($candidate['username'] ?? '') === $username) sendJson(['success' => false, 'error' => '用户名已被占用'], 409);
+        if (($candidate['account'] ?? '') === $username) sendJson(['success' => false, 'error' => '用户名已被占用'], 409);
+    }
+    $avatarLink = ysmAvatarUrl($username, 100);
     $fresh = [
-        'id' => genId(), 'account' => $qqNo, 'nickname' => $displayName,
+        'id' => genId(), 'account' => $username, 'username' => $username, 'nickname' => $displayName,
         'email' => $mailBox,
         'password' => password_hash($secret, PASSWORD_DEFAULT),
         'avatar' => $avatarLink, 'signature' => '', 'role' => 'user',
@@ -508,7 +507,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     $_SESSION['cmt_login_ts'] = time();
     issueRefreshToken($fresh['id'], $_SESSION['cmt_fp'], $tvStamp, $_SESSION['cmt_sfp'] ?? '');
     $_SESSION['cmt_user'] = [
-        'id' => $fresh['id'], 'account' => $qqNo, 'nickname' => $displayName,
+        'id' => $fresh['id'], 'account' => $username, 'username' => $username, 'nickname' => $displayName,
         'avatar' => $avatarLink, 'signature' => '', 'role' => 'user',
         'email' => $mailBox,   // v2.10.0：注册即写邮箱，供个人设置展示/更换
         'home_font' => '', 'home_lang' => '',
@@ -524,14 +523,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
     $cooldownLeft = checkLinkedBlock();
     if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $cooldownLeft . ' 秒后再试', 'locked_seconds' => $cooldownLeft], 429);
     $payload = json_decode(file_get_contents('php://input'), true);
-    $qqNo = trim($payload['account'] ?? '');
+    // v6.2.0：用户名登录（兼容旧前端 account 字段与历史 QQ 数字账号）
+    $loginRaw = trim((string)($payload['username'] ?? ($payload['account'] ?? '')));
+    $loginId = ysmUsernameNormalize($loginRaw);
     $secret = $payload['password'] ?? '';
     // v4.5.0：登录环境指纹（前端上报，服务端与 UA 一起绑定签名）
     $fpToken = getRequestFp();
-    if (empty($qqNo) || empty($secret)) sendJson(['success' => false, 'error' => 'QQ号和密码不能为空'], 400);
+    if (empty($loginId) || empty($secret)) sendJson(['success' => false, 'error' => '用户名和密码不能为空'], 400);
     // v2.11.0：登录锁定检查（IP+账号双级；60 秒内失败 ≥3 次 → 锁 15 分钟）
     $lockRemain = loginLocked('ip:' . $ipAddr);
-    if ($lockRemain <= 0) $lockRemain = loginLocked('account:' . $qqNo);
+    if ($lockRemain <= 0) $lockRemain = loginLocked('account:' . $loginId);
     if ($lockRemain > 0) {
         // v4.7.0：锁定期仍尝试 → 威胁计分（逐步升级联动封锁）
         logThreat('login_locked_try', $ipAddr, $fpToken, 60);
@@ -539,7 +540,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
     }
     $roster = fetchAllUsers();
     foreach ($roster as $candidate) {
-        if (($candidate['account'] ?? '') === $qqNo && password_verify($secret, $candidate['password'])) {
+        $candName = ysmUsernameNormalize($candidate['username'] ?? '');
+        $candLegacy = strtolower(trim((string)($candidate['account'] ?? '')));
+        if (($candName === $loginId || $candLegacy === $loginId) && password_verify($secret, $candidate['password'])) {
             // v2.11.4：被禁用账号拒绝登录
             if (!empty($candidate['disabled'])) sendJson(['success' => false, 'error' => '该账号已被禁用，请联系管理员'], 403);
             // v4.7.0：管理角色陌生设备 → 邮件二次验证（密码通过后仍需验证码才完成登录）
@@ -575,10 +578,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
         }
     }
     // v2.11.0/v4.5.0：失败计数（IP+账号+指纹三维，60 秒窗口 ≥3 → 锁 15 分钟）
-    loginFailAdd($ipAddr, $qqNo, $fpToken);
+    loginFailAdd($ipAddr, $loginId, $fpToken);
     // v4.7.0：失败威胁计分——管理角色账号按「陌生设备失败」高权重（3 次即触发 15min 设备风控，逐次升级）
     $suspect = null;
-    foreach ($roster as $candidate) { if (($candidate['account'] ?? '') === $qqNo) { $suspect = $candidate; break; } }
+    foreach ($roster as $candidate) { if (ysmUsernameNormalize($candidate['username'] ?? '') === $loginId || strtolower(trim((string)($candidate['account'] ?? ''))) === $loginId) { $suspect = $candidate; break; } }
     $suspectIsManager = $suspect !== null && in_array($suspect['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true);
     if ($suspectIsManager) {
         logThreat('device_login_fail', $ipAddr, $fpToken, 30);
@@ -586,18 +589,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
     } else {
         logThreat('login_fail', $ipAddr, $fpToken, 30);
     }
-    $failCount = loginFailCount($ipAddr, $qqNo, 60, $fpToken);
+    $failCount = loginFailCount($ipAddr, $loginId, 60, $fpToken);
     $authCfg = loadSiteConfig();
     if ($failCount >= 3) {
         lockLogin('ip:' . $ipAddr, 900);
-        lockLogin('account:' . $qqNo, 900);
+        lockLogin('account:' . $loginId, 900);
         logThreat('login_lock', $ipAddr, $fpToken, 60);
         logAbnormal($ipAddr, '频繁错误登录（60秒内' . $failCount . '次，已锁定15分钟）');
         // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 已在上行写入）
-        loginFailClear($ipAddr, $qqNo);
+        loginFailClear($ipAddr, $loginId);
         sendJson(['success' => false, 'error' => '登录失败次数过多，请 900 秒后重试', 'locked_seconds' => 900], 429);
     }
-    sendJson(['success' => false, 'error' => 'QQ号或密码错误'], 401);
+    sendJson(['success' => false, 'error' => '用户名或密码错误'], 401);
 }
 
 // ===== v4.7.0：陌生设备登录邮件二次验证（验证码原子消费 → 记录设备 → 完成登录） =====
@@ -635,7 +638,8 @@ if ($action === 'device_verify' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
     $mode = $input['mode'] ?? '';
-    $account = trim($input['account'] ?? '');
+    // v6.2.0：找回密码按用户名（兼容旧字段 account / 历史 QQ 数字）
+    $account = ysmUsernameNormalize($input['username'] ?? ($input['account'] ?? ''));
     $email = trim($input['email'] ?? '');
     $code = trim($input['code'] ?? '');
     $newPw = $input['new_password'] ?? '';
@@ -653,7 +657,9 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $users = fetchAllUsers();
         $target = null;
         foreach ($users as $u) {
-            if (($u['account'] ?? '') === $account && strcasecmp((string)($u['email'] ?? ''), $email) === 0) { $target = $u; break; }
+            $uName = ysmUsernameNormalize($u['username'] ?? '');
+            $uLegacy = strtolower(trim((string)($u['account'] ?? '')));
+            if (($uName === $account || $uLegacy === $account) && strcasecmp((string)($u['email'] ?? ''), $email) === 0) { $target = $u; break; }
         }
         if (!$target) sendJson(['success' => false, 'error' => '账号与邮箱不匹配'], 400);
         // 管理角色：仅常用设备可自助找回；陌生设备 → 联系超管（不发送验证码）
@@ -683,7 +689,11 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $users = fetchAllUsers();
         $target = null;
-        foreach ($users as $u) { if (($u['account'] ?? '') === $account) { $target = $u; break; } }
+        foreach ($users as $u) {
+            $uName = ysmUsernameNormalize($u['username'] ?? '');
+            $uLegacy = strtolower(trim((string)($u['account'] ?? '')));
+            if ($uName === $account || $uLegacy === $account) { $target = $u; break; }
+        }
         // 两种凭证：邮箱验证码（自助找回）或超管一次性重置码（协助找回）；
         // 账号不存在也走同一失败路径（统一提示，防存在性探测）
         [$ok1, $v1] = $target ? email_code_verify($target['email'] ?? '', $code, 'password_reset') : [false, ''];
@@ -765,8 +775,9 @@ if ($action === 'refresh' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $_SESSION['cmt_login_ts'] = (int)($row['created'] ?? 0) ?: time();
     $_SESSION['cmt_user'] = [
         'id' => $found['id'], 'account' => $found['account'],
+        'username' => $found['username'] ?? ($found['account'] ?? ''),
         'nickname' => $found['nickname'] ?? '',
-        'avatar' => $found['avatar'] ?? resolveAvatarUrl($found['account'] ?? ''),
+        'avatar' => $found['avatar'] ?? ysmAvatarUrl($found['username'] ?? ($found['account'] ?? ''), 100),
         'signature' => $found['signature'] ?? '',
         'role' => $found['role'] ?? 'user',
         'email' => $found['email'] ?? '',
@@ -913,25 +924,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'update_profile') {
     $_SESSION['cmt_user']['home_lang'] = $newLang;
     sendJson(['success' => true, 'user' => sanitizeUserForClient($_SESSION['cmt_user'])]);
 }
+// ===== v6.2.0：修改用户名（登录 ID）——密码二次确认 + 唯一性 + 频率限制 + 审计 =====
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'change_username') {
+    $actor = verifyHomeUser();
+    if (!$actor) sendJson(['success' => false, 'error' => '请先登录'], 401);
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    $payload = json_decode(file_get_contents('php://input'), true);
+    $newName = ysmUsernameNormalize($payload['username'] ?? '');
+    $pw = (string)($payload['password'] ?? '');
+    if ($newName === '' || $pw === '') sendJson(['success' => false, 'error' => '请填写新用户名与当前密码'], 400);
+    $chk = ysmUsernameValidate($newName);
+    if ($chk !== true) sendJson(['success' => false, 'error' => $chk], 400);
+    if (!password_verify($pw, (string)($_SESSION['cmt_user']['pw_hash'] ?? ''))) {
+        sendJson(['success' => false, 'error' => '当前密码不正确'], 403);
+    }
+    if (ysmUsernameTaken($newName, $actor['id'])) sendJson(['success' => false, 'error' => '用户名已被占用'], 409);
+    // 频率限制：每天最多 1 次（按 audit 表统计）
+    $last = db_one("SELECT ts FROM audit WHERE action = 'username_change' AND target = ? ORDER BY rowid DESC LIMIT 1", [$actor['id']]);
+    if ($last && strtotime((string)$last['ts']) > time() - 86400) {
+        sendJson(['success' => false, 'error' => '用户名每天只能修改一次'], 429);
+    }
+    $roster = fetchAllUsers();
+    $old = '';
+    foreach ($roster as &$entry) {
+        if ($entry['id'] === $actor['id']) {
+            $old = (string)($entry['username'] ?? '');
+            $entry['username'] = $newName;
+            break;
+        }
+    }
+    unset($entry);
+    try {
+        replaceAllUsers($roster);
+    } catch (Throwable $e) {
+        sendJson(['success' => false, 'error' => '用户名已被占用'], 409);
+    }
+    $_SESSION['cmt_user']['username'] = $newName;
+    auditLog('username_change', $actor['id'], '用户名修改：' . ($old !== '' ? $old : '（空）') . ' → ' . $newName);
+    sendJson(['success' => true, 'username' => $newName]);
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'admin_setup') {
     $actor = verifySessionUser();
     if (!$actor || ($actor['role'] ?? '') !== ROLE_SUPER_ADMIN) { logAbnormal(getClientIP(), '越权尝试修改站长信息'); sendJson(['success' => false, 'error' => '无权限'], 403); }
     $payload = json_decode(file_get_contents('php://input'), true);
-    $qqNo = trim($payload['account'] ?? '');
+    // v6.2.0：管理员登录标识改为用户名（兼容旧字段 account）
+    $adminName = ysmUsernameNormalize($payload['username'] ?? ($payload['account'] ?? ''));
     $displayName = trim($payload['nickname'] ?? '');
     $secret = $payload['password'] ?? '';
-    if (empty($qqNo)) sendJson(['success' => false, 'error' => '请填写QQ号'], 400);
+    if (empty($adminName)) sendJson(['success' => false, 'error' => '请填写用户名'], 400);
+    $nameChk = ysmUsernameValidate($adminName);
+    if ($nameChk !== true) sendJson(['success' => false, 'error' => $nameChk], 400);
+    if (ysmUsernameTaken($adminName, $actor['id'])) sendJson(['success' => false, 'error' => '用户名已被占用'], 409);
     if (empty($displayName)) sendJson(['success' => false, 'error' => '请填写昵称'], 400);
     if ($secret) {
         $pwChk = validatePassword($secret);
         if ($pwChk !== true) sendJson(['success' => false, 'error' => $pwChk], 400);
     }
     $displayName = mb_substr($displayName, 0, 20, 'UTF-8');
-    $avatarLink = resolveAvatarUrl($qqNo);
+    $avatarLink = ysmAvatarUrl($adminName, 100);
     $roster = fetchAllUsers();
     foreach ($roster as &$entry) {
         if ($entry['id'] === $actor['id']) {
-            $entry['account'] = $qqNo;
+            $entry['account'] = $adminName;
+            $entry['username'] = $adminName;
             $entry['nickname'] = $displayName;
             $entry['avatar'] = $avatarLink;
             if ($secret) $entry['password'] = password_hash($secret, PASSWORD_DEFAULT);
@@ -940,7 +996,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'admin_setup') {
     }
     unset($entry);
     replaceAllUsers($roster);
-    $_SESSION['cmt_user']['account'] = $qqNo;
+    $_SESSION['cmt_user']['account'] = $adminName;
+    $_SESSION['cmt_user']['username'] = $adminName;
     $_SESSION['cmt_user']['nickname'] = $displayName;
     $_SESSION['cmt_user']['avatar'] = $avatarLink;
     sendJson(['success' => true, 'user' => sanitizeUserForClient($_SESSION['cmt_user'])]);

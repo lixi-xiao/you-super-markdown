@@ -123,6 +123,18 @@ post_update_finish() {
     echo "  更新完成！"
     echo "  版本: v$FROM_VER → v$TO_VER"
     echo "============================================"
+    # v6.2.0：更新完成后 reload PHP-FPM——让 opcache 立即丢掉旧字节码（此前要等 revalidate 窗口）
+    _phpver=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || true)
+    for _f in "php${_phpver}-fpm" php-fpm; do
+        if [ -n "$_f" ] && systemctl list-unit-files "$_f.service" >/dev/null 2>&1; then
+            if systemctl reload "$_f" 2>/dev/null || systemctl restart "$_f" 2>/dev/null; then
+                echo "  已 reload $_f（opcache 已刷新，新代码立即生效）"
+            else
+                echo "         [警告] $_f reload 失败，请手动执行：sudo systemctl reload $_f" >&2
+            fi
+            break
+        fi
+    done
     # v3.3.14：自更新场景（运行中的脚本被覆盖）下 [4.9/6] 自动补装可能未执行，给出一键命令兜底提示
     # v4.6.0：同时检测 ffmpeg（背景音乐转码依赖）
     if ! php -m 2>/dev/null | grep -qi '^gd$' || ! command -v ffmpeg >/dev/null 2>&1; then
@@ -162,7 +174,7 @@ $CL_TEXT"
 # 依赖安装失败 → 中断更新并自动回滚（保证功能完整）。
 # v4.6.0：兜底清单补 ffmpeg（背景音乐转码依赖，与 ysm-install.sh 全新安装一致）
 # ============================================================
-REQUIRED_DEPS_FALLBACK="php-gd ffmpeg"
+REQUIRED_DEPS_FALLBACK="php-gd php-opcache ffmpeg"
 
 # 读取更新包 version.json 声明的依赖（无 deps 字段 / 旧包返回空）
 pkg_declared_deps() {
@@ -181,6 +193,12 @@ pkg_declared_deps() {
 dep_ready() {
     case "$1" in
         php-gd)  php -m 2>/dev/null | grep -qi '^gd$' ;;
+        # v6.2.0：opcache 属 Zend 扩展，模块名为 "Zend OPcache"；优先用 FPM 模块列表判断
+        php-opcache)
+            _pf=$(php -r 'echo "php-fpm".PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)
+            if command -v "$_pf" >/dev/null 2>&1 && "$_pf" -m 2>/dev/null | grep -qi 'Zend OPcache'; then return 0; fi
+            php -m 2>/dev/null | grep -qi 'Zend OPcache'
+            ;;
         ffmpeg)  command -v ffmpeg >/dev/null 2>&1 ;;
         *)       command -v "$1" >/dev/null 2>&1 ;;
     esac
@@ -212,6 +230,29 @@ install_one_dep() {
             # 重启 php-fpm 使扩展生效
             for f in php-fpm "php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm"; do
                 if systemctl list-unit-files "$f.service" 2>/dev/null | grep -q "$f"; then
+                    systemctl restart "$f" 2>/dev/null || true; break
+                fi
+            done
+            ;;
+        php-opcache)
+            case "$os_id" in
+                ubuntu|debian)
+                    apt-get install -y "php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-opcache" >/dev/null 2>&1 \
+                        || apt-get install -y php-opcache >/dev/null 2>&1 \
+                        || { echo "  [环境] 警告：php-opcache 安装失败"; return 1; }
+                    ;;
+                centos|rhel|fedora|almalinux|rocky|ol)
+                    yum install -y php-opcache >/dev/null 2>&1 || dnf install -y php-opcache >/dev/null 2>&1 \
+                        || { echo "  [环境] 警告：php-opcache 安装失败"; return 1; }
+                    ;;
+                *)
+                    echo "  [环境] 未知发行版，无法自动安装 php-opcache"
+                    return 1
+                    ;;
+            esac
+            # opcache 是 zend_extension，需重启 FPM 才加载
+            for f in "php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm" php-fpm; do
+                if systemctl list-unit-files "$f.service" >/dev/null 2>&1; then
                     systemctl restart "$f" 2>/dev/null || true; break
                 fi
             done

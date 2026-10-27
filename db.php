@@ -52,7 +52,8 @@ function db_init_schema($pdo) {
         login_count INTEGER DEFAULT 0,
         tv INTEGER DEFAULT 0,
         home_font TEXT,
-        home_lang TEXT
+        home_lang TEXT,
+        username TEXT
     )');
     // v4.5.0：refresh token 表（双 token 短时效：登录态过期后用 refresh 自动续期，
     // 绑定环境指纹 + token_version，换环境/踢旧后失效）
@@ -88,6 +89,44 @@ function db_init_schema($pdo) {
     }
     if (!in_array('home_lang', $ucols, true)) {
         $pdo->exec("ALTER TABLE users ADD COLUMN home_lang TEXT DEFAULT ''");
+    }
+    // v6.2.0：用户名（登录 ID，独立于昵称）。补列 → 回填 → 去重 → 唯一索引（大小写不敏感）
+    if (!in_array('username', $ucols, true)) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN username TEXT DEFAULT ''");
+    }
+    $need = $pdo->query("SELECT id, account FROM users WHERE username IS NULL OR username = '' ORDER BY rowid")->fetchAll();
+    if ($need) {
+        $used = [];
+        foreach ($pdo->query("SELECT username FROM users WHERE username IS NOT NULL AND username <> ''") as $r) {
+            $used[strtolower((string)$r['username'])] = true;
+        }
+        $upd = $pdo->prepare('UPDATE users SET username = ? WHERE id = ?');
+        foreach ($need as $r) {
+            $base = strtolower(trim((string)($r['account'] ?? '')));
+            if (!preg_match('/^[a-z0-9][a-z0-9_-]{2,19}$/', $base)) {
+                $base = 'u_' . substr(sha1((string)$r['id']), 0, 8);
+            }
+            $cand = $base;
+            $i = 2;
+            while (isset($used[$cand])) {
+                $cand = substr($base, 0, 16) . '_' . $i;
+                $i++;
+            }
+            $used[$cand] = true;
+            $upd->execute([$cand, $r['id']]);
+        }
+    }
+    // v6.2.0：用户名唯一索引（大小写不敏感）。partial index 排除空值，避免多个「未设置用户名」互相冲突
+    $idxDone = $pdo->query("SELECT value FROM schema_meta WHERE key = 'v620_username_index'")->fetchColumn();
+    if ($idxDone === false) {
+        try { $pdo->exec('DROP INDEX IF EXISTS users_username_ci'); } catch (Throwable $e) {}
+        try {
+            $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS users_username_ci ON users(lower(username)) WHERE username IS NOT NULL AND username <> ''");
+            $pdo->exec("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('v620_username_index', '1')");
+        } catch (Throwable $e) {
+            // 极端情况下（历史数据已存在同名）不阻断站点；由 ysm-admin migrate-usernames 修复后再建索引
+            @error_log('username unique index failed: ' . $e->getMessage());
+        }
     }
     // v2.9.0：邮箱验证码表（注册 / 写作者验证 / 超管确认链路）
     $pdo->exec('CREATE TABLE IF NOT EXISTS email_codes (
@@ -140,6 +179,7 @@ function db_init_schema($pdo) {
         email TEXT,
         nickname TEXT,
         account TEXT,
+        username TEXT,
         password_hash TEXT,
         station_id TEXT,
         verify_code_id TEXT,
@@ -148,6 +188,12 @@ function db_init_schema($pdo) {
         created INTEGER,
         confirmed_at TEXT
     )');
+    // v6.2.0：pending 表补 username（老库）
+    $pcols = [];
+    foreach ($pdo->query('PRAGMA table_info(pending_author_creates)') as $c) { $pcols[] = strtolower($c['name']); }
+    if (!in_array('username', $pcols, true)) {
+        $pdo->exec('ALTER TABLE pending_author_creates ADD COLUMN username TEXT');
+    }
     $pdo->exec('CREATE TABLE IF NOT EXISTS config (
         key TEXT PRIMARY KEY,
         value TEXT

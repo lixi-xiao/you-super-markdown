@@ -11,6 +11,8 @@
 
     var csrf = root.getAttribute('data-csrf') || '';
     var rows = [];
+    // v6.2.0：动态文案翻译（简体下原样返回）
+    var T = window.ysmT || function (s) { return s; };
 
     function el(id) { return document.getElementById(id); }
     function esc(s) {
@@ -38,15 +40,15 @@
         m.style.color = ok ? '#16a34a' : '#dc2626';
     }
 
-    var STATUS_LABEL = { active: '启用', pending: '待确认', dead: '掉链', disabled: '停用' };
+    var STATUS_LABEL = { active: T('启用'), pending: T('待确认'), dead: T('掉链'), disabled: T('停用') };
     var STATUS_COLOR = { active: '#16a34a', pending: '#d97706', dead: '#dc2626', disabled: '#6b7280' };
 
     function render() {
         var table = el('linksTable');
         if (!table) return;
-        var head = '<tr><th>站点</th><th>状态</th><th>排序</th><th>最近巡检</th><th>操作</th></tr>';
+        var head = '<tr><th>' + T('站点') + '</th><th>' + T('状态') + '</th><th>' + T('排序') + '</th><th>' + T('最近巡检') + '</th><th>' + T('操作') + '</th></tr>';
         if (!rows.length) {
-            table.innerHTML = head + '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">暂无友链</td></tr>';
+            table.innerHTML = head + '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">' + T('暂无友链') + '</td></tr>';
             return;
         }
         table.innerHTML = head + rows.map(function (r) {
@@ -56,8 +58,8 @@
                 : '<span style="display:inline-flex;width:28px;height:28px;border-radius:6px;background:#eef2ff;color:#4f46e5;align-items:center;justify-content:center;font-weight:700">' + esc((r.site_name || '?').charAt(0).toUpperCase()) + '</span>';
             var checked = r.last_check ? new Date(r.last_check * 1000).toLocaleString() : '—';
             var toggle = st === 'active'
-                ? '<button class="btn btn-sm btn-outline" data-act="status" data-id="' + r.id + '" data-status="disabled">停用</button>'
-                : '<button class="btn btn-sm btn-outline" data-act="status" data-id="' + r.id + '" data-status="active">启用</button>';
+                ? '<button class="btn btn-sm btn-outline" data-act="status" data-id="' + r.id + '" data-status="disabled">' + T('停用') + '</button>'
+                : '<button class="btn btn-sm btn-outline" data-act="status" data-id="' + r.id + '" data-status="active">' + T('启用') + '</button>';
             return '<tr>' +
                 '<td><div style="display:flex;gap:10px;align-items:center;min-width:0">' + fav +
                     '<div style="min-width:0"><div style="font-weight:600;word-break:break-all">' + esc(r.site_name) + '</div>' +
@@ -68,10 +70,10 @@
                 '<td>' + (parseInt(r.sort, 10) || 0) + '</td>' +
                 '<td style="font-size:12px;color:var(--text-muted)">' + esc(checked) + '</td>' +
                 '<td style="white-space:nowrap">' +
-                    '<button class="btn btn-sm btn-outline" data-act="edit" data-id="' + r.id + '">编辑</button> ' +
-                    '<button class="btn btn-sm btn-outline" data-act="check" data-id="' + r.id + '">巡检</button> ' +
+                    '<button class="btn btn-sm btn-outline" data-act="edit" data-id="' + r.id + '">' + T('编辑') + '</button> ' +
+                    '<button class="btn btn-sm btn-outline" data-act="check" data-id="' + r.id + '">' + T('巡检') + '</button> ' +
                     toggle + ' ' +
-                    '<button class="btn btn-sm btn-outline" data-act="delete" data-id="' + r.id + '" style="color:#dc2626;border-color:#fca5a5">删除</button>' +
+                    '<button class="btn btn-sm btn-outline" data-act="delete" data-id="' + r.id + '" style="color:#dc2626;border-color:#fca5a5">' + T('删除') + '</button>' +
                 '</td>' +
             '</tr>';
         }).join('');
@@ -84,7 +86,7 @@
         el('linkDesc').value = '';
         el('linkFavicon').value = '';
         el('linkSort').value = '0';
-        el('linkFormTitle').textContent = '新增友链';
+        el('linkFormTitle').textContent = T('新增友链');
         el('linkCancelBtn').style.display = 'none';
         formMsg('');
     }
@@ -96,7 +98,7 @@
         el('linkDesc').value = r.desc || '';
         el('linkFavicon').value = r.favicon || '';
         el('linkSort').value = parseInt(r.sort, 10) || 0;
-        el('linkFormTitle').textContent = '编辑友链 #' + r.id;
+        el('linkFormTitle').textContent = T('编辑友链 #' + r.id);
         el('linkCancelBtn').style.display = 'inline-flex';
         formMsg('');
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -105,8 +107,8 @@
     function load() {
         api('../api.php?action=links_admin').then(function (d) {
             if (d && d.success) { rows = d.links || []; render(); }
-            else formMsg((d && d.error) || '加载失败');
-        }).catch(function () { formMsg('加载失败'); });
+            else formMsg((d && d.error) || T('加载失败'));
+        }).catch(function () { formMsg(T('加载失败')); });
     }
 
     el('linkSaveBtn').addEventListener('click', function () {
@@ -118,30 +120,30 @@
             favicon: el('linkFavicon').value.trim(),
             sort: parseInt(el('linkSort').value, 10) || 0
         };
-        if (!body.site_name || !body.url) { formMsg('站点名与地址必填'); return; }
-        formMsg('保存中…', true);
+        if (!body.site_name || !body.url) { formMsg(T('站点名与地址必填')); return; }
+        formMsg(T('保存中…'), true);
         api('../api.php?action=links_save', { method: 'POST', body: JSON.stringify(body) }).then(function (d) {
-            if (d && d.success) { resetForm(); formMsg('已保存', true); load(); }
-            else formMsg((d && d.error) || '保存失败');
-        }).catch(function () { formMsg('保存失败'); });
+            if (d && d.success) { resetForm(); formMsg(T('已保存'), true); load(); }
+            else formMsg((d && d.error) || T('保存失败'));
+        }).catch(function () { formMsg(T('保存失败')); });
     });
 
     el('linkCancelBtn').addEventListener('click', resetForm);
 
     el('linkFetchBtn').addEventListener('click', function () {
         var url = el('linkUrl').value.trim();
-        if (!url) { formMsg('请先填写站点地址'); return; }
-        formMsg('抓取中…', true);
+        if (!url) { formMsg(T('请先填写站点地址')); return; }
+        formMsg(T('抓取中…'), true);
         api('../api.php?action=links_meta&url=' + encodeURIComponent(url)).then(function (d) {
             if (d && d.ok) {
                 if (d.name) el('linkName').value = d.name;
                 if (d.desc) el('linkDesc').value = d.desc;
                 if (d.favicon) el('linkFavicon').value = d.favicon;
-                formMsg('已抓取，可继续修改后保存', true);
+                formMsg(T('已抓取，可继续修改后保存'), true);
             } else {
-                formMsg((d && d.error) || '抓取失败');
+                formMsg((d && d.error) || T('抓取失败'));
             }
-        }).catch(function () { formMsg('抓取失败'); });
+        }).catch(function () { formMsg(T('抓取失败')); });
     });
 
     var table = el('linksTable');
@@ -163,10 +165,10 @@
             }
             if (act === 'check') {
                 btn.disabled = true;
-                btn.textContent = '巡检中';
+                btn.textContent = T('巡检中');
                 api('../api.php?action=links_check&id=' + id).then(function (d) {
-                    if (d && d.success) { load(); } else { btn.disabled = false; btn.textContent = '巡检'; }
-                }).catch(function () { btn.disabled = false; btn.textContent = '巡检'; });
+                    if (d && d.success) { load(); } else { btn.disabled = false; btn.textContent = T('巡检'); }
+                }).catch(function () { btn.disabled = false; btn.textContent = T('巡检'); });
                 return;
             }
             if (act === 'delete') {

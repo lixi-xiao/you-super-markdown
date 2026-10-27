@@ -1419,7 +1419,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         <div class="cmt-modal-head"><div class="cmt-modal-title" id="cmtAuthTitle">登录</div></div>
         <div class="cmt-modal-body cmt-auth-slide" id="cmtAuthSlide">
             <div class="cmt-modal-form" id="cmtLoginForm">
-                <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtLoginQQ" autocomplete="username">
+                <input class="cmt-modal-input" type="text" placeholder="用户名" maxlength="20" id="cmtLoginQQ" autocomplete="username">
                 <div class="cmt-pw-row">
                     <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="密码" id="cmtLoginPw" autocomplete="current-password">
                     <!-- v3.3.16：密码显示切换——线稿眼睛图标（隐藏/可见两态） -->
@@ -1441,7 +1441,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
             <!-- v4.7.0：找回密码（管理角色仅常用设备可自助找回，陌生设备请联系超管） -->
             <div class="cmt-modal-form" id="cmtResetForm" style="display:none">
                 <div class="cmt-sec-title"><span>找回密码</span></div>
-                <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtResetQQ" autocomplete="username">
+                <input class="cmt-modal-input" type="text" placeholder="用户名" maxlength="20" id="cmtResetQQ" autocomplete="username">
                 <div class="cmt-reg-email-row">
                     <input class="cmt-modal-input" type="email" placeholder="绑定邮箱" id="cmtResetEmail" autocomplete="email">
                     <button type="button" class="cmt-code-btn" id="cmtResetSendCode">发送验证码</button>
@@ -1460,7 +1460,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
                 <div class="cmt-sec-title"><span>账号信息</span></div>
                 <!-- v4.4.0：注册蜜罐——CSS 隐藏输入框，真人看不见不会填；机器人自动填充即被后端静默拒绝 -->
                 <input type="text" name="website" id="cmtRegHoneypot" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0">
-                <input class="cmt-modal-input" type="text" placeholder="QQ号" maxlength="15" id="cmtRegQQ">
+                <input class="cmt-modal-input" type="text" placeholder="用户名（3-20 位字母/数字）" maxlength="20" id="cmtRegQQ">
                 <input class="cmt-modal-input" type="text" placeholder="昵称" maxlength="20" id="cmtRegNick">
                 <div class="cmt-pw-row">
                     <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="密码（至少8位，含大小写与数字）" id="cmtRegPw">
@@ -1537,7 +1537,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         <div class="cmt-modal-head"><div class="cmt-modal-title">完善站长信息</div></div>
         <div class="cmt-modal-body">
             <div class="cmt-modal-form">
-                <input class="cmt-modal-input" type="text" placeholder="设置QQ号" maxlength="15" id="cmtAdminQQ">
+                <input class="cmt-modal-input" type="text" placeholder="设置管理员用户名" maxlength="20" id="cmtAdminQQ">
                 <input class="cmt-modal-input" type="text" placeholder="设置昵称" maxlength="20" id="cmtAdminNick" value="站长">
                 <input class="cmt-modal-input" type="password" placeholder="设置新密码（至少8位，含大小写与数字）" id="cmtAdminPw">
                 <input class="cmt-modal-input" type="password" placeholder="确认新密码" id="cmtAdminPw2">
@@ -1716,7 +1716,7 @@ document.addEventListener('click', function(e){
 document.addEventListener('DOMContentLoaded', function() {
     var t = document.getElementById('toast');
     if (t) {
-        t.textContent = '已退出登录';
+        t.textContent = ysmT('已退出登录');
         t.classList.add('show');
         setTimeout(function() { t.classList.remove('show'); }, 2500);
     }

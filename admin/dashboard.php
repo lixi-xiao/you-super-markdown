@@ -403,22 +403,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $newRole = $_POST['role'] ?? ROLE_USER;
         if (!in_array($newRole, [ROLE_STATION_ADMIN, ROLE_AUTHOR, ROLE_USER])) $newRole = ROLE_USER;
         $newNick = trim($_POST['nickname'] ?? '');
-        $newAccount = trim($_POST['account'] ?? '');
+        $newUsername = ysmUsernameNormalize($_POST['username'] ?? ($_POST['account'] ?? ''));
         $newPwd = trim($_POST['password'] ?? '');
-        if ($newNick && $newAccount && $newPwd) {
+        if ($newNick && $newUsername && $newPwd) {
             $vp = validatePassword($newPwd);
             if ($vp !== true) {
                 $msg = 'pw_weak';
             } else {
-                // QQ 唯一性检查（避免同 QQ 账号登录歧义）
-                $accountExists = false;
-                foreach ($users as $uu) { if (($uu['account'] ?? '') === $newAccount) { $accountExists = true; break; } }
+                // v6.2.0：用户名唯一性检查（大小写不敏感）
+                $nameChk = ysmUsernameValidate($newUsername);
+                $accountExists = ($nameChk !== true) || ysmUsernameTaken($newUsername);
                 if ($accountExists) {
                     $msg = 'account_duplicate';
                 } else {
                     $users[] = [
                         'id' => bin2hex(random_bytes(8)),
-                        'account' => $newAccount,
+                        'account' => $newUsername, 'username' => $newUsername, 'avatar' => ysmAvatarUrl($newUsername, 100),
                         'nickname' => $newNick,
                         'password' => password_hash($newPwd, PASSWORD_DEFAULT),
                         'role' => $newRole,
@@ -808,9 +808,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gen_reset_code'])) {
         header('Location: dashboard.php?tab=threat&msg=challenge_failed');
         exit;
     }
-    $resetAccount = trim((string)($_POST['reset_account'] ?? ''));
+    $resetAccount = ysmUsernameNormalize($_POST['reset_account'] ?? '');
     $target = null;
-    foreach ($users as $u) { if (($u['account'] ?? '') === $resetAccount) { $target = $u; break; } }
+    foreach ($users as $u) {
+        $uName = ysmUsernameNormalize($u['username'] ?? '');
+        $uLegacy = strtolower(trim((string)($u['account'] ?? '')));
+        if ($uName === $resetAccount || $uLegacy === $resetAccount) { $target = $u; break; }
+    }
     if (!$target) {
         header('Location: dashboard.php?tab=threat&msg=reset_user_not_found');
         exit;
@@ -1210,7 +1214,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <form method="get" style="margin-bottom:14px" id="userSearchForm">
         <input type="hidden" name="tab" value="users">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input class="form-input" type="text" name="users_q" value="<?= htmlspecialchars($usersQ) ?>" placeholder="搜索昵称 / UID / QQ / 邮箱 / 归属站长…" style="max-width:340px">
+            <input class="form-input" type="text" name="users_q" value="<?= htmlspecialchars($usersQ) ?>" placeholder="搜索用户名 / 昵称 / 邮箱 / 归属站长…" style="max-width:340px">
             <button type="submit" class="btn">搜索</button>
             <?php if ($usersQ !== ''): ?><a class="btn btn-ghost" href="dashboard.php?tab=users">清除</a><?php endif; ?>
         </div>
@@ -1233,8 +1237,8 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                     <input class="form-input" name="nickname" placeholder="用户昵称">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">QQ号</label>
-                    <input class="form-input" name="account" placeholder="登录账号">
+                    <label class="form-label">用户名（3-20 位字母/数字）</label>
+                    <input class="form-input" name="username" placeholder="登录用户名" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,19}">
                 </div>
                 <div class="form-group">
                     <label class="form-label">密码（至少 8 位，含大小写字母与数字）</label>
@@ -1289,10 +1293,10 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     }
     // v4.7.5：用户管理分页——四张表（超管/站长/写作者/普通用户）各自分页，均参与搜索；默认每页 10 条
     // 搜索字段统一为昵称/UID/QQ/邮箱/归属站长（_station）；页码与每页条数互相独立、互不干扰
-    $saPaged = paginateList($superAdmins, ['nickname', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['sa_page'] ?? 1), $saPerPage);
-    $stPaged = paginateList($groupStations, ['nickname', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['st_page'] ?? 1), $stPerPage);
-    $auPaged = paginateList($groupAuthors, ['nickname', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['au_page'] ?? 1), $auPerPage);
-    $usPaged = paginateList($groupUsers, ['nickname', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['us_page'] ?? 1), $usPerPage);
+    $saPaged = paginateList($superAdmins, ['nickname', 'username', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['sa_page'] ?? 1), $saPerPage);
+    $stPaged = paginateList($groupStations, ['nickname', 'username', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['st_page'] ?? 1), $stPerPage);
+    $auPaged = paginateList($groupAuthors, ['nickname', 'username', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['au_page'] ?? 1), $auPerPage);
+    $usPaged = paginateList($groupUsers, ['nickname', 'username', 'account', 'id', 'email', '_station'], $usersQ, (int)($_GET['us_page'] ?? 1), $usPerPage);
     // v4.7.5：分页链接需保留其他三张表的页码/每页条数，切换任一表页码不重置其余表
     $saPgExtra = ['tab' => 'users', 'users_q' => $usersQ, 'st_page' => (int)($_GET['st_page'] ?? 1), 'au_page' => (int)($_GET['au_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'st_per_page' => $stPerPage, 'au_per_page' => $auPerPage, 'us_per_page' => $usPerPage];
     $stPgExtra = ['tab' => 'users', 'users_q' => $usersQ, 'sa_page' => (int)($_GET['sa_page'] ?? 1), 'au_page' => (int)($_GET['au_page'] ?? 1), 'us_page' => (int)($_GET['us_page'] ?? 1), 'sa_per_page' => $saPerPage, 'au_per_page' => $auPerPage, 'us_per_page' => $usPerPage];
@@ -1309,7 +1313,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             $stationLabel = '';
         }
         return [
-            'nickname' => $u['nickname'] ?? '', 'account' => $u['account'] ?? '',
+            'nickname' => $u['nickname'] ?? '', 'username' => $u['username'] ?? ($u['account'] ?? ''), 'account' => $u['account'] ?? '',
             'email' => $u['email'] ?? '未绑定', 'role' => $role,
             'station' => $stationLabel,
             'disabled' => !empty($u['disabled']),
@@ -1330,7 +1334,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         $uid = htmlspecialchars($u['id']);
         $isAuthor = ($u['role'] ?? '') === ROLE_AUTHOR;
         $name = htmlspecialchars($u['nickname'] ?? '');
-        $account = htmlspecialchars($u['account'] ?? '');
+        $account = htmlspecialchars($u['username'] ?? ($u['account'] ?? ''));
         $roleKey = (string)($u['role'] ?? 'user');
         $roleLabel = ['station_admin' => '站长', 'author' => '写作者', 'user' => '普通用户'][$roleKey] ?? '普通用户';
         $initial = htmlspecialchars(mb_strlen($u['nickname'] ?? '') ? mb_substr((string)$u['nickname'], 0, 1) : '?');
@@ -1341,7 +1345,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         $h = '<button type="button" class="user-op-btn" data-op-target="uop-' . $uid . '" title="管理用户"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>';
         $h .= '<template id="uop-' . $uid . '">';
         // 用户信息头（头像按角色色光环）
-        $h .= '<div class="user-op-modal-user"><div class="user-op-avatar role-' . htmlspecialchars($roleKey) . '">' . $initial . '</div><div><div class="user-op-user-name">' . $name . '</div><div class="user-op-user-meta"><span>UID: ' . $account . '</span><span class="role-badge role-' . htmlspecialchars($roleKey) . '">' . $roleLabel . '</span><span style="color:' . $statusColor . '">' . $statusTxt . '</span></div></div></div>';
+        $h .= '<div class="user-op-modal-user"><div class="user-op-avatar role-' . htmlspecialchars($roleKey) . '">' . $initial . '</div><div><div class="user-op-user-name">' . $name . '</div><div class="user-op-user-meta"><span>用户名: ' . $account . '</span><span class="role-badge role-' . htmlspecialchars($roleKey) . '">' . $roleLabel . '</span><span style="color:' . $statusColor . '">' . $statusTxt . '</span></div></div></div>';
         // 查看详情（只读，无需挑战码）
         $h .= '<button type="button" class="user-op-item" data-detail=\'' . htmlspecialchars(json_encode($detail, JSON_UNESCAPED_UNICODE), ENT_QUOTES) . '\' onclick="ysmOpenUserDetail(this)"><span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span><span class="user-op-txt">查看详情</span></button>';
         // 权限设置
@@ -1389,11 +1393,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             系统管理员<span class="card-badge"><?= $saPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
-            <tr><th>昵称</th><th>UID（QQ）</th><th>角色</th><th>状态</th><th>创建时间</th></tr>
+            <tr><th>昵称</th><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th></tr>
             <?php foreach ($saPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
-                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
+                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['username'] ?? ($u['account'] ?? '')) ?></code></td>
                 <td><span class="role-badge role-super_admin"><?= htmlspecialchars($u['role'] ?? '') ?></span></td>
                 <td><?= ysmStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
@@ -1411,11 +1415,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             站长<span class="card-badge"><?= $stPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
-            <tr><th>昵称</th><th>UID（QQ）</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th>昵称</th><th>用户名</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
             <?php foreach ($stPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
-                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
+                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['username'] ?? ($u['account'] ?? '')) ?></code></td>
                 <td><?= ysmStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
                 <td><?= ysmOpMenu($u, $stationNames, ysmUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
@@ -1433,11 +1437,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             写作者<span class="card-badge"><?= $auPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
-            <tr><th>昵称</th><th>UID（QQ）</th><th>归属站长</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th>昵称</th><th>用户名</th><th>归属站长</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
             <?php foreach ($auPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
-                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
+                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['username'] ?? ($u['account'] ?? '')) ?></code></td>
                 <td style="color:var(--text-secondary)"><?= htmlspecialchars($stationNames[$u['station_id'] ?? ''] ?? '超管') ?></td>
                 <td><?= ysmStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
@@ -1456,11 +1460,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             普通用户<span class="card-badge"><?= $usPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
-            <tr><th>昵称</th><th>UID（QQ）</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th>昵称</th><th>用户名</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
             <?php foreach ($usPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
-                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['account'] ?? '') ?></code></td>
+                <td style="color:var(--text-muted)"><code><?= htmlspecialchars($u['username'] ?? ($u['account'] ?? '')) ?></code></td>
                 <td><?= ysmStatusBadge($u) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
                 <td><?= ysmOpMenu($u, $stationNames, ysmUserDetail($u, $stationNames, $statComments, $statArticles)) ?></td>
@@ -2300,14 +2304,14 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         function updatePreview() {
             var blur = blurToggle.checked ? parseInt(blurSlider.value) : 0;
             var opacity = parseInt(opacitySlider.value) / 100;
-            if (currentType === 'none') { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = '无背景'; }
-            else if (currentType === 'image' && bgImagePath.value) { previewBox.style.backgroundImage = 'url(../' + bgImagePath.value + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = '自定义图片'; }
-            else if (currentType === 'api') { if (previewApiSrc) { previewBox.style.backgroundImage = 'url(' + previewApiSrc + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = 'API 图片'; } else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = bgApiUrl.value.trim() ? 'API（请先测试）' : '待配置'; } }
-            else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = '待配置'; }
+            if (currentType === 'none') { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = ysmT('无背景'); }
+            else if (currentType === 'image' && bgImagePath.value) { previewBox.style.backgroundImage = 'url(../' + bgImagePath.value + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = ysmT('自定义图片'); }
+            else if (currentType === 'api') { if (previewApiSrc) { previewBox.style.backgroundImage = 'url(' + previewApiSrc + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = ysmT('API 图片'); } else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = bgApiUrl.value.trim() ? ysmT('API（请先测试）') : ysmT('待配置'); } }
+            else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = ysmT('待配置'); }
             previewBox.style.backgroundSize = 'cover'; previewBox.style.backgroundPosition = 'center';
             previewBlur.style.backdropFilter = 'blur(' + blur + 'px)'; previewBlur.style.webkitBackdropFilter = 'blur(' + blur + 'px)';
             previewCard.style.background = 'rgba(255,255,255,' + opacity + ')';
-            var labels = []; if (blur > 0) labels.push('模糊 ' + blur + 'px'); labels.push('卡片 ' + Math.round(opacity*100) + '%'); previewBlurLabel.textContent = labels.join(' · ');
+            var labels = []; if (blur > 0) labels.push(ysmT('模糊 {n}px').replace('{n}', blur)); labels.push(ysmT('卡片 {n}%').replace('{n}', Math.round(opacity*100))); previewBlurLabel.textContent = labels.join(' · ');
         }
         window.removeBgImage = function() { if (confirm(ysmT('确定移除背景图片？'))) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
@@ -2536,7 +2540,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         fd.append('csrf_token', '<?= generateCsrfToken() ?>');
         fd.append('challenge_code', code.trim().toUpperCase());
         fetch('<?= $_SERVER['SCRIPT_NAME'] ?>?tab=update', { method: 'POST', body: fd })
-            .then(function(r) { return r.json().catch(function() { return { success: false, error: '响应解析失败' }; }); })
+            .then(function(r) { return r.json().catch(function() { return { success: false, error: ysmT('响应解析失败') }; }); })
             .then(function(d) {
                 if (!d || !d.success) {
                     // v5.4.5：失败必须有明确反馈（此前静默无反应，看起来像"功能不可用"）
@@ -2547,7 +2551,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                     t.classList.toggle('active', t.textContent.indexOf(ch === 'stable' ? '正式版' : '测试版') >= 0);
                 });
                 var vl = document.querySelector('.version-label');
-                if (vl) vl.textContent = ch === 'beta' ? '测试版' : '正式版';
+                if (vl) vl.textContent = ch === 'beta' ? ysmT('测试版') : ysmT('正式版');
                 alert(ysmT('已切换为') + (ch === 'beta' ? ysmT('测试版（含预发布）') : ysmT('正式版（仅正式 Release）')) + ysmT('。\n页面将自动刷新以同步所有显示项；随后请点「检查更新」。'));
                 setTimeout(function() { location.reload(); }, 300);
             })
@@ -2557,25 +2561,25 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     function checkUpdate() {
         var btn = document.getElementById('checkUpdateBtn');
         btn.disabled = true;
-        btn.innerHTML = '<span style="display:inline-block;animation:spin 1s linear infinite">⟳</span> 检查中...';
+        btn.innerHTML = '<span style="display:inline-block;animation:spin 1s linear infinite">⟳</span> ' + ysmT('检查中...');
         document.getElementById('updateCheckResult').style.display = 'none';
         fetch('<?= $_SERVER['SCRIPT_NAME'] ?>?tab=update&ajax=check_update')
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 btn.disabled = false;
-                btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> 检查更新';
+                btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> ' + ysmT('检查更新');
                 var resultDiv = document.getElementById('updateCheckResult');
                 if (d.available) {
                     // v3.2.2：更新通道标识（稳定版/测试版）+ 跨版本检测（主版本号变化必须全量包）
                     // v5.3.0：后端 update_decision.force_full（预发布→正式版）同样强制全量包（与 apply-update 同一判定）
-                    var chLabel = '<?= ($config['update_channel'] ?? 'stable') === 'beta' ? '测试版通道' : '稳定版通道' ?>';
+                    var chLabel = ysmT('<?= ($config['update_channel'] ?? 'stable') === 'beta' ? '测试版通道' : '稳定版通道' ?>');
                     var cross = d.latest_version && d.current_version && String(d.latest_version).split('.')[0] !== String(d.current_version).split('.')[0];
                     var forceFullByRule = !!(d.update_decision && d.update_decision.force_full);
                     var forceFull = !!cross || forceFullByRule;
                     var ruleHint = cross
-                        ? '<strong>跨版本更新</strong>：主版本号变化，必须使用<strong>全量包</strong>，已为你默认选中全量包'
-                        : (forceFullByRule ? '<strong>预发布转正式版</strong>：必须使用<strong>全量包</strong>，已为你默认选中全量包' : '');
-                    resultDiv.innerHTML = '<div class="msg msg-success" style="margin:0"><svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>发现新版本 <strong>v' + d.latest_version + '</strong>（当前 v' + d.current_version + '）· ' + chLabel + '</div>' +
+                        ? ysmT('{title}：主版本号变化，必须使用{full}，已为你默认选中全量包').replace('{title}', '<strong>' + ysmT('跨版本更新') + '</strong>').replace('{full}', '<strong>' + ysmT('全量包') + '</strong>')
+                        : (forceFullByRule ? ysmT('{title}：必须使用{full}，已为你默认选中全量包').replace('{title}', '<strong>' + ysmT('预发布转正式版') + '</strong>').replace('{full}', '<strong>' + ysmT('全量包') + '</strong>') : '');
+                    resultDiv.innerHTML = '<div class="msg msg-success" style="margin:0"><svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>' + ysmT('发现新版本 {latest}（当前 {current}）· {channel}').replace('{latest}', '<strong>v' + d.latest_version + '</strong>').replace('{current}', 'v' + d.current_version).replace('{channel}', chLabel) + '</div>' +
                         (ruleHint ? '<div class="msg" style="margin:8px 0 0;background:rgba(245,158,11,0.14);color:#b45309"><svg viewBox="0 0 24 24" width="16" height="16" style="vertical-align:-3px;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' + ruleHint + '</div>' : '');
                     document.getElementById('updateActionCard').style.display = 'block';
                     document.getElementById('newVersionText').textContent = 'v' + d.latest_version;
@@ -2590,19 +2594,19 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                         pendingUpdatePath = '';
                     }
                 } else {
-                    resultDiv.innerHTML = '<div class="msg" style="margin:0;background:var(--accent-glass);color:var(--text)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>当前已是最新版本 v' + d.current_version + '</div>';
+                    resultDiv.innerHTML = '<div class="msg" style="margin:0;background:var(--accent-glass);color:var(--text)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' + ysmT('当前已是最新版本 v{n}').replace('{n}', d.current_version) + '</div>';
                     document.getElementById('updateActionCard').style.display = 'none';
                 }
                 // v5.4.7：测试通道——同时列出「最新正式版」与「最新测试版」，由使用者自选安装哪一个
                 if (d.options && d.options.length) {
                     window.__ysmOpts = d.options;
                     var oh = '<div style="margin:8px 0 0;padding:10px 12px;border:1px solid var(--border);border-radius:10px">' +
-                             '<div style="font-weight:600;margin-bottom:6px">可安装版本（测试通道）</div>';
+                             '<div style="font-weight:600;margin-bottom:6px">' + ysmT('可安装版本（测试通道）') + '</div>';
                     d.options.forEach(function(o, i) {
                         oh += '<div style="display:flex;align-items:center;gap:10px;padding:6px 0">' +
                               '<span style="flex:1">' + o.option_label + ' · <strong>v' + o.latest_version + '</strong>' +
-                              (String(o.latest_version) === String(d.current_version) ? ' <span style="color:var(--text-muted)">（与本机版本相同）</span>' : '') +
-                              '</span><button class="btn btn-secondary" type="button" onclick="pickOption(' + i + ')">选择此版本</button></div>';
+                              (String(o.latest_version) === String(d.current_version) ? ' <span style="color:var(--text-muted)">' + ysmT('（与本机版本相同）') + '</span>' : '') +
+                              '</span><button class="btn btn-secondary" type="button" onclick="pickOption(' + i + ')">' + ysmT('选择此版本') + '</button></div>';
                     });
                     oh += '</div>';
                     resultDiv.innerHTML += oh;
@@ -2611,9 +2615,9 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             })
             .catch(function() {
                 btn.disabled = false;
-                btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> 检查更新';
+                btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> ' + ysmT('检查更新');
                 var resultDiv = document.getElementById('updateCheckResult');
-                resultDiv.innerHTML = '<div class="msg" style="margin:0;background:rgba(255,80,80,0.15);color:#ff6060"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>检查更新失败，请检查服务器网络连接</div>';
+                resultDiv.innerHTML = '<div class="msg" style="margin:0;background:rgba(255,80,80,0.15);color:#ff6060"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + ysmT('检查更新失败，请检查服务器网络连接') + '</div>';
                 resultDiv.style.display = 'block';
             });
     }
@@ -2663,10 +2667,10 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         fCard.style.display = full ? '' : 'none';
         iCard.style.display = inc ? '' : 'none';
         if (full) {
-            fCard.querySelector('.type-desc').textContent = full.name + '（' + fmtSize(full.size) + '）完整覆盖，适合大版本升级';
+            fCard.querySelector('.type-desc').textContent = ysmT(full.name + '（' + fmtSize(full.size) + '）完整覆盖，适合大版本升级');
         }
         if (inc) {
-            iCard.querySelector('.type-desc').textContent = inc.name + '（' + fmtSize(inc.size) + '）仅覆盖变更文件，速度快';
+            iCard.querySelector('.type-desc').textContent = ysmT(inc.name + '（' + fmtSize(inc.size) + '）仅覆盖变更文件，速度快');
         }
         if (crossHint) crossHint.style.display = forceFull ? 'block' : 'none';
         // 默认选中：跨版本强制全量包；否则优先增量包（体积小）
@@ -2682,8 +2686,8 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         area.style.display = 'block';
         syncPkgCardActive();
         hint.textContent = sel === 'inc'
-            ? '将下载增量包更新至 v' + pendingUpdateVersion + '（下载后自动校验签名）'
-            : '将下载全量包更新至 v' + pendingUpdateVersion + '（下载后自动校验签名）';
+            ? ysmT('将下载增量包更新至 v{ver}（下载后自动校验签名）').replace('{ver}', pendingUpdateVersion)
+            : ysmT('将下载全量包更新至 v{ver}（下载后自动校验签名）').replace('{ver}', pendingUpdateVersion);
     }
 
     function syncPkgCardActive() {
@@ -2805,7 +2809,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 var progress = document.getElementById('manualUpdateProgress');
                 progress.style.display = 'block';
                 document.getElementById('mUpStep1').className = 'update-progress-step active';
-                document.getElementById('manualUpdateHint').textContent = '正在上传 ' + file.name + '...';
+                document.getElementById('manualUpdateHint').textContent = ysmT('正在上传 {name}...').replace('{name}', file.name);
 
                 fetch('<?= $_SERVER['SCRIPT_NAME'] ?>', {
                     method: 'POST',
@@ -2816,13 +2820,13 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                     if (d.success) {
                         document.getElementById('mUpStep1').className = 'update-progress-step completed';
                         document.getElementById('mUpStep2').className = 'update-progress-step active';
-                        document.getElementById('manualUpdateHint').textContent = '解压验证中...';
+                        document.getElementById('manualUpdateHint').textContent = ysmT('解压验证中...');
                         setTimeout(function() {
                             document.getElementById('mUpStep2').className = 'update-progress-step completed';
                             document.getElementById('mUpStep3').className = 'update-progress-step active';
-                            document.getElementById('manualUpdateHint').textContent = '更新包已上传，请通过 SSH 执行: ysm-admin apply-update';
+                            document.getElementById('manualUpdateHint').textContent = ysmT('更新包已上传，请通过 SSH 执行: ysm-admin apply-update');
                             // 也显示到执行更新卡片
-                            var verText = d.target_version ? 'v' + d.target_version : '未知版本';
+                            var verText = d.target_version ? 'v' + d.target_version : ysmT('未知版本');
                             document.getElementById('updateActionCard').style.display = 'block';
                             document.getElementById('newVersionText').textContent = verText;
                             pendingUpdateVersion = d.target_version || 'uploaded';
@@ -2832,12 +2836,12 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                         }, 800);
                     } else {
                         document.getElementById('mUpStep1').className = 'update-progress-step failed';
-                        document.getElementById('manualUpdateHint').textContent = '上传失败：' + (d.error || '未知错误');
+                        document.getElementById('manualUpdateHint').textContent = ysmT('上传失败：') + (d.error || ysmT('未知错误'));
                     }
                 })
                 .catch(function() {
                     document.getElementById('mUpStep1').className = 'update-progress-step failed';
-                    document.getElementById('manualUpdateHint').textContent = '上传失败：网络错误';
+                    document.getElementById('manualUpdateHint').textContent = ysmT('上传失败：') + ysmT('网络错误');
                 });
             });
         }
@@ -2874,7 +2878,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         if (q !== undefined) backupSearchQ = q;
         if (perPage !== undefined) backupPerPage = perPage;
         var list = document.getElementById('backupList');
-        list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85em">加载中...</p>';
+        list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85em">' + ysmT('加载中...') + '</p>';
         fetch('<?= $_SERVER['SCRIPT_NAME'] ?>?tab=update&ajax=update_history&page=' + encodeURIComponent(page) + '&q=' + encodeURIComponent(backupSearchQ) + '&per_page=' + encodeURIComponent(backupPerPage))
             .then(function(r) { return r.json(); })
             .then(function(d) {
@@ -2883,13 +2887,13 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 // v5.0.0：搜索词拼接进 innerHTML 前转义（防 HTML 注入）
                 var __qEsc = String(backupSearchQ || '').replace(/[&<>"']/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
                 if (hist.length === 0) {
-                    html = '<p style="color:var(--text-muted);font-size:0.85em">' + (backupSearchQ ? '未找到匹配「' + __qEsc + '」的记录' : '暂无更新记录') + '</p>';
+                    html = '<p style="color:var(--text-muted);font-size:0.85em">' + (backupSearchQ ? ysmT('未找到匹配「{q}」的记录').replace('{q}', __qEsc) : ysmT('暂无更新记录')) + '</p>';
                 } else {
                     for (var i = 0; i < hist.length; i++) {
                         var h = hist[i];
-                        var stText = ({'completed':'已完成','failed':'失败','in_progress':'进行中'}[h.status] || h.status);
+                        var stText = ({'completed': ysmT('已完成'), 'failed': ysmT('失败'), 'in_progress': ysmT('进行中')}[h.status] || h.status);
                         html += '<div class="backup-item">'
-                            + '<div class="backup-info"><span class="backup-version">更新 ' + h.from_version + ' → ' + h.to_version + '</span>'
+                            + '<div class="backup-info"><span class="backup-version">' + ysmT('更新 {from} → {to}').replace('{from}', h.from_version).replace('{to}', h.to_version) + '</span>'
                             + '<span class="backup-time">' + (h.completed_at || '') + '</span></div>'
                             + '<span class="backup-status ' + h.status + '">' + stText + '</span></div>';
                     }
@@ -2904,7 +2908,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 }
             })
             .catch(function() {
-                list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85em">加载失败</p>';
+                list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85em">' + ysmT('加载失败') + '</p>';
             });
         return false;
     }
@@ -2912,7 +2916,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     // v2.6.6：更新历史分页控件（三段式：总数+每页条数 / 页码按钮 / 页码跳转；事件委托防注入）
     function renderBackupPager(d) {
         var info = document.getElementById('backupPageInfo');
-        if (info) info.textContent = (d && d.total > 0) ? ('共 ' + d.total + ' 条 · 第 ' + d.page + '/' + d.pages + ' 页') : '';
+        if (info) info.textContent = (d && d.total > 0) ? ysmT('共 {a} 条 · 第 {b}/{c} 页').replace('{a}', d.total).replace('{b}', d.page).replace('{c}', d.pages) : '';
         var pager = document.getElementById('backupPager');
         if (!d || !d.total || !d.pages) { pager.innerHTML = ''; return; }
         var page = d.page, pages = d.pages, perPage = d.per_page || backupPerPage;
@@ -2932,12 +2936,12 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         }
         var html = '<nav class="pagination">';
         // 左：总数 + 每页条数
-        html += '<div class="pagination-info"><span class="page-info">共 <strong>' + d.total + '</strong> 条</span>'
-              + '<label class="per-page">每页 <select data-pp-url="' + ppTpl + '">';
+        html += '<div class="pagination-info"><span class="page-info">' + ysmT('共 {n} 条').replace('{n}', '<strong>' + d.total + '</strong>') + '</span>'
+              + '<label class="per-page">' + ysmT('每页') + ' <select data-pp-url="' + ppTpl + '">';
         [10, 20, 50, 100].forEach(function(opt) {
             html += '<option value="' + opt + '"' + (opt === perPage ? ' selected' : '') + '>' + opt + '</option>';
         });
-        html += '</select> 条</label></div>';
+        html += '</select> ' + ysmT('条') + '</label></div>';
         // 中：页码按钮（仅多页时显示）
         if (showNav) {
             html += '<div class="pagination-btns">';
@@ -2945,24 +2949,24 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 if (current) return '<span class="page-btn current" title="' + title + '">' + label + '</span>';
                 return '<a class="page-btn" data-page="' + pg + '" href="javascript:void(0)" title="' + title + '">' + label + '</a>';
             };
-            html += mkBtn(1, '« 首页', '首页', false);
-            html += mkBtn(Math.max(1, page - 1), '‹ 上一页', '上一页', false);
+            html += mkBtn(1, '« ' + ysmT('首页'), ysmT('首页'), false);
+            html += mkBtn(Math.max(1, page - 1), '‹ ' + ysmT('上一页'), ysmT('上一页'), false);
             var prev = 0;
             for (var i = 0; i < seq.length; i++) {
                 var pg = seq[i];
                 if (pg - prev > 1) html += '<span class="page-btn page-ellipsis">…</span>';
-                html += mkBtn(pg, pg, '第 ' + pg + ' 页', pg === page);
+                html += mkBtn(pg, pg, ysmT('第 {n} 页').replace('{n}', pg), pg === page);
                 prev = pg;
             }
-            html += mkBtn(Math.min(pages, page + 1), '下一页 ›', '下一页', false);
-            html += mkBtn(pages, '末页 »', '末页', false);
+            html += mkBtn(Math.min(pages, page + 1), ysmT('下一页') + ' ›', ysmT('下一页'), false);
+            html += mkBtn(pages, ysmT('末页') + ' »', ysmT('末页'), false);
             html += '</div>';
         }
         // 右：页码信息 + 跳转（仅多页时显示）
         if (showNav) {
-            html += '<div class="pagination-jump"><span class="page-info">第 ' + page + ' / ' + pages + ' 页</span>'
-                  + '<input type="number" class="page-jump" min="1" max="' + pages + '" placeholder="页码" data-pg-url="' + pgTpl + '">'
-                  + '<button type="button" class="page-btn">跳转</button></div>';
+            html += '<div class="pagination-jump"><span class="page-info">' + ysmT('第 {a} / {b} 页').replace('{a}', page).replace('{b}', pages) + '</span>'
+                  + '<input type="number" class="page-jump" min="1" max="' + pages + '" placeholder="' + ysmT('页码') + '" data-pg-url="' + pgTpl + '">'
+                  + '<button type="button" class="page-btn">' + ysmT('跳转') + '</button></div>';
         }
         pager.innerHTML = html + '</nav>';
         // 事件委托（click: 页码按钮/跳转按钮；change: 每页条数/页码输入）
@@ -3196,7 +3200,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         var btn = document.getElementById('hfishSyncBtn');
         var msg = document.getElementById('hfishSyncMsg');
         btn.disabled = true;
-        msg.textContent = '同步中...';
+        msg.textContent = ysmT('同步中...');
         var fd = new FormData();
         fd.append('ajax', 'hfish_sync');
         fd.append('csrf_token', '<?= generateCsrfToken() ?>');
@@ -3204,10 +3208,10 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 btn.disabled = false;
-                if (d.success) { msg.textContent = '同步成功'; setTimeout(function() { location.reload(); }, 800); }
-                else { msg.textContent = '同步失败：' + (d.output || d.error || '未知错误'); }
+                if (d.success) { msg.textContent = ysmT('同步成功'); setTimeout(function() { location.reload(); }, 800); }
+                else { msg.textContent = ysmT('同步失败：') + (d.output || d.error || ysmT('未知错误')); }
             })
-            .catch(function() { btn.disabled = false; msg.textContent = '请求失败'; });
+            .catch(function() { btn.disabled = false; msg.textContent = ysmT('请求失败'); });
     }
     </script>
     <?php elseif ($tab === 'mail'): ?>
@@ -3318,7 +3322,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         fd.append('challenge_code', code.trim().toUpperCase());
         var el = document.getElementById('smtpTestResult');
         el.style.display = 'block';
-        el.textContent = '发送中...';
+        el.textContent = ysmT('发送中...');
         el.style.color = 'var(--text-secondary)';
         fetch('<?= $_SERVER['SCRIPT_NAME'] ?>', { method: 'POST', body: fd })
             .then(function(r) { return r.json(); })
@@ -3326,17 +3330,17 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 if (d.success) {
                     el.style.background = 'rgba(46,204,113,0.15)';
                     el.style.color = '#2ecc71';
-                    el.textContent = '✅ 测试邮件发送成功，请查收 <?= htmlspecialchars($smtpAdminEmail ?: "") ?>';
+                    el.textContent = '✅ ' + ysmT('测试邮件发送成功，请查收 {email}').replace('{email}', '<?= htmlspecialchars($smtpAdminEmail ?: "") ?>');
                 } else {
                     el.style.background = 'rgba(255,80,80,0.15)';
                     el.style.color = '#ff6060';
-                    el.textContent = '❌ ' + (d.error || '发送失败');
+                    el.textContent = '❌ ' + (d.error || ysmT('发送失败'));
                 }
             })
             .catch(function() {
                 el.style.background = 'rgba(255,80,80,0.15)';
                 el.style.color = '#ff6060';
-                el.textContent = '❌ 请求失败，请重试';
+                el.textContent = '❌ ' + ysmT('请求失败，请重试');
             });
     }
     </script>
@@ -3437,12 +3441,12 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <div class="card-title">写作者创建确认记录（共 <?= count($pendRows) ?> 条）</div>
         <form method="get" class="search-bar" style="margin-bottom:12px;display:flex;gap:8px">
             <input type="hidden" name="tab" value="verify">
-            <input class="form-input" type="text" name="pq" value="<?= htmlspecialchars($_GET['pq'] ?? '') ?>" placeholder="搜索邮箱 / 昵称 / QQ / 状态" style="max-width:320px">
+            <input class="form-input" type="text" name="pq" value="<?= htmlspecialchars($_GET['pq'] ?? '') ?>" placeholder="搜索邮箱 / 昵称 / 用户名 / 状态" style="max-width:320px">
             <button class="btn btn-secondary" type="submit">搜索</button>
         </form>
         <div class="table-wrap">
         <table>
-            <tr><th>发起时间</th><th>邮箱</th><th>昵称</th><th>QQ</th><th>状态</th><th>确认时间</th></tr>
+            <tr><th>发起时间</th><th>邮箱</th><th>昵称</th><th>用户名</th><th>状态</th><th>确认时间</th></tr>
             <?php foreach ($pendsPaged['rows'] as $pd): ?>
             <tr>
                 <td><?= date('Y-m-d H:i:s', (int)$pd['created']) ?></td>
@@ -3559,8 +3563,8 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <input type="hidden" name="challenge_code">
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">用户 QQ 号</label>
-                    <input class="form-input" type="text" name="reset_account" placeholder="填写待找回用户的 QQ 号" maxlength="15" required>
+                    <label class="form-label">用户名</label>
+                    <input class="form-input" type="text" name="reset_account" placeholder="填写待找回用户的用户名" maxlength="20" required>
                 </div>
             </div>
             <div class="form-row">
@@ -3823,24 +3827,24 @@ function ysmOpenUserDetail(btn) {
     // v3.0.5：详情弹窗在二级菜单之上打开——先收起操作菜单，避免被其遮罩挡住
     var opModal = document.getElementById('userOpModal');
     if (opModal) opModal.style.display = 'none';
-    var roleMap = { 'super_admin': '系统管理员', 'station_admin': '站长', 'author': '写作者', 'user': '普通用户' };
+    var roleMap = { 'super_admin': ysmT('系统管理员'), 'station_admin': ysmT('站长'), 'author': ysmT('写作者'), 'user': ysmT('普通用户') };
     var base = [
-        ['昵称', d.nickname], ['UID（QQ）', d.account], ['邮箱', d.email],
-        ['角色', roleMap[d.role] || d.role], ['归属站长', d.station || '—'],
-        ['状态', d.disabled ? '已禁用' : '正常'], ['创建时间', d.created], ['创建者', d.created_by || '—'],
-        ['签名', d.signature || '—'], ['最后登录', d.last_login]
+        [ysmT('昵称'), d.nickname], [ysmT('用户名'), d.username || d.account], [ysmT('邮箱'), d.email],
+        [ysmT('角色'), roleMap[d.role] || d.role], [ysmT('归属站长'), d.station || '—'],
+        [ysmT('状态'), d.disabled ? ysmT('已禁用') : ysmT('正常')], [ysmT('创建时间'), d.created], [ysmT('创建者'), d.created_by || '—'],
+        [ysmT('签名'), d.signature || '—'], [ysmT('最后登录'), d.last_login]
     ];
-    var stats = [['登录次数', d.login_count], ['评论数', d.comments], ['文章数', d.articles]];
+    var stats = [[ysmT('登录次数'), d.login_count], [ysmT('评论数'), d.comments], [ysmT('文章数'), d.articles]];
     var h = '<div class="user-detail-grid">';
     base.forEach(function(r) {
         h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + ysmEsc(r[1]) + '</span></div>';
     });
-    h += '</div><div class="user-detail-sec">关联统计</div><div class="user-detail-grid">';
+    h += '</div><div class="user-detail-sec">' + ysmT('关联统计') + '</div><div class="user-detail-grid">';
     stats.forEach(function(r) {
         h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + ysmEsc(r[1]) + '</span></div>';
     });
     h += '</div>';
-    document.getElementById('udTitle').textContent = '用户详情 - ' + (d.nickname || d.account || '');
+    document.getElementById('udTitle').textContent = ysmT('用户详情 -') + ' ' + (d.nickname || d.username || d.account || '');
     document.getElementById('udBody').innerHTML = h;
     document.getElementById('userDetailModal').style.display = 'flex';
 }
@@ -3848,19 +3852,20 @@ function ysmOpenUserDetail(btn) {
 <script>
 // v5.4.3-beta.2：模型与长度——动态添加一行（index 用大基数，避免与既有行冲突；删除仅移除 DOM 行）
 var _aiModelSeq = 1000;
+var T = window.ysmT || function(s) { return s; };
 function aiModelAddRow(pid) {
     var tb = document.querySelector('.ai-model-table tbody[data-provider="' + pid + '"]');
     if (!tb) return;
     var n = 'ai_model_catalog[' + pid + '][' + (_aiModelSeq++) + ']';
     var tr = document.createElement('tr');
     tr.innerHTML =
-        '<td><input class="form-input" name="' + n + '[id]" placeholder="如 deepseek-flash"></td>' +
-        '<td><input class="form-input" name="' + n + '[label]" placeholder="展示名"></td>' +
+        '<td><input class="form-input" name="' + n + '[id]" placeholder="' + T('如 deepseek-flash') + '"></td>' +
+        '<td><input class="form-input" name="' + n + '[label]" placeholder="' + T('展示名') + '"></td>' +
         '<td><input class="form-input" type="number" min="0" name="' + n + '[max_input_chars]" placeholder="20000"></td>' +
         '<td><input class="form-input" type="number" min="0" name="' + n + '[max_out_tokens]" placeholder="8192"></td>' +
         '<td><input class="form-input" type="number" min="0" name="' + n + '[timeout]" placeholder="60"></td>' +
         '<td><input class="form-input" type="number" min="0" name="' + n + '[timeout_stream]" placeholder="120"></td>' +
-        '<td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'tr\').remove()">删除</button></td>';
+        '<td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'tr\').remove()">' + T('删除') + '</button></td>';
     tb.appendChild(tr);
 }
 </script>
@@ -3880,7 +3885,7 @@ function aiModelAddRow(pid) {
                     if (res && res.success === false) {
                         var _b = document.createElement('div');
                         _b.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99999;background:#dc2626;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:92vw';
-                        _b.textContent = '登录环境已变化（换设备/浏览器/隐私模式），保存等操作将被拦截，请重新登录';
+                        _b.textContent = ysmT('登录环境已变化（换设备/浏览器/隐私模式），保存等操作将被拦截，请重新登录');
                         document.body.appendChild(_b);
                         setTimeout(function() { if (_b.parentNode) _b.parentNode.removeChild(_b); }, 7000);
                     }

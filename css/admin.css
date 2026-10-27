@@ -4,12 +4,7 @@
    ================================================================ */
 
 /* ---------- 字体 ---------- */
-@font-face {
-    font-family: 'ChineseFont';
-    src: url('../fonts/luoliti.ttf') format('truetype');
-    font-weight: normal; font-style: normal; font-display: swap;
-    unicode-range: U+4E00-9FFF, U+3400-4DBF, U+20000-2A6DF, U+3000-303F, U+FF00-FFEF, U+2E80-2EFF, U+31C0-31EF, U+FE10-FE1F, U+FE30-FE4F;
-}
+/* v6.0.0：移除内置萝莉体（luoliti.ttf）；自定义字体仅在首页按超管开关注入，后台使用系统字体 */
 
 /* ---------- CSS 变量（角色配色） ---------- */
 :root {

@@ -903,6 +903,25 @@ case "${1:-}" in
         echo "用户已吊销: $USER_ID"
         ;;
 
+    link-sweep)
+        # v6.0.0：友链掉链巡检（只读校验 + 告警站长；守护进程每日调用）
+        php -r "
+            require_once '$WEB_ROOT/utils.php';
+            \$rows = db_all(\"SELECT id, site_name, url, last_check FROM links WHERE status IN ('active','pending') LIMIT 200\");
+            \$dead = 0; \$ok = 0; \$skipped = 0;
+            foreach (\$rows as \$r) {
+                // 巡检节流：同一条 12 小时内最多查一次
+                if ((int)(\$r['last_check'] ?? 0) > time() - 43200) { \$skipped++; continue; }
+                \$alive = linkCheckAlive((string)\$r['url']);
+                db_exec('UPDATE links SET last_check = ?, check_count = check_count + 1, status = ? WHERE id = ?',
+                    [time(), \$alive ? 'active' : 'dead', \$r['id']]);
+                if (\$alive) { \$ok++; } else { \$dead++; auditLog('link_sweep', \$r['site_name'], '友链巡检判定掉链'); }
+            }
+            if (\$dead > 0) { sendAlert('友站掉链提醒', '本次巡检发现 ' . \$dead . ' 条友链掉链，请在后台友站管理确认撤留。'); }
+            echo 'ok=' . \$ok . ' dead=' . \$dead . ' skipped=' . \$skipped;
+        " 2>/dev/null
+        ;;
+
     backup)
         BACKUP_DIR="/opt/you-super-markdown/backups"
         mkdir -p "$BACKUP_DIR"

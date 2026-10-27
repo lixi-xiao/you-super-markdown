@@ -40,9 +40,17 @@
             return e;
         }
     }
+    // v6.0.0（E）：稳定指纹——忽略分辨率原始值、忽略 canvas、时区按 ±2h 归桶，供已信任设备放宽比对
+        window.ysmGetStableFp = function () {
+        try {
+            var tzB = Math.round((new Date()).getTimezoneOffset() / 120) * 120;
+            var s = [ navigator.language || "", String(tzB), navigator.userAgent ];
+            return ysmFnvHash(s.join("|")) + ysmFnvHash(s.join("~"));
+        } catch (e) { return ""; }
+    };
     // 暴露给后台/OTP 入口页面使用（后台原生表单无自定义头，用上报校验模式）
         window.ysmGetFp = ysmGetFp;
-    // v4.5.0：所有 api.php 请求统一携带 X-Fp（登录态接口服务端校验环境）
+    // v6.0.0（E）：所有 api.php 请求统一携带 X-Fp（登录态接口服务端校验环境）+ X-FpS（稳定指纹）
         (function ysmPatchFetch() {
         var e = window.fetch;
         if (!e) return;
@@ -51,7 +59,8 @@
             var i = String(t);
             if (i.indexOf("api.php") !== -1) {
                 n.headers = Object.assign({}, n.headers || {}, {
-                    "X-Fp": ysmGetFp()
+                    "X-Fp": ysmGetFp(),
+                    "X-FpS": window.ysmGetStableFp ? window.ysmGetStableFp() : ""
                 });
             }
             return e.call(this, t, n);
@@ -673,7 +682,33 @@
         se.textContent = e + "px";
         localStorage.setItem("md-font-size", e);
     }
-    const _e = localStorage.getItem("md-font-type") || "default";
+    function recordHomeFont(f) {
+        // v6.0.0：登录用户切换字体 → 账号绑定（跨设备跟随）；未登录仅本地 localStorage 生效
+        try {
+            if (window.YSM_LOGGED_IN && (f === "default" || f === "custom")) {
+                fetch("api.php?action=update_profile", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ home_font: f })
+                }).catch(function() {});
+            }
+        } catch (err) {}
+    }
+    // v6.0.0：站点启用自定义字体时，未手选过字体的访客默认即展示自定义字体
+    const _e = localStorage.getItem("md-font-type") || (((document.body && document.body.dataset.ysmCustomFont === "1") && document.querySelector('.font-type-btn[data-font="custom"]')) ? "custom" : "default");
+    // v6.0.0：登录后按账号应用默认首页字体（账号优先；站点未启用自定义字体时回落默认）
+    window.ysmApplyAccountFont = function (f) {
+        try {
+            if (f !== "custom" && f !== "default") return;
+            var enabled = document.body && document.body.dataset.ysmCustomFont === "1";
+            var target = enabled ? f : "default";
+            if (target === "custom" && !document.querySelector('.font-type-btn[data-font="custom"]')) target = "default";
+            applyFontType(target);
+            document.querySelectorAll(".font-type-btn").forEach(function (btn) {
+                btn.classList.toggle("active", btn.dataset.font === target);
+            });
+        } catch (err) {}
+    };
     const $e = localStorage.getItem("md-font-size") || 14;
     applyFontType(_e);
     applyFontSize($e);
@@ -684,6 +719,7 @@
             ie.forEach(e => e.classList.remove("active"));
             e.classList.add("active");
             applyFontType(e.dataset.font);
+            recordHomeFont(e.dataset.font);
         });
     });
     ae.addEventListener("input", () => applyFontSize(ae.value));
@@ -4421,6 +4457,11 @@
         }
         function updateDropdown(e) {
             if (e) {
+                window.YSM_LOGGED_IN = true;
+                // v6.0.0：按账号应用默认首页字体（跨设备跟随）
+                if (typeof window.ysmApplyAccountFont === "function" && (e.home_font === "custom" || e.home_font === "default")) {
+                    window.ysmApplyAccountFont(e.home_font);
+                }
                 var t = e.nickname || "用户";
                 var d = e.role || "user";
                 // v2.6.5：超管在主页显示「超管」身份，但无登录/管理/退出入口（需到超管后台退出）

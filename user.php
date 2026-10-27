@@ -5,6 +5,7 @@
  * 排除超管：超管无公开详情页（404）；用户不存在同样 404。
  */
 require_once __DIR__ . '/utils.php';
+require_once __DIR__ . '/lib/i18n.php';
 secureSessionStart();
 
 $id = trim($_GET['id'] ?? '');
@@ -30,7 +31,7 @@ $roleBadgeClass = $u['role'] === ROLE_STATION_ADMIN ? 'up-badge-station'
 $initial = mb_substr($u['nickname'] ?: '?', 0, 1, 'UTF-8');
 ?>
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="<?= htmlspecialchars(ysmLocale()) ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -97,5 +98,8 @@ $initial = mb_substr($u['nickname'] ?: '?', 0, 1, 'UTF-8');
         <a class="up-back" href="./">← 返回主页</a>
     </div>
 </div>
+<!-- v6.0.0：i18n 运行时文案接入 -->
+<script>window.I18N = <?= json_encode(ysmClientI18n(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+<script src="js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
 </body>
 </html>

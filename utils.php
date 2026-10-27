@@ -171,7 +171,7 @@ function resolvePublicIp($host) {
 }
 // SSRF 安全抓取：单跳实现——一次解析 + 固定解析后的 IP 直连（Host/SNI 保留原域名），消除 DNS rebinding TOCTOU
 // 返回 ['code'=>int,'location'=>string,'body'=>string]；非 http/https、内网/未识别主机、请求失败 → false
-function fetchHttpOnce($url, $ua) {
+function fetchHttpOnce($url, $ua, $maxBytes = 0) {
     $parts = parse_url($url);
     if (!is_array($parts)) return false;
     $scheme = strtolower($parts['scheme'] ?? '');
@@ -205,7 +205,9 @@ function fetchHttpOnce($url, $ua) {
             'capture_peer_cert' => false,
         ];
     }
-    $body = @file_get_contents($targetUrl, false, stream_context_create($opts));
+    $body = $maxBytes > 0
+        ? @file_get_contents($targetUrl, false, stream_context_create($opts), 0, $maxBytes)
+        : @file_get_contents($targetUrl, false, stream_context_create($opts));
     if ($body === false) return false;
     $code = 0;
     $location = '';
@@ -230,12 +232,12 @@ function resolveRedirectUrl($base, $loc) {
 }
 // SSRF 安全抓取（对外）：最多跟随 3 跳，每一跳目标都必须为公网且非内网（复用 isPrivateHost/resolvePublicIp）；
 // 非 http/https、跳数超限、目标内网 → 失败。返回响应体字符串或 false（对既有调用方保持兼容）。
-function fetchHttpContent($url, $ua = null) {
+function fetchHttpContent($url, $ua = null, $maxBytes = 0) {
     // v4.1.15：支持自定义 UA（封面图片池用桌面 UA 拉取横屏壁纸）
     $ua = $ua !== null ? $ua : (appConfig('app_name', 'You Super Markdown') . "/" . APP_VERSION);
     $maxHops = 3;
     for ($hop = 0; $hop <= $maxHops; $hop++) {
-        $res = fetchHttpOnce($url, $ua);
+        $res = fetchHttpOnce($url, $ua, $maxBytes);
         if ($res === false) return false;
         $code = (int)($res['code'] ?? 0);
         if (in_array($code, [301, 302, 303, 307, 308], true)) {
@@ -258,11 +260,12 @@ function replaceAllUsers($users) {
     // v2.5.4：INSERT OR REPLACE 防止列表内重复 id 触发唯一约束冲突导致事务回滚
     // v2.9.0：列清单加入 email（注册验证引入，漏列会导致全量替换时邮箱丢失）
     // v4.5.0：列清单加入 tv（token_version 并发踢旧，漏列会导致全量替换时所有会话被误踢）
+    // v6.0.0：列清单加入 home_font（账号级默认首页字体，漏列会导致全量替换时丢失）
     $pdo = db();
     $pdo->beginTransaction();
     try {
         $pdo->exec('DELETE FROM users');
-        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, account, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled, last_login, login_count, tv) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        $st = $pdo->prepare('INSERT OR REPLACE INTO users (id, account, nickname, password, avatar, signature, role, station_id, created, created_by, email, disabled, last_login, login_count, tv, home_font) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
         foreach ($users as $u) {
             $st->execute([
                 $u['id'] ?? '', $u['account'] ?? '', $u['nickname'] ?? '', $u['password'] ?? '',
@@ -271,6 +274,7 @@ function replaceAllUsers($users) {
                 $u['email'] ?? '', (int)($u['disabled'] ?? 0),
                 $u['last_login'] ?? '', (int)($u['login_count'] ?? 0),
                 (int)($u['tv'] ?? 0),
+                in_array(($u['home_font'] ?? ''), ['', 'default', 'custom'], true) ? $u['home_font'] : '',
             ]);
         }
         $pdo->commit();
@@ -357,6 +361,13 @@ function loadSiteConfig() {
         // 安装与更新流程在能确定服务器出口/域名解析 IP 时自动登记（--auto）；亦可用
         // `sudo ysm-admin set-self-ip --add=<ip>` 维护。
         'threat_self_ips' => [],
+        // v6.0.0：首页默认语言（限定 ysmSupportedLangs() 内的 code；用户未手选、无匹配 Accept-Language 时兜底）
+        'default_lang' => 'zh-CN',
+        // v6.0.0：自定义首页字体（替换内置萝莉体；超管后台启用+上传后首页自动展示）
+        'custom_font_enabled' => false,
+        'custom_font_name' => '',   // 相对站点根路径，如：data/fonts/xx.ttf（前端 url() 直接使用）
+        // v6.0.0：前台已停用的语言代码（超管后台可逐个启停；zh-CN 恒启用不可停）
+        'disabled_langs' => [],
     ];
     $rows = db_all('SELECT key, value FROM config');
     $config = $defaults;
@@ -1838,7 +1849,43 @@ function requireSessionEnv() {
     if (!isset($_SESSION['cmt_tv'])) return false;
     $uid = $_SESSION['cmt_user']['id'] ?? '';
     if ($uid === '' || (int)$_SESSION['cmt_tv'] !== getUserTV($uid)) return false;
+    // v6.0.0（E）：已信任设备（管理角色 + device_fps 已登记）且有稳定指纹绑定 → 放宽到稳定指纹，
+    // 手机端旋转/canvas/时区漂移不再被误判换设备；未知设备/无稳定绑定仍走严格比对（安全基线）。
+    if (isTrustedDevice($uid) && trim((string)($_SESSION['cmt_sfp'] ?? '')) !== '') {
+        return fpRelaxedMatches($_SESSION['cmt_fp'], getRequestFp(), $_SESSION['cmt_sfp'], getRequestStableFp());
+    }
     return fpMatches($_SESSION['cmt_fp'], getRequestFp());
+}
+// ---- v6.0.0（E）：手机指纹漂移修复 ----
+// 根因：原始指纹是「lang|时区|分辨率|canvas|UA」的不可拆散哈希，手机端旋转/无痕/时区漂移 → 严格 hash_equals 即误判换设备。
+// 方案：前端额外上报「稳定指纹」（忽略分辨率原始值、忽略 canvas、时区按 ±2h 归桶），
+//       服务端对「已信任设备」（device_fps 已登记的管理角色用户）放宽到稳定指纹比对；陌生/高敏操作仍严格。
+/** 读取前端上报的稳定指纹头 X-FpS */
+function getRequestStableFp() {
+    $fp = trim((string)($_SERVER['HTTP_X_FPS'] ?? ''));
+    return ($fp !== '' && preg_match('/^[a-f0-9]{16,64}$/i', $fp)) ? strtolower($fp) : '';
+}
+/** 计算服务端绑定「稳定指纹」（稳定指纹 + UA；与 computeSessionFp 同构） */
+function computeStableFp($stableClientFp) {
+    $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 256);
+    return hash('sha256', ($stableClientFp !== '' ? (string)$stableClientFp : 'no-fp') . '|' . $ua);
+}
+/** 用户是否「已信任设备」：管理角色（超管/站长/写作者）且在 device_fps 至少登记一次（曾通过邮箱二次验证） */
+function isTrustedDevice($uid) {
+    if ($uid === '') return false;
+    $u = db_one('SELECT role FROM users WHERE id = ?', [$uid]);
+    $role = $u['role'] ?? '';
+    if (!in_array($role, [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) return false;
+    $row = db_one('SELECT 1 AS x FROM device_fps WHERE user_id = ? LIMIT 1', [$uid]);
+    return (bool)$row;
+}
+/** 放宽态比对：严格匹配；已信任设备且稳定指纹双方非空时额外接受稳定匹配 */
+function fpRelaxedMatches($boundFp, $requestFp, $boundStableFp = '', $requestStableFp = '') {
+    if (fpMatches($boundFp, $requestFp)) return true;
+    if ($boundStableFp !== '' && $requestStableFp !== '') {
+        return hash_equals((string)$boundStableFp, computeStableFp($requestStableFp));
+    }
+    return false;
 }
 
 // ---- token_version（同账号并发踢旧）----
@@ -1858,8 +1905,8 @@ const REFRESH_TTL = 2592000; // 30 天
 /** 签发 refresh token（写库 + 写 httpOnly Cookie），返回明文 token */
 function issueRefreshToken($uid, $sessionFp, $tv) {
     $token = bin2hex(random_bytes(32));
-    db_exec('INSERT INTO refresh_tokens (id, user_id, token_hash, fp, tv, expires, created) VALUES (?,?,?,?,?,?,?)',
-        [bin2hex(random_bytes(8)), $uid, hash('sha256', $token), (string)$sessionFp, (int)$tv, time() + REFRESH_TTL, time()]);
+    db_exec('INSERT INTO refresh_tokens (id, user_id, token_hash, fp, sfp, tv, expires, created) VALUES (?,?,?,?,?,?,?,?)',
+        [bin2hex(random_bytes(8)), $uid, hash('sha256', $token), (string)$sessionFp, (string)($sessionSfp ?? ''), (int)$tv, time() + REFRESH_TTL, time()]);
     setcookie('ysm_rt', $token, [
         'expires' => time() + REFRESH_TTL,
         'path' => '/',
@@ -1870,16 +1917,22 @@ function issueRefreshToken($uid, $sessionFp, $tv) {
     return $token;
 }
 /**
- * 消费 refresh token：校验存在/未吊销/未过期/指纹匹配/tv 匹配，成功返回记录数组，失败返回 null。
- * 换环境（指纹不匹配）/被踢（tv 落后）→ 无效，触发重新登录。
+ * 消费 refresh token：校验存在/未吊销/未过期/tv 匹配；环境指纹放行规则（v6.0.0）：
+ *  - 已信任设备（管理角色 + device_fps 已登记）→ 允许「稳定指纹」放宽（旋转/canvas/时区漂移不踢）
+ *  - 未知设备 / 无稳定指纹绑定 → 一律严格指纹比对，不降级
  */
 function consumeRefreshToken($token, $requestFp, $userTV) {
     if (!is_string($token) || strlen($token) !== 64 || !ctype_xdigit($token)) return null;
     $row = db_one('SELECT * FROM refresh_tokens WHERE token_hash = ?', [hash('sha256', $token)]);
     if (!$row || !empty($row['revoked'])) return null;
     if ((int)$row['expires'] < time()) { db_exec('DELETE FROM refresh_tokens WHERE id = ?', [$row['id']]); return null; }
-    if (!hash_equals((string)$row['fp'], computeSessionFp($requestFp))) return null;
     if ((int)$row['tv'] !== (int)$userTV) return null;
+    $uid = $row['user_id'];
+    if (isTrustedDevice($uid) && trim((string)($row['sfp'] ?? '')) !== '') {
+        if (!fpRelaxedMatches((string)$row['fp'], $requestFp, (string)$row['sfp'], getRequestStableFp())) return null;
+    } else {
+        if (!hash_equals((string)$row['fp'], computeSessionFp($requestFp))) return null;
+    }
     db_exec('UPDATE refresh_tokens SET last_used = ? WHERE id = ?', [time(), $row['id']]);
     return $row;
 }
@@ -1965,6 +2018,39 @@ function sanitizeUserForClient($u) {
     unset($u['pw_hash']);
     if (isset($u['account']) && $u['account'] !== '') $u['account'] = maskQQ($u['account']);
     return $u;
+}
+
+// ---- v6.0.0：友站（站长专属；录入辅助抓取 + 掉链巡检，只读校验） ----
+/** 抓取目标站点元数据用于录入预填（name/desc/favicon；不执行 JS、限大小、白名单协议） */
+function linkFetchMeta($url) {
+    $parts = parse_url($url);
+    $scheme = strtolower($parts['scheme'] ?? '');
+    $host = strtolower($parts['host'] ?? '');
+    if (!in_array($scheme, ['http', 'https'], true) || $host === '' || isPrivateHost($host)) {
+        return ['ok' => false, 'error' => '仅允许公网 http/https 地址'];
+    }
+    // SSRF 安全：复用全局单跳校验抓取（禁自动跟随重定向；每跳均校验公网/非内网），并限制响应体大小
+    $body = fetchHttpContent($url, 'YSM-LinkBot/1.0', 400000);
+    if ($body === false) return ['ok' => false, 'error' => '抓取失败或页面过大'];
+    $name = ''; $desc = ''; $favicon = '';
+    if (preg_match('/<title[^>]*>(.*?)<\/title>/is', $body, $m)) $name = trim(strip_tags(html_entity_decode($m[1])));
+    if (preg_match('/<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']/is', $body, $m)) $desc = trim(html_entity_decode($m[1]));
+    elseif (preg_match('/<meta[^>]+content=["\'](.*?)["\'][^>]+name=["\']description["\']/is', $body, $m)) $desc = trim(html_entity_decode($m[1]));
+    if (preg_match('/<link[^>]+rel=["\']?(?:shortcut\s+)?icon["\']?[^>]+href=["\'](.*?)["\']/is', $body, $m)) $favicon = trim(html_entity_decode($m[1]));
+    if ($name === '' && $desc === '') return ['ok' => false, 'error' => '未能识别站点信息'];
+    return ['ok' => true, 'name' => mb_substr($name, 0, 60), 'desc' => mb_substr($desc, 0, 200), 'favicon' => $favicon !== '' ? $favicon : (rtrim(dirname($url), '/') . '/favicon.ico')];
+}
+/** 掉链/存活校验（只读；不跟随重定向，仅单跳校验；3xx 视为存活） */
+function linkCheckAlive($url) {
+    $parts = parse_url($url);
+    $scheme = strtolower($parts['scheme'] ?? '');
+    $host = strtolower(trim((string)($parts['host'] ?? '')));
+    if (!in_array($scheme, ['http', 'https'], true) || $host === '' || isPrivateHost($host)) return false;
+    // SSRF 安全：单跳直连已校验 IP，禁自动跟随重定向；只读取 1 字节以判定状态码
+    $res = fetchHttpOnce($url, 'YSM-LinkBot/1.0', 1);
+    if ($res === false) return false;
+    $code = (int)($res['code'] ?? 0);
+    return $code >= 200 && $code < 400;
 }
 
 /** 邮箱是否已被账户占用 */

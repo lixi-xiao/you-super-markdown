@@ -68,7 +68,7 @@ $myId = $currentUser['id'] ?? '';
 $msg = $_GET['msg'] ?? '';
 // v2.6.0 起 tab 结构（authors 写作者管理 / background 网站背景 / music 音乐设置 / banlog 封禁日志只读）；v2.6.3 新增 profile 个人信息；v3.1.6 新增 announce 公告管理；v4.0.0 新增 images 图片管理；v4.1.18 背景+音乐合并为 ui 主界面及功能设置
 $tab = $_GET['tab'] ?? 'authors';
-if (!in_array($tab, ['authors', 'ui', 'banlog', 'profile', 'announce', 'images', 'threat'], true)) $tab = 'authors';
+if (!in_array($tab, ['authors', 'ui', 'banlog', 'profile', 'announce', 'images', 'threat', 'links'], true)) $tab = 'authors';
 
 // v3.1.6：文章列表（公告选择关联文章用：读 META title / 一级标题 / 文件名）
 function stArticleOptions() {
@@ -505,6 +505,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <a href="dashboard.php?tab=images" class="sidebar-link <?= $tab==='images'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
             图片管理
+        </a>
+        <!-- v6.0.0：友站（友情链接）管理 -->
+        <a href="dashboard.php?tab=links" class="sidebar-link <?= $tab==='links'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            友站管理
         </a>
         <a href="dashboard.php?tab=profile" class="sidebar-link <?= $tab==='profile'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -1263,6 +1268,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             </div>
         </form>
     </div>
+    <?php endif; ?>
+
+    <?php if ($tab === 'links'): ?>
+    <div class="page-header">
+        <div class="page-title">
+            <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            友站管理
+        </div>
+        <div class="page-subtitle">友情链接维护（前台仅展示「启用」状态）；支持抓取站点信息预填与掉链巡检</div>
+    </div>
+    <div id="linksAdmin" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>">
+        <div class="card">
+            <div class="card-title" id="linkFormTitle">新增友链</div>
+            <div class="form-group">
+                <label class="form-label">站点名</label>
+                <input class="form-input" id="linkName" maxlength="60" placeholder="对方站点名称">
+            </div>
+            <div class="form-group">
+                <label class="form-label">站点地址</label>
+                <div class="api-url-group">
+                    <input class="form-input" id="linkUrl" placeholder="https://example.com">
+                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn">抓取预填</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">描述（可选）</label>
+                <input class="form-input" id="linkDesc" maxlength="200" placeholder="一句话介绍">
+            </div>
+            <div class="form-group">
+                <label class="form-label">图标地址（可选）</label>
+                <input class="form-input" id="linkFavicon" placeholder="https://example.com/favicon.ico">
+            </div>
+            <div class="form-group">
+                <label class="form-label">排序（越小越前）</label>
+                <input class="form-input" id="linkSort" type="number" value="0" style="max-width:160px">
+            </div>
+            <div id="linkFormMsg" class="form-hint"></div>
+            <div style="display:flex;justify-content:flex-end;gap:10px">
+                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none">取消编辑</button>
+                <button type="button" class="btn btn-primary" id="linkSaveBtn">保存</button>
+            </div>
+            <input type="hidden" id="linkId" value="">
+        </div>
+        <div class="card">
+            <div class="card-title">友链列表</div>
+            <div class="table-wrap">
+                <table id="linksTable">
+                    <tr><th>站点</th><th>状态</th><th>排序</th><th>最近巡检</th><th>操作</th></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+    <script src="../js/fp.js?v=<?= @filemtime(__DIR__ . '/../js/fp.js') ?>"></script>
+    <script src="../js/links-admin.js?v=<?= @filemtime(__DIR__ . '/../js/links-admin.js') ?>"></script>
     <?php endif; ?>
 
     <?php if ($tab === 'images'): ?>

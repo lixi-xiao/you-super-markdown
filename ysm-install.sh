@@ -200,7 +200,73 @@ configure_php_timezone() {
     systemctl restart "$fpm_svc" > /dev/null 2>&1 || systemctl restart php-fpm > /dev/null 2>&1 || true
     log "PHP 上传上限已配置: upload_max_filesize=100M / post_max_size=105M"
 }
+# v6.0.0（A）：PHP-FPM 池调优（动态子进程 + 防突发 + 平滑回收；写入真实 pool 配置，失败不阻断安装）
+configure_php_fpm_pool() {
+    local max_children="${PM_MAX_CHILDREN:-20}"
+    local start_servers="${PM_START_SERVERS:-4}"
+    local min_spare="${PM_MIN_SPARE:-2}"
+    local max_spare="${PM_MAX_SPARE:-8}"
+    local max_requests="${PM_MAX_REQUESTS:-500}"
+    local pool=""
+    local fpm_dir=""
+    if [ -n "${PHP_VER:-}" ]; then fpm_dir="/etc/php/${PHP_VER}/fpm/pool.d"; else
+        fpm_dir=$(ls -d /etc/php/*/fpm/pool.d 2>/dev/null | head -n1)
+    fi
+    [ -n "$fpm_dir" ] || fpm_dir="/etc/php/8.3/fpm/pool.d"
+    [ -f "$fpm_dir/www.conf" ] && pool="$fpm_dir/www.conf"
+    if [ -z "$pool" ]; then
+        log "未找到 php-fpm pool 配置（$fpm_dir/www.conf 不存在），跳过 FPM 字段调优"
+        return 0
+    fi
+    local bak="$pool.ysm.bak.$RANDOM"
+    cp -a "$pool" "$bak" 2>/dev/null || true
+    # 动态模式（单站配置宽松、防突发；高并发部署可改 pm=static + 对应静态参数）
+    sed -i "s|^pm\s*=.*|pm = dynamic|" "$pool"
+    sed -i "s|^;pm\s*=.*|pm = dynamic|" "$pool"
+    sed -i "s|^pm.max_children\s*=.*|pm.max_children = $max_children|" "$pool"
+    sed -i "s|^;pm.max_children\s*=.*|pm.max_children = $max_children|" "$pool"
+    sed -i "s|^pm.start_servers\s*=.*|pm.start_servers = $start_servers|" "$pool"
+    sed -i "s|^;pm.start_servers\s*=.*|pm.start_servers = $start_servers|" "$pool"
+    sed -i "s|^pm.min_spare_servers\s*=.*|pm.min_spare_servers = $min_spare|" "$pool"
+    sed -i "s|^;pm.min_spare_servers\s*=.*|pm.min_spare_servers = $min_spare|" "$pool"
+    sed -i "s|^pm.max_spare_servers\s*=.*|pm.max_spare_servers = $max_spare|" "$pool"
+    sed -i "s|^;pm.max_spare_servers\s*=.*|pm.max_spare_servers = $max_spare|" "$pool"
+    sed -i "s|^pm.max_requests\s*=.*|pm.max_requests = $max_requests|" "$pool"
+    sed -i "s|^;pm.max_requests\s*=.*|pm.max_requests = $max_requests|" "$pool"
+    # 缺字段追加（幂等，避免后续重跑重复追加）
+    for kv in "pm = dynamic" "pm.max_children = $max_children" "pm.start_servers = $start_servers" "pm.min_spare_servers = $min_spare" "pm.max_spare_servers = $max_spare" "pm.max_requests = $max_requests"; do
+        key="${kv%% *}"
+        grep -q "^${key}\s*=" "$pool" || echo "$kv" >> "$pool"
+    done
+    log "PHP-FPM 池已调优（备份 $bak）：max_children=$max_children start=$start_servers min=$min_spare max=$max_spare max_requests=$max_requests"
+}
+# v6.0.0（A）：启用 PHP-FPM opcache（字节码缓存；脚本随包"只进不删"，签名校验不受影响）
+configure_php_opcache() {
+    local fpm_ini=""
+    if [ -n "${PHP_VER:-}" ]; then fpm_ini="/etc/php/${PHP_VER}/fpm/php.ini"; else
+        fpm_ini=$(ls /etc/php/*/fpm/php.ini 2>/dev/null | head -n1)
+    fi
+    [ -n "$fpm_ini" ] || fpm_ini="/etc/php/8.3/fpm/php.ini"
+    [ -f "$fpm_ini" ] || { log "未找到 FPM php.ini，跳过 opcache 配置"; return 0; }
+    local bak="$fpm_ini.ysm.bak.$RANDOM"
+    cp -a "$fpm_ini" "$bak" 2>/dev/null || true
+    # 默认未加载扩展（Debian php-fpm 通常无 opcache.so，但可在不破坏现有 ini 的前提下写入启用项；
+    # 若扩展缺失则 opcache.enable=1 不生效但对运行无副作用）
+    for k in "zend_extension=opcache" "opcache.enable=1" "opcache.enable_cli=0" "opcache.memory_consumption=128" "opcache.interned_strings_buffer=8" "opcache.max_accelerated_files=10000" "opcache.revalidate_freq=60" "opcache.fast_shutdown=1"; do
+        key="${k%%=*}"
+        if grep -q "^${key}\b" "$fpm_ini" 2>/dev/null; then
+            sed -i "s|^${key}.*|$k|" "$fpm_ini"
+        elif grep -q "^;${key}" "$fpm_ini"; then
+            sed -i "s|^;${key}.*|$k|" "$fpm_ini"
+        else
+            echo "$k" >> "$fpm_ini"
+        fi
+    done
+    log "PHP-FPM opcache 已启用（备份 $bak）：enable=1 memory=128M files=10000 revalidate=60s"
+}
 configure_php_timezone
+configure_php_fpm_pool
+configure_php_opcache
 
 # ================================================================
 # 1. 参数收集

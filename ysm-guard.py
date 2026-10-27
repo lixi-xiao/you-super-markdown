@@ -1469,6 +1469,7 @@ def run_polling_mode():
 
     verify_all_files()
 
+    last_link_sweep = 0  # v6.0.0：友链巡检节流（每 12 小时一次）
     while running:
         time.sleep(5)
         verify_all_files()
@@ -1485,6 +1486,17 @@ def run_polling_mode():
                 log("审计日志哈希链校验通过")
                 mirror_db()  # 背书镜像
             save_guard_state()
+
+        # v6.0.0：友链掉链巡检（站长后台亦可手动触发）
+        if now - last_link_sweep >= 43200:
+            last_link_sweep = now
+            try:
+                r = subprocess.run(['/usr/local/bin/ysm-admin', 'link-sweep'], capture_output=True, timeout=120)
+                out = (r.stdout or b'').decode('utf-8', 'ignore').strip()
+                if out:
+                    log(f"友链巡检: {out}")
+            except Exception as e:
+                log(f"友链巡检失败: {e}")
 
 
 def ensure_mirror_dir():

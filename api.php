@@ -719,7 +719,7 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 // ===== v6.0.0：友站（友情链接） =====
 // GET links_list：前台只读——只出 active 友链（访客可访问）
-if ($action === 'links_list') {
+if (false && $action === 'links_list') {
     sendJson(['success' => true, 'links' => db_all("SELECT id, site_name, url, favicon, desc, sort FROM links WHERE status = 'active' ORDER BY sort ASC, place_time DESC")]);
 }
 /** 站长专属操作的前置校验（角色 + 环境） */
@@ -730,7 +730,7 @@ function linksRequireStationAdmin() {
     return $actor;
 }
 // GET links_meta：录入辅助——抓取站点信息预填
-if ($action === 'links_meta' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+if (false && $action === 'links_meta' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     linksRequireStationAdmin();
     $url = trim((string)($_GET['url'] ?? ''));
     if ($url === '') sendJson(['success' => false, 'error' => '请填写站点地址'], 400);
@@ -738,7 +738,7 @@ if ($action === 'links_meta' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     sendJson(linkFetchMeta($url));
 }
 // POST links_save：新增/编辑
-if ($action === 'links_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (false && $action === 'links_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     linksRequireStationAdmin();
     if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
     $b = json_decode(file_get_contents('php://input'), true);
@@ -764,7 +764,7 @@ if ($action === 'links_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     sendJson(['success' => true]);
 }
 // POST links_delete
-if ($action === 'links_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (false && $action === 'links_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     linksRequireStationAdmin();
     if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
     $b = json_decode(file_get_contents('php://input'), true);
@@ -775,7 +775,7 @@ if ($action === 'links_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     sendJson(['success' => true]);
 }
 // POST links_status：启用/停用/标记掉链
-if ($action === 'links_status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (false && $action === 'links_status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     linksRequireStationAdmin();
     if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
     $b = json_decode(file_get_contents('php://input'), true);
@@ -787,12 +787,12 @@ if ($action === 'links_status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     sendJson(['success' => true]);
 }
 // GET links_admin：站长后台列表
-if ($action === 'links_admin' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+if (false && $action === 'links_admin' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     linksRequireStationAdmin();
     sendJson(['success' => true, 'links' => db_all('SELECT * FROM links ORDER BY sort ASC, place_time DESC')]);
 }
 // GET links_check：单条掉链巡检（只读校验后写回状态）
-if ($action === 'links_check' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+if (false && $action === 'links_check' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     linksRequireStationAdmin();
     $id = (int)($_GET['id'] ?? 0);
     $row = db_one('SELECT url FROM links WHERE id = ?', [$id]);

@@ -2609,38 +2609,6 @@ function requireSessionEnv() {
     }
     return fpMatches($_SESSION['cmt_fp'], getRequestFp());
 }
-// ---- v6.0.0（E）：手机指纹漂移修复 ----
-// 根因：原始指纹是「lang|时区|分辨率|canvas|UA」的不可拆散哈希，手机端旋转/无痕/时区漂移 → 严格 hash_equals 即误判换设备。
-// 方案：前端额外上报「稳定指纹」（忽略分辨率原始值、忽略 canvas、时区按 ±2h 归桶），
-//       服务端对「已信任设备」（device_fps 已登记的管理角色用户）放宽到稳定指纹比对；陌生/高敏操作仍严格。
-/** 读取前端上报的稳定指纹头 X-FpS */
-function getRequestStableFp() {
-    $fp = trim((string)($_SERVER['HTTP_X_FPS'] ?? ''));
-    return ($fp !== '' && preg_match('/^[a-f0-9]{16,64}$/i', $fp)) ? strtolower($fp) : '';
-}
-/** 计算服务端绑定「稳定指纹」（稳定指纹 + UA；与 computeSessionFp 同构） */
-function computeStableFp($stableClientFp) {
-    $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 256);
-    return hash('sha256', ($stableClientFp !== '' ? (string)$stableClientFp : 'no-fp') . '|' . $ua);
-}
-/** 用户是否「已信任设备」：管理角色（超管/站长/写作者）且在 device_fps 至少登记一次（曾通过邮箱二次验证） */
-function isTrustedDevice($uid) {
-    if ($uid === '') return false;
-    $u = db_one('SELECT role FROM users WHERE id = ?', [$uid]);
-    $role = $u['role'] ?? '';
-    if (!in_array($role, [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) return false;
-    $row = db_one('SELECT 1 AS x FROM device_fps WHERE user_id = ? LIMIT 1', [$uid]);
-    return (bool)$row;
-}
-/** 放宽态比对：严格匹配；已信任设备且稳定指纹双方非空时额外接受稳定匹配 */
-function fpRelaxedMatches($boundFp, $requestFp, $boundStableFp = '', $requestStableFp = '') {
-    if (fpMatches($boundFp, $requestFp)) return true;
-    if ($boundStableFp !== '' && $requestStableFp !== '') {
-        return hash_equals((string)$boundStableFp, computeStableFp($requestStableFp));
-    }
-    return false;
-}
-
 // ---- token_version（同账号并发踢旧）----
 function getUserTV($uid) {
     $r = db_one('SELECT tv FROM users WHERE id = ?', [$uid]);
@@ -2774,39 +2742,6 @@ function sanitizeUserForClient($u) {
     unset($u['pw_hash']);
     if (isset($u['account']) && $u['account'] !== '') $u['account'] = maskQQ($u['account']);
     return $u;
-}
-
-// ---- v6.0.0：友站（站长专属；录入辅助抓取 + 掉链巡检，只读校验） ----
-/** 抓取目标站点元数据用于录入预填（name/desc/favicon；不执行 JS、限大小、白名单协议） */
-function linkFetchMeta($url) {
-    $parts = parse_url($url);
-    $scheme = strtolower($parts['scheme'] ?? '');
-    $host = strtolower($parts['host'] ?? '');
-    if (!in_array($scheme, ['http', 'https'], true) || $host === '' || isPrivateHost($host)) {
-        return ['ok' => false, 'error' => '仅允许公网 http/https 地址'];
-    }
-    // SSRF 安全：复用全局单跳校验抓取（禁自动跟随重定向；每跳均校验公网/非内网），并限制响应体大小
-    $body = fetchHttpContent($url, 'YSM-LinkBot/1.0', 400000);
-    if ($body === false) return ['ok' => false, 'error' => '抓取失败或页面过大'];
-    $name = ''; $desc = ''; $favicon = '';
-    if (preg_match('/<title[^>]*>(.*?)<\/title>/is', $body, $m)) $name = trim(strip_tags(html_entity_decode($m[1])));
-    if (preg_match('/<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']/is', $body, $m)) $desc = trim(html_entity_decode($m[1]));
-    elseif (preg_match('/<meta[^>]+content=["\'](.*?)["\'][^>]+name=["\']description["\']/is', $body, $m)) $desc = trim(html_entity_decode($m[1]));
-    if (preg_match('/<link[^>]+rel=["\']?(?:shortcut\s+)?icon["\']?[^>]+href=["\'](.*?)["\']/is', $body, $m)) $favicon = trim(html_entity_decode($m[1]));
-    if ($name === '' && $desc === '') return ['ok' => false, 'error' => '未能识别站点信息'];
-    return ['ok' => true, 'name' => mb_substr($name, 0, 60), 'desc' => mb_substr($desc, 0, 200), 'favicon' => $favicon !== '' ? $favicon : (rtrim(dirname($url), '/') . '/favicon.ico')];
-}
-/** 掉链/存活校验（只读；不跟随重定向，仅单跳校验；3xx 视为存活） */
-function linkCheckAlive($url) {
-    $parts = parse_url($url);
-    $scheme = strtolower($parts['scheme'] ?? '');
-    $host = strtolower(trim((string)($parts['host'] ?? '')));
-    if (!in_array($scheme, ['http', 'https'], true) || $host === '' || isPrivateHost($host)) return false;
-    // SSRF 安全：单跳直连已校验 IP，禁自动跟随重定向；只读取 1 字节以判定状态码
-    $res = fetchHttpOnce($url, 'YSM-LinkBot/1.0', 1);
-    if ($res === false) return false;
-    $code = (int)($res['code'] ?? 0);
-    return $code >= 200 && $code < 400;
 }
 
 /** 邮箱是否已被账户占用 */

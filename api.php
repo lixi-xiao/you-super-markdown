@@ -169,6 +169,8 @@ function verifyHomeUser() {
     return $actor;
 }
 function sendJson($responseData, $httpStatus = 200) {
+    // v6.1.0：JSON 出口统一翻译 error/message（以简体中文原文为 msgid，缺键原样返回）
+    if (function_exists('ysmTranslateApiPayload')) $responseData = ysmTranslateApiPayload($responseData);
     http_response_code($httpStatus);
     echo json_encode($responseData, JSON_UNESCAPED_UNICODE);
     exit;

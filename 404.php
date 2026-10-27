@@ -1,6 +1,9 @@
 <?php http_response_code(404);
 require_once __DIR__ . '/utils.php';
 require_once __DIR__ . '/lib/i18n.php';
+// v6.1.0：服务端输出层 i18n
+require_once __DIR__ . '/lib/i18n-output.php';
+ysmI18nStart();
 $siteCfg = loadSiteConfig();
 $siteName = $siteCfg['site_title'] ?? 'You Super Markdown';
 $bgType = $siteCfg['bg_type'] ?? 'none';
@@ -14,7 +17,7 @@ $bgCardOpacity = intval($siteCfg['bg_card_opacity'] ?? 100);?>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>404 - 页面未找到 · <?= htmlspecialchars($siteName) ?></title>
+    <title><?= ysmT('404 - 页面未找到 · {site}', ['site' => $siteName]) ?></title>
     <!-- v4.0.0：深色模式跟随系统——在 CSS 加载前同步设置 data-theme，避免闪白（与主站一致） -->
     <script>
         (function() {

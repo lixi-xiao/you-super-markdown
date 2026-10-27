@@ -2,6 +2,9 @@
 require_once __DIR__ . '/../utils.php';
 // v6.0.0：语言启停列表（ysmAllLangs / ysmSupportedLangs）
 require_once __DIR__ . '/../lib/i18n.php';
+// v6.1.0：服务端输出层 i18n（后台同样按当前语言输出）
+require_once __DIR__ . '/../lib/i18n-output.php';
+ysmI18nStart();
 secureSessionStart();
 
 // 超管检查：必须通过 OTP 登录，且 JWT 有效
@@ -928,12 +931,15 @@ $disabledLangs = (array)($config['disabled_langs'] ?? []);
 $customFontName = (string)($config['custom_font_name'] ?? '');
 ?>
 <!DOCTYPE html>
-<html lang="zh-CN" data-admin="super">
+<html lang="<?= ysmLocale() ?>" data-admin="super">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>高级管理员后台 - <?= htmlspecialchars($siteTitle) ?></title>
 <link rel="stylesheet" href="../css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
+<!-- v6.1.0：后台 JS 动态文案（弹窗/提示/异步渲染）运行时翻译 -->
+<script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
+<script src="../js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/../js/i18n-live.js') ?>"></script>
 </head>
 <body>
 
@@ -1757,7 +1763,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <span class="toolbar-spacer"></span>
             <?php if ($unauthQ !== ''): ?><span class="result-count">匹配 <?= $unauthData['total'] ?> 条</span><?php endif; ?>
             <?php if ($unauthData['total'] > 0): ?>
-            <form method="post" onsubmit="return confirm('确定清空所有越权访问日志？')">
+            <form method="post" onsubmit="return confirm(ysmT('确定清空所有越权访问日志？'))">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <input type="hidden" name="clear_unauth" value="1">
                 <button type="submit" class="btn btn-sm btn-outline" style="color:#ef4444;border-color:#fecaca">清空日志</button>
@@ -2156,7 +2162,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         </div>
         <?php if ($customFontName !== ''): ?>
         <div style="margin-top:10px">
-            <button type="submit" class="btn btn-outline" name="_font_remove" value="1" onclick="return confirm('确定移除当前自定义字体？')">移除当前字体</button>
+            <button type="submit" class="btn btn-outline" name="_font_remove" value="1" onclick="return confirm(ysmT('确定移除当前自定义字体？'))">移除当前字体</button>
         </div>
         <?php endif; ?>
     </form>
@@ -2213,7 +2219,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             previewCard.style.background = 'rgba(255,255,255,' + opacity + ')';
             var labels = []; if (blur > 0) labels.push('模糊 ' + blur + 'px'); labels.push('卡片 ' + Math.round(opacity*100) + '%'); previewBlurLabel.textContent = labels.join(' · ');
         }
-        window.removeBgImage = function() { if (confirm('确定移除背景图片？')) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
+        window.removeBgImage = function() { if (confirm(ysmT('确定移除背景图片？'))) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
         document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formSiteTitle').value = document.getElementById('siteTitleInput').value.trim(); document.getElementById('formRegEnabled').value = document.getElementById('regToggle').checked ? '1' : ''; document.getElementById('formGuestComments').value = document.getElementById('guestToggle').checked ? '1' : ''; document.getElementById('formSuperComment').value = document.getElementById('superCommentToggle').checked ? '1' : ''; document.getElementById('formNotifyEnabled').value = document.getElementById('notifyToggle').checked ? '1' : ''; document.getElementById('formNotifyEmail').value = document.getElementById('notifyEmailInput').value.trim(); document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicAutoPlay').value = document.getElementById('musicAutoPlayInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formBgMusicEnabled').value = document.getElementById('bgMusicToggle').checked ? '1' : ''; });
         <?php if ($bgType === 'api' && $bgApiUrl): ?>
@@ -2432,7 +2438,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     var pendingUpdateUrl = ''; // v3.2.0：在线更新选中的仓库包下载地址（全量/增量包）
 
     function switchChannel(ch) {
-        var code = prompt('切换更新通道为敏感操作。\n请先在 SSH 中执行：sudo ysm-admin challenge\n再输入得到的确认码：');
+        var code = prompt(ysmT('切换更新通道为敏感操作。\n请先在 SSH 中执行：sudo ysm-admin challenge\n再输入得到的确认码：'));
         if (!code) return;
         var fd = new FormData();
         fd.append('ajax', 'save_channel');
@@ -2444,7 +2450,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             .then(function(d) {
                 if (!d || !d.success) {
                     // v5.4.5：失败必须有明确反馈（此前静默无反应，看起来像"功能不可用"）
-                    alert('切换失败：' + ((d && d.error) || '未知错误') + '\n若为确认码无效/过期，请重新执行：sudo ysm-admin challenge');
+                    alert(ysmT('切换失败：') + ((d && d.error) || ysmT('未知错误')) + '\n' + ysmT('若为确认码无效/过期，请重新执行：sudo ysm-admin challenge'));
                     return;
                 }
                 document.querySelectorAll('.channel-tab').forEach(function(t) {
@@ -2452,10 +2458,10 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 });
                 var vl = document.querySelector('.version-label');
                 if (vl) vl.textContent = ch === 'beta' ? '测试版' : '正式版';
-                alert('已切换为' + (ch === 'beta' ? '测试版（含预发布）' : '正式版（仅正式 Release）') + '。\n页面将自动刷新以同步所有显示项；随后请点「检查更新」。');
+                alert(ysmT('已切换为') + (ch === 'beta' ? ysmT('测试版（含预发布）') : ysmT('正式版（仅正式 Release）')) + ysmT('。\n页面将自动刷新以同步所有显示项；随后请点「检查更新」。'));
                 setTimeout(function() { location.reload(); }, 300);
             })
-            .catch(function(e) { alert('切换请求失败：' + e); });
+            .catch(function(e) { alert(ysmT('切换请求失败：') + e); });
     }
 
     function checkUpdate() {
@@ -3214,7 +3220,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
 
     <script>
     function testSmtpMail() {
-        var code = prompt('请在 SSH 中执行 sudo ysm-admin challenge 获取 6 位确认码后输入：');
+        var code = prompt(ysmT('请在 SSH 中执行 sudo ysm-admin challenge 获取 6 位确认码后输入：'));
         if (!code) return;
         var fd = new FormData();
         fd.append('ajax', 'test_smtp');
@@ -3531,8 +3537,8 @@ document.addEventListener('submit', function(e) {
     var f = e.target;
     if (!f || !f.classList || !f.classList.contains('need-challenge')) return;
     e.preventDefault();
-    if (f.dataset.confirm && !confirm(f.dataset.confirm)) return;
-    var code = prompt('请在 SSH 中执行 sudo ysm-admin challenge 获取 6 位确认码后输入：');
+    if (f.dataset.confirm && !confirm(ysmT(f.dataset.confirm))) return;
+    var code = prompt(ysmT('请在 SSH 中执行 sudo ysm-admin challenge 获取 6 位确认码后输入：'));
     if (!code) return;
     var hid = f.querySelector('input[name="challenge_code"]');
     if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = 'challenge_code'; f.appendChild(hid); }

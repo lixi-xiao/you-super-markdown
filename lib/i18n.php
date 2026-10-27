@@ -124,16 +124,81 @@ if (!function_exists('ysmSupportedLangs')) {
         return htmlspecialchars($str, ENT_QUOTES, 'UTF-8');
     }
 
-    /** 前端注入用：返回 [lang, dict(当前语言+zh 合并)] */
-    function ysmClientI18n() {
+    /** 前端注入用：返回 [lang, dict(当前语言+zh 合并)]；$scope='admin' 时附带后台词组 */
+    function ysmClientI18n($scope = 'front') {
         $lang = ysmLocale();
         $dict = array_merge(ysmDict('zh-CN'), ysmDict($lang));
         $phrases = [];
         if ($lang !== 'zh-CN') {
             $d = ysmDict($lang);
             if (isset($d['@phrases']) && is_array($d['@phrases'])) $phrases = $d['@phrases'];
+            // v6.1.0：后台词组单独存放，避免前台每页注入上百 KB
+            if ($scope === 'admin' && isset($d['@admin_phrases']) && is_array($d['@admin_phrases'])) {
+                $phrases = array_merge($phrases, $d['@admin_phrases']);
+            }
         }
         return ['lang' => $lang, 'dict' => $dict, 'langs' => ysmSupportedLangs(), 'phrases' => $phrases];
+    }
+
+    /** 短语取词（v6.1.0）：以简体中文原文为 msgid，支持 {name} 占位；缺键回落原文 */
+    function ysmT($zh, $vars = [], $escape = true) {
+        $zh = (string)$zh;
+        $out = $zh;
+        $lang = ysmLocale();
+        if ($lang !== 'zh-CN') {
+            $d = ysmDict($lang);
+            $ph = (isset($d['@phrases']) && is_array($d['@phrases'])) ? $d['@phrases'] : [];
+            // v6.1.0：后台/接口文案单独存放，查词时一并参与
+            if (isset($d['@admin_phrases']) && is_array($d['@admin_phrases'])) {
+                $ph = array_merge($ph, $d['@admin_phrases']);
+            }
+            if (isset($ph[$zh])) {
+                $out = (string)$ph[$zh];
+            } else {
+                foreach ($ph as $k => $v) {
+                    $k = (string)$k;
+                    if (strpos($k, '{') === false) continue;
+                    $segs = preg_split('/\{[a-zA-Z0-9_]+\}/', $k);
+                    $rx = '/^' . implode('(.+?)', array_map(function ($s) { return preg_quote($s, '/'); }, $segs)) . '$/u';
+                    if (preg_match($rx, $zh, $m)) {
+                        $idx = 0;
+                        $out = preg_replace_callback('/\{[a-zA-Z0-9_]+\}/', function () use ($m, &$idx) {
+                            $idx++;
+                            return isset($m[$idx]) ? $m[$idx] : '';
+                        }, (string)$v);
+                        break;
+                    }
+                }
+            }
+        }
+        foreach ($vars as $k => $v) {
+            $out = str_replace('{' . $k . '}', (string)$v, $out);
+        }
+        return $escape ? htmlspecialchars($out, ENT_QUOTES, 'UTF-8') : $out;
+    }
+
+    /** ysmT 的直接输出版本 */
+    function ysmE($zh, $vars = []) {
+        echo ysmT($zh, $vars);
+    }
+
+    /**
+     * v6.1.0：JSON 出口翻译——递归把 error / message / msg 字段按当前语言替换。
+     * 只翻「整句命中词表」的文案，未收录的中文原样保留（不猜测）。
+     */
+    function ysmTranslateApiPayload($data) {
+        if (!is_array($data)) return $data;
+        foreach ($data as $k => $v) {
+            if (is_array($v)) {
+                $data[$k] = ysmTranslateApiPayload($v);
+                continue;
+            }
+            if (!is_string($v) || $v === '') continue;
+            if (!in_array($k, ['error', 'message', 'msg'], true)) continue;
+            if (!preg_match('/[\x{4e00}-\x{9fff}]/u', $v)) continue;
+            $data[$k] = ysmT($v, [], false);
+        }
+        return $data;
     }
 
     /** 日期格式化（PHP 侧简单映射，不引入 Intl 扩展依赖） */

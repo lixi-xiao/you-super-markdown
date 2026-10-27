@@ -119,6 +119,11 @@
   #announcementSection .ann-header-icon { background: var(--accent); color: #fff; }
   #announcementSection .ann-list { gap: 16px; }
   #announcementSection .ann-card { border-radius: 20px; box-shadow: var(--shadow); }
+  /* v6.1.0：公告整卡键盘可达（Tab 聚焦 / Enter 打开） */
+  #announcementSection .ann-card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
   #announcementSection .ann-card[data-file]:hover {
     transform: translateY(-4px);
     box-shadow: var(--shadow-md);
@@ -955,6 +960,55 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* ── v6.1.0：友站视图的退出路径（sticky 返回 / × 关闭 / 空态返回） ── */
+  .links-view .links-head {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 2px;
+    background: var(--bg);
+  }
+  .links-view .links-title { flex: 1; text-align: center; margin: 0; }
+  .links-back-btn,
+  .links-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .links-close-btn { width: 34px; padding: 0; }
+  .links-back-btn svg,
+  .links-close-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .links-back-btn:hover,
+  .links-close-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .links-view .links-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
   }
 
   /* ── v5.2.2：已选标签 chip 内联进筛选区（不再单起一整行）──

@@ -252,6 +252,47 @@
             }
         }
     }
+    // v6.3.6：ASCII 图表（框线/目录树）—— 按容器宽度缩放字号（保持等宽对齐、不裁切），点击全屏查看原尺寸
+    function ysmFitAsciiAll(root) {
+        var list = (root || document).querySelectorAll("pre.ysm-ascii");
+        Array.prototype.forEach.call(list, function (pre) {
+            var code = pre.querySelector("code") || pre;
+            code.style.fontSize = "";
+            var avail = pre.clientWidth - 32;
+            var wd = code.scrollWidth;
+            if (avail > 0 && wd > avail + 2) {
+                var base = parseFloat(window.getComputedStyle(code).fontSize) || 13;
+                var size = Math.max(9, Math.floor(base * avail / wd * 10) / 10);
+                code.style.fontSize = size + "px";
+            }
+        });
+    }
+    var __ysmAsciiTimer = null;
+    window.addEventListener("resize", function () {
+        clearTimeout(__ysmAsciiTimer);
+        __ysmAsciiTimer = setTimeout(function () { ysmFitAsciiAll(document); }, 200);
+    });
+    function ysmOpenAscii(pre) {
+        var txt = pre.textContent || "";
+        if (!txt.trim()) return;
+        var mask = document.createElement("div");
+        mask.className = "ysm-ascii-modal";
+        var panel = document.createElement("div");
+        panel.className = "ysm-ascii-panel";
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ysm-ascii-close";
+        btn.textContent = "×";
+        var body = document.createElement("pre");
+        body.textContent = txt;
+        panel.appendChild(btn);
+        panel.appendChild(body);
+        mask.appendChild(panel);
+        mask.addEventListener("click", function (e) {
+            if (e.target === mask || e.target === btn) mask.remove();
+        });
+        document.body.appendChild(mask);
+    }
     function renderMermaidBlocks(e, n) {
         n = n || function() {};
         try {
@@ -1958,6 +1999,18 @@
                     t.appendChild(e);
                 }
             });
+            // v6.3.6：框线字符（架构/目录树）标记 —— 保持不换行，并按容器宽度自适应缩放（等宽对齐不破坏）
+            w.querySelectorAll("pre").forEach(function (p) {
+                var tx = p.textContent || "";
+                if (/[\u2500-\u257F]{2}/.test(tx)) {
+                    p.classList.add("ysm-ascii");
+                    if (!p.__ysmAsciiBound) {
+                        p.__ysmAsciiBound = 1;
+                        p.addEventListener("click", function () { ysmOpenAscii(p); });
+                    }
+                }
+            });
+            ysmFitAsciiAll(w);
             // 外链安全：禁止外链在当前页直接跳转离开本站；统一新窗口 + noopener noreferrer（防 tabnabbing）
                         w.querySelectorAll("a[href]").forEach(function(e) {
                 var t = e.getAttribute("href") || "";

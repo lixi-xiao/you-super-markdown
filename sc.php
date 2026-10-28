@@ -1,8 +1,6 @@
 <?php
 require_once __DIR__ . '/utils.php';
 // v6.1.0：服务端输出层 i18n
-require_once __DIR__ . '/lib/i18n-output.php';
-ysmI18nStart();
 secureSessionStart();
 
 // 权限检查：站长或写作者可访问
@@ -482,14 +480,14 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 <link rel="stylesheet" href="css/admin.css?v=<?= @filemtime(__DIR__ . '/css/admin.css') ?>">
 <!-- v6.1.0：后台 JS 动态文案运行时翻译 -->
 <script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
-<script src="js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
+<script src="js/i18n.js?v=<?= @filemtime(__DIR__ . '/js/i18n.js') ?>"></script>
 </head>
 <body>
 
 <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        <div class="sidebar-title"><span>文档</span>管理</div>
+        <div class="sidebar-title"><span><?= t('editor.001') ?></span><?= t('editor.002') ?></div>
     </div>
     <nav class="sidebar-nav">
         <a href="sc.php" class="sidebar-link active">
@@ -525,13 +523,13 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             文档管理
         </div>
-        <div class="page-subtitle">撰写、上传和管理文章</div>
+        <div class="page-subtitle"><?= t('editor.003') ?></div>
     </div>
 
     <?php if ($flagSaved): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= htmlspecialchars($saveOk ?: '操作成功') ?></div><?php endif; ?>
     <?php if ($errText): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= htmlspecialchars($errText) ?></div><?php endif; ?>
-    <?php if ($flagDeleted): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>文档已删除</div><?php endif; ?>
-    <?php if ($richZipOk): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>富媒体压缩包导入完成：文档 <?= $richZipMd ?> 篇、图片 <?= $richZipImg ?> 张、视频 <?= $richZipVid ?> 个（zip 已自动删除）</div><?php endif; ?>
+    <?php if ($flagDeleted): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('editor.075') ?></div><?php endif; ?>
+    <?php if ($richZipOk): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('editor.zip_done_head') ?><?= $richZipMd ?><?= t('editor.zip_done_mid1') ?><?= $richZipImg ?><?= t('editor.zip_done_mid2') ?><?= $richZipVid ?><?= t('editor.zip_done_tail') ?></div><?php endif; ?>
     <?php if ($richZipErrMsg): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= htmlspecialchars($richZipErrMsg) ?></div><?php endif; ?>
 
     <div class="card">
@@ -542,17 +540,17 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <div class="method-tabs" id="methodTabs">
-                <button type="button" class="method-tab active" data-method="file">文件上传</button>
-                <button type="button" class="method-tab" data-method="url">链接抓取</button>
-                <button type="button" class="method-tab" data-method="paste">粘贴内容</button>
-                <button type="button" class="method-tab" data-method="rich">富媒体压缩包</button>
+                <button type="button" class="method-tab active" data-method="file"><?= t('editor.004') ?></button>
+                <button type="button" class="method-tab" data-method="url"><?= t('editor.005') ?></button>
+                <button type="button" class="method-tab" data-method="paste"><?= t('editor.006') ?></button>
+                <button type="button" class="method-tab" data-method="rich"><?= t('editor.007') ?></button>
             </div>
             <div class="method-panel active" data-panel="file">
                 <div class="form-group">
                     <div class="upload-zone" id="uploadZone">
                         <div class="upload-zone-icon"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
-                        <div class="upload-zone-text">拖拽文件到此处，或点击选择</div>
-                        <div class="upload-zone-hint">支持 .md / .txt / .markdown / .zip（ZIP 自动解压）</div>
+                        <div class="upload-zone-text"><?= t('editor.008') ?></div>
+                        <div class="upload-zone-hint"><?= t('editor.009') ?></div>
                         <input type="file" name="markdown_file" accept=".md,.txt,.markdown,.zip" id="fileInput" class="upload-zone-input">
                     </div>
                     <div class="file-info" id="fileInfo" style="display:none">
@@ -563,24 +561,24 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
             </div>
             <div class="method-panel" data-panel="url">
                 <div class="form-group">
-                    <label class="form-label">文档链接</label>
+                    <label class="form-label"><?= t('editor.010') ?></label>
                     <input class="form-input" type="url" name="url" placeholder="https://example.com/doc.md">
                 </div>
             </div>
             <div class="method-panel" data-panel="paste">
                 <div class="form-group">
-                    <label class="form-label">Markdown 内容</label>
-                    <textarea class="form-input" name="content" id="contentArea" style="min-height:160px;font-family:monospace" placeholder="在此粘贴 Markdown 内容..."></textarea>
+                    <label class="form-label"><?= t('editor.011') ?></label>
+                    <textarea class="form-input" name="content" id="contentArea" style="min-height:160px;font-family:monospace" placeholder="<?= t('editor.012') ?>"></textarea>
                     <p class="form-hint" id="charCount"></p>
                 </div>
             </div>
             <div class="method-panel" data-panel="rich">
                 <div class="form-group">
-                    <p class="form-hint" style="margin-top:0">一个 zip 内可同时含 <strong>Markdown 文档 + 图片（jpg/png/gif/webp）+ 视频（mp4/webm）</strong>：文档存为文章、图片/视频解压到站内媒体目录，md 里的引用路径自动改写，主页即可正常显示图片与播放视频；压缩包解析完自动删除。上限：包 ≤80MB、单文件 ≤40MB、≤200 个文件。</p>
+                    <p class="form-hint" style="margin-top:0"><?= t('editor.013') ?><strong><?= t('editor.014') ?></strong><?= t('editor.015') ?></p>
                     <div class="upload-zone" id="richZipZone">
                         <div class="upload-zone-icon"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
-                        <div class="upload-zone-text">拖拽压缩包到此处，或点击选择</div>
-                        <div class="upload-zone-hint">支持 .zip（内含 .md + 图片 + 视频）</div>
+                        <div class="upload-zone-text"><?= t('editor.016') ?></div>
+                        <div class="upload-zone-hint"><?= t('editor.017') ?></div>
                         <input type="file" id="richZipInput" accept=".zip" class="upload-zone-input">
                     </div>
                     <div class="file-info" id="richZipInfo" style="display:none">
@@ -590,11 +588,11 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">作者</label>
-                        <input class="form-input" id="richAuthor" placeholder="作者名称">
+                        <label class="form-label"><?= t('editor.018') ?></label>
+                        <input class="form-input" id="richAuthor" placeholder="<?= t('editor.019') ?>">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">许可证书</label>
+                        <label class="form-label"><?= t('editor.020') ?></label>
                         <select class="form-select" id="richLicense">
                             <option value="CC BY-NC-SA 4.0" selected>CC BY-NC-SA 4.0</option>
                             <option value="CC BY 4.0">CC BY 4.0</option>
@@ -608,54 +606,54 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">分类</label>
-                        <input class="form-input" id="richCategory" placeholder="例如：技术、随笔">
+                        <label class="form-label"><?= t('editor.021') ?></label>
+                        <input class="form-input" id="richCategory" placeholder="<?= t('editor.022') ?>">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">标签（逗号分隔）</label>
+                        <label class="form-label"><?= t('editor.023') ?></label>
                         <input class="form-input" id="richTags" placeholder="PHP, Markdown">
                     </div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">预览摘要（留空自动生成）</label>
-                    <textarea class="form-input" id="richExcerpt" style="min-height:56px" placeholder="可选"></textarea>
+                    <label class="form-label"><?= t('editor.024') ?></label>
+                    <textarea class="form-input" id="richExcerpt" style="min-height:56px" placeholder="<?= t('editor.025') ?>"></textarea>
                 </div>
                 <!-- v4.1.6：富媒体包发布方式——立即发布 / 存草稿 / 定时发布（默认立即发布，与编辑器一致） -->
                 <div class="form-group">
-                    <label class="form-label">发布方式</label>
+                    <label class="form-label"><?= t('editor.026') ?></label>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
                         <select class="form-select" id="richPublishStatus" onchange="var r=document.getElementById('richPublishAtRow'); if(r) r.style.display=this.value==='scheduled'?'flex':'none'">
-                            <option value="published">立即发布</option>
-                            <option value="draft">存为草稿</option>
-                            <option value="scheduled">定时发布</option>
+                            <option value="published"><?= t('editor.027') ?></option>
+                            <option value="draft"><?= t('editor.028') ?></option>
+                            <option value="scheduled"><?= t('editor.029') ?></option>
                         </select>
-                        <span class="form-hint">导入的多篇文档统一按此方式发布；默认立即发布</span>
+                        <span class="form-hint"><?= t('editor.030') ?></span>
                     </div>
                 </div>
                 <div class="form-group" id="richPublishAtRow" style="display:none">
-                    <label class="form-label">发布时间</label>
+                    <label class="form-label"><?= t('editor.031') ?></label>
                     <input type="datetime-local" class="form-input" id="richPublishAt">
                 </div>
                 <div class="form-group" id="richProgressWrap" style="display:none">
-                    <div style="display:flex;justify-content:space-between;font-size:0.85em;color:var(--text-muted);margin-bottom:6px"><span id="richProgressText">上传中 0%</span><span id="richProgressSize"></span></div>
+                    <div style="display:flex;justify-content:space-between;font-size:0.85em;color:var(--text-muted);margin-bottom:6px"><span id="richProgressText"><?= t('editor.032') ?></span><span id="richProgressSize"></span></div>
                     <div style="height:8px;background:#eef1f6;border-radius:999px;overflow:hidden"><div id="richProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2563eb,#06b6d4);border-radius:999px;transition:width .2s"></div></div>
                 </div>
-                <button type="button" class="btn btn-primary" id="richSubmitBtn">导入富媒体压缩包</button>
+                <button type="button" class="btn btn-primary" id="richSubmitBtn"><?= t('editor.033') ?></button>
                 <span class="form-hint" id="richStatusHint" style="margin-left:10px"></span>
             </div>
             <!-- v3.3.1-fix：纯文档（文件/链接/粘贴）通用字段区——富媒体 tab 激活时由 JS 隐藏，避免与富媒体自己的字段重复 -->
             <div id="docCommonFields">
             <div class="form-group">
-                <label class="form-label">标题（留空则自动提取）</label>
-                <input class="form-input" name="title" placeholder="文档标题">
+                <label class="form-label"><?= t('editor.034') ?></label>
+                <input class="form-input" name="title" placeholder="<?= t('editor.035') ?>">
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">作者</label>
-                    <input class="form-input" name="author" placeholder="作者名称">
+                    <label class="form-label"><?= t('editor.018') ?></label>
+                    <input class="form-input" name="author" placeholder="<?= t('editor.019') ?>">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">许可证书</label>
+                    <label class="form-label"><?= t('editor.020') ?></label>
                     <select class="form-select" name="license">
                         <option value="CC BY-NC-SA 4.0" selected>CC BY-NC-SA 4.0</option>
                         <option value="CC BY 4.0">CC BY 4.0</option>
@@ -669,34 +667,34 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">分类</label>
-                    <input class="form-input" name="category" placeholder="例如：技术、随笔">
+                    <label class="form-label"><?= t('editor.021') ?></label>
+                    <input class="form-input" name="category" placeholder="<?= t('editor.022') ?>">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">标签（逗号分隔）</label>
+                    <label class="form-label"><?= t('editor.023') ?></label>
                     <input class="form-input" name="tags" placeholder="PHP, Markdown">
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label">预览摘要（留空自动生成）</label>
-                <textarea class="form-input" name="excerpt" style="min-height:56px" placeholder="可选"></textarea>
+                <label class="form-label"><?= t('editor.024') ?></label>
+                <textarea class="form-input" name="excerpt" style="min-height:56px" placeholder="<?= t('editor.025') ?>"></textarea>
             </div>
             <!-- v4.0.0：发布状态（立即发布 / 存草稿 / 定时发布） -->
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">发布方式</label>
+                    <label class="form-label"><?= t('editor.026') ?></label>
                     <select class="form-select" name="publish_status" onchange="this.form.querySelector('.publish-at-row').style.display = this.value==='scheduled' ? 'flex' : 'none'">
-                        <option value="published" selected>立即发布</option>
-                        <option value="draft">存为草稿（不公开）</option>
-                        <option value="scheduled">定时发布</option>
+                        <option value="published" selected><?= t('editor.027') ?></option>
+                        <option value="draft"><?= t('editor.036') ?></option>
+                        <option value="scheduled"><?= t('editor.029') ?></option>
                     </select>
                 </div>
                 <div class="form-group publish-at-row" style="display:none">
-                    <label class="form-label">发布时间</label>
+                    <label class="form-label"><?= t('editor.031') ?></label>
                     <input type="datetime-local" class="form-input" name="publish_at">
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary">上传文档</button>
+            <button type="submit" class="btn btn-primary"><?= t('editor.037') ?></button>
             </div>
         </form>
     </div>
@@ -709,12 +707,12 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
         <?php if (empty($docItems)): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <p>暂无文档</p>
+            <p><?= t('editor.038') ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
         <table>
-            <tr><th>标题</th><th>状态</th><th>置顶</th><th>查看</th><th>编辑</th><th>删除</th></tr>
+            <tr><th><?= t('editor.039') ?></th><th><?= t('editor.040') ?></th><th><?= t('editor.041') ?></th><th><?= t('editor.042') ?></th><th><?= t('editor.043') ?></th><th><?= t('editor.044') ?></th></tr>
             <?php foreach ($docItems as $f): ?>
             <?php
             // v4.0.0：列表状态标记（草稿 / 定时 / 已发布）
@@ -730,9 +728,9 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                 <td>
                     <button class="btn-link pin-btn <?= $f['pinned'] ? 'pinned' : '' ?>" data-name="<?= htmlspecialchars($f['name']) ?>" data-pinned="<?= $f['pinned'] ? '1' : '0' ?>"><?= $f['pinned'] ? '已置顶' : '置顶' ?></button>
                 </td>
-                <td><a class="btn-link" href="index.php?file=<?= urlencode($f['name']) ?>" target="_blank">查看</a></td>
-                <td><button class="btn-link edit-article-btn" data-name="<?= htmlspecialchars($f['name']) ?>">编辑</button></td>
-                <td><button class="btn-link danger delete-article-btn" data-name="<?= htmlspecialchars($f['name']) ?>" data-display="<?= htmlspecialchars($f['displayName']) ?>">删除</button></td>
+                <td><a class="btn-link" href="index.php?file=<?= urlencode($f['name']) ?>" target="_blank"><?= t('editor.042') ?></a></td>
+                <td><button class="btn-link edit-article-btn" data-name="<?= htmlspecialchars($f['name']) ?>"><?= t('links.011') ?></button></td>
+                <td><button class="btn-link danger delete-article-btn" data-name="<?= htmlspecialchars($f['name']) ?>" data-display="<?= htmlspecialchars($f['displayName']) ?>"><?= t('links.013') ?></button></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -745,17 +743,17 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 <div class="modal-overlay" id="deleteModal">
     <div class="modal-box" style="max-width:380px">
         <div class="modal-head">
-            <div class="modal-title">确认删除</div>
+            <div class="modal-title"><?= t('editor.045') ?></div>
             <button class="modal-close" onclick="closeModalById('deleteModal')">&times;</button>
         </div>
         <div class="modal-body">
-            <p id="deleteModalText" style="font-size:0.92em;color:var(--text-secondary);margin-bottom:18px">确定要删除这篇文章吗？此操作不可撤销。</p>
+            <p id="deleteModalText" style="font-size:0.92em;color:var(--text-secondary);margin-bottom:18px"><?= t('editor.046') ?></p>
             <div class="modal-actions">
-                <button class="btn btn-outline" onclick="closeModalById('deleteModal')">取消</button>
+                <button class="btn btn-outline" onclick="closeModalById('deleteModal')"><?= t('editor.047') ?></button>
                 <form method="post" style="display:inline">
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                     <input type="hidden" name="delete_file" id="deleteConfirmFile">
-                    <button type="submit" class="btn btn-danger">删除</button>
+                    <button type="submit" class="btn btn-danger"><?= t('editor.044') ?></button>
                 </form>
             </div>
         </div>
@@ -766,37 +764,37 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 <div class="modal-overlay" id="editModal">
     <div class="modal-box" style="max-width:720px;max-height:90vh;overflow-y:auto">
         <div class="modal-head">
-            <div class="modal-title">编辑文档 <span id="editFileName" style="font-weight:400;color:var(--text-muted);font-size:0.82em"></span></div>
-            <button class="modal-close" onclick="closeModalById('editModal')" aria-label="关闭">&times;</button>
+            <div class="modal-title"><?= t('editor.048') ?><span id="editFileName" style="font-weight:400;color:var(--text-muted);font-size:0.82em"></span></div>
+            <button class="modal-close" onclick="closeModalById('editModal')" aria-label="<?= t('editor.049') ?>">&times;</button>
         </div>
         <div class="modal-body">
             <form method="post" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <input type="hidden" name="update_file" id="editUpdateFile" value="">
                 <div class="form-group">
-                    <label class="form-label">Markdown 内容</label>
+                    <label class="form-label"><?= t('editor.011') ?></label>
                     <div class="editor-toolbar">
-                        <button type="button" class="btn btn-sm btn-outline" id="btnInsertImage">插入图片</button>
+                        <button type="button" class="btn btn-sm btn-outline" id="btnInsertImage"><?= t('editor.050') ?></button>
                         <input type="file" id="imageUploadInput" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none">
                         <span class="form-hint" id="imageUploadHint" style="margin-left:10px"></span>
-                        <button type="button" class="btn btn-sm btn-outline" id="btnInsertVideo" style="margin-left:8px">插入视频</button>
+                        <button type="button" class="btn btn-sm btn-outline" id="btnInsertVideo" style="margin-left:8px"><?= t('editor.051') ?></button>
                         <input type="file" id="videoUploadInput" accept="video/mp4,video/webm" style="display:none">
                         <span class="form-hint" id="videoUploadHint" style="margin-left:10px"></span>
                     </div>
-                    <textarea class="form-input" name="content" id="editContent" style="min-height:200px;font-family:monospace" placeholder="Markdown 内容..."></textarea>
+                    <textarea class="form-input" name="content" id="editContent" style="min-height:200px;font-family:monospace" placeholder="<?= t('editor.052') ?>"></textarea>
                     <p class="form-hint" id="editCharCount"></p>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">标题（留空则自动提取）</label>
-                    <input class="form-input" name="title" id="editTitle" placeholder="文档标题">
+                    <label class="form-label"><?= t('editor.034') ?></label>
+                    <input class="form-input" name="title" id="editTitle" placeholder="<?= t('editor.035') ?>">
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">作者</label>
-                        <input class="form-input" name="author" id="editAuthor" placeholder="作者">
+                        <label class="form-label"><?= t('editor.018') ?></label>
+                        <input class="form-input" name="author" id="editAuthor" placeholder="<?= t('editor.018') ?>">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">许可证书</label>
+                        <label class="form-label"><?= t('editor.020') ?></label>
                         <select class="form-select" name="license" id="editLicense">
                             <option value="CC BY-NC-SA 4.0">CC BY-NC-SA 4.0</option>
                             <option value="CC BY 4.0">CC BY 4.0</option>
@@ -810,30 +808,30 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">分类</label>
-                        <input class="form-input" name="category" id="editCategory" placeholder="分类">
+                        <label class="form-label"><?= t('editor.021') ?></label>
+                        <input class="form-input" name="category" id="editCategory" placeholder="<?= t('editor.021') ?>">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">标签（逗号分隔）</label>
-                        <input class="form-input" name="tags" id="editTags" placeholder="标签">
+                        <label class="form-label"><?= t('editor.023') ?></label>
+                        <input class="form-input" name="tags" id="editTags" placeholder="<?= t('editor.053') ?>">
                     </div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">预览摘要</label>
-                    <textarea class="form-input" name="excerpt" id="editExcerpt" style="min-height:56px" placeholder="可选"></textarea>
+                    <label class="form-label"><?= t('editor.054') ?></label>
+                    <textarea class="form-input" name="excerpt" id="editExcerpt" style="min-height:56px" placeholder="<?= t('editor.025') ?>"></textarea>
                 </div>
                 <!-- v4.0.0：编辑时发布状态（立即发布 / 存草稿 / 定时发布） -->
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">发布方式</label>
+                        <label class="form-label"><?= t('editor.026') ?></label>
                         <select class="form-select" name="publish_status" id="editPublishStatus" onchange="var r=this.closest('form').querySelector('.edit-publish-at-row');if(r)r.style.display=this.value==='scheduled'?'flex':'none'">
-                            <option value="published">立即发布</option>
-                            <option value="draft">存为草稿（不公开）</option>
-                            <option value="scheduled">定时发布</option>
+                            <option value="published"><?= t('editor.027') ?></option>
+                            <option value="draft"><?= t('editor.036') ?></option>
+                            <option value="scheduled"><?= t('editor.029') ?></option>
                         </select>
                     </div>
                     <div class="form-group edit-publish-at-row" style="display:none">
-                        <label class="form-label">发布时间</label>
+                        <label class="form-label"><?= t('editor.031') ?></label>
                         <input type="datetime-local" class="form-input" name="publish_at" id="editPublishAt">
                     </div>
                 </div>
@@ -841,14 +839,14 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                 <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface-2,var(--bg));border:1px solid var(--border);border-radius:10px">
                     <input type="checkbox" name="as_announce" id="editAsAnnounce" value="1" style="width:17px;height:17px;accent-color:var(--accent)">
                     <div>
-                        <label for="editAsAnnounce" style="font-weight:600;cursor:pointer">同时作为公告展示</label>
-                        <div class="form-hint" style="margin:0">开启后该文章在首页公告区展示，且不再出现在文章列表</div>
+                        <label for="editAsAnnounce" style="font-weight:600;cursor:pointer"><?= t('editor.055') ?></label>
+                        <div class="form-hint" style="margin:0"><?= t('editor.056') ?></div>
                     </div>
                 </div>
                 <?php endif; ?>
                 <div class="modal-actions">
-                    <button type="submit" class="btn btn-primary">保存修改</button>
-                    <button type="button" class="btn btn-outline" onclick="closeModalById('editModal')">取消</button>
+                    <button type="submit" class="btn btn-primary"><?= t('editor.057') ?></button>
+                    <button type="button" class="btn btn-outline" onclick="closeModalById('editModal')"><?= t('editor.047') ?></button>
                 </div>
             </form>
         </div>
@@ -862,7 +860,7 @@ document.querySelectorAll('.modal-overlay').forEach(function(m) {
 });
 
 function openDeleteConfirmModal(fn, dn) {
-    document.getElementById('deleteModalText').textContent = ysmT('确定要删除「{name}」吗？此操作不可撤销。').replace('{name}', dn);
+    document.getElementById('deleteModalText').textContent = TK('editor.058').replace('{name}', dn);
     document.getElementById('deleteConfirmFile').value = fn;
     document.getElementById('deleteModal').classList.add('active');
 }
@@ -928,11 +926,11 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
     var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content
         || (document.querySelector('input[name="csrf_token"]') || {}).value || '';
     btn.addEventListener('click', function() {
-        if (!input.files.length) { hint.textContent = ysmT('请先选择 zip 压缩包'); return; }
+        if (!input.files.length) { hint.textContent = TK('editor.059'); return; }
         var file = input.files[0];
-        if (!/\.zip$/i.test(file.name)) { hint.textContent = ysmT('仅支持 .zip 文件'); return; }
-        if (file.size > 80 * 1024 * 1024) { hint.textContent = ysmT('压缩包超过 80MB 上限'); return; }
-        if (!window.confirm(ysmT('确认导入该富媒体压缩包？'))) return;
+        if (!/\.zip$/i.test(file.name)) { hint.textContent = TK('editor.060'); return; }
+        if (file.size > 80 * 1024 * 1024) { hint.textContent = TK('editor.061'); return; }
+        if (!window.confirm(TK('editor.062'))) return;
         var fd = new FormData();
         fd.append('rich_zip', file);
         fd.append('csrf_token', csrf);
@@ -947,7 +945,7 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
         btn.disabled = true;
         hint.textContent = '';
         pwrap.style.display = 'block';
-        ptext.textContent = ysmT('上传中 0%');
+        ptext.textContent = TK('editor.032');
         psize.textContent = (file.size / 1048576).toFixed(2) + ' MB';
         pbar.style.width = '0%';
         var xhr = new XMLHttpRequest();
@@ -956,7 +954,7 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
             if (e.lengthComputable) {
                 var pct = Math.round(e.loaded / e.total * 100);
                 pbar.style.width = pct + '%';
-                ptext.textContent = ysmT('上传中 {n}%').replace('{n}', pct);
+                ptext.textContent = TK('editor.063').replace('{n}', pct);
                 psize.textContent = (e.loaded / 1048576).toFixed(2) + ' / ' + (e.total / 1048576).toFixed(2) + ' MB';
             }
         };
@@ -965,14 +963,14 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
                 // 服务端 302 已由 XHR 跟随，最终 URL 带 rich_zip 结果参数 → 刷新显示结果
                 location.href = xhr.responseURL || 'sc.php';
             } else {
-                ptext.textContent = ysmT('上传失败（HTTP {code}）').replace('{code}', xhr.status);
+                ptext.textContent = TK('editor.064').replace('{code}', xhr.status);
                 pbar.style.width = '0%';
                 btn.disabled = false;
-                hint.textContent = ysmT('请重试或检查服务器上传限制');
+                hint.textContent = TK('editor.065');
             }
         };
         xhr.onerror = function() {
-            ptext.textContent = ysmT('网络错误，上传失败');
+            ptext.textContent = TK('editor.066');
             btn.disabled = false;
         };
         xhr.send(fd);
@@ -983,7 +981,7 @@ function ysmResetFilePicker(fi, info, dz) { fi.value = ''; info.style.display = 
 (function() {
     var ta = document.getElementById('contentArea'), ct = document.getElementById('charCount');
     if (!ta || !ct) return;
-    function updateEditorCharCount() { var l = ta.value.replace(/\s/g,'').length; ct.textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : ''; }
+    function updateEditorCharCount() { var l = ta.value.replace(/\s/g,'').length; ct.textContent = l > 0 ? TK('editor.067').replace('{n}', l) : ''; }
     ta.addEventListener('input', updateEditorCharCount);
 })();
 
@@ -1028,12 +1026,12 @@ function openArticleEditor(fn) {
             }
             if (annChk && d.is_announce) annChk.checked = true;
             var l = d.content.replace(/\s/g,'').length;
-            document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
+            document.getElementById('editCharCount').textContent = l > 0 ? TK('editor.067').replace('{n}', l) : '';
         });
 }
 document.getElementById('editContent')?.addEventListener('input', function() {
     var l = this.value.replace(/\s/g,'').length;
-    document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
+    document.getElementById('editCharCount').textContent = l > 0 ? TK('editor.067').replace('{n}', l) : '';
 });
 
 // v3.1.6：文章图片上传（站长/写作者；上传成功后以 Markdown 语法插入光标处）
@@ -1047,7 +1045,7 @@ document.getElementById('editContent')?.addEventListener('input', function() {
         if (!this.files.length) return;
         var file = this.files[0];
         var csrf = (document.querySelector('#editModal input[name=csrf_token]') || {}).value || '';
-        hint.textContent = ysmT('上传中...');
+        hint.textContent = TK('editor.068');
         var fd = new FormData();
         fd.append('image', file);
         fetch('api.php?action=article_image_upload', {
@@ -1055,17 +1053,17 @@ document.getElementById('editContent')?.addEventListener('input', function() {
             headers: { 'X-CSRF-Token': csrf },
             body: fd
         }).then(function(r) { return r.json(); }).then(function(d) {
-            if (!d.success) { hint.textContent = ysmT('上传失败：') + (d.error || ysmT('未知错误')); return; }
-            hint.textContent = ysmT('已上传 ✓');
+            if (!d.success) { hint.textContent = TK('editor.069') + (d.error || TK('editor.070')); return; }
+            hint.textContent = TK('editor.071');
             var ta = document.getElementById('editContent');
-            var ins = '\n![' + ysmT('图片') + '](' + d.url + ')\n';
+            var ins = '\n![' + TK('editor.072') + '](' + d.url + ')\n';
             var start = ta.selectionStart, end = ta.selectionEnd;
             ta.value = ta.value.slice(0, start) + ins + ta.value.slice(end);
             ta.selectionStart = ta.selectionEnd = start + ins.length;
             ta.focus();
             var l = ta.value.replace(/\s/g,'').length;
-            document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
-        }).catch(function() { hint.textContent = ysmT('网络错误，上传失败'); });
+            document.getElementById('editCharCount').textContent = l > 0 ? TK('editor.067').replace('{n}', l) : '';
+        }).catch(function() { hint.textContent = TK('editor.066'); });
         this.value = '';
     });
 })();
@@ -1080,9 +1078,9 @@ document.getElementById('editContent')?.addEventListener('input', function() {
     input.addEventListener('change', function() {
         if (!this.files.length) return;
         var file = this.files[0];
-        if (file.size > 20 * 1024 * 1024) { hint.textContent = ysmT('视频需 ≤20MB，请先压缩后再传'); this.value = ''; return; }
+        if (file.size > 20 * 1024 * 1024) { hint.textContent = TK('editor.073'); this.value = ''; return; }
         var csrf = (document.querySelector('#editModal input[name=csrf_token]') || {}).value || '';
-        hint.textContent = ysmT('上传中...');
+        hint.textContent = TK('editor.068');
         var fd = new FormData();
         fd.append('video', file);
         fetch('api.php?action=article_video_upload', {
@@ -1090,17 +1088,17 @@ document.getElementById('editContent')?.addEventListener('input', function() {
             headers: { 'X-CSRF-Token': csrf },
             body: fd
         }).then(function(r) { return r.json(); }).then(function(d) {
-            if (!d.success) { hint.textContent = ysmT('上传失败：') + (d.error || ysmT('未知错误')); return; }
-            hint.textContent = ysmT('已上传 ✓');
+            if (!d.success) { hint.textContent = TK('editor.069') + (d.error || TK('editor.070')); return; }
+            hint.textContent = TK('editor.071');
             var ta = document.getElementById('editContent');
-            var ins = '\n!video[' + ysmT('视频') + '](' + d.url + ')\n';
+            var ins = '\n!video[' + TK('editor.074') + '](' + d.url + ')\n';
             var start = ta.selectionStart, end = ta.selectionEnd;
             ta.value = ta.value.slice(0, start) + ins + ta.value.slice(end);
             ta.selectionStart = ta.selectionEnd = start + ins.length;
             ta.focus();
             var l = ta.value.replace(/\s/g,'').length;
-            document.getElementById('editCharCount').textContent = l > 0 ? ysmT('{n} 字').replace('{n}', l) : '';
-        }).catch(function() { hint.textContent = ysmT('网络错误，上传失败'); });
+            document.getElementById('editCharCount').textContent = l > 0 ? TK('editor.067').replace('{n}', l) : '';
+        }).catch(function() { hint.textContent = TK('editor.066'); });
         this.value = '';
     });
 })();

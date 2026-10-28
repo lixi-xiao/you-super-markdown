@@ -3,8 +3,6 @@ require_once __DIR__ . '/../utils.php';
 // v6.0.0：语言启停列表（ysmAllLangs / ysmSupportedLangs）
 require_once __DIR__ . '/../lib/i18n.php';
 // v6.1.0：服务端输出层 i18n（后台同样按当前语言输出）
-require_once __DIR__ . '/../lib/i18n-output.php';
-ysmI18nStart();
 secureSessionStart();
 
 // 超管检查：必须通过 OTP 登录，且 JWT 有效
@@ -118,7 +116,7 @@ if (isset($_POST['save_backup_config'])) {
     $bkTrigger = !empty($_POST['trigger_backup']);
     $bkSingle = !empty($_POST['single_restore']);
     $bkOk = saveBackupConfig($bkInterval, $bkArtKeep, $bkManKeep, $bkTrigger, $bkSingle);
-    auditLog('backup_config_update', 'backup.conf', "数据库备份间隔={$bkInterval}分钟/文章保留{$bkArtKeep}份/手动保留{$bkManKeep}份/上传触发备份=" . ($bkTrigger ? '开' : '关') . "/单篇还原=" . ($bkSingle ? '开' : '关'), $bkOk ? 'success' : 'failed');
+    auditLog('backup_config_update', 'backup.conf', "数据库备份间隔={$bkInterval}分钟/文章保留{$bkArtKeep}份/手动保留{$bkManKeep}份/上传触发备份=" . ($bkTrigger ? t('common.on') : t('common.off')) . "/单篇还原=" . ($bkSingle ? t('common.on') : t('common.off')), $bkOk ? 'success' : 'failed');
     header('Location: dashboard.php?tab=data&msg=' . ($bkOk ? 'saved' : 'save_failed'));
     exit;
 }
@@ -943,18 +941,18 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
 <link rel="stylesheet" href="../css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
 <!-- v6.1.0：后台 JS 动态文案（弹窗/提示/异步渲染）运行时翻译 -->
 <script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
-<script src="../js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/../js/i18n-live.js') ?>"></script>
+<script src="../js/i18n.js?v=<?= @filemtime(__DIR__ . '/../js/i18n.js') ?>"></script>
 </head>
 <body>
 
 <!-- v3.1.5：移动端顶栏（菜单按钮融入顶栏，与后台统一视觉） -->
 <div class="mobile-topbar" id="mobileTopbar">
-    <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleSidebar()" aria-label="打开菜单">
+    <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleSidebar()" aria-label="<?= t('admin.001') ?>">
         <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <div class="mobile-topbar-title">超管后台</div>
+    <div class="mobile-topbar-title"><?= t('admin.002') ?></div>
     <div class="mobile-topbar-user">
-        <span class="mobile-topbar-name">超管</span>
+        <span class="mobile-topbar-name"><?= t('admin.003') ?></span>
     </div>
 </div>
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
@@ -962,7 +960,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
 <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
         <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <div class="sidebar-title"><span>超管</span>后台</div>
+        <div class="sidebar-title"><span><?= t('admin.003') ?></span><?= t('admin.004') ?></div>
     </div>
     <nav class="sidebar-nav">
         <a href="dashboard.php" class="sidebar-link <?= (!isset($_GET['tab']) || $_GET['tab'] === 'overview') ? 'active' : '' ?>">
@@ -1030,33 +1028,33 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
 </div>
 
 <div class="main">
-    <?php if ($msg === 'saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>配置已保存</div><?php endif; ?>
-    <?php if ($msg === 'user_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>用户已创建</div><?php endif; ?>
-    <?php if ($msg === 'user_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>用户已删除</div><?php endif; ?>
-    <?php if ($msg === 'user_disabled'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>账号已禁用，该用户已无法登录/评论</div><?php endif; ?>
-    <?php if ($msg === 'user_enabled'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>账号已启用</div><?php endif; ?>
-    <?php if ($msg === 'role_changed'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>用户权限已修改</div><?php endif; ?>
-    <?php if ($msg === 'role_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>权限修改无效（无法操作超管）</div><?php endif; ?>
-    <?php if ($msg === 'station_changed'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者归属站长已更新</div><?php endif; ?>
-    <?php if ($msg === 'station_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>归属设置无效（仅写作者可归属站长）</div><?php endif; ?>
-    <?php if ($msg === 'pwd_reset'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>密码已重置，请立即保存并告知用户</div><?php endif; ?>
-    <?php if ($msg === 'reset_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>重置失败（无法操作超管）</div><?php endif; ?>
+    <?php if ($msg === 'saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.369') ?></div><?php endif; ?>
+    <?php if ($msg === 'user_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.370') ?></div><?php endif; ?>
+    <?php if ($msg === 'user_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.371') ?></div><?php endif; ?>
+    <?php if ($msg === 'user_disabled'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.372') ?></div><?php endif; ?>
+    <?php if ($msg === 'user_enabled'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.373') ?></div><?php endif; ?>
+    <?php if ($msg === 'role_changed'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.374') ?></div><?php endif; ?>
+    <?php if ($msg === 'role_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.375') ?></div><?php endif; ?>
+    <?php if ($msg === 'station_changed'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.376') ?></div><?php endif; ?>
+    <?php if ($msg === 'station_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.377') ?></div><?php endif; ?>
+    <?php if ($msg === 'pwd_reset'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.378') ?></div><?php endif; ?>
+    <?php if ($msg === 'reset_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.379') ?></div><?php endif; ?>
     <?php if (!empty($_SESSION['flash_reset_pwd'])): ?>
     <?php $flashPwd = $_SESSION['flash_reset_pwd']; unset($_SESSION['flash_reset_pwd']); ?>
     <div class="msg msg-warn" style="border:1px dashed var(--accent);background:var(--accent-light,#f0f5ff)">
         <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        用户 <strong><?= htmlspecialchars($flashPwd['account'] ?? '') ?></strong> 的新密码：<code style="font-size:1.1em;font-weight:700"><?= htmlspecialchars($flashPwd['pwd'] ?? '') ?></code>
+        用户 <strong><?= htmlspecialchars($flashPwd['account'] ?? '') ?></strong><?= t('admin.380') ?><code style="font-size:1.1em;font-weight:700"><?= htmlspecialchars($flashPwd['pwd'] ?? '') ?></code>
         （仅本次显示，请立即复制并安全告知用户）
     </div>
     <?php endif; ?>
-    <?php if ($msg === 'account_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
-    <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>密码至少 8 位，且必须包含大写字母、小写字母与数字</div><?php endif; ?>
-    <?php if ($msg === 'challenge_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>挑战码无效或已过期，请重新生成</div><?php endif; ?>
+    <?php if ($msg === 'account_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.381') ?></div><?php endif; ?>
+    <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.382') ?></div><?php endif; ?>
+    <?php if ($msg === 'challenge_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.250') ?></div><?php endif; ?>
 
     <?php if (!$updateNotifyReady): ?>
     <div class="msg msg-warning">
         <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        <strong>更新通知不可用</strong>：发现新版本时将无法邮件通知超管。请前往「邮件设置」配置 SMTP，并在「系统配置」填写管理员邮箱（安装时要求必填；可用 <code>sudo ysm-admin check</code> 体检）。
+        <strong><?= t('admin.005') ?></strong><?= t('admin.006') ?><code>sudo ysm-admin check</code> 体检）。
     </div>
     <?php endif; ?>
 
@@ -1078,14 +1076,14 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
             系统总览
         </div>
-        <div class="page-subtitle">高级管理员控制面板</div>
+        <div class="page-subtitle"><?= t('admin.007') ?></div>
     </div>
 
     <div class="stats-grid">
-        <div class="stat-card"><div class="stat-number"><?= $superCount ?></div><div class="stat-label">高级管理员</div></div>
-        <div class="stat-card"><div class="stat-number"><?= $stationCount ?></div><div class="stat-label">站长</div></div>
-        <div class="stat-card"><div class="stat-number"><?= $authorCount ?></div><div class="stat-label">写作者</div></div>
-        <div class="stat-card"><div class="stat-number"><?= $userCount ?></div><div class="stat-label">注册用户</div></div>
+        <div class="stat-card"><div class="stat-number"><?= $superCount ?></div><div class="stat-label"><?= t('admin.383') ?></div></div>
+        <div class="stat-card"><div class="stat-number"><?= $stationCount ?></div><div class="stat-label"><?= t('station.003') ?></div></div>
+        <div class="stat-card"><div class="stat-number"><?= $authorCount ?></div><div class="stat-label"><?= t('author.003') ?></div></div>
+        <div class="stat-card"><div class="stat-number"><?= $userCount ?></div><div class="stat-label"><?= t('admin.384') ?></div></div>
     </div>
 
     <div class="card">
@@ -1095,11 +1093,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         </div>
         <div class="table-wrap">
         <table>
-            <tr><td style="color:var(--text-muted)">版本</td><td><code><?= APP_VERSION ?></code></td></tr>
-            <tr><td style="color:var(--text-muted)">注册开关</td><td><?= empty($config['registration_enabled']) ? '关闭' : '开启' ?></td></tr>
-            <tr><td style="color:var(--text-muted)">访客评论</td><td><?= empty($config['guest_comments_enabled']) ? '关闭' : '开启' ?></td></tr>
-            <tr><td style="color:var(--text-muted)">超管主页评论</td><td><?= empty($config['super_admin_comment']) ? '关闭' : '开启' ?></td></tr>
-            <tr><td style="color:var(--text-muted)">更新通道</td><td><?= htmlspecialchars($config['update_channel'] ?? 'stable') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.385') ?></td><td><code><?= APP_VERSION ?></code></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.386') ?></td><td><?= empty($config['registration_enabled']) ? '关闭' : '开启' ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.387') ?></td><td><?= empty($config['guest_comments_enabled']) ? '关闭' : '开启' ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.388') ?></td><td><?= empty($config['super_admin_comment']) ? '关闭' : '开启' ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.041') ?></td><td><?= htmlspecialchars($config['update_channel'] ?? 'stable') ?></td></tr>
         </table>
         </div>
     </div>
@@ -1110,7 +1108,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             用户管理
         </div>
-        <div class="page-subtitle">管理站长 / 写作者 / 普通用户：查看详情、修改权限、归属设置、禁用启用、重置密码与删除（敏感操作需 SSH 挑战码）</div>
+        <div class="page-subtitle"><?= t('admin.008') ?></div>
     </div>
     <?php
     // v4.6.0：用户管理搜索与分页参数（需在搜索框渲染前解析）
@@ -1124,9 +1122,9 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <form method="get" style="margin-bottom:14px" id="userSearchForm">
         <input type="hidden" name="tab" value="users">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input class="form-input" type="text" name="users_q" value="<?= htmlspecialchars($usersQ) ?>" placeholder="搜索用户名 / 昵称 / 邮箱 / 归属站长…" style="max-width:340px">
-            <button type="submit" class="btn">搜索</button>
-            <?php if ($usersQ !== ''): ?><a class="btn btn-ghost" href="dashboard.php?tab=users">清除</a><?php endif; ?>
+            <input class="form-input" type="text" name="users_q" value="<?= htmlspecialchars($usersQ) ?>" placeholder="<?= t('admin.389') ?>" style="max-width:340px">
+            <button type="submit" class="btn"><?= t('admin.009') ?></button>
+            <?php if ($usersQ !== ''): ?><a class="btn btn-ghost" href="dashboard.php?tab=users"><?= t('admin.193') ?></a><?php endif; ?>
         </div>
     </form>
     <?php
@@ -1143,28 +1141,28 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <input type="hidden" name="challenge_code">
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">昵称</label>
-                    <input class="form-input" name="nickname" placeholder="用户昵称">
+                    <label class="form-label"><?= t('admin.010') ?></label>
+                    <input class="form-input" name="nickname" placeholder="<?= t('admin.011') ?>">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">用户名（3-20 位字母/数字）</label>
-                    <input class="form-input" name="username" placeholder="登录用户名" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,19}">
+                    <label class="form-label"><?= t('admin.012') ?></label>
+                    <input class="form-input" name="username" placeholder="<?= t('admin.013') ?>" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,19}">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">密码（至少 8 位，含大小写字母与数字）</label>
+                    <label class="form-label"><?= t('admin.014') ?></label>
                     <input class="form-input" name="password" type="password" placeholder="******">
                 </div>
                 <div class="form-group" style="min-width:120px">
-                    <label class="form-label">角色</label>
+                    <label class="form-label"><?= t('admin.015') ?></label>
                     <select class="form-select" name="role">
-                        <option value="<?= ROLE_STATION_ADMIN ?>">站长</option>
-                        <option value="<?= ROLE_AUTHOR ?>">写作者</option>
-                        <option value="<?= ROLE_USER ?>">普通用户</option>
+                        <option value="<?= ROLE_STATION_ADMIN ?>"><?= t('station.003') ?></option>
+                        <option value="<?= ROLE_AUTHOR ?>"><?= t('author.003') ?></option>
+                        <option value="<?= ROLE_USER ?>"><?= t('admin.355') ?></option>
                     </select>
                 </div>
                 <div class="form-group" style="flex:0">
                     <label class="form-label">&nbsp;</label>
-                    <button type="submit" class="btn btn-primary">创建</button>
+                    <button type="submit" class="btn btn-primary"><?= t('admin.016') ?></button>
                 </div>
             </div>
         </form>
@@ -1236,8 +1234,8 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         ];
     }
     function ysmStatusBadge($u) {
-        if (!empty($u['disabled'])) return '<span class="role-badge" style="background:rgba(229,72,77,.12);color:var(--danger,#e5484d)">已禁用</span>';
-        return '<span class="role-badge" style="background:rgba(52,199,89,.12);color:#34c759">正常</span>';
+        if (!empty($u['disabled'])) return '<span class="role-badge" style="background:rgba(229,72,77,.12);color:var(--danger,#e5484d)">' . t('admin.017') . '</span>';
+        return '<span class="role-badge" style="background:rgba(52,199,89,.12);color:#34c759">' . t('admin.018') . '</span>';
     }
     function ysmOpMenu($u, $stationNames, $detail) {
         if (($u['role'] ?? '') === ROLE_SUPER_ADMIN) return '<span style="color:var(--text-muted);font-size:0.82em">—</span>';
@@ -1252,45 +1250,45 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         $statusColor = !empty($u['disabled']) ? 'var(--danger)' : 'var(--text-muted)';
         $tok = htmlspecialchars(generateCsrfToken());
         // v3.0.3~v3.0.5：⋯ 按钮（SVG 竖排三点）+ 隐藏 template（内容注入单例 userOpModal 独立弹窗展示）
-        $h = '<button type="button" class="user-op-btn" data-op-target="uop-' . $uid . '" title="管理用户"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>';
+        $h = '<button type="button" class="user-op-btn" data-op-target="uop-' . $uid . '" title="' . t('admin.019') . '"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>';
         $h .= '<template id="uop-' . $uid . '">';
         // 用户信息头（头像按角色色光环）
         $h .= '<div class="user-op-modal-user"><div class="user-op-avatar role-' . htmlspecialchars($roleKey) . '">' . $initial . '</div><div><div class="user-op-user-name">' . $name . '</div><div class="user-op-user-meta"><span>用户名: ' . $account . '</span><span class="role-badge role-' . htmlspecialchars($roleKey) . '">' . $roleLabel . '</span><span style="color:' . $statusColor . '">' . $statusTxt . '</span></div></div></div>';
         // 查看详情（只读，无需挑战码）
-        $h .= '<button type="button" class="user-op-item" data-detail=\'' . htmlspecialchars(json_encode($detail, JSON_UNESCAPED_UNICODE), ENT_QUOTES) . '\' onclick="ysmOpenUserDetail(this)"><span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span><span class="user-op-txt">查看详情</span></button>';
+        $h .= '<button type="button" class="user-op-item" data-detail=\'' . htmlspecialchars(json_encode($detail, JSON_UNESCAPED_UNICODE), ENT_QUOTES) . '\' onclick="ysmOpenUserDetail(this)"><span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span><span class="user-op-txt">' . t('admin.020') . '</span></button>';
         // 权限设置
-        $h .= '<div class="user-op-sep"></div><div class="user-op-head">权限设置</div>';
+        $h .= '<div class="user-op-sep"></div><div class="user-op-head">' . t('admin.021') . '</div>';
         $h .= '<form method="post" class="need-challenge"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="set_user_role"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
-        $h .= '<div class="user-op-form"><div class="user-op-row"><span class="user-op-label">角色</span><select class="form-select" name="role">';
+        $h .= '<div class="user-op-form"><div class="user-op-row"><span class="user-op-label">' . t('admin.015') . '</span><select class="form-select" name="role">';
         foreach ([ROLE_STATION_ADMIN => '站长', ROLE_AUTHOR => '写作者', ROLE_USER => '普通用户'] as $rv => $rl) {
             $sel = ($u['role'] ?? '') === $rv ? ' selected' : '';
             $h .= '<option value="' . $rv . '"' . $sel . '>' . $rl . '</option>';
         }
-        $h .= '</select><button type="submit" class="user-op-save">保存</button></div></div></form>';
+        $h .= '</select><button type="submit" class="user-op-save">' . t('admin.022') . '</button></div></div></form>';
         // 归属设置（仅写作者）
         if ($isAuthor) {
-            $h .= '<div class="user-op-sep"></div><div class="user-op-head">归属设置</div>';
+            $h .= '<div class="user-op-sep"></div><div class="user-op-head">' . t('admin.023') . '</div>';
             $h .= '<form method="post" class="need-challenge"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="set_user_station"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
-            $h .= '<div class="user-op-form"><div class="user-op-row"><span class="user-op-label">站长</span><select class="form-select" name="station_id">';
-            $h .= '<option value="">超管</option>';
+            $h .= '<div class="user-op-form"><div class="user-op-row"><span class="user-op-label">' . t('admin.024') . '</span><select class="form-select" name="station_id">';
+            $h .= '<option value="">' . t('admin.003') . '</option>';
             foreach ($stationNames as $sid => $sname) {
                 $sel = ($u['station_id'] ?? '') === $sid ? ' selected' : '';
                 $h .= '<option value="' . htmlspecialchars($sid) . '"' . $sel . '>' . htmlspecialchars($sname) . '</option>';
             }
-            $h .= '</select><button type="submit" class="user-op-save">保存</button></div></div></form>';
+            $h .= '</select><button type="submit" class="user-op-save">' . t('admin.022') . '</button></div></div></form>';
         }
         // 禁用/启用
-        $confirm = !empty($u['disabled']) ? '确认启用 ' . $name . ' ？' : '确认禁用 ' . $name . ' ？禁用后该用户无法登录/评论，已登录会话立即失效';
+        $confirm = !empty($u['disabled']) ? t('admin.cf_enable', ['name' => $name]) : t('admin.cf_disable', ['name' => $name]);
         $h .= '<div class="user-op-sep"></div>';
         $h .= '<form method="post" class="need-challenge" data-confirm="' . htmlspecialchars($confirm, ENT_QUOTES) . '"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="set_user_disabled"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="disabled" value="' . (!empty($u['disabled']) ? '0' : '1') . '"><input type="hidden" name="challenge_code">';
-        $h .= '<button type="submit" class="user-op-item">' . (!empty($u['disabled']) ? '<span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg></span><span class="user-op-txt">启用账号</span>' : '<span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="18" y1="8" x2="23" y2="13"/><line x1="23" y1="8" x2="18" y2="13"/></svg></span><span class="user-op-txt">禁用账号</span>') . '</button></form>';
+        $h .= '<button type="submit" class="user-op-item">' . (!empty($u['disabled']) ? '<span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg></span><span class="user-op-txt">' . t('admin.025') . '</span>' : '<span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="18" y1="8" x2="23" y2="13"/><line x1="23" y1="8" x2="18" y2="13"/></svg></span><span class="user-op-txt">' . t('admin.026') . '</span>') . '</button></form>';
         // 重置密码
-        $h .= '<form method="post" class="need-challenge" data-confirm="确认重置 ' . $name . ' 的密码？将生成随机强密码并仅显示一次"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="reset_password"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
-        $h .= '<button type="submit" class="user-op-item"><span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span><span class="user-op-txt">重置密码</span></button></form>';
+        $h .= '<form method="post" class="need-challenge" data-confirm="' . t('admin.cf_reset', ['name' => $name]) . '"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="reset_password"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
+        $h .= '<button type="submit" class="user-op-item"><span class="user-op-ic"><svg viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span><span class="user-op-txt">' . t('admin.027') . '</span></button></form>';
         // 删除
         $h .= '<div class="user-op-sep"></div>';
-        $h .= '<form method="post" class="need-challenge" data-confirm="确定删除 ' . $name . '？"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="delete_user"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
-        $h .= '<button type="submit" class="user-op-item danger"><span class="user-op-ic"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></span><span class="user-op-txt">删除用户</span></button></form>';
+        $h .= '<form method="post" class="need-challenge" data-confirm="' . t('admin.cf_delete', ['name' => $name]) . '"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="delete_user"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
+        $h .= '<button type="submit" class="user-op-item danger"><span class="user-op-ic"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></span><span class="user-op-txt">' . t('admin.028') . '</span></button></form>';
         $h .= '</template>';
         return $h;
     }
@@ -1303,7 +1301,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             系统管理员<span class="card-badge"><?= $saPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
-            <tr><th>昵称</th><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th></tr>
+            <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.015') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th></tr>
             <?php foreach ($saPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
@@ -1325,7 +1323,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             站长<span class="card-badge"><?= $stPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
-            <tr><th>昵称</th><th>用户名</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th><th><?= t('admin.032') ?></th></tr>
             <?php foreach ($stPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
@@ -1347,7 +1345,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             写作者<span class="card-badge"><?= $auPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
-            <tr><th>昵称</th><th>用户名</th><th>归属站长</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.033') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th><th><?= t('admin.032') ?></th></tr>
             <?php foreach ($auPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
@@ -1370,7 +1368,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             普通用户<span class="card-badge"><?= $usPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
-            <tr><th>昵称</th><th>用户名</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th><th><?= t('admin.032') ?></th></tr>
             <?php foreach ($usPaged['items'] as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['nickname'] ?? '') ?></td>
@@ -1391,7 +1389,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
             审计日志
         </div>
-        <div class="page-subtitle">操作审计记录 · 哈希链防篡改</div>
+        <div class="page-subtitle"><?= t('admin.034') ?></div>
     </div>
     <?php
     $q = trim((string)($_GET['q'] ?? ''));
@@ -1406,7 +1404,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
             哈希链校验失败！日志可能已被篡改。
         </div>
-        <p style="color:#fca5a5;font-size:0.9em">断裂位置：第 <?= $chainResult['broken_at'] ?> 条</p>
+        <p style="color:#fca5a5;font-size:0.9em"><?= t('admin.chain_broken_at', ['n' => $chainResult['broken_at']]) ?></p>
     </div>
     <?php else: ?>
     <div class="card card-success">
@@ -1424,16 +1422,16 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <div class="log-toolbar">
             <form class="log-toolbar-search" method="get" action="dashboard.php">
                 <input type="hidden" name="tab" value="logs">
-                <input type="text" class="form-input" name="q" value="<?= htmlspecialchars($q) ?>" placeholder="搜索 时间/用户/角色/操作/目标/IP..." autocomplete="off">
-                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
-                <?php if ($q !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=logs">清除</a><?php endif; ?>
+                <input type="text" class="form-input" name="q" value="<?= htmlspecialchars($q) ?>" placeholder="<?= t('admin.390') ?>" autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary"><?= t('admin.009') ?></button>
+                <?php if ($q !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=logs"><?= t('admin.193') ?></a><?php endif; ?>
             </form>
             <span class="toolbar-spacer"></span>
-            <?php if ($q !== ''): ?><span class="result-count">匹配 <?= $pageData['total'] ?> 条</span><?php endif; ?>
+            <?php if ($q !== ''): ?><span class="result-count"><?= t('common.match_count', ['n' => $pageData['total']]) ?></span><?php endif; ?>
         </div>
         <div class="table-wrap">
         <table>
-            <tr><th>时间</th><th>用户</th><th>角色</th><th>操作</th><th>目标</th><th>结果</th><th>IP</th></tr>
+            <tr><th><?= t('admin.035') ?></th><th><?= t('admin.036') ?></th><th><?= t('admin.015') ?></th><th><?= t('admin.032') ?></th><th><?= t('admin.037') ?></th><th><?= t('admin.038') ?></th><th>IP</th></tr>
             <?php if (empty($pageData['items'])): ?>
             <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:28px"><?= $q !== '' ? '未找到匹配「' . htmlspecialchars($q) . '」的记录' : '暂无审计日志' ?></td></tr>
             <?php else: ?>
@@ -1460,7 +1458,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             安全设置
         </div>
-        <div class="page-subtitle">管理安全参数（修改需服务器挑战码验证）</div>
+        <div class="page-subtitle"><?= t('admin.039') ?></div>
     </div>
     <?php ?>
     <div class="card">
@@ -1473,14 +1471,14 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <input type="hidden" name="_save_config" value="1">
             <input type="hidden" name="challenge_code">
             <div class="form-group">
-                <label class="form-label">管理员邮箱（告警通知）</label>
+                <label class="form-label"><?= t('admin.040') ?></label>
                 <input class="form-input" name="admin_email" value="<?= htmlspecialchars($config['admin_email'] ?? '') ?>" placeholder="admin@example.com">
             </div>
             <div class="form-group">
-                <label class="form-label">更新通道</label>
+                <label class="form-label"><?= t('admin.041') ?></label>
                 <select class="form-select" name="update_channel" style="max-width:200px">
-                    <option value="stable" <?= ($config['update_channel'] ?? 'stable') === 'stable' ? 'selected' : '' ?>>稳定版</option>
-                    <option value="beta" <?= ($config['update_channel'] ?? '') === 'beta' ? 'selected' : '' ?>>测试版</option>
+                    <option value="stable" <?= ($config['update_channel'] ?? 'stable') === 'stable' ? 'selected' : '' ?>><?= t('admin.391') ?></option>
+                    <option value="beta" <?= ($config['update_channel'] ?? '') === 'beta' ? 'selected' : '' ?>><?= t('admin.200') ?></option>
                 </select>
             </div>
             <div style="padding-top:16px;border-top:1px solid var(--border);margin-bottom:16px">
@@ -1490,23 +1488,23 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 </div>
             </div>
             <div class="toggle-row">
-                <div><div class="toggle-label">自动 IP 封禁</div><div class="toggle-desc">检测到异常行为自动封禁 IP</div></div>
+                <div><div class="toggle-label"><?= t('admin.042') ?></div><div class="toggle-desc"><?= t('admin.043') ?></div></div>
                 <label class="toggle"><input type="checkbox" name="auto_ban" <?= empty($config['auto_ban']) ? '' : 'checked' ?>><span class="slider"></span></label>
             </div>
             <div class="toggle-row">
-                <div><div class="toggle-label">自动封禁越权用户</div><div class="toggle-desc">尝试越权访问的 IP 将自动被封禁</div></div>
+                <div><div class="toggle-label"><?= t('admin.044') ?></div><div class="toggle-desc"><?= t('admin.045') ?></div></div>
                 <label class="toggle"><input type="checkbox" name="auto_ban_unauthorized" <?= empty($config['auto_ban_unauthorized']) ? '' : 'checked' ?>><span class="slider"></span></label>
             </div>
             <!-- v4.1.7：蜜罐攻击封禁阈值（后台可配，ysm-hfish-sync.py 读取） -->
             <div class="toggle-row" style="align-items:center">
-                <div><div class="toggle-label">蜜罐攻击封禁阈值</div><div class="toggle-desc">攻击次数达到该值自动封禁 IP（当前 <span style="color:var(--accent);font-weight:600"><?= (int)($config['hfish_ban_threshold'] ?? 10) ?></span> 次；调低更敏感）</div></div>
-                <input type="number" class="form-input" name="hfish_ban_threshold" value="<?= (int)($config['hfish_ban_threshold'] ?? 10) ?>" min="1" max="100" style="width:88px;flex-shrink:0" title="蜜罐攻击封禁阈值（1-100）">
+                <div><div class="toggle-label"><?= t('admin.392') ?></div><div class="toggle-desc"><?= t('admin.393') ?><span style="color:var(--accent);font-weight:600"><?= (int)($config['hfish_ban_threshold'] ?? 10) ?></span><?= t('admin.394') ?></div></div>
+                <input type="number" class="form-input" name="hfish_ban_threshold" value="<?= (int)($config['hfish_ban_threshold'] ?? 10) ?>" min="1" max="100" style="width:88px;flex-shrink:0" title="<?= t('admin.395') ?>">
             </div>
             <!-- v4.4.0：注册蜜罐自动封禁（独立于上方 HFish 蜜罐，仅针对注册表单隐藏蜜罐字段，静默拒绝） -->
             <div class="toggle-row" style="align-items:center">
-                <div><div class="toggle-label">注册蜜罐自动封禁</div><div class="toggle-desc">10 分钟内连续命中注册蜜罐达阈值 → 自动封禁 IP（当前 <span style="color:var(--accent);font-weight:600"><?= (int)($config['honeypot_ban_count'] ?? 3) ?></span> 次 / <span style="color:var(--accent);font-weight:600"><?= $config['honeypot_ban_duration'] > 0 ? (int)($config['honeypot_ban_duration'] / 60) . ' 分钟' : '永久' ?></span>）</div></div>
-                <input type="number" class="form-input" name="honeypot_ban_count" value="<?= (int)($config['honeypot_ban_count'] ?? 3) ?>" min="1" max="50" style="width:70px;flex-shrink:0" title="触发次数（1-50）">
-                <select class="form-input" name="honeypot_ban_duration" style="width:120px;flex-shrink:0" title="封禁时长">
+                <div><div class="toggle-label"><?= t('admin.396') ?></div><div class="toggle-desc"><?= t('admin.397') ?><span style="color:var(--accent);font-weight:600"><?= (int)($config['honeypot_ban_count'] ?? 3) ?></span><?= t('admin.398') ?><span style="color:var(--accent);font-weight:600"><?= $config['honeypot_ban_duration'] > 0 ? (int)($config['honeypot_ban_duration'] / 60) . ' 分钟' : '永久' ?></span>）</div></div>
+                <input type="number" class="form-input" name="honeypot_ban_count" value="<?= (int)($config['honeypot_ban_count'] ?? 3) ?>" min="1" max="50" style="width:70px;flex-shrink:0" title="<?= t('admin.399') ?>">
+                <select class="form-input" name="honeypot_ban_duration" style="width:120px;flex-shrink:0" title="<?= t('admin.046') ?>">
                     <?php
                     $hpDurNow = (int)($config['honeypot_ban_duration'] ?? 3600);
                     $hpOpts = [['900', '15 分钟'], ['1800', '30 分钟'], ['3600', '1 小时'], ['7200', '2 小时'], ['21600', '6 小时'], ['43200', '12 小时'], ['86400', '24 小时'], ['604800', '7 天'], ['0', '永久']];
@@ -1518,7 +1516,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 </select>
             </div>
             <div class="toggle-row" onclick="openRateLimitModal()" style="cursor:pointer">
-                <div><div class="toggle-label">频率限制设置</div><div class="toggle-desc">登录/评论/注册频率上限</div></div>
+                <div><div class="toggle-label"><?= t('admin.047') ?></div><div class="toggle-desc"><?= t('admin.048') ?></div></div>
                 <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             </div>
             <div style="padding-top:16px;border-top:1px solid var(--border);margin-bottom:16px">
@@ -1526,29 +1524,29 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                     <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                     自定义入口路径（L1 隐藏入口扩展）
                 </div>
-                <p class="form-hint" style="margin-bottom:12px">设置后，站长和写作者将通过自定义 URL 路径访问后台。留空则使用默认路径。</p>
+                <p class="form-hint" style="margin-bottom:12px"><?= t('admin.049') ?></p>
             </div>
             <div class="form-group">
-                <label class="form-label">站长后台路径</label>
+                <label class="form-label"><?= t('admin.050') ?></label>
                 <div style="display:flex;align-items:center;gap:8px">
                     <span style="color:var(--text-muted)">/</span>
                     <input class="form-input mono" name="station_path" value="<?= htmlspecialchars($config['station_path'] ?? 'station') ?>" placeholder="station" maxlength="30" pattern="[a-zA-Z0-9][a-zA-Z0-9-]{2,28}[a-zA-Z0-9]">
                     <span style="color:var(--text-muted)">/dashboard.php</span>
                 </div>
-                <p class="form-hint">4-30字符，字母/数字/连字符，首尾必须是字母或数字</p>
+                <p class="form-hint"><?= t('admin.051') ?></p>
             </div>
             <div class="form-group">
-                <label class="form-label">写作者后台路径</label>
+                <label class="form-label"><?= t('admin.052') ?></label>
                 <div style="display:flex;align-items:center;gap:8px">
                     <span style="color:var(--text-muted)">/</span>
                     <input class="form-input mono" name="author_path" value="<?= htmlspecialchars($config['author_path'] ?? 'author') ?>" placeholder="author" maxlength="30" pattern="[a-zA-Z0-9][a-zA-Z0-9-]{2,28}[a-zA-Z0-9]">
                     <span style="color:var(--text-muted)">/dashboard.php</span>
                 </div>
-                <p class="form-hint">不能与站长路径相同，不能使用系统保留关键字</p>
+                <p class="form-hint"><?= t('admin.053') ?></p>
             </div>
             <div class="form-group">
                 <div style="display:flex;align-items:center;gap:10px">
-                    <span style="font-size:13px">隐藏默认路径（自定义路径生效后，/station/ 和 /author/ 返回 404）</span>
+                    <span style="font-size:13px"><?= t('admin.054') ?></span>
                     <label class="toggle" style="flex-shrink:0;margin-left:auto"><input type="checkbox" name="hide_default_paths" <?= empty($config['hide_default_paths']) ? '' : 'checked' ?>><span class="slider"></span></label>
                 </div>
             </div>
@@ -1556,26 +1554,26 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="modal-overlay" id="rateLimitModal">
         <div class="modal-box" style="max-width:420px;text-align:left">
             <div class="modal-head">
-                <div class="modal-title">频率限制设置</div>
+                <div class="modal-title"><?= t('admin.047') ?></div>
                 <button class="modal-close" onclick="closeRateLimitModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <p style="font-size:0.88em;color:var(--text-secondary);margin-bottom:16px;">设置各项操作的频率上限，超过后将记录日志（开启自动封禁则同时封禁 IP）</p>
+                <p style="font-size:0.88em;color:var(--text-secondary);margin-bottom:16px;"><?= t('admin.055') ?></p>
                 <div class="form-group">
-                    <label class="form-label">频繁登录次数（次/小时）</label>
+                    <label class="form-label"><?= t('admin.056') ?></label>
                     <input class="form-input" type="number" name="max_login_fails" value="<?= $config['max_login_fails'] ?? 10 ?>" min="3" max="100">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">频繁评论（条/分钟）</label>
+                    <label class="form-label"><?= t('admin.057') ?></label>
                     <input class="form-input" type="number" name="max_comments_per_minute" value="<?= $config['max_comments_per_minute'] ?? 5 ?>" min="1" max="60">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">频繁注册（次/IP）</label>
+                    <label class="form-label"><?= t('admin.058') ?></label>
                     <input class="form-input" type="number" name="max_registrations_per_ip" value="<?= $config['max_registrations_per_ip'] ?? 3 ?>" min="1" max="50">
                 </div>
                 <div class="modal-actions">
-                    <button type="button" class="btn btn-outline" onclick="closeRateLimitModal()">取消</button>
-                    <button type="submit" class="btn btn-primary">确定</button>
+                    <button type="button" class="btn btn-outline" onclick="closeRateLimitModal()"><?= t('admin.059') ?></button>
+                    <button type="submit" class="btn btn-primary"><?= t('admin.060') ?></button>
                 </div>
             </div>
         </div>
@@ -1585,7 +1583,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     function closeRateLimitModal() { document.getElementById('rateLimitModal').classList.remove('active'); }
     document.getElementById('rateLimitModal')?.addEventListener('click', function(e) { if (e.target === this) closeRateLimitModal(); });
     </script>
-            <button type="submit" class="btn btn-primary">保存配置</button>
+            <button type="submit" class="btn btn-primary"><?= t('admin.061') ?></button>
         </form>
     </div>
 
@@ -1606,7 +1604,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             安全监控
         </div>
-        <div class="page-subtitle">IP 封禁管理、登录日志、操作日志与越权访问记录</div>
+        <div class="page-subtitle"><?= t('admin.062') ?></div>
     </div>
     <?php if ($banMsg):
         $msgText = match($banMsg) {
@@ -1628,23 +1626,23 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <input type="hidden" name="challenge_code">
             <div class="form-row">
                 <div class="form-group" style="flex:1">
-                    <label class="form-label">IP 地址</label>
-                    <input class="form-input mono" name="ip" placeholder="例如 1.2.3.4" required>
+                    <label class="form-label"><?= t('admin.063') ?></label>
+                    <input class="form-input mono" name="ip" placeholder="<?= t('admin.064') ?>" required>
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label">封禁功能</label>
+                <label class="form-label"><?= t('admin.065') ?></label>
                 <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
-                    <span style="font-size:13px">注册</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="types[]" value="register"><span class="slider"></span></label>
-                    <span style="font-size:13px">评论</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="types[]" value="comment"><span class="slider"></span></label>
-                    <span style="font-size:13px">登录</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="types[]" value="login"><span class="slider"></span></label>
+                    <span style="font-size:13px"><?= t('admin.066') ?></span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="types[]" value="register"><span class="slider"></span></label>
+                    <span style="font-size:13px"><?= t('admin.067') ?></span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="types[]" value="comment"><span class="slider"></span></label>
+                    <span style="font-size:13px"><?= t('admin.068') ?></span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="types[]" value="login"><span class="slider"></span></label>
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label">原因（可选）</label>
-                <input class="form-input" name="reason" placeholder="封禁原因">
+                <label class="form-label"><?= t('admin.069') ?></label>
+                <input class="form-input" name="reason" placeholder="<?= t('admin.070') ?>">
             </div>
-            <button type="submit" class="btn btn-primary">添加封禁</button>
+            <button type="submit" class="btn btn-primary"><?= t('admin.071') ?></button>
         </form>
     </div>
     <div class="card">
@@ -1655,7 +1653,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <?php if (empty($banData['items'])): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-            <p>暂无封禁记录</p>
+            <p><?= t('admin.072') ?></p>
         </div>
         <?php else: ?>
         <div class="ban-list">
@@ -1671,17 +1669,17 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                     <?php endforeach; ?>
                 </div>
                 <?php if (!empty($ban['reason'])): ?>
-                <div style="font-size:0.82em;color:var(--text-muted);margin-bottom:8px">原因：<?= htmlspecialchars($ban['reason']) ?></div>
+                <div style="font-size:0.82em;color:var(--text-muted);margin-bottom:8px"><?= t('common.reason') ?><?= htmlspecialchars($ban['reason']) ?></div>
                 <?php endif; ?>
                 <div class="ban-item-actions">
-                    <form method="post" style="display:inline" class="need-challenge" data-confirm="确定解除封禁 <?= htmlspecialchars($ban['ip']) ?>？">
+                    <form method="post" style="display:inline" class="need-challenge" data-confirm="<?= t('admin.cf_unban', ['ip' => $ban['ip']]) ?>">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="ban_action" value="remove">
                         <input type="hidden" name="ip" value="<?= htmlspecialchars($ban['ip']) ?>">
                         <input type="hidden" name="challenge_code">
-                        <button type="submit" class="btn-link danger" title="解除封禁">解除封禁</button>
+                        <button type="submit" class="btn-link danger" title="<?= t('admin.073') ?>"><?= t('admin.073') ?></button>
                     </form>
-                    <button type="button" class="btn-link" onclick="openBanEdit('<?= htmlspecialchars($ban['ip']) ?>', '<?= htmlspecialchars(json_encode($ban['types'] ?? [])) ?>')" title="编辑">编辑</button>
+                    <button type="button" class="btn-link" onclick="openBanEdit('<?= htmlspecialchars($ban['ip']) ?>', '<?= htmlspecialchars(json_encode($ban['types'] ?? [])) ?>')" title="<?= t('links.011') ?>"><?= t('links.011') ?></button>
                 </div>
             </div>
             <?php endforeach; ?>
@@ -1693,7 +1691,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="modal-overlay" id="banEditModal">
         <div class="modal-box" style="max-width:400px">
             <div class="modal-head">
-                <div class="modal-title">编辑封禁</div>
+                <div class="modal-title"><?= t('admin.074') ?></div>
                 <button class="modal-close" onclick="closeBanEdit()">&times;</button>
             </div>
             <div class="modal-body">
@@ -1704,20 +1702,20 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                     <input type="hidden" name="ip" id="banModalIpInput">
                     <input type="hidden" name="challenge_code">
                     <div class="toggle-row">
-                        <div><div class="toggle-label">注册</div><div class="toggle-desc">禁止该 IP 注册新账号</div></div>
+                        <div><div class="toggle-label"><?= t('admin.066') ?></div><div class="toggle-desc"><?= t('admin.075') ?></div></div>
                         <label class="toggle"><input type="checkbox" name="types[]" value="register"><span class="slider"></span></label>
                     </div>
                     <div class="toggle-row">
-                        <div><div class="toggle-label">评论</div><div class="toggle-desc">禁止该 IP 发表评论</div></div>
+                        <div><div class="toggle-label"><?= t('admin.067') ?></div><div class="toggle-desc"><?= t('admin.076') ?></div></div>
                         <label class="toggle"><input type="checkbox" name="types[]" value="comment"><span class="slider"></span></label>
                     </div>
                     <div class="toggle-row">
-                        <div><div class="toggle-label">登录</div><div class="toggle-desc">禁止该 IP 登录账号</div></div>
+                        <div><div class="toggle-label"><?= t('admin.068') ?></div><div class="toggle-desc"><?= t('admin.077') ?></div></div>
                         <label class="toggle"><input type="checkbox" name="types[]" value="login"><span class="slider"></span></label>
                     </div>
                     <div class="modal-actions">
-                        <button type="button" class="btn btn-outline" onclick="closeBanEdit()">取消</button>
-                        <button type="submit" class="btn btn-primary">保存</button>
+                        <button type="button" class="btn btn-outline" onclick="closeBanEdit()"><?= t('admin.059') ?></button>
+                        <button type="submit" class="btn btn-primary"><?= t('admin.022') ?></button>
                     </div>
                 </form>
             </div>
@@ -1760,17 +1758,17 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <div class="log-toolbar">
             <form method="get" action="dashboard.php" class="log-toolbar-search">
                 <input type="hidden" name="tab" value="security">
-                <input type="text" class="form-input" name="unauth_q" value="<?= htmlspecialchars($unauthQ) ?>" placeholder="搜索 时间/IP/操作/用户..." autocomplete="off">
-                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
-                <?php if ($unauthQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=security">清除</a><?php endif; ?>
+                <input type="text" class="form-input" name="unauth_q" value="<?= htmlspecialchars($unauthQ) ?>" placeholder="<?= t('admin.400') ?>" autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary"><?= t('admin.009') ?></button>
+                <?php if ($unauthQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=security"><?= t('admin.193') ?></a><?php endif; ?>
             </form>
             <span class="toolbar-spacer"></span>
-            <?php if ($unauthQ !== ''): ?><span class="result-count">匹配 <?= $unauthData['total'] ?> 条</span><?php endif; ?>
+            <?php if ($unauthQ !== ''): ?><span class="result-count"><?= t('common.match_count', ['n' => $unauthData['total']]) ?></span><?php endif; ?>
             <?php if ($unauthData['total'] > 0): ?>
-            <form method="post" onsubmit="return confirm(ysmT('确定清空所有越权访问日志？'))">
+            <form method="post" onsubmit="return confirm(t('admin.078'))">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <input type="hidden" name="clear_unauth" value="1">
-                <button type="submit" class="btn btn-sm btn-outline" style="color:#ef4444;border-color:#fecaca">清空日志</button>
+                <button type="submit" class="btn btn-sm btn-outline" style="color:#ef4444;border-color:#fecaca"><?= t('admin.079') ?></button>
             </form>
             <?php endif; ?>
         </div>
@@ -1782,7 +1780,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <?php else: ?>
         <div class="table-wrap">
         <table>
-            <tr><th>时间</th><th>IP</th><th>操作</th><th>用户</th></tr>
+            <tr><th><?= t('admin.035') ?></th><th>IP</th><th><?= t('admin.032') ?></th><th><?= t('admin.036') ?></th></tr>
             <?php foreach ($unauthData['items'] as $log): ?>
             <tr>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($log['time'] ?? '') ?></td>
@@ -1810,12 +1808,12 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <div class="log-toolbar">
             <form class="log-toolbar-search" method="get" action="dashboard.php">
                 <input type="hidden" name="tab" value="security">
-                <input type="text" class="form-input" name="login_q" value="<?= htmlspecialchars($loginQ) ?>" placeholder="搜索 时间/IP/操作..." autocomplete="off">
-                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
-                <?php if ($loginQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=security">清除</a><?php endif; ?>
+                <input type="text" class="form-input" name="login_q" value="<?= htmlspecialchars($loginQ) ?>" placeholder="<?= t('admin.401') ?>" autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary"><?= t('admin.009') ?></button>
+                <?php if ($loginQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=security"><?= t('admin.193') ?></a><?php endif; ?>
             </form>
             <span class="toolbar-spacer"></span>
-            <?php if ($loginQ !== ''): ?><span class="result-count">匹配 <?= $loginData['total'] ?> 条</span><?php endif; ?>
+            <?php if ($loginQ !== ''): ?><span class="result-count"><?= t('common.match_count', ['n' => $loginData['total']]) ?></span><?php endif; ?>
         </div>
         <?php if (empty($loginData['items'])): ?>
         <div class="empty-state">
@@ -1825,7 +1823,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <?php else: ?>
         <div class="table-wrap">
         <table>
-            <tr><th>时间</th><th>IP</th><th>操作</th></tr>
+            <tr><th><?= t('admin.035') ?></th><th>IP</th><th><?= t('admin.032') ?></th></tr>
             <?php foreach ($loginData['items'] as $log): ?>
             <tr>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($log['time'] ?? '') ?></td>
@@ -1851,7 +1849,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             操作日志（共 <?= $auditData['total'] ?> 条）
         </div>
         <div style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <span style="font-size:0.82em;color:var(--text-muted)">哈希链状态：</span>
+            <span style="font-size:0.82em;color:var(--text-muted)"><?= t('admin.080') ?></span>
             <span class="chain-badge <?= $chainResult['valid'] ? 'chain-valid' : 'chain-invalid' ?>" style="font-size:0.82em">
                 <?php if ($chainResult['valid']): ?>
                 ● 完整（<?= $chainResult['count'] ?> 条记录）
@@ -1861,37 +1859,37 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             </span>
             <?php $__mir = auditMirrorStatus(); $__rr = readAuditRecoverResult(); ?>
             <?php if (($_GET['bmsg'] ?? '') === 'recover_submitted'): ?>
-            <div class="msg msg-success" style="margin:8px 0 0">已提交恢复请求：守护进程将在数秒内执行；稍后刷新本页可查看「最近一次恢复」结果。</div>
+            <div class="msg msg-success" style="margin:8px 0 0"><?= t('admin.081') ?></div>
             <?php endif; ?>
             <?php if (!$chainResult['valid'] && $__mir['present']): ?>
-            <form method="post" style="display:inline" class="need-challenge" data-confirm="确定从镜像恢复操作日志？该操作会用镜像内容整体替换当前操作日志（镜像之后新增的记录将被丢弃）。">
+            <form method="post" style="display:inline" class="need-challenge" data-confirm="<?= t('admin.cf_restore_audit') ?>">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <input type="hidden" name="recover_audit" value="1">
                 <input type="hidden" name="challenge_code">
-                <button type="submit" class="btn btn-sm btn-outline" style="color:#f59e0b;border-color:#fcd34d">从镜像恢复</button>
+                <button type="submit" class="btn btn-sm btn-outline" style="color:#f59e0b;border-color:#fcd34d"><?= t('admin.082') ?></button>
             </form>
             <?php elseif (!$chainResult['valid']): ?>
-            <span style="color:var(--text-muted);font-size:12px">镜像不可用或守护进程未运行，请在服务器执行：<code>sudo ysm-admin audit-recover</code></span>
+            <span style="color:var(--text-muted);font-size:12px"><?= t('admin.083') ?><code>sudo ysm-admin audit-recover</code></span>
             <?php endif; ?>
             <?php if (!empty($__rr['status'])): ?>
-            <div style="color:var(--text-muted);font-size:12px;margin-top:4px">最近一次恢复：<?= htmlspecialchars(($__rr['status'] ?? '') . ' · ' . ($__rr['message'] ?? '') . ' · ' . ($__rr['time'] ?? '')) ?></div>
+            <div style="color:var(--text-muted);font-size:12px;margin-top:4px"><?= t('admin.last_restore') ?><?= htmlspecialchars(($__rr['status'] ?? '') . ' · ' . ($__rr['message'] ?? '') . ' · ' . ($__rr['time'] ?? '')) ?></div>
             <?php endif; ?>
-            <form method="post" style="display:inline;margin-left:auto" class="need-challenge" data-confirm="确定清空所有操作日志？">
+            <form method="post" style="display:inline;margin-left:auto" class="need-challenge" data-confirm="<?= t('admin.cf_clear_audit') ?>">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <input type="hidden" name="clear_audit" value="1">
                 <input type="hidden" name="challenge_code">
-                <button type="submit" class="btn btn-sm btn-outline" style="color:#ef4444;border-color:#fecaca">清空日志</button>
+                <button type="submit" class="btn btn-sm btn-outline" style="color:#ef4444;border-color:#fecaca"><?= t('admin.079') ?></button>
             </form>
         </div>
         <div class="log-toolbar">
             <form class="log-toolbar-search" method="get" action="dashboard.php">
                 <input type="hidden" name="tab" value="security">
-                <input type="text" class="form-input" name="audit_q" value="<?= htmlspecialchars($auditQ) ?>" placeholder="搜索 时间/用户/角色/操作/目标/IP..." autocomplete="off">
-                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
-                <?php if ($auditQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=security">清除</a><?php endif; ?>
+                <input type="text" class="form-input" name="audit_q" value="<?= htmlspecialchars($auditQ) ?>" placeholder="<?= t('admin.390') ?>" autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary"><?= t('admin.009') ?></button>
+                <?php if ($auditQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=security"><?= t('admin.193') ?></a><?php endif; ?>
             </form>
             <span class="toolbar-spacer"></span>
-            <?php if ($auditQ !== ''): ?><span class="result-count">匹配 <?= $auditData['total'] ?> 条</span><?php endif; ?>
+            <?php if ($auditQ !== ''): ?><span class="result-count"><?= t('common.match_count', ['n' => $auditData['total']]) ?></span><?php endif; ?>
         </div>
         <?php if (empty($auditData['items'])): ?>
         <div class="empty-state">
@@ -1901,7 +1899,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <?php else: ?>
         <div class="table-wrap">
         <table>
-            <tr><th>时间</th><th>用户</th><th>角色</th><th>操作</th><th>目标</th><th>结果</th><th>哈希</th></tr>
+            <tr><th><?= t('admin.035') ?></th><th><?= t('admin.036') ?></th><th><?= t('admin.015') ?></th><th><?= t('admin.032') ?></th><th><?= t('admin.037') ?></th><th><?= t('admin.038') ?></th><th><?= t('admin.084') ?></th></tr>
             <?php foreach ($auditData['items'] as $log): ?>
             <tr>
                 <td style="color:var(--text-muted);font-size:0.85em;white-space:nowrap"><?= htmlspecialchars($log['ts'] ?? '') ?></td>
@@ -1935,11 +1933,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
             主界面及功能设置
         </div>
-        <div class="page-subtitle">网站外观与功能配置（非安全项，无需挑战码）</div>
+        <div class="page-subtitle"><?= t('admin.085') ?></div>
     </div>
-    <?php if ($bgMsg === 'saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>保存成功</div><?php endif; ?>
-    <?php if ($bgMsg === 'uploaded'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>上传成功</div><?php endif; ?>
-    <?php if ($bgMsg === 'upload_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>上传失败，请检查 data/bg/ 目录权限</div><?php endif; ?>
+    <?php if ($bgMsg === 'saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.402') ?></div><?php endif; ?>
+    <?php if ($bgMsg === 'uploaded'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.403') ?></div><?php endif; ?>
+    <?php if ($bgMsg === 'upload_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.404') ?></div><?php endif; ?>
     <!-- v4.1.18：站点外观（从安全设置移入，非敏感项无需挑战码） -->
     <div class="card">
         <div class="card-title">
@@ -1947,25 +1945,25 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             站点设置
         </div>
         <div class="form-group">
-            <label class="form-label">网站标题</label>
+            <label class="form-label"><?= t('admin.086') ?></label>
             <input class="form-input" type="text" id="siteTitleInput" value="<?= htmlspecialchars($config['site_title'] ?? '') ?>" maxlength="60">
         </div>
         <div class="form-row" style="margin-bottom:16px;align-items:center">
-            <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许注册</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" id="regToggle" <?= empty($config['registration_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
-            <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许访客评论</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" id="guestToggle" <?= empty($config['guest_comments_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
-            <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">允许超管主页评论</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" id="superCommentToggle" <?= empty($config['super_admin_comment']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px"><?= t('admin.405') ?></span><label class="toggle" style="flex-shrink:0"><input type="checkbox" id="regToggle" <?= empty($config['registration_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px"><?= t('admin.406') ?></span><label class="toggle" style="flex-shrink:0"><input type="checkbox" id="guestToggle" <?= empty($config['guest_comments_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px"><?= t('admin.407') ?></span><label class="toggle" style="flex-shrink:0"><input type="checkbox" id="superCommentToggle" <?= empty($config['super_admin_comment']) ? '' : 'checked' ?>><span class="slider"></span></label></div>
         </div>
         <div style="padding:12px 16px;border:1px solid var(--border);border-radius:12px;background:var(--surface)">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
                 <div>
-                    <div style="font-weight:600">评论邮件订阅通知</div>
-                    <div style="font-size:0.82em;color:var(--text-muted)">有新评论 / 新回复时向收件人发邮件（需已配置 SMTP 邮件）</div>
+                    <div style="font-weight:600"><?= t('admin.087') ?></div>
+                    <div style="font-size:0.82em;color:var(--text-muted)"><?= t('admin.088') ?></div>
                 </div>
                 <label class="toggle" style="flex-shrink:0"><input type="checkbox" id="notifyToggle" <?= empty($config['comment_notify_enabled']) ? '' : 'checked' ?>><span class="slider"></span></label>
             </div>
             <div class="form-group" style="margin:0">
-                <label class="form-label">收件邮箱（留空默认用管理员邮箱）</label>
-                <input class="form-input" type="email" id="notifyEmailInput" value="<?= htmlspecialchars($config['comment_notify_email'] ?? '') ?>" placeholder="留空则使用管理员邮箱">
+                <label class="form-label"><?= t('admin.089') ?></label>
+                <input class="form-input" type="email" id="notifyEmailInput" value="<?= htmlspecialchars($config['comment_notify_email'] ?? '') ?>" placeholder="<?= t('admin.408') ?>">
             </div>
         </div>
     </div>
@@ -1980,28 +1978,28 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
              既不影响 bgForm 提交时的取值逻辑（见下方 submit 处理器），也不丢失既有数据（前台按预设正常工作）。 -->
         <div style="display:none">
         <div class="form-group">
-            <label class="form-label">网易云歌单 ID</label>
+            <label class="form-label"><?= t('admin.090') ?></label>
             <input class="form-input" type="text" id="musicNeteaseInput" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>" placeholder="3778678">
-            <p class="form-hint">网易云音乐歌单 ID，默认 3778678 为热歌榜</p>
+            <p class="form-hint"><?= t('admin.091') ?></p>
         </div>
         <!-- v4.4.0：默认播放歌曲——打开歌单无历史播放时自动定位播放该歌（歌曲名关键词） -->
         <div class="form-group">
-            <label class="form-label">默认播放歌曲（可选）</label>
-            <input class="form-input" type="text" id="musicAutoPlayInput" value="<?= htmlspecialchars($config['music_auto_play'] ?? '') ?>" placeholder="例如：One Last Kiss" maxlength="60">
-            <p class="form-hint">首次打开歌单时按此关键词自动定位播放；留空则不自动播放</p>
+            <label class="form-label"><?= t('admin.092') ?></label>
+            <input class="form-input" type="text" id="musicAutoPlayInput" value="<?= htmlspecialchars($config['music_auto_play'] ?? '') ?>" placeholder="<?= t('admin.409') ?>" maxlength="60">
+            <p class="form-hint"><?= t('admin.093') ?></p>
         </div>
         <div class="form-group">
-            <label class="form-label">网易云 Cookies（可选）</label>
+            <label class="form-label"><?= t('admin.094') ?></label>
             <input class="form-input" type="text" id="musicNetCookieInput" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
-            <p class="form-hint">配置后可播放网易云 VIP 歌曲</p>
+            <p class="form-hint"><?= t('admin.095') ?></p>
         </div>
         </div>
         <!-- v4.5.0：本地背景音乐——超管/站长后台上传单曲作默认背景音，前台只能开/关不能选曲；单曲循环，浏览器缓存不重复消耗服务器流量；<100MB 常见音频自动转码压缩 -->
         <div class="form-group">
             <div class="toggle-row">
-                <label class="toggle-label">本地背景音乐</label>
+                <label class="toggle-label"><?= t('admin.096') ?></label>
                 <label class="toggle" style="flex-shrink:0"><input type="checkbox" id="bgMusicToggle" <?= !empty($config['bg_music_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
-                <div class="toggle-desc">开启后前台播放器弹窗内出现「本地背景音」开关（单曲循环，播放器与网易云互不干扰）</div>
+                <div class="toggle-desc"><?= t('admin.097') ?></div>
             </div>
             <input class="form-input" type="file" id="bgMusicFileInput" name="bg_music_file" accept=".mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.wma,audio/*" style="margin-top:8px">
             <p class="form-hint" id="bgMusicStatus"><?php $bmSize = bgMusicSize(); echo $bmSize > 0 ? ('当前背景音：' . round($bmSize / 1024 / 1024, 1) . ' MB（上传新文件可替换）') : '尚未上传背景音乐（mp3/wav/flac/m4a 等 ≤100MB，服务器自动转码压缩为 96kbps mp3）'; ?></p>
@@ -2013,74 +2011,74 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             背景类型
         </div>
         <div class="bg-type-grid bg-vis-grid">
-            <label class="bg-type-card <?= $bgType==='none'?'active':'' ?>" data-type="none"><input type="radio" name="bg_type" value="none" <?= $bgType==='none'?'checked':'' ?>><div class="type-icon none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div><div class="type-name">无背景</div></label>
-            <label class="bg-type-card <?= $bgType==='image'?'active':'' ?>" data-type="image"><input type="radio" name="bg_type" value="image" <?= $bgType==='image'?'checked':'' ?>><div class="type-icon upload"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><div class="type-name">上传图片</div></label>
-            <label class="bg-type-card <?= $bgType==='api'?'active':'' ?>" data-type="api"><input type="radio" name="bg_type" value="api" <?= $bgType==='api'?'checked':'' ?>><div class="type-icon api"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div><div class="type-name">API 获取</div></label>
+            <label class="bg-type-card <?= $bgType==='none'?'active':'' ?>" data-type="none"><input type="radio" name="bg_type" value="none" <?= $bgType==='none'?'checked':'' ?>><div class="type-icon none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div><div class="type-name"><?= t('station.044') ?></div></label>
+            <label class="bg-type-card <?= $bgType==='image'?'active':'' ?>" data-type="image"><input type="radio" name="bg_type" value="image" <?= $bgType==='image'?'checked':'' ?>><div class="type-icon upload"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><div class="type-name"><?= t('admin.410') ?></div></label>
+            <label class="bg-type-card <?= $bgType==='api'?'active':'' ?>" data-type="api"><input type="radio" name="bg_type" value="api" <?= $bgType==='api'?'checked':'' ?>><div class="type-icon api"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div><div class="type-name"><?= t('admin.411') ?></div></label>
         </div>
     </div>
     <div class="card" id="imageSection" style="display:<?= $bgType==='image'?'block':'none' ?>">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>上传背景图片</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><?= t('admin.098') ?></div>
         <?php if ($bgImage && $bgType==='image'): ?>
-        <div class="img-preview-thumb"><img src="../<?= htmlspecialchars($bgImage) ?>" alt="当前背景"><button class="remove-img" onclick="removeBgImage()" title="移除">&times;</button></div>
+        <div class="img-preview-thumb"><img src="../<?= htmlspecialchars($bgImage) ?>" alt="<?= t('admin.412') ?>"><button class="remove-img" onclick="removeBgImage()" title="<?= t('admin.339') ?>">&times;</button></div>
         <?php endif; ?>
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <div class="upload-area">
                 <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                <div class="upload-text">点击上传背景图片</div>
-                <div class="upload-hint">支持 JPG / PNG / GIF / WebP，最大 10MB</div>
+                <div class="upload-text"><?= t('admin.099') ?></div>
+                <div class="upload-hint"><?= t('admin.100') ?></div>
                 <input type="file" name="bg_image" accept="image/jpeg,image/png,image/gif,image/webp" onchange="if(this.files.length)this.form.submit()">
             </div>
         </form>
         <input type="hidden" id="bgImagePath" value="<?= htmlspecialchars($bgImage) ?>">
     </div>
     <div class="card" id="apiSection" style="display:<?= $bgType==='api'?'block':'none' ?>">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>API 背景地址</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><?= t('admin.101') ?></div>
         <div class="form-group">
-            <label class="form-label">图片 API URL</label>
+            <label class="form-label"><?= t('admin.102') ?></label>
             <div class="api-url-group">
                 <input class="form-input" type="url" id="bgApiUrl" value="<?= htmlspecialchars($bgApiUrl) ?>" placeholder="<?= htmlspecialchars(FIXED_IMG_API) ?>">
-                <button class="btn btn-sm btn-outline" type="button" onclick="testApiUrl()">测试</button>
+                <button class="btn btn-sm btn-outline" type="button" onclick="testApiUrl()"><?= t('admin.103') ?></button>
             </div>
         </div>
         <div id="apiTestResult" style="margin-top:8px"></div>
     </div>
     <!-- v4.2.4：首页卡片封面图片源（用户自定义则优先，留空回退固定源，走同一池化缓存策略） -->
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>首页卡片封面</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><?= t('admin.104') ?></div>
         <div class="form-group">
-            <label class="form-label">卡片封面图片 API URL（可选）</label>
+            <label class="form-label"><?= t('admin.105') ?></label>
             <div class="api-url-group">
                 <input class="form-input" type="url" id="cardCoverApiInput" value="<?= htmlspecialchars($cardCoverApi) ?>" placeholder="<?= htmlspecialchars(FIXED_IMG_API) ?>">
-                <button class="btn btn-sm btn-outline" type="button" onclick="testCardCoverApi()">测试</button>
+                <button class="btn btn-sm btn-outline" type="button" onclick="testCardCoverApi()"><?= t('admin.103') ?></button>
             </div>
-            <p class="form-hint">无图文章卡片的封面图源（16:9 横屏）。留空使用默认固定源；自定义后走服务端缩略图池缓存，加载快且省流量</p>
+            <p class="form-hint"><?= t('admin.106') ?></p>
         </div>
         <div id="cardCoverApiTestResult" style="margin-top:8px"></div>
     </div>
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>模糊与透明度</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><?= t('admin.107') ?></div>
         <div class="toggle-row" id="bgBlurRow" style="display:<?= $bgType!=='none'?'flex':'none' ?>">
-            <div><div class="toggle-label">背景模糊</div><div class="toggle-desc">对网站背景应用高斯模糊</div></div>
+            <div><div class="toggle-label"><?= t('admin.108') ?></div><div class="toggle-desc"><?= t('admin.109') ?></div></div>
             <label class="toggle"><input type="checkbox" id="blurToggle" <?= $bgBlurEnabled?'checked':'' ?>><span class="slider"></span></label>
         </div>
         <div id="blurLevelWrap" style="display:<?= ($bgBlurEnabled && $bgType!=='none')?'block':'none' ?>;padding-top:8px">
             <div class="slider-group">
-                <div class="slider-header"><label>模糊程度</label><span class="slider-val" id="blurVal"><?= $bgBlurLevel ?>px</span></div>
-                <div class="slider-row"><span class="slider-label">清晰</span><input type="range" min="0" max="50" value="<?= $bgBlurLevel ?>" step="2" id="blurSlider"><span class="slider-label">模糊</span></div>
+                <div class="slider-header"><label><?= t('admin.413') ?></label><span class="slider-val" id="blurVal"><?= $bgBlurLevel ?>px</span></div>
+                <div class="slider-row"><span class="slider-label"><?= t('admin.414') ?></span><input type="range" min="0" max="50" value="<?= $bgBlurLevel ?>" step="2" id="blurSlider"><span class="slider-label"><?= t('admin.415') ?></span></div>
             </div>
         </div>
         <div class="slider-group" style="margin-top:12px">
-            <div class="slider-header"><label>卡片透明度</label><span class="slider-val" id="opacityVal"><?= $bgCardOpacity ?>%</span></div>
-            <div class="slider-row"><span class="slider-label">透明</span><input type="range" min="20" max="100" value="<?= $bgCardOpacity ?>" step="5" id="opacitySlider"><span class="slider-label">不透明</span></div>
+            <div class="slider-header"><label><?= t('admin.416') ?></label><span class="slider-val" id="opacityVal"><?= $bgCardOpacity ?>%</span></div>
+            <div class="slider-row"><span class="slider-label"><?= t('admin.417') ?></span><input type="range" min="20" max="100" value="<?= $bgCardOpacity ?>" step="5" id="opacitySlider"><span class="slider-label"><?= t('admin.418') ?></span></div>
         </div>
     </div>
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>实时预览</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><?= t('admin.110') ?></div>
         <div class="preview-box" id="previewBox">
             <div class="preview-blur" id="previewBlur"></div>
-            <div class="preview-card-sim" id="previewCard"><div class="sim-title">文章卡片</div><div class="sim-line" style="width:80%"></div><div class="sim-line" style="width:100%"></div><div class="sim-line"></div></div>
-            <div class="preview-overlay"><span id="previewBgLabel">无背景</span><span id="previewBlurLabel"></span></div>
+            <div class="preview-card-sim" id="previewCard"><div class="sim-title"><?= t('admin.111') ?></div><div class="sim-line" style="width:80%"></div><div class="sim-line" style="width:100%"></div><div class="sim-line"></div></div>
+            <div class="preview-overlay"><span id="previewBgLabel"><?= t('admin.112') ?></span><span id="previewBlurLabel"></span></div>
         </div>
     </div>
     <form method="post" id="bgForm" enctype="multipart/form-data">
@@ -2104,8 +2102,8 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <input type="hidden" name="music_cookies" id="formMusicNetCookie" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>">
         <input type="hidden" name="bg_music_enabled" id="formBgMusicEnabled" value="<?= !empty($config['bg_music_enabled']) ? '1' : '' ?>">
         <div style="display:flex;justify-content:flex-end;gap:10px">
-            <button type="button" class="btn btn-outline" onclick="resetBg()">重置</button>
-            <button type="submit" class="btn btn-primary">保存配置</button>
+            <button type="button" class="btn btn-outline" onclick="resetBg()"><?= t('admin.113') ?></button>
+            <button type="submit" class="btn btn-primary"><?= t('admin.061') ?></button>
         </div>
     </form>
 
@@ -2118,16 +2116,16 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             语言与字体
         </div>
         <div class="form-group">
-            <label class="form-label">首页默认语言</label>
+            <label class="form-label"><?= t('admin.114') ?></label>
             <select class="form-input" name="default_lang">
                 <?php foreach ($allLangsAdmin as $lc => $info): $isDis = in_array($lc, $disabledLangs, true); ?>
                 <option value="<?= htmlspecialchars($lc) ?>" <?= ($config['default_lang'] ?? 'zh-CN') === $lc ? 'selected' : '' ?> <?= $isDis ? 'disabled' : '' ?>><?= htmlspecialchars($info['name']) ?>（<?= htmlspecialchars($lc) ?>）<?= $isDis ? ' · 已停用' : '' ?></option>
                 <?php endforeach; ?>
             </select>
-            <p class="form-hint">访客未手动选择、且浏览器语言不在启用列表时的首页默认语言（仅可选已启用语言）。</p>
+            <p class="form-hint"><?= t('admin.115') ?></p>
         </div>
         <div class="form-group">
-            <label class="form-label">启用的语言</label>
+            <label class="form-label"><?= t('admin.116') ?></label>
             <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
                 <?php foreach ($allLangsAdmin as $lc => $info): $on = !in_array($lc, $disabledLangs, true); ?>
                 <label class="toggle-row" style="gap:12px;align-items:center">
@@ -2136,14 +2134,14 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 </label>
                 <?php endforeach; ?>
             </div>
-            <p class="form-hint">关闭后前台语言切换器不再显示该语言（zh-CN 恒启用）。新增 <code>lang/*.php</code> 语言文件后，会自动出现在此列表。</p>
+            <p class="form-hint"><?= t('admin.117') ?><code>lang/*.php</code><?= t('admin.118') ?></p>
         </div>
         <div class="toggle-row">
-            <div><div class="toggle-label">在首页启用自定义字体</div><div class="toggle-desc">需先上传字体文件；启用后访客默认展示该字体，登录用户可按账号覆盖</div></div>
+            <div><div class="toggle-label"><?= t('admin.119') ?></div><div class="toggle-desc"><?= t('admin.120') ?></div></div>
             <label class="toggle"><input type="checkbox" name="custom_font_enabled" <?= !empty($config['custom_font_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:12px">
-            <button type="submit" class="btn btn-primary">保存语言与字体设置</button>
+            <button type="submit" class="btn btn-primary"><?= t('admin.121') ?></button>
         </div>
     </form>
 
@@ -2155,18 +2153,18 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             自定义字体文件
         </div>
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;word-break:break-all">
-            当前字体：<?= $customFontName !== '' ? htmlspecialchars($customFontName) : '未上传（内置萝莉体已移除）' ?>
-            <?= !empty($config['custom_font_enabled']) ? ' · <span style="color:#16a34a">已启用</span>' : ' · <span style="color:var(--text-muted)">未启用</span>' ?>
+            <?= t('admin.font_current') ?><?= $customFontName !== '' ? htmlspecialchars($customFontName) : t('admin.font_none') ?>
+            <?= !empty($config['custom_font_enabled']) ? ' · <span style="color:#16a34a">' . t('admin.font_enabled') . '</span>' : ' · <span style="color:var(--text-muted)">' . t('admin.font_disabled') . '</span>' ?>
         </p>
         <div class="upload-area">
             <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            <div class="upload-text">点击上传字体文件</div>
-            <div class="upload-hint">支持 TTF / OTF / WOFF / WOFF2，最大 20MB；上传后自动启用</div>
+            <div class="upload-text"><?= t('admin.122') ?></div>
+            <div class="upload-hint"><?= t('admin.123') ?></div>
             <input type="file" name="custom_font" accept=".ttf,.otf,.woff,.woff2" onchange="if(this.files.length)this.form.submit()">
         </div>
         <?php if ($customFontName !== ''): ?>
         <div style="margin-top:10px">
-            <button type="submit" class="btn btn-outline" name="_font_remove" value="1" onclick="return confirm(ysmT('确定移除当前自定义字体？'))">移除当前字体</button>
+            <button type="submit" class="btn btn-outline" name="_font_remove" value="1" onclick="return confirm(t('admin.124'))"><?= t('admin.125') ?></button>
         </div>
         <?php endif; ?>
     </form>
@@ -2214,16 +2212,16 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         function updatePreview() {
             var blur = blurToggle.checked ? parseInt(blurSlider.value) : 0;
             var opacity = parseInt(opacitySlider.value) / 100;
-            if (currentType === 'none') { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = ysmT('无背景'); }
-            else if (currentType === 'image' && bgImagePath.value) { previewBox.style.backgroundImage = 'url(../' + bgImagePath.value + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = ysmT('自定义图片'); }
-            else if (currentType === 'api') { if (previewApiSrc) { previewBox.style.backgroundImage = 'url(' + previewApiSrc + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = ysmT('API 图片'); } else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = bgApiUrl.value.trim() ? ysmT('API（请先测试）') : ysmT('待配置'); } }
-            else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = ysmT('待配置'); }
+            if (currentType === 'none') { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = TK('admin.112'); }
+            else if (currentType === 'image' && bgImagePath.value) { previewBox.style.backgroundImage = 'url(../' + bgImagePath.value + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = TK('admin.126'); }
+            else if (currentType === 'api') { if (previewApiSrc) { previewBox.style.backgroundImage = 'url(' + previewApiSrc + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = TK('admin.127'); } else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = bgApiUrl.value.trim() ? TK('admin.128') : TK('admin.129'); } }
+            else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = TK('admin.129'); }
             previewBox.style.backgroundSize = 'cover'; previewBox.style.backgroundPosition = 'center';
             previewBlur.style.backdropFilter = 'blur(' + blur + 'px)'; previewBlur.style.webkitBackdropFilter = 'blur(' + blur + 'px)';
             previewCard.style.background = 'rgba(255,255,255,' + opacity + ')';
-            var labels = []; if (blur > 0) labels.push(ysmT('模糊 {n}px').replace('{n}', blur)); labels.push(ysmT('卡片 {n}%').replace('{n}', Math.round(opacity*100))); previewBlurLabel.textContent = labels.join(' · ');
+            var labels = []; if (blur > 0) labels.push(TK('admin.130').replace('{n}', blur)); labels.push(TK('admin.131').replace('{n}', Math.round(opacity*100))); previewBlurLabel.textContent = labels.join(' · ');
         }
-        window.removeBgImage = function() { if (confirm(ysmT('确定移除背景图片？'))) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
+        window.removeBgImage = function() { if (confirm(TK('admin.132'))) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
         document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formSiteTitle').value = document.getElementById('siteTitleInput').value.trim(); document.getElementById('formRegEnabled').value = document.getElementById('regToggle').checked ? '1' : ''; document.getElementById('formGuestComments').value = document.getElementById('guestToggle').checked ? '1' : ''; document.getElementById('formSuperComment').value = document.getElementById('superCommentToggle').checked ? '1' : ''; document.getElementById('formNotifyEnabled').value = document.getElementById('notifyToggle').checked ? '1' : ''; document.getElementById('formNotifyEmail').value = document.getElementById('notifyEmailInput').value.trim(); document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicAutoPlay').value = document.getElementById('musicAutoPlayInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); document.getElementById('formBgMusicEnabled').value = document.getElementById('bgMusicToggle').checked ? '1' : ''; });
         <?php if ($bgType === 'api' && $bgApiUrl): ?>
@@ -2239,46 +2237,46 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             友站管理
         </div>
-        <div class="page-subtitle">友情链接维护（前台仅展示「启用」状态）；支持抓取站点信息预填与掉链巡检</div>
+        <div class="page-subtitle"><?= t('admin.133') ?></div>
     </div>
     <div id="linksAdmin" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>">
         <div class="card">
-            <div class="card-title" id="linkFormTitle">新增友链</div>
+            <div class="card-title" id="linkFormTitle"><?= t('admin.134') ?></div>
             <div class="form-group">
-                <label class="form-label">站点名</label>
-                <input class="form-input" id="linkName" maxlength="60" placeholder="对方站点名称">
+                <label class="form-label"><?= t('admin.135') ?></label>
+                <input class="form-input" id="linkName" maxlength="60" placeholder="<?= t('admin.136') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label">站点地址</label>
+                <label class="form-label"><?= t('admin.137') ?></label>
                 <div class="api-url-group">
                     <input class="form-input" id="linkUrl" placeholder="https://example.com">
-                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn">抓取预填</button>
+                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn"><?= t('admin.138') ?></button>
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label">描述（可选）</label>
-                <input class="form-input" id="linkDesc" maxlength="200" placeholder="一句话介绍">
+                <label class="form-label"><?= t('admin.139') ?></label>
+                <input class="form-input" id="linkDesc" maxlength="200" placeholder="<?= t('admin.140') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label">图标地址（可选）</label>
+                <label class="form-label"><?= t('admin.141') ?></label>
                 <input class="form-input" id="linkFavicon" placeholder="https://example.com/favicon.ico">
             </div>
             <div class="form-group">
-                <label class="form-label">排序（越小越前）</label>
+                <label class="form-label"><?= t('admin.142') ?></label>
                 <input class="form-input" id="linkSort" type="number" value="0" style="max-width:160px">
             </div>
             <div id="linkFormMsg" class="form-hint"></div>
             <div style="display:flex;justify-content:flex-end;gap:10px">
-                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none">取消编辑</button>
-                <button type="button" class="btn btn-primary" id="linkSaveBtn">保存</button>
+                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none"><?= t('admin.143') ?></button>
+                <button type="button" class="btn btn-primary" id="linkSaveBtn"><?= t('admin.022') ?></button>
             </div>
             <input type="hidden" id="linkId" value="">
         </div>
         <div class="card">
-            <div class="card-title">友链列表</div>
+            <div class="card-title"><?= t('admin.144') ?></div>
             <div class="table-wrap">
                 <table id="linksTable">
-                    <tr><th>站点</th><th>状态</th><th>排序</th><th>最近巡检</th><th>操作</th></tr>
+                    <tr><th><?= t('admin.145') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.146') ?></th><th><?= t('admin.147') ?></th><th><?= t('admin.032') ?></th></tr>
                 </table>
             </div>
         </div>
@@ -2292,14 +2290,14 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             在线更新
         </div>
-        <div class="page-subtitle">系统版本管理与更新</div>
+        <div class="page-subtitle"><?= t('admin.148') ?></div>
     </div>
 
     <div class="update-status-bar" id="updateStatusBar" style="display:none"></div>
 
     <!-- 当前版本 -->
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>当前版本</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><?= t('admin.149') ?></div>
         <div class="version-display">
             <div>
                 <div class="version-tag">v<?= htmlspecialchars(APP_VERSION) ?></div>
@@ -2317,56 +2315,56 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
 
     <!-- 更新通道 -->
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>更新通道</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><?= t('admin.041') ?></div>
         <div class="channel-tabs">
-            <div class="channel-tab <?= ($config['update_channel'] ?? 'stable') === 'stable' ? 'active' : '' ?>" onclick="switchChannel('stable')"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 正式版</div>
-            <div class="channel-tab <?= ($config['update_channel'] ?? '') === 'beta' ? 'active' : '' ?>" onclick="switchChannel('beta')"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> 测试版</div>
+            <div class="channel-tab <?= ($config['update_channel'] ?? 'stable') === 'stable' ? 'active' : '' ?>" data-channel="stable" onclick="switchChannel('stable')"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><?= t('admin.201') ?></div>
+            <div class="channel-tab <?= ($config['update_channel'] ?? '') === 'beta' ? 'active' : '' ?>" data-channel="beta" onclick="switchChannel('beta')"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg><?= t('admin.200') ?></div>
         </div>
         <!-- v3.2.4：更新方式与更新包类型详细说明（面向小白，三种通道一目了然） -->
         <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;font-size:0.88em;color:var(--text-secondary);line-height:1.8">
-            <div style="font-weight:600;color:var(--text);margin-bottom:6px">系统支持三种更新方式：</div>
+            <div style="font-weight:600;color:var(--text);margin-bottom:6px"><?= t('admin.150') ?></div>
             <div style="display:flex;flex-direction:column;gap:8px">
-                <div><span style="font-weight:600;color:var(--accent)">① SSH 服务器连接更新（推荐）</span><br>
-                在服务器终端（SSH）执行 <code>sudo ysm-admin apply-update</code>，从本页已确认的更新包直接应用；适合习惯命令行的用户，全程自动备份、校验签名、失败自动回滚。</div>
-                <div><span style="font-weight:600;color:var(--accent)">② 上传更新包更新（手动上传）</span><br>
-                在下方「手动更新」区上传 <code>ZIP / tar.gz</code> 更新包到服务器，再执行 <code>sudo ysm-admin apply-update</code>；适合更新包已下载到本地、不想从仓库拉取的场景。</div>
-                <div><span style="font-weight:600;color:var(--accent)">③ 在线更新（后台检查更新）</span><br>
+                <div><span style="font-weight:600;color:var(--accent)"><?= t('admin.151') ?></span><br>
+                在服务器终端（SSH）执行 <code>sudo ysm-admin apply-update</code><?= t('admin.152') ?></div>
+                <div><span style="font-weight:600;color:var(--accent)"><?= t('admin.153') ?></span><br>
+                在下方「手动更新」区上传 <code>ZIP / tar.gz</code><?= t('admin.154') ?><code>sudo ysm-admin apply-update</code><?= t('admin.155') ?></div>
+                <div><span style="font-weight:600;color:var(--accent)"><?= t('admin.156') ?></span><br>
                 点击上方「检查更新」自动连接 GitHub 仓库，识别最新版本并展示可用的更新包，选定后按提示在 SSH 执行 <code>sudo ysm-admin apply-update</code>。</div>
             </div>
-            <div style="font-weight:600;color:var(--text);margin:10px 0 6px">更新包类型：</div>
+            <div style="font-weight:600;color:var(--text);margin:10px 0 6px"><?= t('admin.157') ?></div>
             <div style="display:flex;flex-direction:column;gap:8px">
-                <div><span style="font-weight:600;color:var(--accent)">全量包</span>（<code>-full.tar.gz</code>）：包含全部源码文件，适用于<b>跨大版本</b>升级或异常环境修复，体积最大；跨版本更新<b>必须</b>使用全量包。</div>
-                <div><span style="font-weight:600;color:var(--accent)">增量包</span>（<code>-to-*-inc.tar.gz</code>）：仅包含本次变更的文件，适用于<b>同版本内</b>的小版本升级，体积小、速度快。</div>
-                <div><span style="font-weight:600;color:var(--accent)">初始化安装包</span>（<code>-install.tar.gz</code>）：用于<b>全新部署</b>（首次安装），包含完整源码与一键安装脚本，不用于升级。</div>
+                <div><span style="font-weight:600;color:var(--accent)"><?= t('admin.158') ?></span>（<code>-full.tar.gz</code><?= t('admin.159') ?><b><?= t('admin.160') ?></b><?= t('admin.161') ?><b><?= t('admin.162') ?></b><?= t('admin.163') ?></div>
+                <div><span style="font-weight:600;color:var(--accent)"><?= t('admin.164') ?></span>（<code>-to-*-inc.tar.gz</code><?= t('admin.165') ?><b><?= t('admin.166') ?></b><?= t('admin.167') ?></div>
+                <div><span style="font-weight:600;color:var(--accent)"><?= t('admin.168') ?></span>（<code>-install.tar.gz</code><?= t('admin.169') ?><b><?= t('admin.170') ?></b><?= t('admin.171') ?></div>
             </div>
-            <div style="margin-top:10px;color:var(--text-muted)">当前通道：<?= ($config['update_channel'] ?? 'stable') === 'beta' ? '测试版（含预发布版本）' : '正式版（仅正式 Release）' ?></div>
+            <div style="margin-top:10px;color:var(--text-muted)"><?= t('admin.channel_now') ?><?= ($config['update_channel'] ?? 'stable') === 'beta' ? t('admin.channel_beta_desc') : t('admin.channel_stable_desc') ?></div>
         </div>
     </div>
 
     <!-- 执行更新 -->
     <div class="card" id="updateActionCard" style="display:none">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>执行更新</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg><?= t('admin.172') ?></div>
         <div id="updateActionContent">
             <!-- v3.2.2：跨版本更新必须使用全量包提示 -->
             <div id="crossVerHint" class="msg" style="display:none;margin:0 0 12px;background:rgba(245,158,11,0.14);color:#b45309">
                 <svg viewBox="0 0 24 24" width="16" height="16" style="vertical-align:-3px;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                <strong>检测到跨版本更新</strong>（主版本号变化），必须使用<b>全量包</b>，请勿选择增量包。
+                <strong><?= t('admin.173') ?></strong><?= t('admin.174') ?><b><?= t('admin.158') ?></b>，请勿选择增量包。
             </div>
-            <p style="color:var(--text-secondary)">发现新版本 <strong id="newVersionText"></strong>，请选择更新包类型后开始更新。</p>
+            <p style="color:var(--text-secondary)"><?= t('admin.175') ?><strong id="newVersionText"></strong><?= t('admin.176') ?></p>
             <!-- v3.2.0：在线更新自动识别仓库发布的全量包 / 增量包，由站长选择 -->
             <div id="pkgSelectArea" style="margin-top:14px;display:none">
                 <div class="bg-type-grid" style="max-width:640px">
                     <label class="bg-type-card" id="pkgFullCard">
                         <input type="radio" name="pkg_type" value="full">
                         <div class="type-icon full"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M6 3l3 3-3 3M18 15l-3 3 3 3"/></svg></div>
-                        <div class="type-name">全量包更新</div>
-                        <div class="type-desc" style="font-size:0.74em">完整覆盖全部文件，适合大版本升级</div>
+                        <div class="type-name"><?= t('admin.177') ?></div>
+                        <div class="type-desc" style="font-size:0.74em"><?= t('admin.178') ?></div>
                     </label>
                     <label class="bg-type-card" id="pkgIncCard">
                         <input type="radio" name="pkg_type" value="inc">
                         <div class="type-icon inc"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div>
-                        <div class="type-name">增量包更新</div>
-                        <div class="type-desc" style="font-size:0.74em">仅覆盖变更文件，体积小、速度快</div>
+                        <div class="type-name"><?= t('admin.179') ?></div>
+                        <div class="type-desc" style="font-size:0.74em"><?= t('admin.180') ?></div>
                     </label>
                 </div>
                 <p id="pkgHint" style="color:var(--text-muted);font-size:0.82em;margin-top:10px"></p>
@@ -2385,21 +2383,21 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         </div>
         <div id="updateProgressContent" style="display:none">
             <div class="update-progress">
-                <div class="update-progress-step" id="upStep1"><span class="step-icon">⏳</span> 等待 SSH 确认</div>
-                <div class="update-progress-step" id="upStep2"><span class="step-icon">⏳</span> 备份中</div>
-                <div class="update-progress-step" id="upStep3"><span class="step-icon">⏳</span> 更新文件中</div>
-                <div class="update-progress-step" id="upStep4"><span class="step-icon">⏳</span> 完成</div>
+                <div class="update-progress-step" id="upStep1"><span class="step-icon">⏳</span><?= t('admin.181') ?></div>
+                <div class="update-progress-step" id="upStep2"><span class="step-icon">⏳</span><?= t('admin.182') ?></div>
+                <div class="update-progress-step" id="upStep3"><span class="step-icon">⏳</span><?= t('admin.183') ?></div>
+                <div class="update-progress-step" id="upStep4"><span class="step-icon">⏳</span><?= t('admin.184') ?></div>
             </div>
             <div style="margin-top:12px">
-                <p style="color:var(--text-muted);font-size:0.85em" id="updateProgressHint">请在 SSH 中执行: <code id="sshCommandText">ysm-admin apply-update</code></p>
+                <p style="color:var(--text-muted);font-size:0.85em" id="updateProgressHint"><?= t('admin.185') ?><code id="sshCommandText">ysm-admin apply-update</code></p>
             </div>
         </div>
     </div>
 
     <!-- 手动更新（始终可见） -->
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>手动更新</div>
-        <p style="color:var(--text-secondary);margin-bottom:12px">上传 ZIP 或 tar.gz 更新包手动升级系统。</p>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><?= t('admin.186') ?></div>
+        <p style="color:var(--text-secondary);margin-bottom:12px"><?= t('admin.187') ?></p>
         <div>
             <button class="btn btn-secondary" onclick="document.getElementById('uploadPkgInput').click()">
                 <svg viewBox="0 0 24 24" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -2409,10 +2407,10 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         </div>
         <div id="manualUpdateProgress" style="display:none;margin-top:12px">
             <div class="update-progress">
-                <div class="update-progress-step" id="mUpStep1"><span class="step-icon">⏳</span> 上传中...</div>
-                <div class="update-progress-step" id="mUpStep2"><span class="step-icon">⏳</span> 解压验证中</div>
-                <div class="update-progress-step" id="mUpStep3"><span class="step-icon">⏳</span> 部署中</div>
-                <div class="update-progress-step" id="mUpStep4"><span class="step-icon">⏳</span> 完成</div>
+                <div class="update-progress-step" id="mUpStep1"><span class="step-icon">⏳</span><?= t('admin.188') ?></div>
+                <div class="update-progress-step" id="mUpStep2"><span class="step-icon">⏳</span><?= t('admin.189') ?></div>
+                <div class="update-progress-step" id="mUpStep3"><span class="step-icon">⏳</span><?= t('admin.190') ?></div>
+                <div class="update-progress-step" id="mUpStep4"><span class="step-icon">⏳</span><?= t('admin.184') ?></div>
             </div>
             <div style="margin-top:8px;color:var(--text-muted);font-size:0.85em" id="manualUpdateHint"></div>
         </div>
@@ -2420,16 +2418,16 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
 
     <!-- 更新历史 -->
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>更新历史</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><?= t('admin.191') ?></div>
         <form class="log-toolbar" onsubmit="return loadBackupHistory(1, document.getElementById('backupSearchInput').value)">
-            <input type="text" class="form-input" id="backupSearchInput" placeholder="搜索 版本/时间/状态..." autocomplete="off">
-            <button type="submit" class="btn btn-sm btn-primary">搜索</button>
-            <button type="button" class="btn btn-sm btn-outline" onclick="document.getElementById('backupSearchInput').value='';loadBackupHistory(1,'')">清除</button>
+            <input type="text" class="form-input" id="backupSearchInput" placeholder="<?= t('admin.192') ?>" autocomplete="off">
+            <button type="submit" class="btn btn-sm btn-primary"><?= t('admin.009') ?></button>
+            <button type="button" class="btn btn-sm btn-outline" onclick="document.getElementById('backupSearchInput').value='';loadBackupHistory(1,'')"><?= t('admin.193') ?></button>
             <span class="toolbar-spacer"></span>
             <span class="page-info" id="backupPageInfo"></span>
         </form>
         <div class="backup-list" id="backupList">
-            <p style="color:var(--text-muted);font-size:0.85em">加载中...</p>
+            <p style="color:var(--text-muted);font-size:0.85em"><?= t('admin.194') ?></p>
         </div>
         <div id="backupPager"></div>
     </div>
@@ -2442,7 +2440,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     var pendingUpdateUrl = ''; // v3.2.0：在线更新选中的仓库包下载地址（全量/增量包）
 
     function switchChannel(ch) {
-        var code = prompt(ysmT('切换更新通道为敏感操作。\n请先在 SSH 中执行：sudo ysm-admin challenge\n再输入得到的确认码：'));
+        var code = prompt(TK('admin.195'));
         if (!code) return;
         var fd = new FormData();
         fd.append('ajax', 'save_channel');
@@ -2450,46 +2448,46 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         fd.append('csrf_token', '<?= generateCsrfToken() ?>');
         fd.append('challenge_code', code.trim().toUpperCase());
         fetch('<?= $_SERVER['SCRIPT_NAME'] ?>?tab=update', { method: 'POST', body: fd })
-            .then(function(r) { return r.json().catch(function() { return { success: false, error: ysmT('响应解析失败') }; }); })
+            .then(function(r) { return r.json().catch(function() { return { success: false, error: TK('admin.196') }; }); })
             .then(function(d) {
                 if (!d || !d.success) {
                     // v5.4.5：失败必须有明确反馈（此前静默无反应，看起来像"功能不可用"）
-                    alert(ysmT('切换失败：') + ((d && d.error) || ysmT('未知错误')) + '\n' + ysmT('若为确认码无效/过期，请重新执行：sudo ysm-admin challenge'));
+                    alert(TK('admin.197') + ((d && d.error) || TK('admin.198')) + '\n' + TK('admin.199'));
                     return;
                 }
                 document.querySelectorAll('.channel-tab').forEach(function(t) {
-                    t.classList.toggle('active', t.textContent.indexOf(ch === 'stable' ? '正式版' : '测试版') >= 0);
+                    t.classList.toggle('active', t.getAttribute('data-channel') === ch);
                 });
                 var vl = document.querySelector('.version-label');
-                if (vl) vl.textContent = ch === 'beta' ? ysmT('测试版') : ysmT('正式版');
-                alert(ysmT('已切换为') + (ch === 'beta' ? ysmT('测试版（含预发布）') : ysmT('正式版（仅正式 Release）')) + ysmT('。\n页面将自动刷新以同步所有显示项；随后请点「检查更新」。'));
+                if (vl) vl.textContent = ch === 'beta' ? TK('admin.200') : TK('admin.201');
+                alert(TK('admin.202') + (ch === 'beta' ? TK('admin.203') : TK('admin.204')) + TK('admin.205'));
                 setTimeout(function() { location.reload(); }, 300);
             })
-            .catch(function(e) { alert(ysmT('切换请求失败：') + e); });
+            .catch(function(e) { alert(TK('admin.206') + e); });
     }
 
     function checkUpdate() {
         var btn = document.getElementById('checkUpdateBtn');
         btn.disabled = true;
-        btn.innerHTML = '<span style="display:inline-block;animation:spin 1s linear infinite">⟳</span> ' + ysmT('检查中...');
+        btn.innerHTML = '<span style="display:inline-block;animation:spin 1s linear infinite">⟳</span> ' + TK('admin.207');
         document.getElementById('updateCheckResult').style.display = 'none';
         fetch('<?= $_SERVER['SCRIPT_NAME'] ?>?tab=update&ajax=check_update')
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 btn.disabled = false;
-                btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> ' + ysmT('检查更新');
+                btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> ' + TK('admin.208');
                 var resultDiv = document.getElementById('updateCheckResult');
                 if (d.available) {
                     // v3.2.2：更新通道标识（稳定版/测试版）+ 跨版本检测（主版本号变化必须全量包）
                     // v5.3.0：后端 update_decision.force_full（预发布→正式版）同样强制全量包（与 apply-update 同一判定）
-                    var chLabel = ysmT('<?= ($config['update_channel'] ?? 'stable') === 'beta' ? '测试版通道' : '稳定版通道' ?>');
+                    var chLabel = TK('<?= ($config['update_channel'] ?? 'stable') === 'beta' ? 'admin.ch_beta' : 'admin.ch_stable' ?>');
                     var cross = d.latest_version && d.current_version && String(d.latest_version).split('.')[0] !== String(d.current_version).split('.')[0];
                     var forceFullByRule = !!(d.update_decision && d.update_decision.force_full);
                     var forceFull = !!cross || forceFullByRule;
                     var ruleHint = cross
-                        ? ysmT('{title}：主版本号变化，必须使用{full}，已为你默认选中全量包').replace('{title}', '<strong>' + ysmT('跨版本更新') + '</strong>').replace('{full}', '<strong>' + ysmT('全量包') + '</strong>')
-                        : (forceFullByRule ? ysmT('{title}：必须使用{full}，已为你默认选中全量包').replace('{title}', '<strong>' + ysmT('预发布转正式版') + '</strong>').replace('{full}', '<strong>' + ysmT('全量包') + '</strong>') : '');
-                    resultDiv.innerHTML = '<div class="msg msg-success" style="margin:0"><svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>' + ysmT('发现新版本 {latest}（当前 {current}）· {channel}').replace('{latest}', '<strong>v' + d.latest_version + '</strong>').replace('{current}', 'v' + d.current_version).replace('{channel}', chLabel) + '</div>' +
+                        ? TK('admin.209').replace('{title}', '<strong>' + TK('admin.210') + '</strong>').replace('{full}', '<strong>' + TK('admin.158') + '</strong>')
+                        : (forceFullByRule ? TK('admin.211').replace('{title}', '<strong>' + TK('admin.212') + '</strong>').replace('{full}', '<strong>' + TK('admin.158') + '</strong>') : '');
+                    resultDiv.innerHTML = '<div class="msg msg-success" style="margin:0"><svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>' + TK('admin.213').replace('{latest}', '<strong>v' + d.latest_version + '</strong>').replace('{current}', 'v' + d.current_version).replace('{channel}', chLabel) + '</div>' +
                         (ruleHint ? '<div class="msg" style="margin:8px 0 0;background:rgba(245,158,11,0.14);color:#b45309"><svg viewBox="0 0 24 24" width="16" height="16" style="vertical-align:-3px;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' + ruleHint + '</div>' : '');
                     document.getElementById('updateActionCard').style.display = 'block';
                     document.getElementById('newVersionText').textContent = 'v' + d.latest_version;
@@ -2504,19 +2502,19 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                         pendingUpdatePath = '';
                     }
                 } else {
-                    resultDiv.innerHTML = '<div class="msg" style="margin:0;background:var(--accent-glass);color:var(--text)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' + ysmT('当前已是最新版本 v{n}').replace('{n}', d.current_version) + '</div>';
+                    resultDiv.innerHTML = '<div class="msg" style="margin:0;background:var(--accent-glass);color:var(--text)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' + TK('admin.214').replace('{n}', d.current_version) + '</div>';
                     document.getElementById('updateActionCard').style.display = 'none';
                 }
                 // v5.4.7：测试通道——同时列出「最新正式版」与「最新测试版」，由使用者自选安装哪一个
                 if (d.options && d.options.length) {
                     window.__ysmOpts = d.options;
                     var oh = '<div style="margin:8px 0 0;padding:10px 12px;border:1px solid var(--border);border-radius:10px">' +
-                             '<div style="font-weight:600;margin-bottom:6px">' + ysmT('可安装版本（测试通道）') + '</div>';
+                             '<div style="font-weight:600;margin-bottom:6px">' + TK('admin.215') + '</div>';
                     d.options.forEach(function(o, i) {
                         oh += '<div style="display:flex;align-items:center;gap:10px;padding:6px 0">' +
                               '<span style="flex:1">' + o.option_label + ' · <strong>v' + o.latest_version + '</strong>' +
-                              (String(o.latest_version) === String(d.current_version) ? ' <span style="color:var(--text-muted)">' + ysmT('（与本机版本相同）') + '</span>' : '') +
-                              '</span><button class="btn btn-secondary" type="button" onclick="pickOption(' + i + ')">' + ysmT('选择此版本') + '</button></div>';
+                              (String(o.latest_version) === String(d.current_version) ? ' <span style="color:var(--text-muted)">' + TK('admin.216') + '</span>' : '') +
+                              '</span><button class="btn btn-secondary" type="button" onclick="pickOption(' + i + ')">' + TK('admin.217') + '</button></div>';
                     });
                     oh += '</div>';
                     resultDiv.innerHTML += oh;
@@ -2525,9 +2523,9 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             })
             .catch(function() {
                 btn.disabled = false;
-                btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> ' + ysmT('检查更新');
+                btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> ' + TK('admin.208');
                 var resultDiv = document.getElementById('updateCheckResult');
-                resultDiv.innerHTML = '<div class="msg" style="margin:0;background:rgba(255,80,80,0.15);color:#ff6060"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + ysmT('检查更新失败，请检查服务器网络连接') + '</div>';
+                resultDiv.innerHTML = '<div class="msg" style="margin:0;background:rgba(255,80,80,0.15);color:#ff6060"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + TK('admin.218') + '</div>';
                 resultDiv.style.display = 'block';
             });
     }
@@ -2577,10 +2575,10 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         fCard.style.display = full ? '' : 'none';
         iCard.style.display = inc ? '' : 'none';
         if (full) {
-            fCard.querySelector('.type-desc').textContent = ysmT(full.name + '（' + fmtSize(full.size) + '）完整覆盖，适合大版本升级');
+            fCard.querySelector('.type-desc').textContent = TK('admin.upd_full_desc').replace('{name}', full.name).replace('{size}', fmtSize(full.size));
         }
         if (inc) {
-            iCard.querySelector('.type-desc').textContent = ysmT(inc.name + '（' + fmtSize(inc.size) + '）仅覆盖变更文件，速度快');
+            iCard.querySelector('.type-desc').textContent = TK('admin.upd_inc_desc').replace('{name}', inc.name).replace('{size}', fmtSize(inc.size));
         }
         if (crossHint) crossHint.style.display = forceFull ? 'block' : 'none';
         // 默认选中：跨版本强制全量包；否则优先增量包（体积小）
@@ -2596,8 +2594,8 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         area.style.display = 'block';
         syncPkgCardActive();
         hint.textContent = sel === 'inc'
-            ? ysmT('将下载增量包更新至 v{ver}（下载后自动校验签名）').replace('{ver}', pendingUpdateVersion)
-            : ysmT('将下载全量包更新至 v{ver}（下载后自动校验签名）').replace('{ver}', pendingUpdateVersion);
+            ? TK('admin.219').replace('{ver}', pendingUpdateVersion)
+            : TK('admin.220').replace('{ver}', pendingUpdateVersion);
     }
 
     function syncPkgCardActive() {
@@ -2719,7 +2717,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 var progress = document.getElementById('manualUpdateProgress');
                 progress.style.display = 'block';
                 document.getElementById('mUpStep1').className = 'update-progress-step active';
-                document.getElementById('manualUpdateHint').textContent = ysmT('正在上传 {name}...').replace('{name}', file.name);
+                document.getElementById('manualUpdateHint').textContent = TK('admin.221').replace('{name}', file.name);
 
                 fetch('<?= $_SERVER['SCRIPT_NAME'] ?>', {
                     method: 'POST',
@@ -2730,13 +2728,13 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                     if (d.success) {
                         document.getElementById('mUpStep1').className = 'update-progress-step completed';
                         document.getElementById('mUpStep2').className = 'update-progress-step active';
-                        document.getElementById('manualUpdateHint').textContent = ysmT('解压验证中...');
+                        document.getElementById('manualUpdateHint').textContent = TK('admin.222');
                         setTimeout(function() {
                             document.getElementById('mUpStep2').className = 'update-progress-step completed';
                             document.getElementById('mUpStep3').className = 'update-progress-step active';
-                            document.getElementById('manualUpdateHint').textContent = ysmT('更新包已上传，请通过 SSH 执行: ysm-admin apply-update');
+                            document.getElementById('manualUpdateHint').textContent = TK('admin.223');
                             // 也显示到执行更新卡片
-                            var verText = d.target_version ? 'v' + d.target_version : ysmT('未知版本');
+                            var verText = d.target_version ? 'v' + d.target_version : TK('admin.224');
                             document.getElementById('updateActionCard').style.display = 'block';
                             document.getElementById('newVersionText').textContent = verText;
                             pendingUpdateVersion = d.target_version || 'uploaded';
@@ -2746,12 +2744,12 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                         }, 800);
                     } else {
                         document.getElementById('mUpStep1').className = 'update-progress-step failed';
-                        document.getElementById('manualUpdateHint').textContent = ysmT('上传失败：') + (d.error || ysmT('未知错误'));
+                        document.getElementById('manualUpdateHint').textContent = TK('admin.225') + (d.error || TK('admin.198'));
                     }
                 })
                 .catch(function() {
                     document.getElementById('mUpStep1').className = 'update-progress-step failed';
-                    document.getElementById('manualUpdateHint').textContent = ysmT('上传失败：') + ysmT('网络错误');
+                    document.getElementById('manualUpdateHint').textContent = TK('admin.225') + TK('admin.226');
                 });
             });
         }
@@ -2788,7 +2786,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         if (q !== undefined) backupSearchQ = q;
         if (perPage !== undefined) backupPerPage = perPage;
         var list = document.getElementById('backupList');
-        list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85em">' + ysmT('加载中...') + '</p>';
+        list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85em">' + TK('admin.194') + '</p>';
         fetch('<?= $_SERVER['SCRIPT_NAME'] ?>?tab=update&ajax=update_history&page=' + encodeURIComponent(page) + '&q=' + encodeURIComponent(backupSearchQ) + '&per_page=' + encodeURIComponent(backupPerPage))
             .then(function(r) { return r.json(); })
             .then(function(d) {
@@ -2797,13 +2795,13 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 // v5.0.0：搜索词拼接进 innerHTML 前转义（防 HTML 注入）
                 var __qEsc = String(backupSearchQ || '').replace(/[&<>"']/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
                 if (hist.length === 0) {
-                    html = '<p style="color:var(--text-muted);font-size:0.85em">' + (backupSearchQ ? ysmT('未找到匹配「{q}」的记录').replace('{q}', __qEsc) : ysmT('暂无更新记录')) + '</p>';
+                    html = '<p style="color:var(--text-muted);font-size:0.85em">' + (backupSearchQ ? TK('admin.227').replace('{q}', __qEsc) : TK('admin.228')) + '</p>';
                 } else {
                     for (var i = 0; i < hist.length; i++) {
                         var h = hist[i];
-                        var stText = ({'completed': ysmT('已完成'), 'failed': ysmT('失败'), 'in_progress': ysmT('进行中')}[h.status] || h.status);
+                        var stText = ({'completed': TK('admin.229'), 'failed': TK('admin.230'), 'in_progress': TK('admin.231')}[h.status] || h.status);
                         html += '<div class="backup-item">'
-                            + '<div class="backup-info"><span class="backup-version">' + ysmT('更新 {from} → {to}').replace('{from}', h.from_version).replace('{to}', h.to_version) + '</span>'
+                            + '<div class="backup-info"><span class="backup-version">' + TK('admin.232').replace('{from}', h.from_version).replace('{to}', h.to_version) + '</span>'
                             + '<span class="backup-time">' + (h.completed_at || '') + '</span></div>'
                             + '<span class="backup-status ' + h.status + '">' + stText + '</span></div>';
                     }
@@ -2818,7 +2816,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 }
             })
             .catch(function() {
-                list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85em">' + ysmT('加载失败') + '</p>';
+                list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85em">' + TK('admin.233') + '</p>';
             });
         return false;
     }
@@ -2826,7 +2824,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     // v2.6.6：更新历史分页控件（三段式：总数+每页条数 / 页码按钮 / 页码跳转；事件委托防注入）
     function renderBackupPager(d) {
         var info = document.getElementById('backupPageInfo');
-        if (info) info.textContent = (d && d.total > 0) ? ysmT('共 {a} 条 · 第 {b}/{c} 页').replace('{a}', d.total).replace('{b}', d.page).replace('{c}', d.pages) : '';
+        if (info) info.textContent = (d && d.total > 0) ? TK('admin.234').replace('{a}', d.total).replace('{b}', d.page).replace('{c}', d.pages) : '';
         var pager = document.getElementById('backupPager');
         if (!d || !d.total || !d.pages) { pager.innerHTML = ''; return; }
         var page = d.page, pages = d.pages, perPage = d.per_page || backupPerPage;
@@ -2846,12 +2844,12 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         }
         var html = '<nav class="pagination">';
         // 左：总数 + 每页条数
-        html += '<div class="pagination-info"><span class="page-info">' + ysmT('共 {n} 条').replace('{n}', '<strong>' + d.total + '</strong>') + '</span>'
-              + '<label class="per-page">' + ysmT('每页') + ' <select data-pp-url="' + ppTpl + '">';
+        html += '<div class="pagination-info"><span class="page-info">' + TK('admin.235').replace('{n}', '<strong>' + d.total + '</strong>') + '</span>'
+              + '<label class="per-page">' + TK('admin.236') + ' <select data-pp-url="' + ppTpl + '">';
         [10, 20, 50, 100].forEach(function(opt) {
             html += '<option value="' + opt + '"' + (opt === perPage ? ' selected' : '') + '>' + opt + '</option>';
         });
-        html += '</select> ' + ysmT('条') + '</label></div>';
+        html += '</select> ' + TK('admin.237') + '</label></div>';
         // 中：页码按钮（仅多页时显示）
         if (showNav) {
             html += '<div class="pagination-btns">';
@@ -2859,24 +2857,24 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 if (current) return '<span class="page-btn current" title="' + title + '">' + label + '</span>';
                 return '<a class="page-btn" data-page="' + pg + '" href="javascript:void(0)" title="' + title + '">' + label + '</a>';
             };
-            html += mkBtn(1, '« ' + ysmT('首页'), ysmT('首页'), false);
-            html += mkBtn(Math.max(1, page - 1), '‹ ' + ysmT('上一页'), ysmT('上一页'), false);
+            html += mkBtn(1, '« ' + TK('admin.238'), TK('admin.238'), false);
+            html += mkBtn(Math.max(1, page - 1), '‹ ' + TK('admin.239'), TK('admin.239'), false);
             var prev = 0;
             for (var i = 0; i < seq.length; i++) {
                 var pg = seq[i];
                 if (pg - prev > 1) html += '<span class="page-btn page-ellipsis">…</span>';
-                html += mkBtn(pg, pg, ysmT('第 {n} 页').replace('{n}', pg), pg === page);
+                html += mkBtn(pg, pg, TK('admin.240').replace('{n}', pg), pg === page);
                 prev = pg;
             }
-            html += mkBtn(Math.min(pages, page + 1), ysmT('下一页') + ' ›', ysmT('下一页'), false);
-            html += mkBtn(pages, ysmT('末页') + ' »', ysmT('末页'), false);
+            html += mkBtn(Math.min(pages, page + 1), TK('admin.241') + ' ›', TK('admin.241'), false);
+            html += mkBtn(pages, TK('admin.242') + ' »', TK('admin.242'), false);
             html += '</div>';
         }
         // 右：页码信息 + 跳转（仅多页时显示）
         if (showNav) {
-            html += '<div class="pagination-jump"><span class="page-info">' + ysmT('第 {a} / {b} 页').replace('{a}', page).replace('{b}', pages) + '</span>'
-                  + '<input type="number" class="page-jump" min="1" max="' + pages + '" placeholder="' + ysmT('页码') + '" data-pg-url="' + pgTpl + '">'
-                  + '<button type="button" class="page-btn">' + ysmT('跳转') + '</button></div>';
+            html += '<div class="pagination-jump"><span class="page-info">' + TK('admin.243').replace('{a}', page).replace('{b}', pages) + '</span>'
+                  + '<input type="number" class="page-jump" min="1" max="' + pages + '" placeholder="' + TK('admin.244') + '" data-pg-url="' + pgTpl + '">'
+                  + '<button type="button" class="page-btn">' + TK('admin.245') + '</button></div>';
         }
         pager.innerHTML = html + '</nav>';
         // 事件委托（click: 页码按钮/跳转按钮；change: 每页条数/页码输入）
@@ -2913,7 +2911,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
             守护进程
         </div>
-        <div class="page-subtitle">文件完整性保护与自动恢复</div>
+        <div class="page-subtitle"><?= t('admin.246') ?></div>
     </div>
     <?php
     $guardStatus = 'unknown';
@@ -2928,7 +2926,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             守护进程状态
         </div>
         <table>
-            <tr><td style="color:var(--text-muted)">状态</td>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.030') ?></td>
                 <td>
                     <span class="chain-badge <?= $guardStatus === 'active' ? 'chain-valid' : 'chain-invalid' ?>">
                         <?= $guardStatus === 'active' ? '● 运行中' : '● 未运行' ?>
@@ -2951,59 +2949,59 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
             数据管理
         </div>
-        <div class="page-subtitle">数据库 / 文章自动备份、整库恢复与保留策略</div>
+        <div class="page-subtitle"><?= t('admin.247') ?></div>
     </div>
     <?php if ($dMsg === 'saved'): ?>
-        <div class="msg" style="margin:0 0 16px;background:rgba(46,204,113,0.15);color:#2ecc71"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>自动备份配置已保存，守护进程下个周期生效</div>
+        <div class="msg" style="margin:0 0 16px;background:rgba(46,204,113,0.15);color:#2ecc71"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.248') ?></div>
     <?php elseif ($dMsg === 'save_failed'): ?>
-        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">配置写入失败，请检查 /opt/you-super-markdown/backup.conf 权限</div>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060"><?= t('admin.249') ?></div>
     <?php elseif ($dMsg === 'challenge_failed'): ?>
-        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">挑战码无效或已过期，请重新生成</div>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060"><?= t('admin.250') ?></div>
     <?php elseif ($dMsg === 'csrf_error'): ?>
-        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">CSRF 校验失败，请刷新页面重试</div>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060"><?= t('admin.251') ?></div>
     <?php endif; ?>
 
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>自动备份状态</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg><?= t('admin.252') ?></div>
         <table>
-            <tr><td style="color:var(--text-muted)">数据库备份间隔</td><td><?= (int)($gState['backup_interval_min'] ?? $bCfg['interval_min']) ?> 分钟（5~1440 可配）</td></tr>
-            <tr><td style="color:var(--text-muted)">上次数据库备份</td><td><?= htmlspecialchars($gState['last_db_backup'] ?: '尚未生成') ?></td></tr>
-            <tr><td style="color:var(--text-muted)">下次数据库备份</td><td><?= htmlspecialchars($gState['next_db_backup'] ?: '—') ?></td></tr>
-            <tr><td style="color:var(--text-muted)">数据库备份大小</td><td><?= $gState['db_backup_size'] ? number_format((float)$gState['db_backup_size'] / 1024, 1) . ' KB' : '—' ?></td></tr>
-            <tr><td style="color:var(--text-muted)">文章每日备份</td><td>保留 <?= (int)($gState['article_backup_keep'] ?? $bCfg['article_keep']) ?> 份；上次：<?= htmlspecialchars($gState['last_articles_backup'] ?: '尚未生成') ?>（当前 <?= (int)($gState['articles_backup_count'] ?? 0) ?> 份）</td></tr>
-            <tr><td style="color:var(--text-muted)">上传触发备份（v3.3.5）</td><td><?= !empty($bCfg['trigger_backup']) ? '开' : '关' ?>；最近触发：<?= htmlspecialchars($gState['last_upload_backup'] ?? '无记录') ?></td></tr>
-            <tr><td style="color:var(--text-muted)">单篇篡改还原（v3.3.5）</td><td><?= !empty($bCfg['single_restore']) ? '开' : '关' ?>；最近还原：<?= htmlspecialchars($gState['last_single_restore'] ?? '无记录') ?></td></tr>
-            <tr><td style="color:var(--text-muted)">手动备份保留</td><td><?= (int)($gState['manual_backup_keep'] ?? $bCfg['manual_keep']) ?> 份（超时自动清除）</td></tr>
-            <tr><td style="color:var(--text-muted)">最近自动恢复</td><td><?= htmlspecialchars($gState['last_restore'] ?: '无记录') ?></td></tr>
-            <tr><td style="color:var(--text-muted)">备份锁定</td><td>backups/db、backups/articles、logs 目录 chattr +i 锁定（root），PHP 权限不可篡改</td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.419') ?></td><td><?= (int)($gState['backup_interval_min'] ?? $bCfg['interval_min']) ?><?= t('admin.interval_unit') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.420') ?></td><td><?= htmlspecialchars($gState['last_db_backup'] ?: '尚未生成') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.421') ?></td><td><?= htmlspecialchars($gState['next_db_backup'] ?: '—') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.422') ?></td><td><?= $gState['db_backup_size'] ? number_format((float)$gState['db_backup_size'] / 1024, 1) . ' KB' : '—' ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.423') ?></td><td><?= t('admin.keep_article_line', ['n' => (int)($gState['article_backup_keep'] ?? $bCfg['article_keep']), 'last' => htmlspecialchars($gState['last_articles_backup'] ?: t('common.not_generated')), 'c' => (int)($gState['articles_backup_count'] ?? 0)]) ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.424') ?></td><td><?= !empty($bCfg['trigger_backup']) ? t('common.on') : t('common.off') ?><?= t('admin.last_trigger') ?><?= htmlspecialchars($gState['last_upload_backup'] ?? t('common.not_recorded')) ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.260') ?></td><td><?= !empty($bCfg['single_restore']) ? t('common.on') : t('common.off') ?><?= t('admin.last_single_restore') ?><?= htmlspecialchars($gState['last_single_restore'] ?? t('common.not_recorded')) ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.425') ?></td><td><?= (int)($gState['manual_backup_keep'] ?? $bCfg['manual_keep']) ?><?= t('admin.manual_keep_unit') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.426') ?></td><td><?= htmlspecialchars($gState['last_restore'] ?: t('common.not_recorded')) ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.253') ?></td><td><?= t('admin.254') ?></td></tr>
         </table>
     </div>
 
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>自动备份配置</div>
-        <form method="post" class="need-challenge" data-confirm="保存自动备份配置？">
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg><?= t('admin.255') ?></div>
+        <form method="post" class="need-challenge" data-confirm="<?= t('admin.cf_backup') ?>">
             <input type="hidden" name="save_backup_config" value="1">
             <input type="hidden" name="csrf_token" value="<?= generateCsrfToken() ?>">
             <table>
                 <tr>
-                    <td style="color:var(--text-muted)">数据库备份间隔（分钟）</td>
+                    <td style="color:var(--text-muted)"><?= t('admin.256') ?></td>
                     <td><input class="form-input" style="width:160px" type="number" min="5" max="1440" name="interval_min" value="<?= (int)$bCfg['interval_min'] ?>" required></td>
                 </tr>
                 <tr>
-                    <td style="color:var(--text-muted)">文章每日备份保留份数</td>
+                    <td style="color:var(--text-muted)"><?= t('admin.257') ?></td>
                     <td><input class="form-input" style="width:160px" type="number" min="1" max="90" name="article_keep" value="<?= (int)$bCfg['article_keep'] ?>" required></td>
                 </tr>
                 <tr>
-                    <td style="color:var(--text-muted)">手动备份保留份数</td>
+                    <td style="color:var(--text-muted)"><?= t('admin.258') ?></td>
                     <td><input class="form-input" style="width:160px" type="number" min="1" max="30" name="manual_keep" value="<?= (int)$bCfg['manual_keep'] ?>" required></td>
                 </tr>
                 <tr>
-                    <td style="color:var(--text-muted)">上传触发立即备份（v3.3.5）</td>
-                    <td><div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">上传新文章后立即备份（10 秒内）</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="trigger_backup" value="1" <?= !empty($bCfg['trigger_backup']) ? 'checked' : '' ?>><span class="slider"></span></label></div></td>
+                    <td style="color:var(--text-muted)"><?= t('admin.259') ?></td>
+                    <td><div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px"><?= t('admin.427') ?></span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="trigger_backup" value="1" <?= !empty($bCfg['trigger_backup']) ? 'checked' : '' ?>><span class="slider"></span></label></div></td>
                 </tr>
                 <tr>
-                    <td style="color:var(--text-muted)">单篇篡改还原（v3.3.5）</td>
-                    <td><div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">仅还原「系统隐藏文章 META 异常」的单篇，正常编辑不受影响</span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="single_restore" value="1" <?= !empty($bCfg['single_restore']) ? 'checked' : '' ?>><span class="slider"></span></label></div></td>
+                    <td style="color:var(--text-muted)"><?= t('admin.260') ?></td>
+                    <td><div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px"><?= t('admin.428') ?></span><label class="toggle" style="flex-shrink:0"><input type="checkbox" name="single_restore" value="1" <?= !empty($bCfg['single_restore']) ? 'checked' : '' ?>><span class="slider"></span></label></div></td>
                 </tr>
             </table>
             <div style="margin-top:12px">
@@ -3011,18 +3009,18 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                     <svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                     保存配置
                 </button>
-                <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px">保存需 SSH 生成挑战码（sudo ysm-admin challenge），300 秒有效</span>
+                <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px"><?= t('admin.261') ?></span>
             </div>
         </form>
     </div>
 
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>备份列表</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><?= t('admin.262') ?></div>
         <?php if (!$bList): ?>
-            <p style="color:var(--text-muted);font-size:0.85em">暂无备份记录（自动备份将在守护进程下个周期生成）</p>
+            <p style="color:var(--text-muted);font-size:0.85em"><?= t('admin.263') ?></p>
         <?php else: ?>
         <table>
-            <thead><tr><th>类型</th><th>文件</th><th>时间</th><th>大小</th></tr></thead>
+            <thead><tr><th><?= t('admin.264') ?></th><th><?= t('admin.265') ?></th><th><?= t('admin.035') ?></th><th><?= t('admin.266') ?></th></tr></thead>
             <tbody>
             <?php foreach ($bList as $b): ?>
                 <tr>
@@ -3035,7 +3033,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             </tbody>
         </table>
         <?php endif; ?>
-        <p style="color:var(--text-muted);font-size:0.82em;margin-top:8px">数据库备份固定 1 份滚动；文章备份按保留份数自动清除；手动/更新备份超时自动清除。手动整站备份：SSH 执行 <code>sudo ysm-admin backup</code>。</p>
+        <p style="color:var(--text-muted);font-size:0.82em;margin-top:8px"><?= t('admin.267') ?><code>sudo ysm-admin backup</code>。</p>
     </div>
 
     <?php elseif ($tab === 'hfish'): ?>
@@ -3044,7 +3042,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
             蜜罐安全
         </div>
-        <div class="page-subtitle">HFish 蜜罐攻击日志与自动封禁（攻击≥阈值自动封禁登录/注册/评论；内网 IP 豁免）</div>
+        <div class="page-subtitle"><?= t('admin.268') ?></div>
     </div>
     <?php
     $hfishSnapshot = [];
@@ -3064,13 +3062,13 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     $hfishData = paginateList($hfishAttacks, ['ip', 'date'], '', (int)($_GET['hfish_page'] ?? 1), $hfishPerPage);
     ?>
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>蜜罐状态</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><?= t('admin.269') ?></div>
         <div class="table-wrap"><table>
-            <tr><td style="color:var(--text-muted)">最近同步时间</td><td><?= htmlspecialchars($hfishUpdated) ?></td></tr>
-            <tr><td style="color:var(--text-muted)">自动封禁阈值</td><td>攻击次数 ≥ <strong><?= intval($hfishThreshold) ?></strong> 次 → 封禁（登录/注册/评论）；内网/私有 IP（10/8、172.16/12、192.168/16 等）豁免自动封禁</td></tr>
-            <tr><td style="color:var(--text-muted)">攻击 IP 记录</td><td><?= count($hfishAttacks) ?> 条（已封禁 <?= $hfishBannedCount ?> 条）</td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.429') ?></td><td><?= htmlspecialchars($hfishUpdated) ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.430') ?></td><td><?= t('admin.431') ?><strong><?= intval($hfishThreshold) ?></strong><?= t('admin.432') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.433') ?></td><td><?= t('admin.hfish_count', ['n' => count($hfishAttacks), 'm' => $hfishBannedCount]) ?></td></tr>
             <?php if ($hfishError): ?>
-            <tr><td style="color:var(--text-muted)">数据源状态</td><td><span style="color:#ef4444"><?= htmlspecialchars($hfishError) ?></span></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.434') ?></td><td><span style="color:#ef4444"><?= htmlspecialchars($hfishError) ?></span></td></tr>
             <?php endif; ?>
         </table></div>
         <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
@@ -3080,25 +3078,25 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             </button>
             <span id="hfishSyncMsg" style="font-size:0.85em;color:var(--text-muted)"></span>
         </div>
-        <p style="font-size:0.82em;color:var(--text-muted);margin-top:10px">守护进程每 5 分钟自动同步一次；点击「立即同步」可即时拉取蜜罐攻击记录并执行封禁检查。</p>
+        <p style="font-size:0.82em;color:var(--text-muted);margin-top:10px"><?= t('admin.270') ?></p>
     </div>
 
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>攻击 IP 列表（共 <?= $hfishData['total'] ?>）</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg><?= t('admin.hfish_title', ['n' => $hfishData['total']]) ?></div>
         <?php if (empty($hfishData['items'])): ?>
-        <div class="empty-state"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg><p>暂无攻击记录（或蜜罐尚未同步）</p></div>
+        <div class="empty-state"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg><p><?= t('admin.271') ?></p></div>
         <?php else: ?>
         <div class="table-wrap"><table>
-            <tr><th>IP</th><th>攻击次数</th><th>攻击行为</th><th>命中蜜罐</th><th>UA</th><th>最近时间</th><th>状态</th></tr>
+            <tr><th>IP</th><th><?= t('admin.272') ?></th><th><?= t('admin.273') ?></th><th><?= t('admin.274') ?></th><th>UA</th><th><?= t('admin.275') ?></th><th><?= t('admin.030') ?></th></tr>
             <?php foreach ($hfishData['items'] as $a): ?>
             <tr>
                 <td><code><?= htmlspecialchars($a['ip'] ?? '') ?></code></td>
-                <td><strong><?= intval($a['attack_cnt'] ?? 0) ?></strong><?= intval($a['attack_cnt'] ?? 0) >= $hfishThreshold ? ' <span class="chain-badge chain-invalid">已达阈值</span>' : '' ?></td>
+                <td><strong><?= intval($a['attack_cnt'] ?? 0) ?></strong><?= intval($a['attack_cnt'] ?? 0) >= $hfishThreshold ? ' <span class="chain-badge chain-invalid">' . t('admin.reach_threshold') . '</span>' : '' ?></td>
                 <td style="font-size:0.85em"><?= htmlspecialchars(implode(', ', array_keys($a['styles'] ?? [])) ?: '-') ?></td>
                 <td style="font-size:0.85em"><?= htmlspecialchars(implode(', ', array_keys($a['honeypots'] ?? [])) ?: '-') ?></td>
                 <td style="font-size:0.82em;color:var(--text-muted)"><?= htmlspecialchars(implode(', ', array_keys($a['uas'] ?? [])) ?: '-') ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['date'] ?? '') ?></td>
-                <td><?php if (!empty($a['banned'])): ?><span class="chain-badge chain-invalid">已封禁</span><?php elseif (!empty($a['skip'])): ?><span class="chain-badge" style="background:rgba(251,191,36,.15);color:#d97706" title="<?= htmlspecialchars($a['skip_reason'] ?? '内网/链路本地地址豁免') ?>">已豁免</span><?php else: ?><span class="chain-badge chain-valid">未封禁</span><?php endif; ?></td>
+                <td><?php if (!empty($a['banned'])): ?><span class="chain-badge chain-invalid"><?= t('admin.435') ?></span><?php elseif (!empty($a['skip'])): ?><span class="chain-badge" style="background:rgba(251,191,36,.15);color:#d97706" title="<?= htmlspecialchars($a['skip_reason'] ?? '内网/链路本地地址豁免') ?>"><?= t('admin.436') ?></span><?php else: ?><span class="chain-badge chain-valid"><?= t('admin.437') ?></span><?php endif; ?></td>
             </tr>
             <?php endforeach; ?>
         </table></div>
@@ -3110,7 +3108,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         var btn = document.getElementById('hfishSyncBtn');
         var msg = document.getElementById('hfishSyncMsg');
         btn.disabled = true;
-        msg.textContent = ysmT('同步中...');
+        msg.textContent = TK('admin.276');
         var fd = new FormData();
         fd.append('ajax', 'hfish_sync');
         fd.append('csrf_token', '<?= generateCsrfToken() ?>');
@@ -3118,10 +3116,10 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 btn.disabled = false;
-                if (d.success) { msg.textContent = ysmT('同步成功'); setTimeout(function() { location.reload(); }, 800); }
-                else { msg.textContent = ysmT('同步失败：') + (d.output || d.error || ysmT('未知错误')); }
+                if (d.success) { msg.textContent = TK('admin.277'); setTimeout(function() { location.reload(); }, 800); }
+                else { msg.textContent = TK('admin.278') + (d.output || d.error || TK('admin.198')); }
             })
-            .catch(function() { btn.disabled = false; msg.textContent = ysmT('请求失败'); });
+            .catch(function() { btn.disabled = false; msg.textContent = TK('admin.279'); });
     }
     </script>
     <?php elseif ($tab === 'mail'): ?>
@@ -3141,90 +3139,90 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
             邮件设置
         </div>
-        <div class="page-subtitle">SMTP 告警邮件配置（直连发送，无 MTA 依赖）</div>
+        <div class="page-subtitle"><?= t('admin.280') ?></div>
     </div>
     <?php if ($smtpMsg === 'saved'): ?>
-        <div class="msg" style="margin:0 0 16px;background:rgba(46,204,113,0.15);color:#2ecc71"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>SMTP 配置已保存</div>
+        <div class="msg" style="margin:0 0 16px;background:rgba(46,204,113,0.15);color:#2ecc71"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.281') ?></div>
     <?php elseif ($smtpMsg === 'save_failed'): ?>
-        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">配置保存失败，请检查 config 表权限</div>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060"><?= t('admin.282') ?></div>
     <?php elseif ($smtpMsg === 'challenge_failed'): ?>
-        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">挑战码无效或已过期，请重新生成</div>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060"><?= t('admin.250') ?></div>
     <?php elseif ($smtpMsg === 'csrf_error'): ?>
-        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">CSRF 校验失败，请刷新页面重试</div>
+        <div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060"><?= t('admin.251') ?></div>
     <?php endif; ?>
 
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>SMTP 配置</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg><?= t('admin.283') ?></div>
         <?php if ($smtpAdminEmail === ''): ?>
-        <div class="msg" style="margin:0 0 12px;background:rgba(255,80,80,0.15);color:#ff6060">未配置管理员邮箱：超管设备二次验证码与安全告警均无法发送，超管将无法在新设备登录——请先在「系统配置」填写 admin_email</div>
+        <div class="msg" style="margin:0 0 12px;background:rgba(255,80,80,0.15);color:#ff6060"><?= t('admin.284') ?></div>
         <?php else: ?>
-        <div class="form-hint" style="margin-bottom:12px">设备二次验证码发送至管理员邮箱 <b><?= htmlspecialchars($smtpAdminEmail) ?></b>（超管无独立绑定邮箱，该邮箱即超管的验证通道）；SMTP 未配置或发送失败时验证码邮件不可达</div>
+        <div class="form-hint" style="margin-bottom:12px"><?= t('admin.438') ?><b><?= htmlspecialchars($smtpAdminEmail) ?></b><?= t('admin.439') ?></div>
         <?php endif; ?>
         <table>
-            <tr><td style="color:var(--text-muted)">管理员邮箱（收件人）</td><td><?= htmlspecialchars($smtpAdminEmail ?: '(未设置，请到「系统配置」填写 admin_email)') ?></td></tr>
-            <tr><td style="color:var(--text-muted)">当前 SMTP 服务器</td><td><?= $smtpCfg['host'] ? htmlspecialchars($smtpCfg['host']) . ':' . (int)$smtpCfg['port'] . '（' . htmlspecialchars($smtpCfg['enc']) . '）' : '未配置' ?></td></tr>
-            <tr><td style="color:var(--text-muted)">当前发信账号</td><td><?= htmlspecialchars($smtpCfg['user'] ?: '未配置') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.440') ?></td><td><?= htmlspecialchars($smtpAdminEmail ?: '(未设置，请到「系统配置」填写 admin_email)') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.441') ?></td><td><?= $smtpCfg['host'] ? htmlspecialchars($smtpCfg['host']) . ':' . (int)$smtpCfg['port'] . '（' . htmlspecialchars($smtpCfg['enc']) . '）' : '未配置' ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('admin.442') ?></td><td><?= htmlspecialchars($smtpCfg['user'] ?: '未配置') ?></td></tr>
         </table>
-        <form method="post" class="need-challenge" data-confirm="保存 SMTP 配置？授权码将写入数据库 config 表">
+        <form method="post" class="need-challenge" data-confirm="<?= t('admin.cf_smtp') ?>">
             <input type="hidden" name="save_smtp_config" value="1">
             <input type="hidden" name="csrf_token" value="<?= generateCsrfToken() ?>">
             <table style="margin-top:8px">
-                <tr><td style="color:var(--text-muted)">SMTP 服务器</td>
-                    <td><input class="form-input" style="width:220px" type="text" name="smtp_host" value="<?= htmlspecialchars($smtpCfg['host']) ?>" placeholder="如 smtp.163.com" required></td></tr>
-                <tr><td style="color:var(--text-muted)">端口</td>
+                <tr><td style="color:var(--text-muted)"><?= t('admin.285') ?></td>
+                    <td><input class="form-input" style="width:220px" type="text" name="smtp_host" value="<?= htmlspecialchars($smtpCfg['host']) ?>" placeholder="<?= t('admin.443') ?>" required></td></tr>
+                <tr><td style="color:var(--text-muted)"><?= t('admin.286') ?></td>
                     <td><input class="form-input" style="width:120px" type="number" min="1" max="65535" name="smtp_port" value="<?= (int)$smtpCfg['port'] ?>" required></td></tr>
-                <tr><td style="color:var(--text-muted)">加密方式</td>
+                <tr><td style="color:var(--text-muted)"><?= t('admin.287') ?></td>
                     <td><select class="form-input" style="width:160px" name="smtp_enc">
                         <option value="ssl" <?= $smtpCfg['enc'] === 'ssl' ? 'selected' : '' ?>>SSL (465)</option>
                         <option value="tls" <?= $smtpCfg['enc'] === 'tls' ? 'selected' : '' ?>>STARTTLS (587)</option>
-                        <option value="plain" <?= $smtpCfg['enc'] === 'plain' ? 'selected' : '' ?>>无加密</option>
+                        <option value="plain" <?= $smtpCfg['enc'] === 'plain' ? 'selected' : '' ?>><?= t('admin.444') ?></option>
                     </select></td></tr>
-                <tr><td style="color:var(--text-muted)">发信账号</td>
-                    <td><input class="form-input" style="width:220px" type="text" name="smtp_user" value="<?= htmlspecialchars($smtpCfg['user']) ?>" placeholder="如 xxx@163.com" required></td></tr>
-                <tr><td style="color:var(--text-muted)">授权码</td>
+                <tr><td style="color:var(--text-muted)"><?= t('admin.288') ?></td>
+                    <td><input class="form-input" style="width:220px" type="text" name="smtp_user" value="<?= htmlspecialchars($smtpCfg['user']) ?>" placeholder="<?= t('admin.445') ?>" required></td></tr>
+                <tr><td style="color:var(--text-muted)"><?= t('admin.289') ?></td>
                     <td><?php $smtpPassSrc = smtpPassSource(); ?>
                         <?php if ($smtpPassSrc === 'env'): ?>
-                        <span style="color:#34c759;font-size:0.85em">✅ 已通过 php-fpm 环境变量 <code>YSM_SMTP_PASS</code> 注入（口令存于 root-only 独立文件 <code>/etc/php/*/fpm/pool.d/zz-ysm-secret.conf</code>，0600 root:root，Web 端不可见；修改用 <code>sudo ysm-admin set-smtp-pass</code>）</span>
+                        <span style="color:#34c759;font-size:0.85em"><?= t('admin.290') ?><code>YSM_SMTP_PASS</code><?= t('admin.291') ?><code>/etc/php/*/fpm/pool.d/zz-ysm-secret.conf</code><?= t('admin.292') ?><code>sudo ysm-admin set-smtp-pass</code>）</span>
                         <?php elseif ($smtpPassSrc === 'config'): ?>
-                        <span style="color:#f59e0b;font-size:0.85em">⚠️ 使用 config 表密文兜底。建议迁移到环境注入：<code>sudo ysm-admin set-smtp-pass</code>（写入 root-only 独立文件 <code>zz-ysm-secret.conf</code> 并重载 php-fpm）</span>
+                        <span style="color:#f59e0b;font-size:0.85em"><?= t('admin.293') ?><code>sudo ysm-admin set-smtp-pass</code><?= t('admin.294') ?><code>zz-ysm-secret.conf</code><?= t('admin.295') ?></span>
                         <?php elseif ($smtpPassSrc === 'file'): ?>
-                        <span style="color:#34c759;font-size:0.85em">✅ 已通过服务器密钥文件 <code>/opt/you-super-markdown/secrets/smtp_pass</code> 提供（CLI/守护进程告警可用；Web 端仍优先 php-fpm 环境变量）</span>
+                        <span style="color:#34c759;font-size:0.85em"><?= t('admin.296') ?><code>/opt/you-super-markdown/secrets/smtp_pass</code><?= t('admin.297') ?></span>
                         <?php else: ?>
-                        <span style="color:#ef4444;font-size:0.85em">❌ 未配置密码。请在服务器执行 <code>sudo ysm-admin set-smtp-pass</code>（写入 root-only 独立文件 <code>zz-ysm-secret.conf</code>，独立专用发信账号）</span>
+                        <span style="color:#ef4444;font-size:0.85em"><?= t('admin.298') ?><code>sudo ysm-admin set-smtp-pass</code><?= t('admin.294') ?><code>zz-ysm-secret.conf</code><?= t('admin.299') ?></span>
                         <?php endif; ?></td></tr>
                 <tr><td style="color:var(--text-muted)">发件人（可空=账号）</td>
-                    <td><input class="form-input" style="width:220px" type="text" name="smtp_from" value="<?= htmlspecialchars($smtpCfg['from']) ?>" placeholder="留空则用发信账号"></td></tr>
+                    <td><input class="form-input" style="width:220px" type="text" name="smtp_from" value="<?= htmlspecialchars($smtpCfg['from']) ?>" placeholder="<?= t('admin.446') ?>"></td></tr>
             </table>
             <div style="margin-top:12px">
                 <button class="btn btn-primary" type="submit">
                     <svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                     保存配置
                 </button>
-                <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px">保存需 SSH 生成挑战码（sudo ysm-admin challenge），300 秒有效</span>
+                <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px"><?= t('admin.261') ?></span>
             </div>
         </form>
         <div style="margin-top:14px">
-            <button class="btn btn-secondary" onclick="testSmtpMail()">发送测试邮件</button>
-            <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px">向管理员邮箱发送一封测试邮件，验证配置是否正确（需挑战码）</span>
+            <button class="btn btn-secondary" onclick="testSmtpMail()"><?= t('admin.300') ?></button>
+            <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px"><?= t('admin.301') ?></span>
         </div>
         <div id="smtpTestResult" style="display:none;margin-top:10px;padding:10px 14px;border-radius:8px;font-size:0.9em"></div>
     </div>
 
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>最近告警发送记录（alert.log）</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><?= t('admin.302') ?></div>
         <?php if (!$alertLogTail): ?>
-            <p style="color:var(--text-muted);font-size:0.85em">暂无失败记录（发送成功不会出现在此）</p>
+            <p style="color:var(--text-muted);font-size:0.85em"><?= t('admin.303') ?></p>
         <?php else: ?>
         <div style="font-family:monospace;font-size:0.82em;line-height:1.7;white-space:pre-wrap;word-break:break-all">
             <?php foreach ($alertLogTail as $line): ?><?= htmlspecialchars($line) ?><?= PHP_EOL ?><?php endforeach; ?>
         </div>
         <?php endif; ?>
-        <p style="color:var(--text-muted);font-size:0.82em;margin-top:8px">说明：邮件发送成功无记录；失败会在此列出（SMTP 认证失败/连接失败/mail 命令不可用等），便于追溯「告警没发出去」。</p>
+        <p style="color:var(--text-muted);font-size:0.82em;margin-top:8px"><?= t('admin.304') ?></p>
     </div>
 
     <script>
     function testSmtpMail() {
-        var code = prompt(ysmT('请在 SSH 中执行 sudo ysm-admin challenge 获取 6 位确认码后输入：'));
+        var code = prompt(TK('admin.305'));
         if (!code) return;
         var fd = new FormData();
         fd.append('ajax', 'test_smtp');
@@ -3232,7 +3230,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         fd.append('challenge_code', code.trim().toUpperCase());
         var el = document.getElementById('smtpTestResult');
         el.style.display = 'block';
-        el.textContent = ysmT('发送中...');
+        el.textContent = TK('admin.306');
         el.style.color = 'var(--text-secondary)';
         fetch('<?= $_SERVER['SCRIPT_NAME'] ?>', { method: 'POST', body: fd })
             .then(function(r) { return r.json(); })
@@ -3240,17 +3238,17 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 if (d.success) {
                     el.style.background = 'rgba(46,204,113,0.15)';
                     el.style.color = '#2ecc71';
-                    el.textContent = '✅ ' + ysmT('测试邮件发送成功，请查收 {email}').replace('{email}', '<?= htmlspecialchars($smtpAdminEmail ?: "") ?>');
+                    el.textContent = '✅ ' + t('admin.307').replace('{email}', '<?= htmlspecialchars($smtpAdminEmail ?: "") ?>');
                 } else {
                     el.style.background = 'rgba(255,80,80,0.15)';
                     el.style.color = '#ff6060';
-                    el.textContent = '❌ ' + (d.error || ysmT('发送失败'));
+                    el.textContent = '❌ ' + (d.error || TK('admin.308'));
                 }
             })
             .catch(function() {
                 el.style.background = 'rgba(255,80,80,0.15)';
                 el.style.color = '#ff6060';
-                el.textContent = '❌ ' + ysmT('请求失败，请重试');
+                el.textContent = '❌ ' + TK('admin.309');
             });
     }
     </script>
@@ -3271,66 +3269,66 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             注册验证
         </div>
-        <div class="page-subtitle">注册邮箱验证码 + 滑块人机验证 + 写作者双重确认（v2.9.0，正式版默认启用 / 测试版默认禁用）</div>
+        <div class="page-subtitle"><?= t('admin.310') ?></div>
     </div>
-    <?php if ($verifyMsg === 'saved'): ?><div class="msg" style="margin:0 0 16px;background:rgba(46,204,113,0.15);color:#2ecc71"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>配置已保存</div><?php endif; ?>
-    <?php if ($verifyMsg === 'csrf_error'): ?><div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">请求已过期，请重试</div><?php endif; ?>
-    <?php if ($verifyMsg === 'challenge_failed'): ?><div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060">挑战码无效或已过期</div><?php endif; ?>
+    <?php if ($verifyMsg === 'saved'): ?><div class="msg" style="margin:0 0 16px;background:rgba(46,204,113,0.15);color:#2ecc71"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.369') ?></div><?php endif; ?>
+    <?php if ($verifyMsg === 'csrf_error'): ?><div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060"><?= t('admin.447') ?></div><?php endif; ?>
+    <?php if ($verifyMsg === 'challenge_failed'): ?><div class="msg" style="margin:0 0 16px;background:rgba(255,80,80,0.15);color:#ff6060"><?= t('admin.448') ?></div><?php endif; ?>
     <div class="card">
-        <div class="card-title">功能开关与参数</div>
-        <form method="post" class="need-challenge" data-confirm="确认保存注册验证配置？">
+        <div class="card-title"><?= t('admin.311') ?></div>
+        <form method="post" class="need-challenge" data-confirm="<?= t('admin.cf_verify') ?>">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="save_verify_config" value="1">
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">注册邮箱验证码（总开关）</label>
+                    <label class="form-label"><?= t('admin.312') ?></label>
                     <div style="display:flex;align-items:center;gap:10px">
-                        <span style="font-size:13px">启用注册邮箱验证码（一个邮箱只能注册一个账户）</span>
+                        <span style="font-size:13px"><?= t('admin.313') ?></span>
                         <label class="toggle" style="flex-shrink:0;margin-left:auto"><input type="checkbox" name="email_verify_enabled" id="ev_email" value="1" <?= !empty($config['email_verify_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
                     </div>
                 </div>
                 <div class="form-group">
                     <!-- v2.11.0：滑块人机验证已彻底移除（原 captcha_enabled 开关删除） -->
-                    <label class="form-label">写作者双重确认</label>
+                    <label class="form-label"><?= t('admin.314') ?></label>
                     <div style="display:flex;align-items:center;gap:10px">
-                        <span style="font-size:13px">站长创建写作者需邮箱验证 + 超管邮件确认</span>
+                        <span style="font-size:13px"><?= t('admin.315') ?></span>
                         <label class="toggle" style="flex-shrink:0;margin-left:auto"><input type="checkbox" name="author_dual_verify_enabled" id="ev_dual" value="1" <?= !empty($config['author_dual_verify_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
                     </div>
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">验证码有效期（秒）</label>
+                    <label class="form-label"><?= t('admin.316') ?></label>
                     <input class="form-input" type="number" name="verify_code_ttl" min="60" value="<?= (int)($config['verify_code_ttl'] ?? 300) ?>">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">超管确认链接有效期（秒）</label>
+                    <label class="form-label"><?= t('admin.317') ?></label>
                     <input class="form-input" type="number" name="confirm_link_ttl" min="300" value="<?= (int)($config['confirm_link_ttl'] ?? 86400) ?>">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">验证码重发冷却（秒，超管后台操作不受限）</label>
+                    <label class="form-label"><?= t('admin.318') ?></label>
                     <input class="form-input" type="number" name="resend_cooldown" min="10" value="<?= (int)($config['resend_cooldown'] ?? 60) ?>">
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group" style="flex:0">
                     <label class="form-label">&nbsp;</label>
-                    <button type="submit" class="btn btn-primary">保存配置</button>
+                    <button type="submit" class="btn btn-primary"><?= t('admin.061') ?></button>
                 </div>
             </div>
-            <div class="form-hint" style="margin-top:8px;font-size:12px;color:var(--text-muted)">保存为敏感操作：需 SSH 执行 <code>sudo ysm-admin challenge</code> 获取 6 位确认码</div>
+            <div class="form-hint" style="margin-top:8px;font-size:12px;color:var(--text-muted)"><?= t('admin.319') ?><code>sudo ysm-admin challenge</code><?= t('admin.320') ?></div>
         </form>
     </div>
     <div class="card">
-        <div class="card-title">验证码发送记录（共 <?= count($codeRows) ?> 条）</div>
+        <div class="card-title"><?= t('admin.code_rows', ['n' => count($codeRows)]) ?></div>
         <form method="get" class="search-bar" style="margin-bottom:12px;display:flex;gap:8px">
             <input type="hidden" name="tab" value="verify">
-            <input class="form-input" type="text" name="vq" value="<?= htmlspecialchars($_GET['vq'] ?? '') ?>" placeholder="搜索邮箱 / 用途 / 验证码 / IP" style="max-width:320px">
-            <button class="btn btn-secondary" type="submit">搜索</button>
+            <input class="form-input" type="text" name="vq" value="<?= htmlspecialchars($_GET['vq'] ?? '') ?>" placeholder="<?= t('admin.449') ?>" style="max-width:320px">
+            <button class="btn btn-secondary" type="submit"><?= t('admin.009') ?></button>
         </form>
         <div class="table-wrap">
         <table>
-            <tr><th>时间</th><th>邮箱</th><th>用途</th><th>验证码</th><th>IP</th><th>操作者</th><th>状态</th></tr>
+            <tr><th><?= t('admin.035') ?></th><th><?= t('admin.321') ?></th><th><?= t('admin.322') ?></th><th><?= t('admin.323') ?></th><th>IP</th><th><?= t('admin.324') ?></th><th><?= t('admin.030') ?></th></tr>
             <?php foreach ($codesPaged['rows'] as $c): ?>
             <tr>
                 <td><?= date('Y-m-d H:i:s', (int)$c['created']) ?></td>
@@ -3342,21 +3340,21 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 <td><?= !empty($c['used']) ? '已使用' : ((int)$c['expires'] < time() ? '已过期' : '未使用') ?></td>
             </tr>
             <?php endforeach; ?>
-            <?php if (empty($codesPaged['rows'])): ?><tr><td colspan="7" style="text-align:center;color:var(--text-muted)">暂无记录</td></tr><?php endif; ?>
+            <?php if (empty($codesPaged['rows'])): ?><tr><td colspan="7" style="text-align:center;color:var(--text-muted)"><?= t('admin.450') ?></td></tr><?php endif; ?>
         </table>
         </div>
         <?= renderPager($codesPaged, 'vp', ['tab' => 'verify', 'vq' => $_GET['vq'] ?? ''], 'vpp') ?>
     </div>
     <div class="card">
-        <div class="card-title">写作者创建确认记录（共 <?= count($pendRows) ?> 条）</div>
+        <div class="card-title"><?= t('admin.pending_rows', ['n' => count($pendRows)]) ?></div>
         <form method="get" class="search-bar" style="margin-bottom:12px;display:flex;gap:8px">
             <input type="hidden" name="tab" value="verify">
-            <input class="form-input" type="text" name="pq" value="<?= htmlspecialchars($_GET['pq'] ?? '') ?>" placeholder="搜索邮箱 / 昵称 / 用户名 / 状态" style="max-width:320px">
-            <button class="btn btn-secondary" type="submit">搜索</button>
+            <input class="form-input" type="text" name="pq" value="<?= htmlspecialchars($_GET['pq'] ?? '') ?>" placeholder="<?= t('admin.451') ?>" style="max-width:320px">
+            <button class="btn btn-secondary" type="submit"><?= t('admin.009') ?></button>
         </form>
         <div class="table-wrap">
         <table>
-            <tr><th>发起时间</th><th>邮箱</th><th>昵称</th><th>用户名</th><th>状态</th><th>确认时间</th></tr>
+            <tr><th><?= t('admin.325') ?></th><th><?= t('admin.321') ?></th><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.326') ?></th></tr>
             <?php foreach ($pendsPaged['rows'] as $pd): ?>
             <tr>
                 <td><?= date('Y-m-d H:i:s', (int)$pd['created']) ?></td>
@@ -3367,19 +3365,19 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 <td><?= $pd['confirmed_at'] ? htmlspecialchars($pd['confirmed_at']) : '—' ?></td>
             </tr>
             <?php endforeach; ?>
-            <?php if (empty($pendsPaged['rows'])): ?><tr><td colspan="6" style="text-align:center;color:var(--text-muted)">暂无记录</td></tr><?php endif; ?>
+            <?php if (empty($pendsPaged['rows'])): ?><tr><td colspan="6" style="text-align:center;color:var(--text-muted)"><?= t('admin.450') ?></td></tr><?php endif; ?>
         </table>
         </div>
         <?= renderPager($pendsPaged, 'pp', ['tab' => 'verify', 'pq' => $_GET['pq'] ?? ''], 'ppp') ?>
     </div>
     <?php elseif ($tab === 'threat'): ?>
-    <?php if ($msg === 'challenge_failed'): ?><div class="msg msg-error">挑战码无效或已过期，操作未执行</div><?php endif; ?>
-    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error">CSRF 校验失败，请重试</div><?php endif; ?>
-    <?php if ($msg === 'device_removed'): ?><div class="msg msg-success">已移除该信任设备</div><?php endif; ?>
-    <?php if ($msg === 'device_rm_fail'): ?><div class="msg msg-error">移除失败（设备不存在）</div><?php endif; ?>
-    <?php if ($msg === 'linked_cleared'): ?><div class="msg msg-success">已解除联动封锁</div><?php endif; ?>
-    <?php if ($msg === 'linked_clr_fail'): ?><div class="msg msg-error">解除失败</div><?php endif; ?>
-    <?php if ($msg === 'reset_user_not_found'): ?><div class="msg msg-error">未找到该账号</div><?php endif; ?>
+    <?php if ($msg === 'challenge_failed'): ?><div class="msg msg-error"><?= t('admin.452') ?></div><?php endif; ?>
+    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><?= t('admin.453') ?></div><?php endif; ?>
+    <?php if ($msg === 'device_removed'): ?><div class="msg msg-success"><?= t('admin.454') ?></div><?php endif; ?>
+    <?php if ($msg === 'device_rm_fail'): ?><div class="msg msg-error"><?= t('admin.455') ?></div><?php endif; ?>
+    <?php if ($msg === 'linked_cleared'): ?><div class="msg msg-success"><?= t('admin.456') ?></div><?php endif; ?>
+    <?php if ($msg === 'linked_clr_fail'): ?><div class="msg msg-error"><?= t('admin.457') ?></div><?php endif; ?>
+    <?php if ($msg === 'reset_user_not_found'): ?><div class="msg msg-error"><?= t('admin.458') ?></div><?php endif; ?>
     <?php if (strpos((string)$msg, '重置码') !== false): ?><div class="msg msg-success"><?= htmlspecialchars($msg) ?></div><?php endif; ?>
 
     <?php
@@ -3390,10 +3388,10 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     if ($tp > $threatPages) { $tp = $threatPages; [$threatRows, $threatTotal] = threatDims($tp, $tpp); }
     ?>
     <div class="card">
-        <div class="card-title">联动威胁评分（24h 滑动窗口，阈值 50→15分钟 / 100→24小时 / 200→永久）</div>
+        <div class="card-title"><?= t('admin.327') ?></div>
         <div class="table-wrap">
         <table>
-            <tr><th>维度</th><th>评分</th><th>事件数</th><th>最后事件</th><th>封锁状态</th><th>操作</th></tr>
+            <tr><th><?= t('admin.328') ?></th><th><?= t('admin.329') ?></th><th><?= t('admin.330') ?></th><th><?= t('admin.331') ?></th><th><?= t('admin.332') ?></th><th><?= t('admin.032') ?></th></tr>
             <?php foreach ($threatRows as $tr): $locked = (int)$tr['locked_left']; ?>
             <tr>
                 <td><code><?= htmlspecialchars($tr['dim_type'] === 'ip' ? 'IP: ' . $tr['dim_key'] : '指纹: ' . substr($tr['dim_key'], 0, 16) . '…') ?></code></td>
@@ -3401,11 +3399,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 <td><?= $tr['cnt'] ?></td>
                 <td><?= date('m-d H:i', (int)$tr['last_ts']) ?></td>
                 <td>
-                    <?php if ($locked > 0): ?><span style="color:#e5484d;font-weight:600">封锁中（剩 <?= ceil($locked / 60) ?> 分钟）</span>
-                    <?php elseif ($tr['score'] >= 200): ?><span style="color:#e5484d;font-weight:600">达永久阈值</span>
-                    <?php elseif ($tr['score'] >= 100): ?><span style="color:#f5a623;font-weight:600">达24h阈值</span>
-                    <?php elseif ($tr['score'] >= 50): ?><span style="color:#f5a623">达15min阈值</span>
-                    <?php else: ?><span style="color:var(--text-muted)">正常</span><?php endif; ?>
+                    <?php if ($locked > 0): ?><span style="color:#e5484d;font-weight:600"><?= t('common.locked_remain', ['n' => ceil($locked / 60)]) ?></span>
+                    <?php elseif ($tr['score'] >= 200): ?><span style="color:#e5484d;font-weight:600"><?= t('admin.459') ?></span>
+                    <?php elseif ($tr['score'] >= 100): ?><span style="color:#f5a623;font-weight:600"><?= t('admin.460') ?></span>
+                    <?php elseif ($tr['score'] >= 50): ?><span style="color:#f5a623"><?= t('admin.461') ?></span>
+                    <?php else: ?><span style="color:var(--text-muted)"><?= t('station.136') ?></span><?php endif; ?>
                 </td>
                 <td>
                     <?php if ($locked > 0 || $tr['score'] >= 50): ?>
@@ -3415,20 +3413,20 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                         <input type="hidden" name="link_dim_type" value="<?= htmlspecialchars($tr['dim_type']) ?>">
                         <input type="hidden" name="link_dim_key" value="<?= htmlspecialchars($tr['dim_key']) ?>">
                         <input type="hidden" name="challenge_code">
-                        <button class="btn btn-sm btn-outline" data-confirm="确定解除该维度的联动封锁？">解除</button>
+                        <button class="btn btn-sm btn-outline" data-confirm="<?= t('admin.cf_unlink') ?>"><?= t('admin.333') ?></button>
                     </form>
                     <?php endif; ?>
                 </td>
             </tr>
             <?php endforeach; ?>
-            <?php if (empty($threatRows)): ?><tr><td colspan="6" style="text-align:center;color:var(--text-muted)">暂无威胁事件</td></tr><?php endif; ?>
+            <?php if (empty($threatRows)): ?><tr><td colspan="6" style="text-align:center;color:var(--text-muted)"><?= t('admin.462') ?></td></tr><?php endif; ?>
         </table>
         </div>
         <?= renderPager(['page' => $tp, 'pages' => $threatPages, 'per_page' => $tpp, 'total' => $threatTotal], 'tp', ['tab' => 'threat'], 'tpp') ?>
     </div>
 
     <div class="card">
-        <div class="card-title">已信任设备（管理角色陌生设备登录二次验证；移除后该设备需重新邮箱验证码确认）</div>
+        <div class="card-title"><?= t('admin.334') ?></div>
         <div class="table-wrap">
         <?php
         $dp = max(1, (int)($_GET['dp'] ?? 1));
@@ -3438,7 +3436,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         if ($dp > $devPages) { $dp = $devPages; [$devRows, $devTotal] = getDevicesPaginated($dp, $dpp); }
         ?>
         <table>
-            <tr><th>账号</th><th>角色</th><th>设备指纹</th><th>UA</th><th>首次</th><th>最近</th><th>操作</th></tr>
+            <tr><th><?= t('admin.335') ?></th><th><?= t('admin.015') ?></th><th><?= t('admin.336') ?></th><th>UA</th><th><?= t('admin.337') ?></th><th><?= t('admin.338') ?></th><th><?= t('admin.032') ?></th></tr>
             <?php foreach ($devRows as $d): ?>
             <tr>
                 <td><?= htmlspecialchars($d['account'] ?? '') ?></td>
@@ -3454,35 +3452,35 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                         <input type="hidden" name="device_uid" value="<?= htmlspecialchars($d['user_id']) ?>">
                         <input type="hidden" name="device_id" value="<?= htmlspecialchars($d['id']) ?>">
                         <input type="hidden" name="challenge_code">
-                        <button class="btn btn-sm btn-outline" data-confirm="确定移除该设备？移除后需重新验证码验证">移除</button>
+                        <button class="btn btn-sm btn-outline" data-confirm="<?= t('admin.cf_device') ?>"><?= t('admin.339') ?></button>
                     </form>
                 </td>
             </tr>
             <?php endforeach; ?>
-            <?php if (empty($devRows)): ?><tr><td colspan="7" style="text-align:center;color:var(--text-muted)">暂无已信任设备</td></tr><?php endif; ?>
+            <?php if (empty($devRows)): ?><tr><td colspan="7" style="text-align:center;color:var(--text-muted)"><?= t('admin.463') ?></td></tr><?php endif; ?>
         </table>
         </div>
         <?= renderPager(['page' => $dp, 'pages' => $devPages, 'per_page' => $dpp, 'total' => $devTotal], 'dp', ['tab' => 'threat'], 'dpp') ?>
     </div>
 
     <div class="card">
-        <div class="card-title">协助找回密码（生成一次性重置码转交用户，用户凭码自行设置新密码）</div>
+        <div class="card-title"><?= t('admin.340') ?></div>
         <form method="post" class="need-challenge">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="gen_reset_code" value="1">
             <input type="hidden" name="challenge_code">
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">用户名</label>
-                    <input class="form-input" type="text" name="reset_account" placeholder="填写待找回用户的用户名" maxlength="20" required>
+                    <label class="form-label"><?= t('admin.029') ?></label>
+                    <input class="form-input" type="text" name="reset_account" placeholder="<?= t('admin.341') ?>" maxlength="20" required>
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group" style="flex:0">
-                    <button type="submit" class="btn btn-primary">生成重置码</button>
+                    <button type="submit" class="btn btn-primary"><?= t('admin.342') ?></button>
                 </div>
             </div>
-            <div class="form-hint">重置码 30 分钟内一次性有效；用户可在首页「忘记密码」中直接输入该重置码与新密码完成重置</div>
+            <div class="form-hint"><?= t('admin.343') ?></div>
         </form>
     </div>
     <?php endif; ?>
@@ -3492,22 +3490,22 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="modal-overlay" id="challengeModal" style="display:none" onclick="if(event.target===this)closeChallengeModal()">
         <div class="modal-box" style="max-width:420px">
             <div class="modal-head">
-                <div class="modal-title">安全验证</div>
-                <button class="modal-close" onclick="closeChallengeModal()" aria-label="关闭">&times;</button>
+                <div class="modal-title"><?= t('admin.344') ?></div>
+                <button class="modal-close" onclick="closeChallengeModal()" aria-label="<?= t('admin.345') ?>">&times;</button>
             </div>
             <div class="modal-body">
-                <p style="color:var(--text-secondary);margin-bottom:16px">请在 SSH 中执行以下命令生成确认码：</p>
+                <p style="color:var(--text-secondary);margin-bottom:16px"><?= t('admin.346') ?></p>
                 <div class="code-block">ysm-admin challenge</div>
                 <div style="margin-top:16px">
-                    <label class="form-label">输入 6 位确认码</label>
-                    <input class="form-input" type="text" id="challengeCodeInput" placeholder="例如: A3B9F2" maxlength="6" style="text-transform:uppercase;letter-spacing:4px;font-size:1.2em;text-align:center" autocomplete="off">
+                    <label class="form-label"><?= t('admin.347') ?></label>
+                    <input class="form-input" type="text" id="challengeCodeInput" placeholder="<?= t('admin.348') ?>" maxlength="6" style="text-transform:uppercase;letter-spacing:4px;font-size:1.2em;text-align:center" autocomplete="off">
                 </div>
-                <div style="margin-top:8px;color:var(--text-muted);font-size:0.82em">确认码 300 秒有效，每次操作后自动失效</div>
+                <div style="margin-top:8px;color:var(--text-muted);font-size:0.82em"><?= t('admin.349') ?></div>
                 <div id="challengeError" style="color:var(--danger);margin-top:8px;display:none"></div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeChallengeModal()">取消</button>
-                <button class="btn btn-primary" onclick="submitChallenge()" id="submitChallengeBtn">确认并更新</button>
+                <button class="btn btn-secondary" onclick="closeChallengeModal()"><?= t('admin.059') ?></button>
+                <button class="btn btn-primary" onclick="submitChallenge()" id="submitChallengeBtn"><?= t('admin.350') ?></button>
             </div>
         </div>
     </div>
@@ -3516,7 +3514,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="modal-overlay" id="userDetailModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
         <div class="modal-box user-detail-box">
             <div class="modal-head">
-                <div class="modal-title" id="udTitle">用户详情</div>
+                <div class="modal-title" id="udTitle"><?= t('admin.351') ?></div>
                 <button class="modal-close" onclick="document.getElementById('userDetailModal').style.display='none'">&times;</button>
             </div>
             <div class="modal-body" id="udBody"></div>
@@ -3527,8 +3525,8 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="modal-overlay" id="userOpModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
         <div class="modal-box user-op-modal-box">
             <div class="modal-head">
-                <div class="modal-title">用户管理</div>
-                <button class="modal-close" onclick="document.getElementById('userOpModal').style.display='none'" aria-label="关闭">&times;</button>
+                <div class="modal-title"><?= t('admin.352') ?></div>
+                <button class="modal-close" onclick="document.getElementById('userOpModal').style.display='none'" aria-label="<?= t('admin.345') ?>">&times;</button>
             </div>
             <div class="modal-body" id="userOpBody"></div>
         </div>
@@ -3541,8 +3539,8 @@ document.addEventListener('submit', function(e) {
     var f = e.target;
     if (!f || !f.classList || !f.classList.contains('need-challenge')) return;
     e.preventDefault();
-    if (f.dataset.confirm && !confirm(ysmT(f.dataset.confirm))) return;
-    var code = prompt(ysmT('请在 SSH 中执行 sudo ysm-admin challenge 获取 6 位确认码后输入：'));
+    if (f.dataset.confirm && !confirm(f.dataset.confirm)) return;
+    var code = prompt(TK('admin.305'));
     if (!code) return;
     var hid = f.querySelector('input[name="challenge_code"]');
     if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = 'challenge_code'; f.appendChild(hid); }
@@ -3588,24 +3586,24 @@ function ysmOpenUserDetail(btn) {
     // v3.0.5：详情弹窗在二级菜单之上打开——先收起操作菜单，避免被其遮罩挡住
     var opModal = document.getElementById('userOpModal');
     if (opModal) opModal.style.display = 'none';
-    var roleMap = { 'super_admin': ysmT('系统管理员'), 'station_admin': ysmT('站长'), 'author': ysmT('写作者'), 'user': ysmT('普通用户') };
+    var roleMap = { 'super_admin': TK('admin.353'), 'station_admin': TK('admin.024'), 'author': TK('admin.354'), 'user': TK('admin.355') };
     var base = [
-        [ysmT('昵称'), d.nickname], [ysmT('用户名'), d.username || d.account], [ysmT('邮箱'), d.email],
-        [ysmT('角色'), roleMap[d.role] || d.role], [ysmT('归属站长'), d.station || '—'],
-        [ysmT('状态'), d.disabled ? ysmT('已禁用') : ysmT('正常')], [ysmT('创建时间'), d.created], [ysmT('创建者'), d.created_by || '—'],
-        [ysmT('签名'), d.signature || '—'], [ysmT('最后登录'), d.last_login]
+        [TK('admin.010'), d.nickname], [TK('admin.029'), d.username || d.account], [TK('admin.321'), d.email],
+        [TK('admin.015'), roleMap[d.role] || d.role], [TK('admin.033'), d.station || '—'],
+        [TK('admin.030'), d.disabled ? TK('admin.017') : TK('admin.018')], [TK('admin.031'), d.created], [TK('admin.356'), d.created_by || '—'],
+        [TK('admin.357'), d.signature || '—'], [TK('admin.358'), d.last_login]
     ];
-    var stats = [[ysmT('登录次数'), d.login_count], [ysmT('评论数'), d.comments], [ysmT('文章数'), d.articles]];
+    var stats = [[TK('admin.359'), d.login_count], [TK('admin.360'), d.comments], [TK('admin.361'), d.articles]];
     var h = '<div class="user-detail-grid">';
     base.forEach(function(r) {
         h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + ysmEsc(r[1]) + '</span></div>';
     });
-    h += '</div><div class="user-detail-sec">' + ysmT('关联统计') + '</div><div class="user-detail-grid">';
+    h += '</div><div class="user-detail-sec">' + TK('admin.362') + '</div><div class="user-detail-grid">';
     stats.forEach(function(r) {
         h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + ysmEsc(r[1]) + '</span></div>';
     });
     h += '</div>';
-    document.getElementById('udTitle').textContent = ysmT('用户详情 -') + ' ' + (d.nickname || d.username || d.account || '');
+    document.getElementById('udTitle').textContent = TK('admin.363') + ' ' + (d.nickname || d.username || d.account || '');
     document.getElementById('udBody').innerHTML = h;
     document.getElementById('userDetailModal').style.display = 'flex';
 }
@@ -3626,7 +3624,7 @@ function ysmOpenUserDetail(btn) {
                     if (res && res.success === false) {
                         var _b = document.createElement('div');
                         _b.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99999;background:#dc2626;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:92vw';
-                        _b.textContent = ysmT('登录环境已变化（换设备/浏览器/隐私模式），保存等操作将被拦截，请重新登录');
+                        _b.textContent = TK('admin.364');
                         document.body.appendChild(_b);
                         setTimeout(function() { if (_b.parentNode) _b.parentNode.removeChild(_b); }, 7000);
                     }

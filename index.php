@@ -3,8 +3,6 @@ require_once __DIR__ . '/utils.php';
 // v6.0.0：i18n 外壳框架（严谨：缺键自动回落 zh-CN，生命周期内自动发现 lang/ 新语种）
 require_once __DIR__ . '/lib/i18n.php';
 // v6.1.0：服务端输出层 i18n——非中文时在输出前把整页文本/属性替换为当前语言
-require_once __DIR__ . '/lib/i18n-output.php';
-ysmI18nStart();
 secureSessionStart();
 
 // v3.0.8 统一安全入口：扫描器 UA 黑名单检测（命中返回 403 + 记录 + 封禁来源 IP）
@@ -30,7 +28,6 @@ function isStationAdmin() {
 function sendJson($respData, $httpStatus = 200) {
     // v6.1.0：先丢弃 HTML 翻译缓冲，再按词表翻译 error/message 字段
     if (function_exists('ysmI18nFlush')) ysmI18nFlush();
-    if (function_exists('ysmTranslateApiPayload')) $respData = ysmTranslateApiPayload($respData);
     http_response_code($httpStatus);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode($respData, JSON_UNESCAPED_UNICODE);
@@ -290,7 +287,7 @@ function ysmRenderShortNotFound($siteName, $siteConf = []) {
             </svg>
         </div>
         <h1><?= $esc($shortTitle) ?></h1>
-        <p>你打开的分享链接对应的文档不存在或已被移除，请检查链接是否正确。</p>
+        <p><?= t('home.001') ?></p>
         <div class="nf-actions">
             <a href="/" class="btn btn-primary">
                 <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
@@ -429,12 +426,12 @@ $action = $_GET['action'] ?? '';
 // CSRF 防护：index.php 所有 POST 操作（pin/unpin/delete/update）统一校验
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) {
-        sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+        sendJson(['success' => false, 'error' => tn('api.901')], 403);
     }
 }
 
 if ('pin' === $action) {
-    if (!isStationAdmin()) { logUnauthorized('越权尝试置顶文章', true); sendJson(['success' => false, 'error' => '无权限'], 403); }
+    if (!isStationAdmin()) { logUnauthorized('越权尝试置顶文章', true); sendJson(['success' => false, 'error' => tn('api.906')], 403); }
     header('Content-Type: application/json; charset=utf-8'); $targetFile = basename($_POST['file'] ?? '');
     if (empty($targetFile)) { echo json_encode(['success' => false]); exit; }
     $pinList = getPinnedList();
@@ -445,7 +442,7 @@ if ('pin' === $action) {
     echo json_encode(['success' => true]); exit;
 }
 if ('unpin' === $action) {
-    if (!isStationAdmin()) { logUnauthorized('越权尝试取消置顶文章', true); sendJson(['success' => false, 'error' => '无权限'], 403); }
+    if (!isStationAdmin()) { logUnauthorized('越权尝试取消置顶文章', true); sendJson(['success' => false, 'error' => tn('api.906')], 403); }
     header('Content-Type: application/json; charset=utf-8'); $targetFile = basename($_POST['file'] ?? '');
     if (empty($targetFile)) { echo json_encode(['success' => false]); exit; }
     $pinList = getPinnedList();
@@ -618,19 +615,19 @@ if ($action === 'read') {
     $filepath = './data/articles/' . $filename;
     if (!file_exists($filepath) || !is_file($filepath)) {
         http_response_code(404);
-        echo json_encode(['success' => false, 'error' => '文件不存在'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('api.981')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if (strtolower(pathinfo($filename, PATHINFO_EXTENSION)) !== 'md') {
         http_response_code(400);
-        echo json_encode(['success' => false, 'error' => '仅支持 .md 文件'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('api.982')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $realDataPath = realpath('./data/articles');
     $realFilePath = realpath($filepath);
     if ($realFilePath === false || strpos($realFilePath, $realDataPath) !== 0) {
         http_response_code(403);
-        echo json_encode(['success' => false, 'error' => '禁止访问'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('api.983')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     // v4.0.0：草稿（status=draft）与未到发布时间的定时文章（status=scheduled）对外不可读
@@ -641,12 +638,12 @@ if ($action === 'read') {
         $rPublishAt = $rmeta['publish_at'] ?? '';
         if ($rStatus === 'draft') {
             http_response_code(404);
-            echo json_encode(['success' => false, 'error' => '文件不存在'], JSON_UNESCAPED_UNICODE);
+            echo json_encode(['success' => false, 'error' => tn('api.981')], JSON_UNESCAPED_UNICODE);
             exit;
         }
         if ($rStatus === 'scheduled' && $rPublishAt !== '' && $rPublishAt > date('Y-m-d H:i')) {
             http_response_code(404);
-            echo json_encode(['success' => false, 'error' => '文件不存在'], JSON_UNESCAPED_UNICODE);
+            echo json_encode(['success' => false, 'error' => tn('api.981')], JSON_UNESCAPED_UNICODE);
             exit;
         }
     }
@@ -673,7 +670,7 @@ if ($action === 'read') {
         echo '<title>' . htmlspecialchars($shareCtx['title'], ENT_QUOTES, 'UTF-8') . "</title>\n";
         ysmShareRenderMeta($shareCtx);
         echo '<meta http-equiv="refresh" content="0;url=' . htmlspecialchars($readTarget, ENT_QUOTES, 'UTF-8') . '">' . "\n";
-        echo "</head>\n<body><p>正在打开文章…<a href=\"" . htmlspecialchars($readTarget, ENT_QUOTES, 'UTF-8') . "\">继续</a></p></body>\n</html>";
+        echo "</head>\n<body><p>" . t('home.002') . "<a href=\"" . htmlspecialchars($readTarget, ENT_QUOTES, 'UTF-8') . "\">" . t('home.003') . "</a></p></body>\n</html>";
         exit;
     }
     // v4.0.0：站内访问统计——同 IP 同文章同一天只计一次（views_log 去重），避免刷量
@@ -732,34 +729,34 @@ if ($action === 'read') {
     exit;
 }
 if ($action === 'delete') {
-    if (!isStationAdmin()) { logUnauthorized('越权尝试删除文章: ' . ($_GET['file'] ?? $_POST['file'] ?? ''), true); sendJson(['success' => false, 'error' => '无权限'], 403); }
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendJson(['success' => false, 'error' => '请求方式错误'], 405);
+    if (!isStationAdmin()) { logUnauthorized('越权尝试删除文章: ' . ($_GET['file'] ?? $_POST['file'] ?? ''), true); sendJson(['success' => false, 'error' => tn('api.906')], 403); }
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendJson(['success' => false, 'error' => tn('api.984')], 405);
     header('Content-Type: application/json; charset=utf-8');
     $requestedFile = $_POST['file'] ?? '';
     $filename = basename($requestedFile);
     $filepath = './data/articles/' . $filename;
     if (!file_exists($filepath) || !is_file($filepath)) {
         http_response_code(404);
-        echo json_encode(['success' => false, 'error' => '文件不存在'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('api.981')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $realDataPath = realpath('./data/articles');
     $realFilePath = realpath($filepath);
     if ($realFilePath === false || strpos($realFilePath, $realDataPath) !== 0) {
         http_response_code(403);
-        echo json_encode(['success' => false, 'error' => '禁止访问'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('api.983')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if (unlink($filepath)) {
         echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
     } else {
-        echo json_encode(['success' => false, 'error' => '删除失败'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('api.985')], JSON_UNESCAPED_UNICODE);
     }
     exit;
 }
 if ($action === 'update') {
-    if (!isStationAdmin()) { logUnauthorized('越权尝试修改文章: ' . ($_GET['file'] ?? ''), true); sendJson(['success' => false, 'error' => '无权限'], 403); }
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendJson(['success' => false, 'error' => '请求方式错误'], 405);
+    if (!isStationAdmin()) { logUnauthorized('越权尝试修改文章: ' . ($_GET['file'] ?? ''), true); sendJson(['success' => false, 'error' => tn('api.906')], 403); }
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendJson(['success' => false, 'error' => tn('api.984')], 405);
     header('Content-Type: application/json; charset=utf-8');
     $input = json_decode(file_get_contents('php://input'), true);
     $requestedFile = $input['file'] ?? '';
@@ -774,14 +771,14 @@ if ($action === 'update') {
     $filepath = './data/articles/' . $filename;
     if (!file_exists($filepath) || !is_file($filepath)) {
         http_response_code(404);
-        echo json_encode(['success' => false, 'error' => '文件不存在'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('api.981')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $realDataPath = realpath('./data/articles');
     $realFilePath = realpath($filepath);
     if ($realFilePath === false || strpos($realFilePath, $realDataPath) !== 0) {
         http_response_code(403);
-        echo json_encode(['success' => false, 'error' => '禁止访问'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('api.983')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $meta = json_encode(['category' => $newCategory, 'tags' => $newTags, 'excerpt' => $newExcerpt, 'author' => $newAuthor, 'license' => $newLicense, 'licenseUrl' => $newLicenseUrl], JSON_UNESCAPED_UNICODE);
@@ -789,7 +786,7 @@ if ($action === 'update') {
     if (file_put_contents($filepath, $fullContent)) {
         echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
     } else {
-        echo json_encode(['success' => false, 'error' => '保存失败'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('api.986')], JSON_UNESCAPED_UNICODE);
     }
     exit;
 }
@@ -909,7 +906,7 @@ if ($action === 'search') {
     db_rate_add('comment_rates', $searchIp);
     if (db_rate_count('comment_rates', $searchIp, 60) > 30) {
         http_response_code(429);
-        echo json_encode(['success' => false, 'error' => '搜索太频繁，请稍后再试'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('api.987')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $hits = collectPublishedArticles($q);
@@ -967,7 +964,7 @@ if ($action === 'rss_guide') {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
-<title><?= ysmT('RSS 订阅 · {site}', ['site' => $siteHeading]) ?></title>
+<title><?= t('rss.guide_title', ['site' => $siteHeading]) ?></title>
 <!-- v5.0.0：RSS 指引页站点级分享卡片（爬虫只读 head、不执行 JS） -->
 <?php ysmShareRenderMeta(ysmShareContext()); ?>
 <script>
@@ -1005,24 +1002,24 @@ if ($action === 'rss_guide') {
 <body style="padding-left:0">
 <div class="rss-guide-page">
     <div class="rss-guide-card">
-        <h1>📡 RSS 订阅</h1>
-        <p><?= ysmT('本站提供标准 RSS 2.0 订阅源（最近 {n} 篇文章，发布后自动更新）。用任意 RSS 阅读器添加下面地址即可追更：', ['n' => intval($feedCount)]) ?></p>
+        <h1><?= t('home.004') ?></h1>
+        <p><?= t('home.005', ['n' => intval($feedCount)]) ?></p>
         <div class="rss-guide-url">
             <input type="text" readonly value="<?= htmlspecialchars($rssAbs) ?>" id="rssGuideUrl">
-            <button class="btn btn-primary" type="button" onclick="var i=document.getElementById('rssGuideUrl'); i.select(); try{document.execCommand('copy');}catch(e){}; this.textContent='<?= ysmT('已复制') ?>'; setTimeout(()=>this.textContent='<?= ysmT('复制地址') ?>',1600);"><?= ysmT('复制地址') ?></button>
+            <button class="btn btn-primary" type="button" onclick="var i=document.getElementById('rssGuideUrl'); i.select(); try{document.execCommand('copy');}catch(e){}; this.textContent='<?= t('home.006') ?>'; setTimeout(()=>this.textContent='<?= t('home.007') ?>',1600);"><?= t('home.007') ?></button>
         </div>
         <ol class="rss-guide-list">
-            <li><?= ysmT('1️⃣ 打开你常用的 RSS 阅读器（如 Feedly、Inoreader、NetNewsWire，或浏览器 RSS 扩展）') ?></li>
-            <li><?= ysmT('2️⃣ 选择「添加订阅 / Add Feed」，粘贴上面的地址') ?></li>
-            <li><?= ysmT('3️⃣ 之后新文章发布，阅读器会自动拉取提醒，无需再打开本站') ?></li>
+            <li><?= t('home.008') ?></li>
+            <li><?= t('home.009') ?></li>
+            <li><?= t('home.010') ?></li>
         </ol>
-        <p style="margin-bottom:0"><a href="/index.php?action=rss" target="_blank" rel="noopener"><?= ysmT('查看原始 XML 订阅源 →') ?></a></p>
-        <p class="rss-guide-foot"><?= ysmT('也可以直接复制地址到任意支持订阅的客户端使用。') ?></p>
+        <p style="margin-bottom:0"><a href="/index.php?action=rss" target="_blank" rel="noopener"><?= t('home.011') ?></a></p>
+        <p class="rss-guide-foot"><?= t('home.012') ?></p>
     </div>
 </div>
 <!-- v6.0.0：i18n 运行时文案接入 -->
 <script>window.I18N = <?= json_encode(ysmClientI18n(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
-<script src="js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
+<script src="js/i18n.js?v=<?= @filemtime(__DIR__ . '/js/i18n.js') ?>"></script>
 </body>
 </html>
     <?php
@@ -1089,12 +1086,9 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand truncate max-w-[40vw] sm:max-w-none" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($siteHeading) ?></a></div>
     <div class="header-right">
-        <!-- v6.0.0：友站入口（友情链接卡片墙）；v6.1.0：无启用友链时不渲染 -->
-        <?php if ($__ysmActiveLinks > 0): ?>
-        <button class="icon-btn" id="btnLinks" title="友情链接" onclick="ysmOpenLinks()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
-        <?php endif; ?>
+        <!-- v6.3.0：桌面端移除顶部友链入口（副栏已有友链展示），手机端由「应用」面板承载 -->
         <!-- v4.1.0：RSS 订阅入口（点击进友好引导页，不再直接弹 XML；阅读器自动发现仍走 ?action=rss） -->
-        <a class="icon-btn rss-btn" id="btnRss" title="RSS 订阅" href="/index.php?action=rss_guide" target="_blank" rel="noopener" aria-label="RSS 订阅">
+        <a class="icon-btn rss-btn" id="btnRss" title="<?= t('home.014') ?>" href="/index.php?action=rss_guide" target="_blank" rel="noopener" aria-label="<?= t('home.014') ?>">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M5 13a6 6 0 0 1 6 6"/>
                 <path d="M5 7a12 12 0 0 1 12 12"/>
@@ -1103,22 +1097,44 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         </a>
         <?php if ($musicEnabled): ?>
         <!-- v4.3.0：音乐入口由右侧浮动按钮移至顶部快捷栏（手机/电脑均常驻，切换界面不打断播放） -->
-        <button class="icon-btn" id="floatMusicBtn" title="音乐"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></button>
+        <button class="icon-btn" id="floatMusicBtn" title="<?= t('home.015') ?>"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></button>
         <?php endif; ?>
-        <button class="icon-btn" id="btnSearch" title="搜索"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
-        <button class="icon-btn" id="btnToc" title="目录"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
-        <button class="icon-btn" id="btnFont" title="字体设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg></button>
-        <button class="icon-btn" id="btnThemeToggle" title="明暗切换"><svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
-        <button class="icon-btn" id="btnKbdHelp" title="快捷键帮助 (?)" onclick="toggleKbdHelp()"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/></svg></button>
-        <button class="icon-btn" id="btnColor" title="调整主题色"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 0 1 0 20 4 4 0 0 1-4-4v-2a2 2 0 0 0-2-2H4a2 2 0 0 1-2-2 10 10 0 0 1 10-10z"/><circle cx="8" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="14" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="18" cy="10" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></button>
+        <button class="icon-btn" id="btnSearch" title="<?= t('home.016') ?>"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+        <button class="icon-btn" id="btnToc" title="<?= t('home.017') ?>"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+        <button class="icon-btn" id="btnFont" title="<?= t('home.018') ?>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg></button>
+        <button class="icon-btn" id="btnThemeToggle" title="<?= t('home.019') ?>"><svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+        <button class="icon-btn" id="btnKbdHelp" title="<?= t('home.020') ?>" onclick="toggleKbdHelp()"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/></svg></button>
+        <button class="icon-btn" id="btnColor" title="<?= t('home.021') ?>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 0 1 0 20 4 4 0 0 1-4-4v-2a2 2 0 0 0-2-2H4a2 2 0 0 1-2-2 10 10 0 0 1 10-10z"/><circle cx="8" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="14" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="18" cy="10" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></button>
         <!-- v6.0.0：i18n 语言切换器（自动发现 lang/ 下语言；切换写 Cookie + 刷新） -->
-        <button class="icon-btn" id="btnLang" title="切换语言"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button>
-        <button class="icon-btn" id="btnUser" title="用户"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
+        <button class="icon-btn" id="btnLang" title="<?= t('home.022') ?>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button>
+        <button class="icon-btn" id="btnUser" title="<?= t('home.023') ?>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
+        <!-- v6.3.0：手机端「应用」面板触发器（≤640 显示；收纳低频入口） -->
+        <button class="icon-btn apps-btn" id="btnApps" title="<?= t('home.apps_title') ?>" aria-haspopup="menu" aria-expanded="false" aria-controls="appPanel">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none"/></svg>
+        </button>
     </div>
 </header>
+<!-- v6.3.0：手机端「应用」面板（形态对齐移动端习惯：右对齐、遮罩关闭、半透明模糊） -->
+<div class="app-panel-mask" id="appPanelMask" hidden></div>
+<div class="app-panel" id="appPanel" role="menu" aria-label="<?= t('home.apps_title') ?>" hidden>
+    <button type="button" class="app-panel-item" role="menuitem" data-act="toc"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></span><span class="app-panel-text"><?= t('home.017') ?></span></button>
+    <button type="button" class="app-panel-item" role="menuitem" data-act="font"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg></span><span class="app-panel-text"><?= t('home.018') ?></span></button>
+    <div class="app-panel-gap"></div>
+    <button type="button" class="app-panel-item" role="menuitem" data-act="theme"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span><span class="app-panel-text"><?= t('home.019') ?></span></button>
+    <button type="button" class="app-panel-item" role="menuitem" data-act="color"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 1 0 20 4 4 0 0 1-4-4v-2a2 2 0 0 0-2-2H4a2 2 0 0 1-2-2 10 10 0 0 1 10-10z"/><circle cx="8" cy="6" r="1.5"/><circle cx="14" cy="6" r="1.5"/></svg></span><span class="app-panel-text"><?= t('home.021') ?></span></button>
+    <div class="app-panel-gap"></div>
+    <a class="app-panel-item" role="menuitem" href="/index.php?action=rss_guide" target="_blank" rel="noopener"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M5 13a6 6 0 0 1 6 6"/><path d="M5 7a12 12 0 0 1 12 12"/><circle cx="5" cy="19" r="1"/></svg></span><span class="app-panel-text"><?= t('home.014') ?></span></a>
+    <?php if ($__ysmActiveLinks > 0): ?>
+    <button type="button" class="app-panel-item" role="menuitem" data-act="links"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span><span class="app-panel-text"><?= t('home.013') ?></span><span class="app-panel-count"><?= (int)$__ysmActiveLinks ?></span></button>
+    <?php endif; ?>
+    <?php if ($musicEnabled): ?>
+    <button type="button" class="app-panel-item" role="menuitem" data-act="music"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span><span class="app-panel-text"><?= t('home.015') ?></span></button>
+    <?php endif; ?>
+    <button type="button" class="app-panel-item" role="menuitem" data-act="kbd"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="8" y1="14" x2="16" y2="14"/></svg></span><span class="app-panel-text"><?= t('home.020') ?></span></button>
+</div>
 <!-- v6.1.0：语言切换菜单（点击即写 Cookie + 账号，不再区分「临时」与「设为默认」） -->
 <div class="lang-dropdown" id="langDropdown" style="display:none;">
-    <div class="lang-dropdown-title">切换语言</div>
+    <div class="lang-dropdown-title"><?= t('home.022') ?></div>
     <?php $__ysmCurLang = ysmLocale(); foreach (ysmSupportedLangs() as $lc => $info): ?>
     <a class="lang-option<?= $lc === $__ysmCurLang ? ' active' : '' ?>" data-lang="<?= htmlspecialchars($lc) ?>" href="#" onclick="event.preventDefault();ysmSetLang('<?= htmlspecialchars($lc) ?>');"><?= htmlspecialchars($info['name']) ?></a>
     <?php endforeach; ?>
@@ -1128,28 +1144,28 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
     <div class="user-dropdown-header" id="userDropdownHeader">
         <div class="user-dropdown-avatar" id="userDropdownAvatar"></div>
         <div class="user-dropdown-info">
-            <div class="user-dropdown-name" id="userDropdownName">未登录</div>
-            <div class="user-dropdown-role" id="userDropdownRole">访客</div>
+            <div class="user-dropdown-name" id="userDropdownName"><?= t('home.024') ?></div>
+            <div class="user-dropdown-role" id="userDropdownRole"><?= t('home.025') ?></div>
         </div>
     </div>
     <div class="user-dropdown-divider"></div>
     <div class="user-dropdown-item" id="userDropdownLogin" data-action="login">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-        <span>登录</span>
+        <span><?= t('home.026') ?></span>
     </div>
     <div class="user-dropdown-item" id="userDropdownAdmin" data-action="admin" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <span>快捷进入管理界面</span>
+        <span><?= t('home.027') ?></span>
     </div>
     <div class="user-dropdown-divider" id="userDropdownDivider" style="display:none"></div>
     <!-- v2.11.3：普通用户/站长/写作者的个人资料入口（超管保持隐身不显示） -->
     <div class="user-dropdown-item" id="userDropdownProfile" data-action="profile" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        <span>编辑资料</span>
+        <span><?= t('home.028') ?></span>
     </div>
     <div class="user-dropdown-item user-dropdown-item-danger" id="userDropdownLogout" data-action="logout" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        <span>退出登录</span>
+        <span><?= t('home.029') ?></span>
     </div>
 </div>
 <div class="sidebar" id="sidebar">
@@ -1160,40 +1176,40 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         </div>
         <div style="display:flex;align-items:center;gap:4px;">
             <span class="sidebar-count" id="sidebarCount">0</span>
-            <button class="icon-btn" onclick="toggleSidebar()" title="折叠侧边栏 (S)" style="width:28px;height:28px;"><svg viewBox="0 0 24 24" width="16" height="16"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></button>
+            <button class="icon-btn" onclick="toggleSidebar()" title="<?= t('home.030') ?>" style="width:28px;height:28px;"><svg viewBox="0 0 24 24" width="16" height="16"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></button>
         </div>
     </div>
     <div class="sidebar-search">
-        <input type="text" id="sidebarSearchInput" placeholder="搜索文档... (按 / 聚焦)">
+        <input type="text" id="sidebarSearchInput" placeholder="<?= t('home.031') ?>">
     </div>
     <div class="sidebar-back-btn" id="sidebarBackBtn">
         <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-        返回文章列表
+        <?= t('home.back_list') ?>
     </div>
     <div class="sidebar-article-title" id="sidebarArticleTitle"></div>
-    <div class="sidebar-toc-header" id="sidebarTocHeader">目录</div>
+    <div class="sidebar-toc-header" id="sidebarTocHeader"><?= t('home.017') ?></div>
     <div class="sidebar-list" id="sidebarFileList"></div>
     <div class="sidebar-toc-list" id="sidebarTocList"></div>
 </div>
 <!-- v2.6.5 修复：折叠按钮在 sidebar 内部，收起后无恢复入口；此按钮独立于 sidebar 外，收起时可见 -->
-<button class="sidebar-restore-btn" id="sidebarRestoreBtn" onclick="toggleSidebar()" title="展开侧边栏 (S)" style="display:none" aria-label="展开侧边栏">
+<button class="sidebar-restore-btn" id="sidebarRestoreBtn" onclick="toggleSidebar()" title="<?= t('home.032') ?>" style="display:none" aria-label="<?= t('home.033') ?>">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
 </button>
 <div class="dropdown-panel" id="searchPanel">
-    <div class="dropdown-search"><input type="text" id="searchInput" placeholder="搜索文档..."></div>
+    <div class="dropdown-search"><input type="text" id="searchInput" placeholder="<?= t('home.034') ?>"></div>
     <div class="dropdown-list" id="searchResults"></div>
 </div>
 <div class="dropdown-panel" id="tocPanel">
-    <div class="toc-panel-header" id="tocPanelHeader" style="display:none;"><div class="toc-popup-title">目录</div></div>
+    <div class="toc-panel-header" id="tocPanelHeader" style="display:none;"><div class="toc-popup-title"><?= t('home.017') ?></div></div>
     <div class="dropdown-list" id="tocFileList"></div>
 </div>
 <div class="dropdown-panel" id="fontPanel">
     <div class="font-panel-inner">
-        <span style="font-weight:600; color:var(--text);">字体设置</span>
+        <span style="font-weight:600; color:var(--text);"><?= t('home.018') ?></span>
         <div class="font-type-buttons" id="fontTypeButtons">
-            <button class="font-type-btn active" data-font="default">默认</button>
+            <button class="font-type-btn active" data-font="default"><?= t('home.035') ?></button>
             <?php if (!empty($__ysmFontOn)): ?>
-            <button class="font-type-btn" data-font="custom">自定义字体</button>
+            <button class="font-type-btn" data-font="custom"><?= t('home.036') ?></button>
             <?php endif; ?>
         </div>
         <div class="font-size-slider">
@@ -1205,7 +1221,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
     </div>
 </div>
 <div class="dropdown-panel" id="colorPanel">
-    <div class="color-panel-content"><div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-weight:600;">选择主题色</span><button class="color-reset-btn" id="colorResetBtn">重置</button></div><input type="range" min="0" max="360" value="220" class="hue-slider" id="hueSlider"></div>
+    <div class="color-panel-content"><div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-weight:600;"><?= t('home.037') ?></span><button class="color-reset-btn" id="colorResetBtn"><?= t('home.038') ?></button></div><input type="range" min="0" max="360" value="220" class="hue-slider" id="hueSlider"></div>
 </div>
 <main class="main-container" id="mainContainer">
     <div id="homeView">
@@ -1217,13 +1233,13 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
                 <div class="cards-grid" id="cardsGrid"></div>
                 <!-- v4.0.0：归档视图（按年月分组；默认隐藏，点分类栏「归档」切换） -->
                 <div class="archive-view" id="archiveView" style="display:none"></div>
-                <div class="empty-state py-16 text-center text-ink-3" id="emptyHome" style="display:none;">📭 暂无文档</div>
+                <div class="empty-state py-16 text-center text-ink-3" id="emptyHome" style="display:none;"><?= t('home.039') ?></div>
             </div>
             <aside class="home-aside" id="homeAside">
                 <div class="category-bar" id="categoryBar"></div>
                 <!-- v5.2.0：副栏热门榜（前端按热度分排序取前 5，数据同 list 接口，不新增接口） -->
                 <section class="home-popular" id="homePopular">
-                    <div class="home-popular-title">热门文章<span class="home-popular-state" aria-hidden="true">展开</span></div>
+                    <div class="home-popular-title"><?= t('home.040') ?><span class="home-popular-state" aria-hidden="true"><?= t('home.041') ?></span></div>
                     <div class="home-popular-list" id="homePopularList"></div>
                 </section>
                 <!-- v6.0.1：副栏友情链接（「热门文章」下方直接可见；超出 6 个时提供「全部」入口）
@@ -1231,8 +1247,8 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
                 <?php if ($__ysmActiveLinks > 0): ?>
                 <section class="home-links" id="homeLinks" style="display:none">
                     <div class="home-links-head">
-                        <div class="home-links-title">友情链接</div>
-                        <button type="button" class="home-links-more" id="homeLinksMore" onclick="ysmOpenLinks()" style="display:none">全部</button>
+                        <div class="home-links-title"><?= t('home.013') ?></div>
+                        <button type="button" class="home-links-more" id="homeLinksMore" style="display:none"><?= t('home.link_all') ?></button>
                     </div>
                     <div class="home-links-list" id="homeLinksList"></div>
                 </section>
@@ -1243,18 +1259,18 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
     <!-- v6.0.0：友站（友情链接）卡片墙；v6.1.0：补 ×/ESC/深链退出，空态可直接返回 -->
     <div class="links-view" id="linksView" style="display:none">
         <div class="links-head">
-            <button type="button" class="links-back-btn" onclick="ysmCloseLinks()" aria-label="返回">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg><span>返回</span>
+            <button type="button" class="links-back-btn" onclick="ysmCloseLinks()" aria-label="<?= t('home.043') ?>">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg><span><?= t('home.043') ?></span>
             </button>
-            <h2 class="links-title">友情链接</h2>
-            <button type="button" class="links-close-btn" onclick="ysmCloseLinks()" aria-label="关闭">
+            <h2 class="links-title"><?= t('home.013') ?></h2>
+            <button type="button" class="links-close-btn" onclick="ysmCloseLinks()" aria-label="<?= t('home.044') ?>">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
         <div class="links-grid" id="linksGrid"></div>
         <div class="links-empty" id="linksEmpty" style="display:none">
-            <div class="links-empty-text">暂无友情链接</div>
-            <button type="button" class="btn btn-outline" onclick="ysmCloseLinks()">返回首页</button>
+            <div class="links-empty-text"><?= t('home.045') ?></div>
+            <button type="button" class="btn btn-outline" onclick="ysmCloseLinks()"><?= t('home.046') ?></button>
         </div>
     </div>
     <div class="reading-view" id="readingView">
@@ -1263,23 +1279,23 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
             <div class="cmt-capsule-bar" id="cmtCapsuleBar">
                 <button class="cmt-capsule-btn" id="cmtCapsuleBtn">
                     <span class="cmt-capsule-icon"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
-                    <span class="cmt-capsule-text">未登录用户</span>
+                    <span class="cmt-capsule-text"><?= t('home.047') ?></span>
                 </button>
             </div>
             <div class="cmt-user-bar" id="cmtUserBar" style="display:none">
                 <div class="cmt-user-inner" id="cmtUserInner">
                     <div class="cmt-user-avatar" id="cmtUserAvatar"></div>
                     <span class="cmt-user-greeting" id="cmtUserGreeting"></span>
-                    <button class="cmt-logout-btn" id="cmtLogoutBtn" title="退出登录"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
+                    <button class="cmt-logout-btn" id="cmtLogoutBtn" title="<?= t('home.029') ?>"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
                 </div>
             </div>
         </div>
         <div class="cmt-input-section" id="commentArea" style="display:none;">
             <div class="cmt-input-box">
-                <textarea id="cmtTextarea" placeholder="说点什么吧..." maxlength="1000" disabled></textarea>
+                <textarea id="cmtTextarea" placeholder="<?= t('home.048') ?>" maxlength="1000" disabled></textarea>
                 <div class="cmt-input-divider"></div>
                 <div class="cmt-input-bottom">
-                    <button class="cmt-send-btn" id="cmtSendBtn"><svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>发送</button>
+                    <button class="cmt-send-btn" id="cmtSendBtn"><svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg><?= t('home.049') ?></button>
                 </div>
             </div>
         </div>
@@ -1295,22 +1311,22 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
 </main>
 <!-- v4.7.4：浮动按钮组常驻——主页仅显示背景音乐按钮；阅读视图追加 目录/返回主页/回到顶部；BGM 与阅读按钮统一 UI，整组下移避免遮挡 -->
 <div class="floating-buttons" id="floatingButtons">
-    <button class="float-btn read-float-btn" id="floatTocBtn" title="目录"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
-    <button class="float-btn read-float-btn" id="floatHomeBtn" title="返回主页"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></button>
-    <button class="float-btn read-float-btn" id="scrollToTopBtn" title="回到顶部"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
-    <button class="float-btn bgm-float-btn" id="bgmFloatBtn" title="背景音乐" style="display:none" aria-label="背景音乐开关">
+    <button class="float-btn read-float-btn" id="floatTocBtn" title="<?= t('home.017') ?>"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <button class="float-btn read-float-btn" id="floatHomeBtn" title="<?= t('home.050') ?>"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></button>
+    <button class="float-btn read-float-btn" id="scrollToTopBtn" title="<?= t('home.051') ?>"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
+    <button class="float-btn bgm-float-btn" id="bgmFloatBtn" title="<?= t('home.052') ?>" style="display:none" aria-label="<?= t('home.053') ?>">
         <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
         <span class="bgm-float-bar"></span>
     </button>
 </div>
 <div class="share-modal-overlay" id="shareModalOverlay">
     <div class="share-modal">
-        <div class="share-modal-title">分享文章</div>
+        <div class="share-modal-title"><?= t('home.054') ?></div>
         <div id="shareQrcode"></div>
         <div class="share-modal-actions">
-            <button class="share-modal-btn" id="shareCopyLinkBtn">复制链接</button>
+            <button class="share-modal-btn" id="shareCopyLinkBtn"><?= t('home.055') ?></button>
         </div>
-        <button class="share-modal-close" id="shareModalClose">关闭</button>
+        <button class="share-modal-close" id="shareModalClose"><?= t('home.044') ?></button>
     </div>
 </div>
 <!-- v3.1.8：公告详情弹窗（无关联文章的公告点击后显示完整内容） -->
@@ -1318,26 +1334,26 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
     <div class="ann-modal-box">
         <div class="ann-modal-head">
             <span class="ann-modal-type"></span>
-            <button class="ann-modal-close" id="announceModalClose" title="关闭">&times;</button>
+            <button class="ann-modal-close" id="announceModalClose" title="<?= t('home.044') ?>">&times;</button>
         </div>
         <div class="ann-modal-title"></div>
         <div class="ann-modal-date"></div>
         <div class="ann-modal-words"></div>
         <div class="ann-modal-content"></div>
-        <button class="ann-modal-link" id="announceModalLink">查看文章 →</button>
+        <button class="ann-modal-link" id="announceModalLink"><?= t('home.056') ?></button>
     </div>
 </div>
-<div class="toc-popup" id="tocPopup"><div class="toc-popup-header"><div class="toc-popup-title">目录</div></div><div class="toc-popup-list" id="tocPopupList"></div></div>
+<div class="toc-popup" id="tocPopup"><div class="toc-popup-header"><div class="toc-popup-title"><?= t('home.017') ?></div></div><div class="toc-popup-list" id="tocPopupList"></div></div>
 <div class="music-popup" id="musicPopup">
     <!-- v4.6.2：弹窗顶部一行两个滑块——歌词显示开关 + 本地背景音乐开关（统一滑块样式，双向同步首页浮动音符按钮） -->
     <div class="music-opt-row">
-        <label class="music-opt-item" title="显示/隐藏歌词">
-            <span class="music-opt-label"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>&nbsp;歌词</span>
+        <label class="music-opt-item" title="<?= t('home.057') ?>">
+            <span class="music-opt-label"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg><?= t('home.058') ?></span>
             <span class="bgm-switch"><input type="checkbox" id="musicLyrToggle"><span class="slider"></span></span>
         </label>
         <!-- v4.5.0：本地背景音开关（弹窗内；曲目由站长/超管后台上传，前端只能开/关，单曲循环；浏览器缓存播放不重复消耗服务器流量） -->
-        <label class="music-opt-item" id="bgmRow" style="display:none" title="本地背景音乐开关">
-            <span class="music-opt-label"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>&nbsp;背景音乐</span>
+        <label class="music-opt-item" id="bgmRow" style="display:none" title="<?= t('home.059') ?>">
+            <span class="music-opt-label"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg><?= t('home.060') ?></span>
             <span class="bgm-switch"><input type="checkbox" id="bgmToggle"><span class="slider"></span></span>
         </label>
     </div>
@@ -1351,8 +1367,8 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
             </div>
         </div>
         <div class="music-meta">
-            <div class="music-name" id="musicName">未播放</div>
-            <div class="music-artist" id="musicArtist">点击下方歌曲开始</div>
+            <div class="music-name" id="musicName"><?= t('home.061') ?></div>
+            <div class="music-artist" id="musicArtist"><?= t('home.062') ?></div>
         </div>
     </div>
     <div class="music-progress-wrap">
@@ -1363,34 +1379,34 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         <div class="music-progress-time"><span id="musicCurTime">0:00</span><span id="musicTotalTime">0:00</span></div>
     </div>
     <div class="music-controls">
-        <button class="music-ctrl-btn music-mode-btn" id="musicModeBtn" title="循环模式">
+        <button class="music-ctrl-btn music-mode-btn" id="musicModeBtn" title="<?= t('home.063') ?>">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
         </button>
         <button class="music-ctrl-btn" id="musicPrev"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
         <button class="music-ctrl-btn music-play-btn" id="musicPlay"><svg viewBox="0 0 24 24" fill="currentColor" id="musicPlayIcon"><path d="M8 5v14l11-7z"/></svg></button>
         <button class="music-ctrl-btn" id="musicNext"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
-        <button class="music-ctrl-btn music-list-btn" id="musicListToggle" title="歌单">
+        <button class="music-ctrl-btn music-list-btn" id="musicListToggle" title="<?= t('home.064') ?>">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
         </button>
     </div>
     <div class="music-lyric-panel" id="musicLyrPanel">
         <div class="music-lyric-scroll" id="musicLyrScroll">
-            <div class="music-lyric-hint">暂无歌词</div>
+            <div class="music-lyric-hint"><?= t('home.065') ?></div>
         </div>
     </div>
     <div class="music-list" id="musicList">
         <!-- v4.7.4：多平台音乐——平台切换 + 每平台榜单切换（网易云/QQ音乐/酷狗） -->
         <div class="music-src-row" id="musicSrcRow">
-            <button type="button" class="music-src-chip active" data-platform="netease">网易云</button>
-            <button type="button" class="music-src-chip" data-platform="qq">QQ音乐</button>
-            <button type="button" class="music-src-chip" data-platform="kugou">酷狗</button>
+            <button type="button" class="music-src-chip active" data-platform="netease"><?= t('home.066') ?></button>
+            <button type="button" class="music-src-chip" data-platform="qq"><?= t('home.067') ?></button>
+            <button type="button" class="music-src-chip" data-platform="kugou"><?= t('home.068') ?></button>
         </div>
         <div class="music-chart-row" id="musicChartRow"></div>
         <div class="music-list-header">
-            <span class="music-popup-count" id="musicPopupCount">热歌榜</span>
+            <span class="music-popup-count" id="musicPopupCount"><?= t('home.069') ?></span>
         </div>
         <div class="music-song-list" id="musicSongList"></div>
-        <div class="music-loading" id="musicLoading">点击加载热歌榜</div>
+        <div class="music-loading" id="musicLoading"><?= t('home.070') ?></div>
     </div>
 </div>
 <audio id="musicAudio" preload="auto"></audio>
@@ -1403,84 +1419,84 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
 <div class="img-lightbox" id="imgLightbox"><img src="" alt="" id="lightboxImg"></div>
 <div class="cmt-modal-mask" id="cmtAuthModal">
     <div class="cmt-modal-box">
-        <div class="cmt-modal-head"><div class="cmt-modal-title" id="cmtAuthTitle">登录</div></div>
+        <div class="cmt-modal-head"><div class="cmt-modal-title" id="cmtAuthTitle"><?= t('home.026') ?></div></div>
         <div class="cmt-modal-body cmt-auth-slide" id="cmtAuthSlide">
             <div class="cmt-modal-form" id="cmtLoginForm">
-                <input class="cmt-modal-input" type="text" placeholder="用户名" maxlength="20" id="cmtLoginQQ" autocomplete="username">
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.071') ?>" maxlength="20" id="cmtLoginQQ" autocomplete="username">
                 <div class="cmt-pw-row">
-                    <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="密码" id="cmtLoginPw" autocomplete="current-password">
+                    <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="<?= t('home.072') ?>" id="cmtLoginPw" autocomplete="current-password">
                     <!-- v3.3.16：密码显示切换——线稿眼睛图标（隐藏/可见两态） -->
-                    <button type="button" class="cmt-pw-toggle" id="cmtLoginPwToggle" tabindex="-1" title="显示/隐藏密码" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                    <button type="button" class="cmt-pw-toggle" id="cmtLoginPwToggle" tabindex="-1" title="<?= t('home.073') ?>" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
                 </div>
                 <div class="cmt-modal-err" id="cmtLoginErr"></div>
-                <button class="cmt-modal-submit" id="cmtLoginBtn">登录</button>
-                <div class="cmt-forgot-row"><button type="button" class="cmt-modal-switch-link" id="cmtForgotLink">忘记密码？</button></div>
+                <button class="cmt-modal-submit" id="cmtLoginBtn"><?= t('home.026') ?></button>
+                <div class="cmt-forgot-row"><button type="button" class="cmt-modal-switch-link" id="cmtForgotLink"><?= t('home.074') ?></button></div>
             </div>
             <!-- v4.7.0：陌生设备登录邮件二次验证 -->
             <div class="cmt-modal-form" id="cmtDevForm" style="display:none">
-                <div class="cmt-sec-title"><span>设备验证</span></div>
-                <div class="cmt-reset-tip" id="cmtDevTip">验证码已发送，请查收邮箱</div>
-                <input class="cmt-modal-input" type="text" placeholder="邮箱验证码（6位）" maxlength="6" id="cmtDevCode" autocomplete="off" inputmode="numeric">
+                <div class="cmt-sec-title"><span><?= t('home.075') ?></span></div>
+                <div class="cmt-reset-tip" id="cmtDevTip"><?= t('home.076') ?></div>
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.077') ?>" maxlength="6" id="cmtDevCode" autocomplete="off" inputmode="numeric">
                 <div class="cmt-modal-err" id="cmtDevErr"></div>
-                <button class="cmt-modal-submit" id="cmtDevBtn">确认设备</button>
-                <div class="cmt-back-row"><button type="button" class="cmt-modal-switch-link" id="cmtDevBack">返回登录</button></div>
+                <button class="cmt-modal-submit" id="cmtDevBtn"><?= t('home.078') ?></button>
+                <div class="cmt-back-row"><button type="button" class="cmt-modal-switch-link" id="cmtDevBack"><?= t('home.079') ?></button></div>
             </div>
             <!-- v4.7.0：找回密码（管理角色仅常用设备可自助找回，陌生设备请联系超管） -->
             <div class="cmt-modal-form" id="cmtResetForm" style="display:none">
-                <div class="cmt-sec-title"><span>找回密码</span></div>
-                <input class="cmt-modal-input" type="text" placeholder="用户名" maxlength="20" id="cmtResetQQ" autocomplete="username">
+                <div class="cmt-sec-title"><span><?= t('home.080') ?></span></div>
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.071') ?>" maxlength="20" id="cmtResetQQ" autocomplete="username">
                 <div class="cmt-reg-email-row">
-                    <input class="cmt-modal-input" type="email" placeholder="绑定邮箱" id="cmtResetEmail" autocomplete="email">
-                    <button type="button" class="cmt-code-btn" id="cmtResetSendCode">发送验证码</button>
+                    <input class="cmt-modal-input" type="email" placeholder="<?= t('home.081') ?>" id="cmtResetEmail" autocomplete="email">
+                    <button type="button" class="cmt-code-btn" id="cmtResetSendCode"><?= t('home.082') ?></button>
                 </div>
-                <input class="cmt-modal-input" type="text" placeholder="邮箱验证码或管理员提供的重置码（6位）" maxlength="6" id="cmtResetCode" autocomplete="off" inputmode="numeric">
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.083') ?>" maxlength="6" id="cmtResetCode" autocomplete="off" inputmode="numeric">
                 <div class="cmt-pw-row">
-                    <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="新密码（至少8位，含大小写与数字）" id="cmtResetPw" autocomplete="new-password">
-                    <button type="button" class="cmt-pw-toggle" id="cmtResetPwToggle" tabindex="-1" title="显示/隐藏密码" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                    <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="<?= t('home.084') ?>" id="cmtResetPw" autocomplete="new-password">
+                    <button type="button" class="cmt-pw-toggle" id="cmtResetPwToggle" tabindex="-1" title="<?= t('home.073') ?>" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
                 </div>
                 <div class="cmt-modal-err" id="cmtResetErr"></div>
-                <button class="cmt-modal-submit" id="cmtResetBtn">重置密码</button>
-                <div class="cmt-back-row"><button type="button" class="cmt-modal-switch-link" id="cmtResetBack">返回登录</button></div>
+                <button class="cmt-modal-submit" id="cmtResetBtn"><?= t('home.085') ?></button>
+                <div class="cmt-back-row"><button type="button" class="cmt-modal-switch-link" id="cmtResetBack"><?= t('home.079') ?></button></div>
             </div>
             <div class="cmt-modal-form cmt-reg-form" id="cmtRegForm" style="display:none">
                 <!-- v2.10.2：注册表单统一设计——账号信息 / 身份验证分组分层 -->
-                <div class="cmt-sec-title"><span>账号信息</span></div>
+                <div class="cmt-sec-title"><span><?= t('home.086') ?></span></div>
                 <!-- v4.4.0：注册蜜罐——CSS 隐藏输入框，真人看不见不会填；机器人自动填充即被后端静默拒绝 -->
                 <input type="text" name="website" id="cmtRegHoneypot" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0">
-                <input class="cmt-modal-input" type="text" placeholder="用户名（3-20 位字母/数字）" maxlength="20" id="cmtRegQQ">
-                <input class="cmt-modal-input" type="text" placeholder="昵称" maxlength="20" id="cmtRegNick">
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.087') ?>" maxlength="20" id="cmtRegQQ">
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.088') ?>" maxlength="20" id="cmtRegNick">
                 <div class="cmt-pw-row">
-                    <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="密码（至少8位，含大小写与数字）" id="cmtRegPw">
+                    <input class="cmt-modal-input cmt-pw-input" type="password" placeholder="<?= t('home.089') ?>" id="cmtRegPw">
                     <!-- v3.3.16：注册密码显示切换（与登录一致，线稿眼睛图标） -->
-                    <button type="button" class="cmt-pw-toggle" id="cmtRegPwToggle" tabindex="-1" title="显示/隐藏密码" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                    <button type="button" class="cmt-pw-toggle" id="cmtRegPwToggle" tabindex="-1" title="<?= t('home.073') ?>" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
                 </div>
                 <div class="cmt-reg-verify" id="cmtRegVerifyBox" style="display:none">
-                    <div class="cmt-sec-title"><span>身份验证</span></div>
+                    <div class="cmt-sec-title"><span><?= t('home.090') ?></span></div>
                     <div class="cmt-reg-email-row">
-                        <input class="cmt-modal-input" type="email" placeholder="邮箱（用于验证）" id="cmtRegEmail">
-                        <button type="button" class="cmt-code-btn" id="cmtRegSendCode">获取验证码</button>
+                        <input class="cmt-modal-input" type="email" placeholder="<?= t('home.091') ?>" id="cmtRegEmail">
+                        <button type="button" class="cmt-code-btn" id="cmtRegSendCode"><?= t('home.092') ?></button>
                     </div>
-                    <input class="cmt-modal-input" type="text" placeholder="邮箱验证码（6位）" maxlength="6" id="cmtRegCode">
+                    <input class="cmt-modal-input" type="text" placeholder="<?= t('home.077') ?>" maxlength="6" id="cmtRegCode">
                 </div>
                 <div class="cmt-modal-err" id="cmtRegErr"></div>
-                <button class="cmt-modal-submit" id="cmtRegBtn">注册</button>
+                <button class="cmt-modal-submit" id="cmtRegBtn"><?= t('home.093') ?></button>
             </div>
         </div>
-        <div class="cmt-modal-switch"><span id="cmtSwitchText">还没有账号？</span><button class="cmt-modal-switch-link" id="cmtSwitchBtn">立即注册</button></div>
+        <div class="cmt-modal-switch"><span id="cmtSwitchText"><?= t('home.094') ?></span><button class="cmt-modal-switch-link" id="cmtSwitchBtn"><?= t('home.095') ?></button></div>
     </div>
 </div>
 <!-- v4.4.0：注册算术人机验证弹窗——点击「获取验证码」弹出随机加减乘除题，答对才发送邮箱验证码 -->
 <div class="cmt-modal-mask" id="cmtArithModal">
     <div class="cmt-modal-box cmt-arith-box">
-        <div class="cmt-modal-head"><div class="cmt-modal-title">人机验证</div></div>
+        <div class="cmt-modal-head"><div class="cmt-modal-title"><?= t('home.096') ?></div></div>
         <div class="cmt-modal-body">
             <div class="cmt-modal-form">
                 <div class="cmt-arith-question" id="cmtArithQuestion">…</div>
-                <input class="cmt-modal-input" type="text" placeholder="计算结果" maxlength="6" id="cmtArithAnswer" autocomplete="off" inputmode="numeric">
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.097') ?>" maxlength="6" id="cmtArithAnswer" autocomplete="off" inputmode="numeric">
                 <div class="cmt-modal-err" id="cmtArithErr"></div>
                 <div class="cmt-arith-actions">
-                    <button class="cmt-modal-submit" id="cmtArithOk">验证</button>
-                    <button type="button" class="cmt-arith-cancel" id="cmtArithCancel">取消</button>
+                    <button class="cmt-modal-submit" id="cmtArithOk"><?= t('home.098') ?></button>
+                    <button type="button" class="cmt-arith-cancel" id="cmtArithCancel"><?= t('home.099') ?></button>
                 </div>
             </div>
         </div>
@@ -1488,32 +1504,32 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
 </div>
 <div class="cmt-modal-mask" id="cmtProfileModal">
     <div class="cmt-modal-box">
-        <div class="cmt-modal-head"><div class="cmt-modal-title">编辑资料</div></div>
+        <div class="cmt-modal-head"><div class="cmt-modal-title"><?= t('home.028') ?></div></div>
         <div class="cmt-modal-body">
             <div class="cmt-modal-form">
                 <!-- v2.10.0：头像自定义（JPG/PNG/WEBP ≤2MB，选文件后立即上传） -->
                 <div class="cmt-profile-avatar-row">
                     <div class="cmt-profile-avatar" id="cmtProfileAvatar"></div>
                     <div class="cmt-profile-avatar-side">
-                        <label class="cmt-avatar-btn" for="cmtAvatarFile">上传头像</label>
+                        <label class="cmt-avatar-btn" for="cmtAvatarFile"><?= t('home.100') ?></label>
                         <input type="file" id="cmtAvatarFile" accept="image/jpeg,image/png,image/webp" style="display:none">
                         <div class="cmt-profile-avatar-tip">JPG / PNG / WEBP，≤2MB</div>
                     </div>
                 </div>
-                <input class="cmt-modal-input" type="text" placeholder="昵称" maxlength="20" id="cmtEditNick">
-                <input class="cmt-modal-input" type="text" placeholder="签名（选填，最多16字）" maxlength="16" id="cmtEditSign">
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.088') ?>" maxlength="20" id="cmtEditNick">
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.101') ?>" maxlength="16" id="cmtEditSign">
                 <div class="cmt-modal-err" id="cmtProfileErr"></div>
-                <button class="cmt-modal-submit" id="cmtProfileSave">保存</button>
+                <button class="cmt-modal-submit" id="cmtProfileSave"><?= t('home.102') ?></button>
                 <!-- v2.10.0：邮箱绑定/更换（超管关闭邮箱验证后整体隐藏，基础资料编辑不受影响） -->
                 <div class="cmt-profile-email" id="cmtProfileEmailWrap" style="display:none">
-                    <div class="cmt-profile-sec-title">邮箱绑定</div>
+                    <div class="cmt-profile-sec-title"><?= t('home.103') ?></div>
                     <div class="cmt-modal-input-row">
-                        <input class="cmt-modal-input" type="email" placeholder="输入新邮箱" id="cmtEditEmail">
-                        <button type="button" class="cmt-code-btn" id="cmtEmailSendCode">获取验证码</button>
+                        <input class="cmt-modal-input" type="email" placeholder="<?= t('home.104') ?>" id="cmtEditEmail">
+                        <button type="button" class="cmt-code-btn" id="cmtEmailSendCode"><?= t('home.092') ?></button>
                     </div>
-                    <input class="cmt-modal-input" type="text" placeholder="邮箱验证码（6位）" maxlength="6" id="cmtEditEmailCode">
+                    <input class="cmt-modal-input" type="text" placeholder="<?= t('home.077') ?>" maxlength="6" id="cmtEditEmailCode">
                     <div class="cmt-modal-err" id="cmtEmailErr"></div>
-                    <button class="cmt-modal-submit cmt-email-confirm" id="cmtEmailSave">确认绑定</button>
+                    <button class="cmt-modal-submit cmt-email-confirm" id="cmtEmailSave"><?= t('home.105') ?></button>
                 </div>
             </div>
         </div>
@@ -1521,26 +1537,26 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
 </div>
 <div class="cmt-modal-mask" id="cmtAdminModal">
     <div class="cmt-modal-box">
-        <div class="cmt-modal-head"><div class="cmt-modal-title">完善站长信息</div></div>
+        <div class="cmt-modal-head"><div class="cmt-modal-title"><?= t('home.106') ?></div></div>
         <div class="cmt-modal-body">
             <div class="cmt-modal-form">
-                <input class="cmt-modal-input" type="text" placeholder="设置管理员用户名" maxlength="20" id="cmtAdminQQ">
-                <input class="cmt-modal-input" type="text" placeholder="设置昵称" maxlength="20" id="cmtAdminNick" value="站长">
-                <input class="cmt-modal-input" type="password" placeholder="设置新密码（至少8位，含大小写与数字）" id="cmtAdminPw">
-                <input class="cmt-modal-input" type="password" placeholder="确认新密码" id="cmtAdminPw2">
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.107') ?>" maxlength="20" id="cmtAdminQQ">
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.108') ?>" maxlength="20" id="cmtAdminNick" value="站长">
+                <input class="cmt-modal-input" type="password" placeholder="<?= t('home.109') ?>" id="cmtAdminPw">
+                <input class="cmt-modal-input" type="password" placeholder="<?= t('home.110') ?>" id="cmtAdminPw2">
                 <div class="cmt-modal-err" id="cmtAdminErr"></div>
-                <button class="cmt-modal-submit" id="cmtAdminSave">保存并进入</button>
+                <button class="cmt-modal-submit" id="cmtAdminSave"><?= t('home.111') ?></button>
             </div>
         </div>
     </div>
 </div>
 <div class="cmt-confirm-overlay" id="cmtConfirmOverlay">
     <div class="cmt-confirm-box">
-        <h3>确认删除</h3>
-        <p>删除后不可恢复，确定要删除吗？</p>
+        <h3><?= t('home.112') ?></h3>
+        <p><?= t('home.113') ?></p>
         <div class="cmt-confirm-actions">
-            <button class="cmt-confirm-cancel" id="cmtConfirmCancel">取消</button>
-            <button class="cmt-confirm-ok" id="cmtConfirmOk">删除</button>
+            <button class="cmt-confirm-cancel" id="cmtConfirmCancel"><?= t('home.099') ?></button>
+            <button class="cmt-confirm-ok" id="cmtConfirmOk"><?= t('home.114') ?></button>
         </div>
     </div>
 </div>
@@ -1603,11 +1619,16 @@ window.ysmOpenLinks = function(fromHistory){
         var esc = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
         grid.innerHTML = links.map(function(x){
             var name = esc(x.site_name), url = esc(x.url), desc = esc(x.desc), fav = esc(x.favicon);
+            var host = '';
+            try { host = esc(new URL(x.url).host); } catch (e) { host = ''; }
             var favHtml = fav
                 ? '<img class="link-fav" src="' + fav + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
                 : '<span class="link-fav link-fav-ph">' + (name.charAt(0).toUpperCase() || '🔗') + '</span>';
             return '<a class="link-card" href="' + url + '" target="_blank" rel="noopener nofollow">' + favHtml +
-                   '<span class="link-body"><span class="link-name">' + name + '</span><span class="link-desc">' + desc + '</span></span></a>';
+                   '<span class="link-body"><span class="link-name">' + name + '</span>' +
+                   (desc ? '<span class="link-desc">' + desc + '</span>' : '') +
+                   (host ? '<span class="link-host">' + host + '</span>' : '') +
+                   '</span><span class="link-arrow"><svg viewBox="0 0 24 24"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></span></a>';
         }).join('');
     }).catch(function(){
         if (empty) { empty.style.display = 'block'; }
@@ -1637,26 +1658,46 @@ document.addEventListener('keydown', function(e){
     if (lv && lv.style.display !== 'none') { window.ysmCloseLinks(); }
 });
 if (location.hash === '#links') { window.ysmOpenLinks(true); }
-// v6.0.1：副栏友情链接卡片（与卡片墙共用只读接口；最多展示 6 个，超出时显示「全部」）
+// v6.3.0：副栏友链按数量换形态（1–3 条行式、≥4 条两列网格）；「全部」改为内联展开/收起
 (function(){
     var sec = document.getElementById('homeLinks');
     var list = document.getElementById('homeLinksList');
     var more = document.getElementById('homeLinksMore');
     if (!sec || !list) return;
     var esc = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
-    fetch('api.php?action=links_list').then(function(r){ return r.json(); }).then(function(d){
-        var links = (d && d.links) || [];
-        if (!links.length) return;
-        list.innerHTML = links.slice(0, 6).map(function(x){
+    var LIMIT = 6, ALL = [], expanded = false;
+    function render() {
+        var rows = ALL.length && ALL.length <= 3;
+        var shown = expanded ? ALL : ALL.slice(0, LIMIT);
+        list.className = 'home-links-list' + (rows ? ' is-rows' : '');
+        list.innerHTML = shown.map(function(x){
             var name = esc(x.site_name), url = esc(x.url), desc = esc(x.desc), fav = esc(x.favicon);
             var favHtml = fav
-                ? '<img class="home-link-fav" src="' + fav + '" alt="" loading="lazy" onerror="this.parentNode.textContent=\'' + (name.charAt(0).toUpperCase() || '🔗') + '\'">'
+                ? '<img class="home-link-fav" src="' + fav + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
                 : '<span class="home-link-fav">' + (name.charAt(0).toUpperCase() || '🔗') + '</span>';
+            if (rows) {
+                return '<a class="home-link-row" href="' + url + '" target="_blank" rel="noopener nofollow">' + favHtml +
+                       '<span class="home-link-body"><span class="home-link-name">' + name + '</span>' +
+                       (desc ? '<span class="home-link-desc">' + desc + '</span>' : '') + '</span>' +
+                       '<span class="home-link-arrow"><svg viewBox="0 0 24 24"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></span></a>';
+            }
             return '<a class="home-link-chip" href="' + url + '" target="_blank" rel="noopener nofollow" title="' + desc + '">' +
                    favHtml + '<span class="home-link-name">' + name + '</span></a>';
         }).join('');
-        if (more && links.length > 6) more.style.display = '';
+        if (more) {
+            more.style.display = ALL.length > LIMIT ? '' : 'none';
+            more.textContent = expanded ? TK('home.link_collapse') : TK('home.link_all');
+        }
         sec.style.display = '';
+    }
+    if (more) {
+        more.removeAttribute('onclick');
+        more.addEventListener('click', function(){ expanded = !expanded; render(); });
+    }
+    fetch('api.php?action=links_list').then(function(r){ return r.json(); }).then(function(d){
+        ALL = (d && d.links) || [];
+        if (!ALL.length) return;
+        render();
     }).catch(function(){});
 })();
 document.addEventListener('click', function(e){
@@ -1671,7 +1712,7 @@ document.addEventListener('click', function(e){
 <!-- v5.1.0 P3：外壳增强（滚动边界 / 键盘焦点环）；纯增量，与 main.js 无重叠 -->
 <script src="js/ui.js?v=<?= @filemtime(__DIR__ . '/js/ui.js') ?>" defer></script>
 <!-- v6.0.0：i18n 运行时文案接入（首页全部 UI 文案按当前语言翻译；文章/评论等用户内容不翻译） -->
-<script src="js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>" defer></script>
+<script src="js/i18n.js?v=<?= @filemtime(__DIR__ . '/js/i18n.js') ?>" defer></script>
 <script>
 // 背景图片应用
 (function() {
@@ -1703,7 +1744,7 @@ document.addEventListener('click', function(e){
 document.addEventListener('DOMContentLoaded', function() {
     var t = document.getElementById('toast');
     if (t) {
-        t.textContent = ysmT('已退出登录');
+        t.textContent = TK('home.115');
         t.classList.add('show');
         setTimeout(function() { t.classList.remove('show'); }, 2500);
     }

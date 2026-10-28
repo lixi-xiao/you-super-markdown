@@ -729,9 +729,64 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 // ===== v6.0.0：友站（友情链接） =====
+/** v6.3.0：友链 URL 归一化（协议/域名小写、去尾斜杠），用于查重（防 https://a.top 与 https://a.top/ 绕过） */
+function linkUrlNorm($u) {
+    $u = trim((string)$u);
+    $p = parse_url($u);
+    if (!$p || empty($p['host'])) return strtolower(rtrim($u, '/'));
+    $host = strtolower($p['host']);
+    if (!empty($p['port'])) $host .= ':' . $p['port'];
+    $path = rtrim($p['path'] ?? '', '/');
+    $qs = (isset($p['query']) && $p['query'] !== '') ? '?' . $p['query'] : '';
+    return strtolower($p['scheme'] ?? 'https') . '://' . $host . $path . $qs;
+}
+/** 同址友链是否已存在（$withPending=true 时连待审申请一起判重） */
+function linkUrlTaken($url, $withPending = true) {
+    $key = linkUrlNorm($url);
+    foreach (db_all('SELECT url FROM links') as $r) {
+        if (linkUrlNorm($r['url']) === $key) return true;
+    }
+    if ($withPending) {
+        foreach (db_all("SELECT url FROM link_applies WHERE status = 'pending'") as $r) {
+            if (linkUrlNorm($r['url']) === $key) return true;
+        }
+    }
+    return false;
+}
 // GET links_list：前台只读——只出 active 友链（访客可访问）
 if ($action === 'links_list') {
     sendJson(['success' => true, 'links' => db_all("SELECT id, site_name, url, favicon, desc, sort FROM links WHERE status = 'active' ORDER BY sort ASC, place_time DESC")]);
+}
+// POST link_apply：访客提交友链申请（写 link_applies + 邮件通知站长，带一次性审核令牌）
+if ($action === 'link_apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $name = trim((string)($in['site_name'] ?? ''));
+    $url  = trim((string)($in['url'] ?? ''));
+    $desc = trim((string)($in['desc'] ?? ''));
+    $mail = trim((string)($in['email'] ?? ''));
+    $fav  = trim((string)($in['favicon'] ?? ''));
+    if (mb_strlen($name) < 2 || mb_strlen($name) > 60) sendJson(['success' => false, 'error' => tn('api.990')], 400);
+    if (!preg_match('#^https?://#i', $url) || !filter_var($url, FILTER_VALIDATE_URL)) sendJson(['success' => false, 'error' => tn('api.991')], 400);
+    if ($desc === '' || mb_strlen($desc) > 200) sendJson(['success' => false, 'error' => tn('api.992')], 400);
+    if (!function_exists('email_valid') || !email_valid($mail)) sendJson(['success' => false, 'error' => tn('api.993')], 400);
+    if ($fav !== '' && !preg_match('#^https?://#i', $fav)) $fav = '';
+    $ip = getClientIP();
+    $row = db_one("SELECT COUNT(*) AS c FROM link_applies WHERE ip = ? AND created > ?", [$ip, date('Y-m-d H:i:s', time() - 86400)]);
+    if ($row && (int)$row['c'] >= 3) sendJson(['success' => false, 'error' => tn('api.994')], 429);
+    if (linkUrlTaken($url)) {
+        sendJson(['success' => false, 'error' => tn('api.995')], 409);
+    }
+    $id = genId();
+    $token = bin2hex(random_bytes(16));
+    $exp = time() + 7 * 86400;
+    db_exec('INSERT INTO link_applies (id, site_name, url, desc, favicon, email, status, token, token_expires, ip, created) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [$id, $name, $url, $desc, $fav, $mail, 'pending', $token, $exp, $ip, date('Y-m-d H:i:s')]);
+    auditLog('link_apply', $name, '访客提交友链申请：' . $url, 'success');
+    $base = rtrim((string)(appConfig('site_url') ?: ('https://' . ($_SERVER['HTTP_HOST'] ?? ''))), '/');
+    $approve = $base . '/index.php?action=link_review&token=' . $token;
+    $detail = "站点名称：{$name}\n网址：{$url}\n简介：{$desc}\n联系邮箱：{$mail}\n\n审核（需登录后台）：\n通过 / 拒绝：{$approve}\n\n令牌 7 天内有效，单次使用。";
+    if (function_exists('sendNotice')) { @sendNotice('友链申请', $detail); }
+    sendJson(['success' => true]);
 }
 /** 站长专属操作的前置校验（角色 + 环境） */
 function linksRequireStationAdmin() {
@@ -768,7 +823,7 @@ if ($action === 'links_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         db_exec('UPDATE links SET site_name=?, url=?, desc=?, favicon=?, sort=? WHERE id=?', [$name, $url, $desc, $favicon, $sort, $id]);
         auditLog('links_edit', $url, '编辑友链 ' . $name);
     } else {
-        if (db_one('SELECT 1 AS x FROM links WHERE url = ?', [$url])) sendJson(['success' => false, 'error' => tn('api.945')], 400);
+        if (linkUrlTaken($url, false)) sendJson(['success' => false, 'error' => tn('api.945')], 400);
         db_exec('INSERT INTO links (site_name, url, desc, favicon, status, place_time, sort, source) VALUES (?,?,?,?,\'active\',?,?,?)', [$name, $url, $desc, $favicon, time(), $sort, 'manual']);
         auditLog('links_add', $url, '新增友链 ' . $name);
     }

@@ -128,6 +128,17 @@ function db_init_schema($pdo) {
             @error_log('username unique index failed: ' . $e->getMessage());
         }
     }
+    // v6.3.0：友链申请（前台提交 → 邮件通知站长 → 审核入站）
+    // 注：links 表本分支已在下方 v6.0.0-beta 段创建，此处只补 link_applies
+    $pdo->exec('CREATE TABLE IF NOT EXISTS link_applies (
+        id TEXT PRIMARY KEY,
+        site_name TEXT, url TEXT, desc TEXT, favicon TEXT, email TEXT,
+        status TEXT DEFAULT \'pending\',
+        token TEXT, token_expires INTEGER,
+        ip TEXT, created TEXT, decided_at TEXT, decided_by TEXT
+    )');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_link_applies_status ON link_applies(status, created)');
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_link_applies_token ON link_applies(token)');
     // v2.9.0：邮箱验证码表（注册 / 写作者验证 / 超管确认链路）
     $pdo->exec('CREATE TABLE IF NOT EXISTS email_codes (
         id TEXT PRIMARY KEY,

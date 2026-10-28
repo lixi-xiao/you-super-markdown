@@ -21,6 +21,8 @@ if (!function_exists('ysmAllLangs')) {
         $names = ['zh-CN' => '简体中文', 'zh-TW' => '繁體中文', 'en-US' => 'English', 'ja-JP' => '日本語'];
         foreach ($files as $f) {
             if (!preg_match('/^([A-Za-z-]+)\.php$/', $f, $m)) continue;
+            // v6.3.0：legacy-<code>.php 是邮件 msgid 表，不是语言，禁止出现在语言切换器
+            if (strpos($f, 'legacy-') === 0) continue;
             $code = $m[1];
             $langs[$code] = ['name' => $names[$code] ?? ucfirst(str_replace('-', ' ', $code)), 'code' => $code];
         }

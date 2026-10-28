@@ -961,6 +961,55 @@ if ($action === 'rss') {
     exit;
 }
 
+// v6.3.0：友链申请审核（邮件令牌 + 登录态 + CSRF；通过后自动入 links）
+if ($action === 'link_review') {
+    $token = preg_replace('/[^a-f0-9]/', '', (string)($_GET['token'] ?? ''));
+    $actor = function_exists('checkRole') ? checkRole(ROLE_STATION_ADMIN) : false;
+    $row = $token !== '' ? db_one('SELECT * FROM link_applies WHERE token = ?', [$token]) : null;
+    $msg = '';
+    if ($row && (int)$row['token_expires'] < time()) { $msg = 'expired'; }
+    if (!$actor) { $msg = $msg ?: 'login'; }
+    if ($row && $actor && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!checkCsrfToken($_POST['csrf_token'] ?? '')) { $msg = 'csrf'; }
+        elseif ($row['status'] !== 'pending') { $msg = 'done'; }
+        else {
+            $dec = ($_POST['decision'] ?? '') === 'approve' ? 'approve' : 'reject';
+            if ($dec === 'approve') {
+                db_exec("INSERT OR IGNORE INTO links (site_name,url,favicon,desc,status,place_time,last_check,check_count,sort,source) VALUES (?,?,?,?,'active',?,0,0,99,'apply')",
+                    [$row['site_name'], $row['url'], (string)$row['favicon'], (string)$row['desc'], time()]);
+                db_exec("UPDATE link_applies SET status='approved', decided_at=?, decided_by=? WHERE id=?", [date('Y-m-d H:i:s'), (string)$actor['id'], $row['id']]);
+                auditLog('link_apply_approve', (string)$row['site_name'], '友链申请通过：' . $row['url'], 'success');
+                $msg = 'approved';
+            } else {
+                db_exec("UPDATE link_applies SET status='rejected', decided_at=?, decided_by=? WHERE id=?", [date('Y-m-d H:i:s'), (string)$actor['id'], $row['id']]);
+                auditLog('link_apply_reject', (string)$row['site_name'], '友链申请拒绝：' . $row['url'], 'success');
+                $msg = 'rejected';
+            }
+        }
+    }
+    $titles = ['approved' => 'links.review_approved', 'rejected' => 'links.review_rejected', 'login' => 'links.review_login', 'expired' => 'links.review_expired', 'csrf' => 'links.review_csrf', 'done' => 'links.review_done'];
+    echo '<!DOCTYPE html><html lang="' . htmlspecialchars(ysmLocale()) . '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' . t('links.apply_title') . '</title><link rel="stylesheet" href="/css/style.css"></head><body style="padding:24px">';
+    echo '<div style="max-width:560px;margin:40px auto">';
+    echo '<h1 style="font-size:1.3em;margin-bottom:16px">' . t('links.apply_title') . '</h1>';
+    if ($msg !== '') echo '<p style="margin-bottom:16px;color:var(--accent)">' . htmlspecialchars(t($titles[$msg] ?? 'links.review_done')) . '</p>';
+    if ($row) {
+        echo '<div class="share-card"><div class="share-card-top"><div class="share-card-icon"></div><div>';
+        echo '<div class="share-card-title">' . htmlspecialchars((string)$row['site_name']) . '</div>';
+        echo '<div class="share-card-desc">' . htmlspecialchars((string)$row['url']) . '<br>' . htmlspecialchars((string)$row['desc']) . '<br>' . htmlspecialchars((string)$row['email']) . '</div>';
+        echo '</div></div>';
+        if ($actor && $row['status'] === 'pending' && $msg !== 'approved' && $msg !== 'rejected') {
+            echo '<form method="post" style="display:flex;gap:10px;margin-top:14px">'
+                . '<input type="hidden" name="csrf_token" value="' . htmlspecialchars(generateCsrfToken()) . '">'
+                . '<button class="btn btn-primary" name="decision" value="approve" type="submit">' . t('links.apply_approve') . '</button>'
+                . '<button class="btn btn-outline" name="decision" value="reject" type="submit">' . t('links.apply_reject') . '</button>'
+                . '</form>';
+        }
+        echo '</div>';
+    }
+    echo '</div></body></html>';
+    exit;
+}
+
 // v4.1.0：RSS 订阅引导页——浏览器点击 RSS 图标不再直接弹 XML 树，改为友好说明页（阅读器抓取仍走 ?action=rss）
 if ($action === 'rss_guide') {
     $hostRaw2 = $_SERVER['HTTP_HOST'] ?? '';
@@ -1095,7 +1144,8 @@ $bgApi = trim((string)($siteConf['bg_api_url'] ?? ''));
 if (($siteConf['bg_type'] ?? 'none') === 'api' && $bgApi === '') $bgApi = FIXED_IMG_API;
 if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t=' . time();
 ?>
-<body data-ysm-custom-font="<?= !empty($__ysmFontOn) ? '1' : '0' ?>" data-guest-comments="<?= !empty($siteConf['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($siteConf['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($siteConf['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($bgApi) ?>" data-bg-blur="<?= !empty($siteConf['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($siteConf['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($siteConf['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($siteConf['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($siteConf['music_auto_play'] ?? '') ?>" data-bg-music="<?= (!empty($siteConf['bg_music_enabled']) && is_file(__DIR__ . '/data/bgm/background.mp3')) ? '1' : '0' ?>">
+<?php $__showLinks = (($_GET['view'] ?? '') === 'links'); ?>
+<body class="<?= $__showLinks ? 'links-open' : '' ?>" data-ysm-custom-font="<?= !empty($__ysmFontOn) ? '1' : '0' ?>" data-guest-comments="<?= !empty($siteConf['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($siteConf['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($siteConf['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($bgApi) ?>" data-bg-blur="<?= !empty($siteConf['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($siteConf['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($siteConf['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($siteConf['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($siteConf['music_auto_play'] ?? '') ?>" data-bg-music="<?= (!empty($siteConf['bg_music_enabled']) && is_file(__DIR__ . '/data/bgm/background.mp3')) ? '1' : '0' ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand truncate max-w-[40vw] sm:max-w-none" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($siteHeading) ?></a></div>
     <div class="header-right">
@@ -1138,12 +1188,12 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
     <div class="app-panel-gap"></div>
     <a class="app-panel-item" role="menuitem" href="/index.php?action=rss_guide" target="_blank" rel="noopener"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M5 13a6 6 0 0 1 6 6"/><path d="M5 7a12 12 0 0 1 12 12"/><circle cx="5" cy="19" r="1"/></svg></span><span class="app-panel-text"><?= t('home.014') ?></span></a>
     <?php if ($__ysmActiveLinks > 0): ?>
-    <button type="button" class="app-panel-item" role="menuitem" data-act="links"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span><span class="app-panel-text"><?= t('home.013') ?></span><span class="app-panel-count"><?= (int)$__ysmActiveLinks ?></span></button>
+    <a class="app-panel-item" role="menuitem" href="/index.php?view=links"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span><span class="app-panel-text"><?= t('home.013') ?></span><span class="app-panel-count"><?= (int)$__ysmActiveLinks ?></span></a>
     <?php endif; ?>
     <?php if ($musicEnabled): ?>
     <button type="button" class="app-panel-item" role="menuitem" data-act="music"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span><span class="app-panel-text"><?= t('home.015') ?></span></button>
     <?php endif; ?>
-    <button type="button" class="app-panel-item" role="menuitem" data-act="kbd"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="8" y1="14" x2="16" y2="14"/></svg></span><span class="app-panel-text"><?= t('home.020') ?></span></button>
+    <!-- v6.3.0：手机无物理键盘，「快捷键帮助」不进入移动端面板（桌面按钮保留） -->
 </div>
 <!-- v6.1.0：语言切换菜单（点击即写 Cookie + 账号，不再区分「临时」与「设为默认」） -->
 <div class="lang-dropdown" id="langDropdown" style="display:none;">
@@ -1269,19 +1319,55 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
             </aside>
         </div>
     </div>
-    <!-- v6.0.0：友站（友情链接）卡片墙；v6.1.0：补 ×/ESC/深链退出，空态可直接返回 -->
-    <div class="links-view" id="linksView" style="display:none">
-        <div class="links-head">
+    <!-- v6.3.0：友站独立页（手机端从「应用」面板进入；桌面无入口但 #links 深链仍可用） -->
+    <div class="links-view" id="linksView"<?= $__showLinks ? '' : ' style="display:none"' ?>>
+        <div class="links-top">
             <button type="button" class="links-back-btn" onclick="ysmCloseLinks()" aria-label="<?= t('home.043') ?>">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg><span><?= t('home.043') ?></span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
             <h2 class="links-title"><?= t('home.013') ?></h2>
-            <button type="button" class="links-close-btn" onclick="ysmCloseLinks()" aria-label="<?= t('home.044') ?>">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
+            <span class="links-count" id="linksCount"><?= $__showLinks && $__ysmActiveLinks > 0 ? t('links.subtitle', ['n' => (int)$__ysmActiveLinks]) : '' ?></span>
         </div>
-        <div class="links-grid" id="linksGrid"></div>
+        <div class="links-grid" id="linksGrid"><?php
+        if ($__showLinks) {
+            foreach (db_all("SELECT site_name, url, favicon, desc FROM links WHERE status = 'active' ORDER BY sort ASC, place_time DESC") as $__lk) {
+                $__host = parse_url((string)$__lk['url'], PHP_URL_HOST);
+                echo '<a class="link-card" href="' . htmlspecialchars($__lk['url'], ENT_QUOTES) . '" target="_blank" rel="noopener nofollow">';
+                echo $__lk['favicon'] !== ''
+                    ? '<img class="link-fav" src="' . htmlspecialchars($__lk['favicon'], ENT_QUOTES) . '" alt="" loading="lazy">'
+                    : '<span class="link-fav link-fav-ph">' . htmlspecialchars(mb_strtoupper(mb_substr((string)$__lk['site_name'], 0, 1))) . '</span>';
+                echo '<span class="link-body"><span class="link-name">' . htmlspecialchars((string)$__lk['site_name']) . '</span>';
+                if ((string)$__lk['desc'] !== '') echo '<span class="link-desc">' . htmlspecialchars((string)$__lk['desc']) . '</span>';
+                if ($__host) echo '<span class="link-host">' . htmlspecialchars($__host) . '</span>';
+                echo '</span><span class="link-arrow"><svg viewBox="0 0 24 24"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></span></a>';
+            }
+        }
+    ?></div>
+        <?php if ($__showLinks): ?>
+        <section class="links-apply" id="linkApplySec">
+            <button type="button" class="links-apply-open" id="linkApplyOpen">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <?= t('links.apply_open') ?>
+            </button>
+            <form class="links-apply-form" id="linkApplyForm" style="display:none" novalidate>
+                <div class="links-apply-row"><label><?= t('links.apply_name') ?></label><input type="text" name="site_name" maxlength="60" required></div>
+                <div class="links-apply-row"><label><?= t('links.apply_url') ?></label><input type="url" name="url" placeholder="https://" required></div>
+                <div class="links-apply-row"><label><?= t('links.apply_desc') ?></label><input type="text" name="desc" maxlength="200" required></div>
+                <div class="links-apply-row"><label><?= t('links.apply_email') ?></label><input type="email" name="email" required></div>
+                <p class="links-apply-msg" id="linkApplyMsg" role="status"></p>
+                <button type="submit" class="btn btn-primary links-apply-submit"><?= t('links.apply_submit') ?></button>
+            </form>
+        </section>
+        <section class="links-siteinfo">
+            <div class="links-siteinfo-title"><?= t('links.site_info') ?></div>
+            <dl>
+                <dt><?= t('links.site_name') ?></dt><dd><?= htmlspecialchars($siteHeading) ?></dd>
+                <dt><?= t('links.site_url') ?></dt><dd><?= htmlspecialchars((string)(appConfig('site_url') ?: ($_SERVER['HTTP_HOST'] ?? ''))) ?></dd>
+            </dl>
+        </section>
+        <?php endif; ?>
         <div class="links-empty" id="linksEmpty" style="display:none">
+            <div class="links-empty-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div>
             <div class="links-empty-text"><?= t('home.045') ?></div>
             <button type="button" class="btn btn-outline" onclick="ysmCloseLinks()"><?= t('home.046') ?></button>
         </div>
@@ -1618,6 +1704,7 @@ window.ysmOpenLinks = function(fromHistory){
     if (hv) hv.style.display = 'none';
     if (rv) rv.style.display = 'none';
     if (lv) lv.style.display = 'block';
+    document.body.classList.add('links-open');
     if (!fromHistory) {
         try { history.pushState({ ysmView: 'links' }, '', '#links'); window.ysmLinksPushed = true; } catch (e) {}
     }
@@ -1628,6 +1715,8 @@ window.ysmOpenLinks = function(fromHistory){
     if (empty) { empty.style.display = 'none'; }
     fetch('api.php?action=links_list').then(function(r){ return r.json(); }).then(function(d){
         var links = (d && d.links) || [];
+        var cnt = document.getElementById('linksCount');
+        if (cnt) { cnt.textContent = links.length ? TK('links.subtitle', { n: links.length }) : ''; }
         if (!links.length) { if (empty) empty.style.display = 'block'; return; }
         var esc = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
         grid.innerHTML = links.map(function(x){
@@ -1656,6 +1745,8 @@ window.ysmCloseLinks = function(fromHistory){
     var lv = document.getElementById('linksView');
     var hv = document.getElementById('homeView');
     if (lv) lv.style.display = 'none';
+    document.body.classList.remove('links-open');
+    if (location.search.indexOf('view=links') >= 0) { location.href = '/'; return; }
     if (hv) hv.style.display = '';
     if (location.hash === '#links') {
         try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
@@ -1670,7 +1761,26 @@ document.addEventListener('keydown', function(e){
     var lv = document.getElementById('linksView');
     if (lv && lv.style.display !== 'none') { window.ysmCloseLinks(); }
 });
-if (location.hash === '#links') { window.ysmOpenLinks(true); }
+// v6.3.0：#links 旧深链重定向到服务端视图 ?view=links（不依赖 JS 时序，避免被首页初始化覆盖）
+(function(){ if (location.hash === '#links' && location.search.indexOf('view=links') < 0) { location.replace('/index.php?view=links'); } })();
+// v6.3.0：友链申请表单（访客提交，CSRF + JSON）
+(function(){
+    var openBtn=document.getElementById('linkApplyOpen');
+    var form=document.getElementById('linkApplyForm');
+    var msg=document.getElementById('linkApplyMsg');
+    if(!openBtn||!form) return;
+    openBtn.addEventListener('click', function(){ form.style.display = (form.style.display==='none'?'':'none'); if(form.style.display===''){var i=form.querySelector('input'); if(i) i.focus();} });
+    form.addEventListener('submit', function(e){
+        e.preventDefault();
+        var d={}; new FormData(form).forEach(function(v,k){ d[k]=String(v).trim(); });
+        if(!d.site_name||!d.url||!d.desc||!d.email){ msg.textContent=TK('links.apply_need'); return; }
+        msg.textContent='';
+        fetch('api.php?action=link_apply', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':(document.body.getAttribute('data-csrf')||'')}, body: JSON.stringify(d)})
+            .then(function(r){ return r.json(); })
+            .then(function(j){ if(j&&j.success){ form.reset(); msg.textContent=TK('links.apply_ok'); } else { msg.textContent=(j&&j.error)||TK('links.apply_err'); } })
+            .catch(function(){ msg.textContent=TK('links.apply_err'); });
+    });
+})();
 // v6.3.0：副栏友链按数量换形态（1–3 条行式、≥4 条两列网格）；「全部」改为内联展开/收起
 (function(){
     var sec = document.getElementById('homeLinks');

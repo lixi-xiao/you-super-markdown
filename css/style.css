@@ -1233,6 +1233,38 @@ body.links-open .main-container { padding-top: 0; }
 }
 .ysm-mmd-retry:hover { background: rgba(239, 68, 68, .12); }
 
+/* ---------- v6.3.6：ASCII 字符图表（框线/目录树）—— 图表卡 + 自适应缩放 + 点击全屏 ---------- */
+.markdown-body pre.ysm-ascii {
+  background: #fbfcfe; border: 1px solid var(--border); border-radius: 14px;
+  padding: 16px; overflow: hidden; cursor: zoom-in;
+}
+.markdown-body pre.ysm-ascii code,
+.markdown-body pre.ysm-ascii code.hljs {
+  white-space: pre; overflow-wrap: normal; word-break: normal;
+  font-size: 12.5px; line-height: 1.55; background: none; padding: 0;
+}
+[data-theme="dark"] .markdown-body pre.ysm-ascii { background: #15171c; }
+.ysm-ascii-modal {
+  position: fixed; inset: 0; z-index: 99998; padding: 16px;
+  background: rgba(15, 23, 42, .72);
+  display: flex; align-items: center; justify-content: center;
+}
+.ysm-ascii-panel {
+  position: relative; max-width: 96vw; max-height: 88vh; overflow: auto;
+  background: #fff; color: #111; border-radius: 14px; padding: 22px 20px 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .35);
+}
+.ysm-ascii-panel pre {
+  margin: 0; white-space: pre;
+  font-family: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
+  font-size: 13px; line-height: 1.5;
+}
+.ysm-ascii-close {
+  position: absolute; top: 6px; right: 8px; width: 30px; height: 30px;
+  border: none; border-radius: 50%; background: rgba(0, 0, 0, .06);
+  color: #333; font-size: 18px; line-height: 1; cursor: pointer;
+}
+
 /* v6.3.6：手机端代码块不再被右侧裁切——自动换行（表格/图表仍横向滚动） */
 @media (max-width: 640px) {
   .markdown-body pre code,

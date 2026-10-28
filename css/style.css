@@ -1241,6 +1241,12 @@ body.links-open .main-container { padding-top: 0; }
     overflow-x: visible; font-size: 12.5px;
   }
   .markdown-body pre { overflow: hidden; }
+  /* v6.3.6：ASCII 架构图 / 目录树保持原样横向滚动，不参与自动换行（换行会折断框线） */
+  .markdown-body pre.ysm-ascii code,
+  .markdown-body pre.ysm-ascii code.hljs {
+    white-space: pre; overflow-wrap: normal; word-break: normal;
+    overflow-x: auto; font-size: 11.5px;
+  }
   .markdown-body .mermaid { overflow-x: auto; }
   .markdown-body .mermaid svg { max-width: 100%; height: auto; }
 }

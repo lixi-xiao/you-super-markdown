@@ -1978,6 +1978,11 @@
                     t.appendChild(e);
                 }
             });
+            // v6.3.6：框线字符（架构/目录树）标记 —— 手机端保持不换行，避免被折断错位
+            w.querySelectorAll("pre").forEach(function (p) {
+                var tx = p.textContent || "";
+                if (/[\u2500-\u257F]{2}/.test(tx)) p.classList.add("ysm-ascii");
+            });
             // 外链安全：禁止外链在当前页直接跳转离开本站；统一新窗口 + noopener noreferrer（防 tabnabbing）
                         w.querySelectorAll("a[href]").forEach(function(e) {
                 var t = e.getAttribute("href") || "";

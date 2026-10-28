@@ -2,8 +2,6 @@
 require_once __DIR__ . '/utils.php';
 require_once __DIR__ . '/lib/i18n.php';
 // v6.1.0：服务端输出层 i18n
-require_once __DIR__ . '/lib/i18n-output.php';
-ysmI18nStart();
 $siteCfg = loadSiteConfig();
 $siteName = $siteCfg['site_title'] ?? 'You Super Markdown';
 $bgType = $siteCfg['bg_type'] ?? 'none';
@@ -17,7 +15,7 @@ $bgCardOpacity = intval($siteCfg['bg_card_opacity'] ?? 100);?>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= ysmT('404 - 页面未找到 · {site}', ['site' => $siteName]) ?></title>
+    <title><?= htmlspecialchars('404 - 页面未找到 · ' . $siteName, ENT_QUOTES, 'UTF-8') ?></title>
     <!-- v4.0.0：深色模式跟随系统——在 CSS 加载前同步设置 data-theme，避免闪白（与主站一致） -->
     <script>
         (function() {
@@ -74,8 +72,8 @@ $bgCardOpacity = intval($siteCfg['bg_card_opacity'] ?? 100);?>
                 <line x1="15" y1="9" x2="15.01" y2="9"/>
             </svg>
         </div>
-        <h1>页面走丢了</h1>
-        <p>你访问的页面不存在或已被移除，请检查链接是否正确。</p>
+        <h1><?= t('err.001') ?></h1>
+        <p><?= t('err.002') ?></p>
         <div class="nf-actions">
             <a href="/" class="btn btn-primary">
                 <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
@@ -90,6 +88,6 @@ $bgCardOpacity = intval($siteCfg['bg_card_opacity'] ?? 100);?>
 </div>
 <!-- v6.0.0：i18n 运行时文案接入 -->
 <script>window.I18N = <?= json_encode(ysmClientI18n(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
-<script src="/js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
+<script src="/js/i18n.js?v=<?= @filemtime(__DIR__ . '/js/i18n.js') ?>"></script>
 </body>
 </html>

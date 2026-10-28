@@ -1,8 +1,6 @@
 <?php
 require_once __DIR__ . '/utils.php';
 // v6.1.0：服务端输出层 i18n
-require_once __DIR__ . '/lib/i18n-output.php';
-ysmI18nStart();
 
 $siteCfg = loadSiteConfig();
 $title = $siteCfg['site_title'] ?? 'You Super Markdown';
@@ -39,7 +37,7 @@ if (!$row) {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>超管确认 - <?= htmlspecialchars($title) ?></title>
 <script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
-<script src="/js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
+<script src="/js/i18n.js?v=<?= @filemtime(__DIR__ . '/js/i18n.js') ?>"></script>
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -93,7 +91,7 @@ if (!$row) {
     <div class="icon <?= $okResult ? 'ok' : 'fail' ?>"><?= $okResult ? '✓' : '!' ?></div>
     <div class="brand"><?= htmlspecialchars($title) ?></div>
     <div class="result <?= $okResult ? 'ok' : 'fail' ?>"><?= htmlspecialchars($result) ?></div>
-    <a class="back" href="./">返回首页</a>
+    <a class="back" href="./"><?= t('verify.004') ?></a>
 </div>
 </body>
 </html>

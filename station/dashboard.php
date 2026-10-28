@@ -1,8 +1,6 @@
 <?php
 require_once __DIR__ . '/../utils.php';
 // v6.1.0：服务端输出层 i18n
-require_once __DIR__ . '/../lib/i18n-output.php';
-ysmI18nStart();
 secureSessionStart();
 
 if (!checkRole(ROLE_STATION_ADMIN)) {
@@ -462,16 +460,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 <link rel="stylesheet" href="../css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
 <!-- v6.1.0：后台 JS 动态文案（弹窗/提示/异步渲染）运行时翻译 -->
 <script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
-<script src="../js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/../js/i18n-live.js') ?>"></script>
+<script src="../js/i18n.js?v=<?= @filemtime(__DIR__ . '/../js/i18n.js') ?>"></script>
 </head>
 <body>
 
 <!-- v3.1.5：移动端顶栏（菜单按钮融入顶栏，与后台统一视觉） -->
 <div class="mobile-topbar" id="mobileTopbar">
-    <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleSidebar()" aria-label="打开菜单">
+    <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleSidebar()" aria-label="<?= t('station.001') ?>">
         <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <div class="mobile-topbar-title">站长后台</div>
+    <div class="mobile-topbar-title"><?= t('station.002') ?></div>
     <div class="mobile-topbar-user">
         <span class="mobile-topbar-name"><?= htmlspecialchars($currentUser['nickname'] ?? '站长') ?></span>
     </div>
@@ -481,12 +479,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
         <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        <div class="sidebar-title"><span>站长</span>后台</div>
+        <div class="sidebar-title"><span><?= t('station.003') ?></span><?= t('station.004') ?></div>
         <div class="sidebar-user">
             <div class="sidebar-user-avatar"><?php if (!empty($currentUser['account'])): ?><img src="<?= htmlspecialchars(ysmAvatarUrl($currentUser['username'] ?? ($currentUser['account'] ?? ''), 100)) ?>" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
             <div class="sidebar-user-info">
                 <div class="sidebar-user-name"><?= htmlspecialchars($currentUser['nickname'] ?? '站长') ?></div>
-                <div class="sidebar-user-role">站长</div>
+                <div class="sidebar-user-role"><?= t('station.003') ?></div>
             </div>
         </div>
     </div>
@@ -548,22 +546,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 </div>
 
 <div class="main">
-    <?php if ($msg === 'author_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者已创建</div><?php endif; ?>
-    <?php if ($msg === 'code_sent_await_author'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>已提交！验证码已发送到写作者邮箱，请其打开邮件链接自助验证；验证通过后将通知超管确认</div><?php endif; ?>
-    <?php if ($msg === 'account_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>用户名格式不正确（3-20 位字母/数字/下划线/连字符）</div><?php endif; ?>
-    <?php if ($msg === 'email_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱格式不正确</div><?php endif; ?>
-    <?php if ($msg === 'email_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该邮箱已被使用</div><?php endif; ?>
-    <?php if ($msg === 'send_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>验证码发送失败（请确认 SMTP 邮件配置）</div><?php endif; ?>
-    <?php if ($msg === 'author_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>写作者已删除</div><?php endif; ?>
-    <?php if ($msg === 'account_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该账号已存在，请更换</div><?php endif; ?>
-    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>请求已过期，请重试</div><?php endif; ?>
-    <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>密码至少 8 位，且必须包含大写字母、小写字母与数字</div><?php endif; ?>
-    <?php if ($msg === 'saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>保存成功</div><?php endif; ?>
-    <?php if ($msg === 'uploaded'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>上传成功</div><?php endif; ?>
-    <?php if ($msg === 'upload_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>上传失败，请检查文件格式与 data/bg/ 目录权限</div><?php endif; ?>
-    <?php if ($msg === 'music_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>音乐设置已保存</div><?php endif; ?>
-    <?php if ($msg === 'image_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>图片已删除</div><?php endif; ?>
-    <?php if ($msg === 'image_delete_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>图片删除失败（文件不存在或权限不足）</div><?php endif; ?>
+    <?php if ($msg === 'author_created'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.147') ?></div><?php endif; ?>
+    <?php if ($msg === 'code_sent_await_author'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.148') ?></div><?php endif; ?>
+    <?php if ($msg === 'account_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('station.149') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('api.907') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('api.908') ?></div><?php endif; ?>
+    <?php if ($msg === 'send_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('station.150') ?></div><?php endif; ?>
+    <?php if ($msg === 'author_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.151') ?></div><?php endif; ?>
+    <?php if ($msg === 'account_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.381') ?></div><?php endif; ?>
+    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.447') ?></div><?php endif; ?>
+    <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.382') ?></div><?php endif; ?>
+    <?php if ($msg === 'saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.402') ?></div><?php endif; ?>
+    <?php if ($msg === 'uploaded'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('admin.403') ?></div><?php endif; ?>
+    <?php if ($msg === 'upload_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('station.152') ?></div><?php endif; ?>
+    <?php if ($msg === 'music_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.153') ?></div><?php endif; ?>
+    <?php if ($msg === 'image_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.154') ?></div><?php endif; ?>
+    <?php if ($msg === 'image_delete_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('station.155') ?></div><?php endif; ?>
 
     <?php if ($tab === 'authors'): ?>
     <div class="page-header">
@@ -571,7 +569,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
             写作者管理
         </div>
-        <div class="page-subtitle">管理你的写作者团队</div>
+        <div class="page-subtitle"><?= t('station.005') ?></div>
     </div>
 
     <div class="card">
@@ -584,30 +582,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <input type="hidden" name="action" value="create_author">
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">昵称</label>
-                    <input class="form-input" name="nickname" placeholder="写作者昵称">
+                    <label class="form-label"><?= t('station.006') ?></label>
+                    <input class="form-input" name="nickname" placeholder="<?= t('station.007') ?>">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">用户名（3-20 位字母/数字/下划线/连字符，登录用）</label>
-                    <input class="form-input" name="username" placeholder="例如 xiao_writer" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,19}" title="3-20 位字母、数字、下划线或连字符">
+                    <label class="form-label"><?= t('station.008') ?></label>
+                    <input class="form-input" name="username" placeholder="<?= t('station.009') ?>" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{2,19}" title="<?= t('station.010') ?>">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">密码（至少 8 位，含大小写字母与数字）</label>
+                    <label class="form-label"><?= t('station.011') ?></label>
                     <input class="form-input" name="password" type="password" placeholder="******">
                 </div>
             </div>
             <?php if (!empty($config['author_dual_verify_enabled'])): ?>
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">写作者邮箱（收验证码，由写作者通过邮件链接自助验证，超管确认后生效）</label>
-                    <input class="form-input" name="email" id="authorEmail" placeholder="写作者邮箱">
+                    <label class="form-label"><?= t('station.012') ?></label>
+                    <input class="form-input" name="email" id="authorEmail" placeholder="<?= t('station.013') ?>">
                 </div>
             </div>
             <?php endif; ?>
             <div class="form-row">
                 <div class="form-group" style="flex:0">
                     <label class="form-label">&nbsp;</label>
-                    <button type="submit" class="btn btn-primary">创建</button>
+                    <button type="submit" class="btn btn-primary"><?= t('station.014') ?></button>
                 </div>
             </div>
         </form>
@@ -621,24 +619,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <?php if (empty($myAuthors)): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-            <p>暂无写作者，在上方创建第一个</p>
+            <p><?= t('station.015') ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
         <table>
-            <tr><th>昵称</th><th>用户名</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th><?= t('station.006') ?></th><th><?= t('station.016') ?></th><th><?= t('station.017') ?></th><th><?= t('station.018') ?></th></tr>
             <?php foreach ($myAuthors as $a): ?>
             <tr>
                 <td><?= htmlspecialchars($a['nickname'] ?? '') ?></td>
                 <td style="color:var(--text-muted)"><?= htmlspecialchars($a['username'] ?? ($a['account'] ?? '')) ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['created'] ?? '') ?></td>
                 <td>
-                    <button type="button" class="btn-link" onclick="stOpenDetail(this)" data-detail='<?= htmlspecialchars(json_encode(stAuthorDetail($a, $st_statComments, $st_statArticles, $stMyNick), JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>'>查看参数</button>
-                    <form method="post" style="display:inline" onsubmit="return confirm(ysmT('确定删除') + ' <?= htmlspecialchars($a['nickname'] ?? '') ?>' + ysmT('？'))">
+                    <button type="button" class="btn-link" onclick="stOpenDetail(this)" data-detail='<?= htmlspecialchars(json_encode(stAuthorDetail($a, $st_statComments, $st_statArticles, $stMyNick), JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>'><?= t('station.156') ?></button>
+                    <form method="post" style="display:inline" onsubmit="return confirm(t('station.019') + ' <?= htmlspecialchars($a['nickname'] ?? '') ?>' + t('station.qmark'))">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="action" value="delete_author">
                         <input type="hidden" name="user_id" value="<?= htmlspecialchars($a['id']) ?>">
-                        <button type="submit" class="btn-link danger">删除</button>
+                        <button type="submit" class="btn-link danger"><?= t('station.020') ?></button>
                     </form>
                 </td>
             </tr>
@@ -663,7 +661,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
             主界面及功能设置
         </div>
-        <div class="page-subtitle">网站背景与功能配置（与超管共享配置，后保存者生效）</div>
+        <div class="page-subtitle"><?= t('station.021') ?></div>
     </div>
     <!-- v4.1.18：音乐播放器设置（原 music tab 并入主界面） -->
     <div class="card">
@@ -676,28 +674,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
              既不影响表单提交时的取值逻辑（见下方提交处理器），也不丢失既有数据（前台按预设正常工作）。 -->
         <div style="display:none">
         <div class="form-group">
-            <label class="form-label">网易云歌单 ID</label>
+            <label class="form-label"><?= t('station.022') ?></label>
             <input class="form-input" type="text" id="musicNeteaseInput" value="<?= htmlspecialchars($config['music_playlist_id'] ?? '3778678') ?>" placeholder="3778678">
-            <p class="form-hint">网易云音乐歌单 ID，默认 3778678 为热歌榜</p>
+            <p class="form-hint"><?= t('station.023') ?></p>
         </div>
         <!-- v4.4.0：默认播放歌曲——打开歌单无历史播放时自动定位播放该歌（歌曲名关键词） -->
         <div class="form-group">
-            <label class="form-label">默认播放歌曲（可选）</label>
-            <input class="form-input" type="text" id="musicAutoPlayInput" value="<?= htmlspecialchars($config['music_auto_play'] ?? '') ?>" placeholder="例如：One Last Kiss" maxlength="60">
-            <p class="form-hint">首次打开歌单时按此关键词自动定位播放；留空则不自动播放</p>
+            <label class="form-label"><?= t('station.024') ?></label>
+            <input class="form-input" type="text" id="musicAutoPlayInput" value="<?= htmlspecialchars($config['music_auto_play'] ?? '') ?>" placeholder="<?= t('admin.409') ?>" maxlength="60">
+            <p class="form-hint"><?= t('station.025') ?></p>
         </div>
         <div class="form-group">
-            <label class="form-label">网易云 Cookies（可选）</label>
+            <label class="form-label"><?= t('station.026') ?></label>
             <input class="form-input" type="text" id="musicNetCookieInput" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>" placeholder="MUSIC_U=xxx; __csrf=xxx; ...">
-            <p class="form-hint">配置后可播放网易云 VIP 歌曲</p>
+            <p class="form-hint"><?= t('station.027') ?></p>
         </div>
         </div>
         <!-- v4.5.0：本地背景音乐——站长/超管后台上传单曲作默认背景音，前台只能开/关不能选曲；单曲循环，浏览器缓存不重复消耗服务器流量；<100MB 常见音频自动转码压缩 -->
         <div class="form-group">
             <div class="toggle-row">
-                <label class="toggle-label">本地背景音乐</label>
+                <label class="toggle-label"><?= t('station.028') ?></label>
                 <label class="toggle" style="flex-shrink:0"><input type="checkbox" id="bgMusicToggle" <?= !empty($config['bg_music_enabled']) ? 'checked' : '' ?>><span class="slider"></span></label>
-                <div class="toggle-desc">开启后前台播放器弹窗内出现「本地背景音」开关（单曲循环，播放器与网易云互不干扰）</div>
+                <div class="toggle-desc"><?= t('station.029') ?></div>
             </div>
             <input class="form-input" type="file" id="bgMusicFileInput" name="bg_music_file" accept=".mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.wma,audio/*" style="margin-top:8px">
             <p class="form-hint" id="bgMusicStatus"><?php $bmSize = bgMusicSize(); echo $bmSize > 0 ? ('当前背景音：' . round($bmSize / 1024 / 1024, 1) . ' MB（上传新文件可替换）') : '尚未上传背景音乐（mp3/wav/flac/m4a 等 ≤100MB，服务器自动转码压缩为 96kbps mp3）'; ?></p>
@@ -709,74 +707,74 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             背景类型
         </div>
         <div class="bg-type-grid bg-vis-grid">
-            <label class="bg-type-card <?= $bgType==='none'?'active':'' ?>" data-type="none"><input type="radio" name="bg_type" value="none" <?= $bgType==='none'?'checked':'' ?>><div class="type-icon none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div><div class="type-name">无背景</div></label>
-            <label class="bg-type-card <?= $bgType==='image'?'active':'' ?>" data-type="image"><input type="radio" name="bg_type" value="image" <?= $bgType==='image'?'checked':'' ?>><div class="type-icon upload"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><div class="type-name">上传图片</div></label>
-            <label class="bg-type-card <?= $bgType==='api'?'active':'' ?>" data-type="api"><input type="radio" name="bg_type" value="api" <?= $bgType==='api'?'checked':'' ?>><div class="type-icon api"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div><div class="type-name">API 获取</div></label>
+            <label class="bg-type-card <?= $bgType==='none'?'active':'' ?>" data-type="none"><input type="radio" name="bg_type" value="none" <?= $bgType==='none'?'checked':'' ?>><div class="type-icon none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div><div class="type-name"><?= t('station.044') ?></div></label>
+            <label class="bg-type-card <?= $bgType==='image'?'active':'' ?>" data-type="image"><input type="radio" name="bg_type" value="image" <?= $bgType==='image'?'checked':'' ?>><div class="type-icon upload"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><div class="type-name"><?= t('admin.410') ?></div></label>
+            <label class="bg-type-card <?= $bgType==='api'?'active':'' ?>" data-type="api"><input type="radio" name="bg_type" value="api" <?= $bgType==='api'?'checked':'' ?>><div class="type-icon api"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div><div class="type-name"><?= t('admin.411') ?></div></label>
         </div>
     </div>
     <div class="card" id="imageSection" style="display:<?= $bgType==='image'?'block':'none' ?>">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>上传背景图片</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><?= t('station.030') ?></div>
         <?php if ($bgImage && $bgType==='image'): ?>
-        <div class="img-preview-thumb"><img src="../<?= htmlspecialchars($bgImage) ?>" alt="当前背景"><button class="remove-img" onclick="removeBgImage()" title="移除">&times;</button></div>
+        <div class="img-preview-thumb"><img src="../<?= htmlspecialchars($bgImage) ?>" alt="<?= t('admin.412') ?>"><button class="remove-img" onclick="removeBgImage()" title="<?= t('admin.339') ?>">&times;</button></div>
         <?php endif; ?>
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <div class="upload-area">
                 <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                <div class="upload-text">点击上传背景图片</div>
-                <div class="upload-hint">支持 JPG / PNG / GIF / WebP，最大 10MB</div>
+                <div class="upload-text"><?= t('station.031') ?></div>
+                <div class="upload-hint"><?= t('station.032') ?></div>
                 <input type="file" name="bg_image" accept="image/jpeg,image/png,image/gif,image/webp" onchange="if(this.files.length)this.form.submit()">
             </div>
         </form>
         <input type="hidden" id="bgImagePath" value="<?= htmlspecialchars($bgImage) ?>">
     </div>
     <div class="card" id="apiSection" style="display:<?= $bgType==='api'?'block':'none' ?>">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>API 背景地址</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><?= t('station.033') ?></div>
         <div class="form-group">
-            <label class="form-label">图片 API URL</label>
+            <label class="form-label"><?= t('station.034') ?></label>
             <div class="api-url-group">
                 <input class="form-input" type="url" id="bgApiUrl" value="<?= htmlspecialchars($bgApiUrl) ?>" placeholder="<?= htmlspecialchars(FIXED_IMG_API) ?>">
-                <button class="btn btn-sm btn-outline" type="button" onclick="testApiUrl()">测试</button>
+                <button class="btn btn-sm btn-outline" type="button" onclick="testApiUrl()"><?= t('station.035') ?></button>
             </div>
         </div>
         <div id="apiTestResult" style="margin-top:8px"></div>
     </div>
     <!-- v4.2.4：首页卡片封面图片源（用户自定义则优先，留空回退固定源，走同一池化缓存策略） -->
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>首页卡片封面</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><?= t('station.036') ?></div>
         <div class="form-group">
-            <label class="form-label">卡片封面图片 API URL（可选）</label>
+            <label class="form-label"><?= t('station.037') ?></label>
             <div class="api-url-group">
                 <input class="form-input" type="url" id="cardCoverApiInput" value="<?= htmlspecialchars($cardCoverApi) ?>" placeholder="<?= htmlspecialchars(FIXED_IMG_API) ?>">
-                <button class="btn btn-sm btn-outline" type="button" onclick="testCardCoverApi()">测试</button>
+                <button class="btn btn-sm btn-outline" type="button" onclick="testCardCoverApi()"><?= t('station.035') ?></button>
             </div>
-            <p class="form-hint">无图文章卡片的封面图源（16:9 横屏）。留空使用默认固定源；自定义后走服务端缩略图池缓存，加载快且省流量</p>
+            <p class="form-hint"><?= t('station.038') ?></p>
         </div>
         <div id="cardCoverApiTestResult" style="margin-top:8px"></div>
     </div>
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>模糊与透明度</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><?= t('station.039') ?></div>
         <div class="toggle-row" id="bgBlurRow" style="display:<?= $bgType!=='none'?'flex':'none' ?>">
-            <div><div class="toggle-label">背景模糊</div><div class="toggle-desc">对网站背景应用高斯模糊</div></div>
+            <div><div class="toggle-label"><?= t('station.040') ?></div><div class="toggle-desc"><?= t('station.041') ?></div></div>
             <label class="toggle"><input type="checkbox" id="blurToggle" <?= $bgBlurEnabled?'checked':'' ?>><span class="slider"></span></label>
         </div>
         <div id="blurLevelWrap" style="display:<?= ($bgBlurEnabled && $bgType!=='none')?'block':'none' ?>;padding-top:8px">
             <div class="slider-group">
-                <div class="slider-header"><label>模糊程度</label><span class="slider-val" id="blurVal"><?= $bgBlurLevel ?>px</span></div>
-                <div class="slider-row"><span class="slider-label">清晰</span><input type="range" min="0" max="50" value="<?= $bgBlurLevel ?>" step="2" id="blurSlider"><span class="slider-label">模糊</span></div>
+                <div class="slider-header"><label><?= t('admin.413') ?></label><span class="slider-val" id="blurVal"><?= $bgBlurLevel ?>px</span></div>
+                <div class="slider-row"><span class="slider-label"><?= t('admin.414') ?></span><input type="range" min="0" max="50" value="<?= $bgBlurLevel ?>" step="2" id="blurSlider"><span class="slider-label"><?= t('admin.415') ?></span></div>
             </div>
         </div>
         <div class="slider-group" style="margin-top:12px">
-            <div class="slider-header"><label>卡片透明度</label><span class="slider-val" id="opacityVal"><?= $bgCardOpacity ?>%</span></div>
-            <div class="slider-row"><span class="slider-label">透明</span><input type="range" min="20" max="100" value="<?= $bgCardOpacity ?>" step="5" id="opacitySlider"><span class="slider-label">不透明</span></div>
+            <div class="slider-header"><label><?= t('admin.416') ?></label><span class="slider-val" id="opacityVal"><?= $bgCardOpacity ?>%</span></div>
+            <div class="slider-row"><span class="slider-label"><?= t('admin.417') ?></span><input type="range" min="20" max="100" value="<?= $bgCardOpacity ?>" step="5" id="opacitySlider"><span class="slider-label"><?= t('admin.418') ?></span></div>
         </div>
     </div>
     <div class="card">
-        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>实时预览</div>
+        <div class="card-title"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><?= t('station.042') ?></div>
         <div class="preview-box" id="previewBox">
             <div class="preview-blur" id="previewBlur"></div>
-            <div class="preview-card-sim" id="previewCard"><div class="sim-title">文章卡片</div><div class="sim-line" style="width:80%"></div><div class="sim-line" style="width:100%"></div><div class="sim-line"></div></div>
-            <div class="preview-overlay"><span id="previewBgLabel">无背景</span><span id="previewBlurLabel"></span></div>
+            <div class="preview-card-sim" id="previewCard"><div class="sim-title"><?= t('station.043') ?></div><div class="sim-line" style="width:80%"></div><div class="sim-line" style="width:100%"></div><div class="sim-line"></div></div>
+            <div class="preview-overlay"><span id="previewBgLabel"><?= t('station.044') ?></span><span id="previewBlurLabel"></span></div>
         </div>
     </div>
     <form method="post" id="bgForm" enctype="multipart/form-data">
@@ -794,8 +792,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <input type="hidden" name="music_cookies" id="formMusicNetCookie" value="<?= htmlspecialchars($config['music_cookies'] ?? '') ?>">
         <input type="hidden" name="bg_music_enabled" id="formBgMusicEnabled" value="<?= !empty($config['bg_music_enabled']) ? '1' : '' ?>">
         <div style="display:flex;justify-content:flex-end;gap:10px">
-            <button type="button" class="btn btn-outline" onclick="resetBg()">重置</button>
-            <button type="submit" class="btn btn-primary">保存配置</button>
+            <button type="button" class="btn btn-outline" onclick="resetBg()"><?= t('station.045') ?></button>
+            <button type="submit" class="btn btn-primary"><?= t('station.046') ?></button>
         </div>
     </form>
     <script>
@@ -842,16 +840,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         function updatePreview() {
             var blur = blurToggle.checked ? parseInt(blurSlider.value) : 0;
             var opacity = parseInt(opacitySlider.value) / 100;
-            if (currentType === 'none') { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = ysmT('无背景'); }
-            else if (currentType === 'image' && bgImagePath.value) { previewBox.style.backgroundImage = 'url(../' + bgImagePath.value + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = ysmT('自定义图片'); }
-            else if (currentType === 'api') { if (previewApiSrc) { previewBox.style.backgroundImage = 'url(' + previewApiSrc + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = ysmT('API 图片'); } else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = bgApiUrl.value.trim() ? ysmT('API（请先测试）') : ysmT('待配置'); } }
-            else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = ysmT('待配置'); }
+            if (currentType === 'none') { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = TK('station.044'); }
+            else if (currentType === 'image' && bgImagePath.value) { previewBox.style.backgroundImage = 'url(../' + bgImagePath.value + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = TK('station.047'); }
+            else if (currentType === 'api') { if (previewApiSrc) { previewBox.style.backgroundImage = 'url(' + previewApiSrc + ')'; previewBox.style.backgroundColor = ''; previewBgLabel.textContent = TK('station.048'); } else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = bgApiUrl.value.trim() ? TK('station.049') : TK('station.050'); } }
+            else { previewBox.style.backgroundImage = 'none'; previewBox.style.backgroundColor = 'var(--bg)'; previewBgLabel.textContent = TK('station.050'); }
             previewBox.style.backgroundSize = 'cover'; previewBox.style.backgroundPosition = 'center';
             previewBlur.style.backdropFilter = 'blur(' + blur + 'px)'; previewBlur.style.webkitBackdropFilter = 'blur(' + blur + 'px)';
             previewCard.style.background = 'rgba(255,255,255,' + opacity + ')';
-            var labels = []; if (blur > 0) labels.push(ysmT('模糊 {n}px').replace('{n}', blur)); labels.push(ysmT('卡片 {n}%').replace('{n}', Math.round(opacity*100))); previewBlurLabel.textContent = labels.join(' · ');
+            var labels = []; if (blur > 0) labels.push(TK('station.051').replace('{n}', blur)); labels.push(TK('station.052').replace('{n}', Math.round(opacity*100))); previewBlurLabel.textContent = labels.join(' · ');
         }
-        window.removeBgImage = function() { if (confirm(ysmT('确定移除背景图片？'))) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
+        window.removeBgImage = function() { if (confirm(TK('station.053'))) { bgImagePath.value = ''; document.getElementById('formBgImage').value = ''; document.getElementById('formBgType').value = 'none'; currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); } };
         window.resetBg = function() { currentType = 'none'; typeCards.forEach(function(c) { c.classList.remove('active'); }); typeCards[0].classList.add('active'); imageSection.style.display = 'none'; apiSection.style.display = 'none'; bgImagePath.value = ''; bgApiUrl.value = ''; previewApiSrc = ''; blurToggle.checked = false; blurSlider.value = 0; blurVal.textContent = '0px'; opacitySlider.value = 100; opacityVal.textContent = '100%'; blurLevelWrap.style.display = 'none'; bgBlurRow.style.display = 'none'; updatePreview(); };
         document.getElementById('bgForm').addEventListener('submit', function() { document.getElementById('formBgType').value = currentType; document.getElementById('formBgImage').value = bgImagePath.value; document.getElementById('formBgApiUrl').value = bgApiUrl.value.trim(); document.getElementById('formCardCoverApi').value = document.getElementById('cardCoverApiInput').value.trim(); document.getElementById('formBlurEnabled').value = blurToggle.checked ? '1' : ''; document.getElementById('formBlurLevel').value = blurSlider.value; document.getElementById('formCardOpacity').value = opacitySlider.value; document.getElementById('formMusicNetease').value = document.getElementById('musicNeteaseInput').value.trim(); document.getElementById('formMusicAutoPlay').value = document.getElementById('musicAutoPlayInput').value.trim(); document.getElementById('formMusicNetCookie').value = document.getElementById('musicNetCookieInput').value.trim(); });
         <?php if ($bgType === 'api' && $bgApiUrl): ?>
@@ -899,7 +897,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             封禁日志
         </div>
-        <div class="page-subtitle">只读查看封禁与安全日志（管理操作由超管执行）</div>
+        <div class="page-subtitle"><?= t('station.054') ?></div>
     </div>
     <div class="card">
         <div class="card-title">
@@ -909,12 +907,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <div class="log-toolbar">
             <form method="get" action="dashboard.php" class="log-toolbar-search">
                 <input type="hidden" name="tab" value="banlog">
-                <input type="text" class="form-input" name="ban_q" value="<?= htmlspecialchars($banQ) ?>" placeholder="搜索 IP/原因..." autocomplete="off">
-                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
-                <?php if ($banQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=banlog">清除</a><?php endif; ?>
+                <input type="text" class="form-input" name="ban_q" value="<?= htmlspecialchars($banQ) ?>" placeholder="<?= t('station.157') ?>" autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary"><?= t('station.055') ?></button>
+                <?php if ($banQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=banlog"><?= t('admin.193') ?></a><?php endif; ?>
             </form>
             <span class="toolbar-spacer"></span>
-            <?php if ($banQ !== ''): ?><span class="result-count">匹配 <?= $banData['total'] ?> 条</span><?php endif; ?>
+            <?php if ($banQ !== ''): ?><span class="result-count"><?= t('common.match_count', ['n' => $banData['total']]) ?></span><?php endif; ?>
         </div>
         <?php if (empty($banTypes)): ?>
         <div class="empty-state">
@@ -935,7 +933,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                     <?php endforeach; ?>
                 </div>
                 <?php if (!empty($ban['reason'])): ?>
-                <div style="font-size:0.82em;color:var(--text-muted);margin-bottom:8px">原因：<?= htmlspecialchars($ban['reason']) ?></div>
+                <div style="font-size:0.82em;color:var(--text-muted);margin-bottom:8px"><?= t('common.reason') ?><?= htmlspecialchars($ban['reason']) ?></div>
                 <?php endif; ?>
             </div>
             <?php endforeach; ?>
@@ -951,12 +949,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <div class="log-toolbar">
             <form method="get" action="dashboard.php" class="log-toolbar-search">
                 <input type="hidden" name="tab" value="banlog">
-                <input type="text" class="form-input" name="login_q" value="<?= htmlspecialchars($loginQ) ?>" placeholder="搜索 时间/IP/操作..." autocomplete="off">
-                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
-                <?php if ($loginQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=banlog">清除</a><?php endif; ?>
+                <input type="text" class="form-input" name="login_q" value="<?= htmlspecialchars($loginQ) ?>" placeholder="<?= t('admin.401') ?>" autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary"><?= t('station.055') ?></button>
+                <?php if ($loginQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=banlog"><?= t('admin.193') ?></a><?php endif; ?>
             </form>
             <span class="toolbar-spacer"></span>
-            <?php if ($loginQ !== ''): ?><span class="result-count">匹配 <?= $loginData['total'] ?> 条</span><?php endif; ?>
+            <?php if ($loginQ !== ''): ?><span class="result-count"><?= t('common.match_count', ['n' => $loginData['total']]) ?></span><?php endif; ?>
         </div>
         <?php if (empty($loginLogs)): ?>
         <div class="empty-state">
@@ -966,7 +964,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <?php else: ?>
         <div class="table-wrap">
         <table>
-            <tr><th>时间</th><th>IP</th><th>操作</th></tr>
+            <tr><th><?= t('station.056') ?></th><th>IP</th><th><?= t('station.018') ?></th></tr>
             <?php foreach ($loginLogs as $log): ?>
             <tr>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($log['time'] ?? '') ?></td>
@@ -987,12 +985,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <div class="log-toolbar">
             <form method="get" action="dashboard.php" class="log-toolbar-search">
                 <input type="hidden" name="tab" value="banlog">
-                <input type="text" class="form-input" name="unauth_q" value="<?= htmlspecialchars($unauthQ) ?>" placeholder="搜索 时间/IP/操作/用户..." autocomplete="off">
-                <button type="submit" class="btn btn-sm btn-primary">搜索</button>
-                <?php if ($unauthQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=banlog">清除</a><?php endif; ?>
+                <input type="text" class="form-input" name="unauth_q" value="<?= htmlspecialchars($unauthQ) ?>" placeholder="<?= t('admin.400') ?>" autocomplete="off">
+                <button type="submit" class="btn btn-sm btn-primary"><?= t('station.055') ?></button>
+                <?php if ($unauthQ !== ''): ?><a class="btn btn-sm btn-outline" href="dashboard.php?tab=banlog"><?= t('admin.193') ?></a><?php endif; ?>
             </form>
             <span class="toolbar-spacer"></span>
-            <?php if ($unauthQ !== ''): ?><span class="result-count">匹配 <?= $unauthData['total'] ?> 条</span><?php endif; ?>
+            <?php if ($unauthQ !== ''): ?><span class="result-count"><?= t('common.match_count', ['n' => $unauthData['total']]) ?></span><?php endif; ?>
         </div>
         <?php if (empty($unauthLogs)): ?>
         <div class="empty-state">
@@ -1002,7 +1000,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <?php else: ?>
         <div class="table-wrap">
         <table>
-            <tr><th>时间</th><th>IP</th><th>操作</th><th>用户</th></tr>
+            <tr><th><?= t('station.056') ?></th><th>IP</th><th><?= t('station.018') ?></th><th><?= t('station.057') ?></th></tr>
             <?php foreach ($unauthLogs as $log): ?>
             <tr>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($log['time'] ?? '') ?></td>
@@ -1027,10 +1025,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     if ($tp > $threatPages) { $tp = $threatPages; [$threatRows, $threatTotal] = threatDims($tp, $tpp); }
     ?>
     <div class="card">
-        <div class="card-title">联动威胁评分（只读 · 24h 滑动窗口，阈值 50→15分钟 / 100→24小时 / 200→永久）</div>
+        <div class="card-title"><?= t('station.058') ?></div>
         <div class="table-wrap">
         <table>
-            <tr><th>维度</th><th>评分</th><th>事件数</th><th>最后事件</th><th>封锁状态</th></tr>
+            <tr><th><?= t('station.059') ?></th><th><?= t('station.060') ?></th><th><?= t('station.061') ?></th><th><?= t('station.062') ?></th><th><?= t('station.063') ?></th></tr>
             <?php foreach ($threatRows as $tr): $locked = (int)$tr['locked_left']; ?>
             <tr>
                 <td><code><?= htmlspecialchars($tr['dim_type'] === 'ip' ? 'IP: ' . $tr['dim_key'] : '指纹: ' . substr($tr['dim_key'], 0, 16) . '…') ?></code></td>
@@ -1038,19 +1036,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <td><?= $tr['cnt'] ?></td>
                 <td><?= date('m-d H:i', (int)$tr['last_ts']) ?></td>
                 <td>
-                    <?php if ($locked > 0): ?><span style="color:#e5484d;font-weight:600">封锁中（剩 <?= ceil($locked / 60) ?> 分钟）</span>
-                    <?php elseif ($tr['score'] >= 200): ?><span style="color:#e5484d;font-weight:600">达永久阈值</span>
-                    <?php elseif ($tr['score'] >= 100): ?><span style="color:#f5a623;font-weight:600">达24h阈值</span>
-                    <?php elseif ($tr['score'] >= 50): ?><span style="color:#f5a623">达15min阈值</span>
-                    <?php else: ?><span style="color:var(--text-muted)">正常</span><?php endif; ?>
+                    <?php if ($locked > 0): ?><span style="color:#e5484d;font-weight:600"><?= t('common.locked_remain', ['n' => ceil($locked / 60)]) ?></span>
+                    <?php elseif ($tr['score'] >= 200): ?><span style="color:#e5484d;font-weight:600"><?= t('admin.459') ?></span>
+                    <?php elseif ($tr['score'] >= 100): ?><span style="color:#f5a623;font-weight:600"><?= t('admin.460') ?></span>
+                    <?php elseif ($tr['score'] >= 50): ?><span style="color:#f5a623"><?= t('admin.461') ?></span>
+                    <?php else: ?><span style="color:var(--text-muted)"><?= t('station.136') ?></span><?php endif; ?>
                 </td>
             </tr>
             <?php endforeach; ?>
-            <?php if (empty($threatRows)): ?><tr><td colspan="5" style="text-align:center;color:var(--text-muted)">暂无威胁事件</td></tr><?php endif; ?>
+            <?php if (empty($threatRows)): ?><tr><td colspan="5" style="text-align:center;color:var(--text-muted)"><?= t('admin.462') ?></td></tr><?php endif; ?>
         </table>
         </div>
         <?= renderPager(['page' => $tp, 'pages' => $threatPages, 'per_page' => $tpp, 'total' => $threatTotal], 'tp', ['tab' => 'threat'], 'tpp') ?>
-        <div class="form-hint">只读视图：解除封锁、移除信任设备、生成重置码等操作请由超管在超管后台完成</div>
+        <div class="form-hint"><?= t('station.064') ?></div>
     </div>
 
     <?php elseif ($tab === 'announce'): ?>
@@ -1066,30 +1064,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             公告管理
         </div>
-        <div class="page-subtitle">发布首页公告卡片（选择文章或填写标题摘要；排序即首页显示顺序）</div>
+        <div class="page-subtitle"><?= t('station.065') ?></div>
     </div>
-    <?php if ($msg === 'announce_added'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>公告已发布</div><?php endif; ?>
-    <?php if ($msg === 'announce_updated'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>公告已更新</div><?php endif; ?>
-    <?php if ($msg === 'announce_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>公告已删除</div><?php endif; ?>
-    <?php if ($msg === 'announce_reordered'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>排序已更新</div><?php endif; ?>
-    <?php if ($msg === 'announce_vis_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>公告可视范围已保存</div><?php endif; ?>
-    <?php if ($msg === 'announce_not_found'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>公告不存在或已被删除</div><?php endif; ?>
+    <?php if ($msg === 'announce_added'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.158') ?></div><?php endif; ?>
+    <?php if ($msg === 'announce_updated'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.159') ?></div><?php endif; ?>
+    <?php if ($msg === 'announce_deleted'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.160') ?></div><?php endif; ?>
+    <?php if ($msg === 'announce_reordered'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.161') ?></div><?php endif; ?>
+    <?php if ($msg === 'announce_vis_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.162') ?></div><?php endif; ?>
+    <?php if ($msg === 'announce_not_found'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('station.163') ?></div><?php endif; ?>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             更新公告可视范围
         </div>
-        <p class="form-hint" style="margin-bottom:12px">仅控制「更新历史」更新公告对访客 / 普通用户 / 后台角色的开放程度，其他公告始终可见</p>
+        <p class="form-hint" style="margin-bottom:12px"><?= t('station.066') ?></p>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="announce_action" value="vis">
             <div class="bg-type-grid ann-vis-grid" style="max-width:640px">
-                <label class="bg-type-card <?= $annVis==='all'?'active':'' ?>" data-type="all"><input type="radio" name="a_vis" value="all" <?= $annVis==='all'?'checked':'' ?>><div class="type-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div><div class="type-name">所有人可见</div><div class="type-desc">访客与普通用户均可看到公告</div></label>
-                <label class="bg-type-card <?= $annVis==='users'?'active':'' ?>" data-type="users"><input type="radio" name="a_vis" value="users" <?= $annVis==='users'?'checked':'' ?>><div class="type-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><div class="type-name">仅登录用户可见</div><div class="type-desc">访客看不到公告，登录后可见</div></label>
-                <label class="bg-type-card <?= $annVis==='managers'?'active':'' ?>" data-type="managers"><input type="radio" name="a_vis" value="managers" <?= $annVis==='managers'?'checked':'' ?>><div class="type-icon"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div class="type-name">仅站长及以上可见</div><div class="type-desc">访客与普通用户均看不到公告</div></label>
+                <label class="bg-type-card <?= $annVis==='all'?'active':'' ?>" data-type="all"><input type="radio" name="a_vis" value="all" <?= $annVis==='all'?'checked':'' ?>><div class="type-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div><div class="type-name"><?= t('station.164') ?></div><div class="type-desc"><?= t('station.165') ?></div></label>
+                <label class="bg-type-card <?= $annVis==='users'?'active':'' ?>" data-type="users"><input type="radio" name="a_vis" value="users" <?= $annVis==='users'?'checked':'' ?>><div class="type-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><div class="type-name"><?= t('station.166') ?></div><div class="type-desc"><?= t('station.167') ?></div></label>
+                <label class="bg-type-card <?= $annVis==='managers'?'active':'' ?>" data-type="managers"><input type="radio" name="a_vis" value="managers" <?= $annVis==='managers'?'checked':'' ?>><div class="type-icon"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div class="type-name"><?= t('station.168') ?></div><div class="type-desc"><?= t('station.169') ?></div></label>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px">
-                <button type="submit" class="btn btn-primary">保存可视范围</button>
+                <button type="submit" class="btn btn-primary"><?= t('station.067') ?></button>
             </div>
         </form>
     </div>
@@ -1102,33 +1100,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="announce_action" value="add">
             <div class="form-group">
-                <label class="form-label">类型</label>
+                <label class="form-label"><?= t('station.068') ?></label>
                 <select class="form-input" name="a_type" id="aTypeSel" style="max-width:260px">
-                    <option value="manual" selected>手动公告</option>
-                    <option value="update">更新公告</option>
+                    <option value="manual" selected><?= t('station.069') ?></option>
+                    <option value="update"><?= t('station.070') ?></option>
                 </select>
             </div>
             <!-- v3.2.4：取消「关联文章」功能——公告为独立内容，不再关联文章 -->
             <div class="form-group">
-                <label class="form-label">公告标题</label>
-                <input class="form-input" name="a_title" id="aTitleInput" maxlength="120" placeholder="公告标题">
+                <label class="form-label"><?= t('station.071') ?></label>
+                <input class="form-input" name="a_title" id="aTitleInput" maxlength="120" placeholder="<?= t('station.071') ?>">
             </div>
             <!-- v3.2.3：.md 文件导入正文（小白友好：直接把写好的公告文档传上来，自动填正文与摘要） -->
             <div class="form-group">
-                <label class="form-label">上传 .md 文件（可选，自动填入下方正文与摘要）</label>
+                <label class="form-label"><?= t('station.072') ?></label>
                 <input class="form-input" type="file" id="aMdFileInput" accept=".md,.markdown,text/markdown,text/plain">
-                <p class="form-hint" style="margin-top:4px">选择写好的公告 Markdown 文档后自动读取内容；也可直接在下方粘贴 Markdown 正文。首页将按富文本展示，支持标题/列表/加粗/图片等排版。</p>
+                <p class="form-hint" style="margin-top:4px"><?= t('station.073') ?></p>
             </div>
             <div class="form-group">
-                <label class="form-label">公告正文（Markdown，可选）</label>
-                <textarea class="form-input" name="a_body" id="aBodyInput" rows="8" placeholder="支持 Markdown 排版：标题、列表、加粗、图片、链接等，内容会自动渲染，阅读更清晰"></textarea>
+                <label class="form-label"><?= t('station.074') ?></label>
+                <textarea class="form-input" name="a_body" id="aBodyInput" rows="8" placeholder="<?= t('station.075') ?>"></textarea>
             </div>
             <div class="form-group">
-                <label class="form-label">公告内容 / 摘要（留空时自动取正文前 200 字）</label>
-                <textarea class="form-input" name="a_summary" id="aSummaryInput" rows="3" maxlength="2000" placeholder="填写公告内容（纯文字公告时展示；关联文章时可留空则展示文章摘要）"></textarea>
+                <label class="form-label"><?= t('station.076') ?></label>
+                <textarea class="form-input" name="a_summary" id="aSummaryInput" rows="3" maxlength="2000" placeholder="<?= t('station.077') ?>"></textarea>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px">
-                <button type="submit" class="btn btn-primary">发布公告</button>
+                <button type="submit" class="btn btn-primary"><?= t('station.078') ?></button>
             </div>
         </form>
     </div>
@@ -1140,31 +1138,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <?php if (empty($annList)): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            <p>暂无公告，在上方发布第一条</p>
+            <p><?= t('station.079') ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
         <table>
-            <tr><th style="width:64px">排序</th><th>标题</th><th>类型</th><th>关联文章</th><th>日期</th><th style="width:150px">操作</th></tr>
+            <tr><th style="width:64px"><?= t('station.080') ?></th><th><?= t('station.081') ?></th><th><?= t('station.068') ?></th><th><?= t('station.082') ?></th><th><?= t('station.083') ?></th><th style="width:150px"><?= t('station.018') ?></th></tr>
             <?php foreach ($annList as $ai => $an): ?>
             <tr>
                 <td>
                     <div style="display:flex;gap:2px">
-                        <form method="post" style="display:inline"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>"><input type="hidden" name="announce_action" value="reorder"><input type="hidden" name="a_id" value="<?= htmlspecialchars($an['id']) ?>"><input type="hidden" name="dir" value="up"><button type="submit" class="btn btn-sm btn-outline" title="上移" <?= $ai === 0 ? 'disabled' : '' ?>>↑</button></form>
-                        <form method="post" style="display:inline"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>"><input type="hidden" name="announce_action" value="reorder"><input type="hidden" name="a_id" value="<?= htmlspecialchars($an['id']) ?>"><input type="hidden" name="dir" value="down"><button type="submit" class="btn btn-sm btn-outline" title="下移" <?= $ai === count($annList) - 1 ? 'disabled' : '' ?>>↓</button></form>
+                        <form method="post" style="display:inline"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>"><input type="hidden" name="announce_action" value="reorder"><input type="hidden" name="a_id" value="<?= htmlspecialchars($an['id']) ?>"><input type="hidden" name="dir" value="up"><button type="submit" class="btn btn-sm btn-outline" title="<?= t('station.170') ?>" <?= $ai === 0 ? 'disabled' : '' ?>>↑</button></form>
+                        <form method="post" style="display:inline"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>"><input type="hidden" name="announce_action" value="reorder"><input type="hidden" name="a_id" value="<?= htmlspecialchars($an['id']) ?>"><input type="hidden" name="dir" value="down"><button type="submit" class="btn btn-sm btn-outline" title="<?= t('station.171') ?>" <?= $ai === count($annList) - 1 ? 'disabled' : '' ?>>↓</button></form>
                     </div>
                 </td>
                 <td><div style="font-weight:600"><?= htmlspecialchars($an['title']) ?></div><div style="font-size:12px;color:var(--text-muted);max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><?= htmlspecialchars($an['summary'] ?? '') ?></div></td>
-                <td><?= ($an['type'] === 'update') ? '<span class="ban-tag type-login">更新</span>' : '<span class="ban-tag type-comment">公告</span>' ?></td>
+                <td><?= ($an['type'] === 'update') ? '<span class="ban-tag type-login">' . t('station.type_update') . '</span>' : '<span class="ban-tag type-comment">' . t('station.type_notice') . '</span>' ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= $an['article'] !== '' ? htmlspecialchars($an['article']) : '—' ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($an['date']) ?></td>
                 <td>
-                    <button type="button" class="btn-link" onclick="stEditAnnounce(this)" data-id="<?= htmlspecialchars($an['id']) ?>" data-type="<?= htmlspecialchars($an['type']) ?>" data-article="<?= htmlspecialchars($an['article']) ?>" data-title="<?= htmlspecialchars($an['title']) ?>" data-summary="<?= htmlspecialchars($an['summary']) ?>" data-body="<?= htmlspecialchars($an['body'] ?? '') ?>">编辑</button>
-                    <form method="post" style="display:inline" onsubmit="return confirm(ysmT('确定删除该公告？'))">
+                    <button type="button" class="btn-link" onclick="stEditAnnounce(this)" data-id="<?= htmlspecialchars($an['id']) ?>" data-type="<?= htmlspecialchars($an['type']) ?>" data-article="<?= htmlspecialchars($an['article']) ?>" data-title="<?= htmlspecialchars($an['title']) ?>" data-summary="<?= htmlspecialchars($an['summary']) ?>" data-body="<?= htmlspecialchars($an['body'] ?? '') ?>"><?= t('links.011') ?></button>
+                    <form method="post" style="display:inline" onsubmit="return confirm(t('station.084'))">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="announce_action" value="delete">
                         <input type="hidden" name="a_id" value="<?= htmlspecialchars($an['id']) ?>">
-                        <button type="submit" class="btn-link danger">删除</button>
+                        <button type="submit" class="btn-link danger"><?= t('station.020') ?></button>
                     </form>
                 </td>
             </tr>
@@ -1180,17 +1178,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             个人信息
         </div>
-        <div class="page-subtitle">修改你的账号头像、昵称、签名、密码与绑定邮箱</div>
+        <div class="page-subtitle"><?= t('station.085') ?></div>
     </div>
-    <?php if ($msg === 'profile_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>个人信息已保存</div><?php endif; ?>
-    <?php if ($msg === 'avatar_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>头像已更新</div><?php endif; ?>
-    <?php if ($msg === 'avatar_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>头像上传失败（仅支持 JPG/PNG/WEBP，≤2MB，且 data/avatars/ 需可写）</div><?php endif; ?>
-    <?php if ($msg === 'email_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>绑定邮箱已更新</div><?php endif; ?>
-    <?php if ($msg === 'email_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱格式不正确</div><?php endif; ?>
-    <?php if ($msg === 'email_taken'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该邮箱已被其他账号使用</div><?php endif; ?>
-    <?php if ($msg === 'email_code_bad'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>验证码不正确或已过期</div><?php endif; ?>
-    <?php if ($msg === 'email_disabled'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱验证已关闭，无法更换邮箱</div><?php endif; ?>
-    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>请求已过期，请重试</div><?php endif; ?>
+    <?php if ($msg === 'profile_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.172') ?></div><?php endif; ?>
+    <?php if ($msg === 'avatar_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('js.124') ?></div><?php endif; ?>
+    <?php if ($msg === 'avatar_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('station.173') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.174') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('api.907') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_taken'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('api.911') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_code_bad'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('api.938') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_disabled'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('station.175') ?></div><?php endif; ?>
+    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.447') ?></div><?php endif; ?>
     <?php $myAvatar = $currentUser['avatar'] ?? '';
           $avatarSrc = ($myAvatar !== '' && strpos($myAvatar, 'data/') === 0) ? '../' . $myAvatar : ($myAvatar !== '' ? $myAvatar : '../api.php?action=avatar&account=' . urlencode($currentUser['account'] ?? '')); ?>
     <div class="card">
@@ -1200,10 +1198,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         </div>
         <div class="table-wrap">
         <table>
-            <tr><th style="width:120px">项目</th><th>内容</th></tr>
-            <tr><td style="color:var(--text-muted)">用户名</td><td><code><?= htmlspecialchars($currentUser['account'] ?? '') ?></code>（不可修改）</td></tr>
-            <tr><td style="color:var(--text-muted)">绑定邮箱</td><td><?= htmlspecialchars($currentUser['email'] ?? '未绑定') ?></td></tr>
-            <tr><td style="color:var(--text-muted)">角色</td><td>站长</td></tr>
+            <tr><th style="width:120px"><?= t('station.086') ?></th><th><?= t('station.087') ?></th></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('station.016') ?></td><td><code><?= htmlspecialchars($currentUser['account'] ?? '') ?></code><?= t('station.176') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('js.102') ?></td><td><?= htmlspecialchars($currentUser['email'] ?? '未绑定') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('station.088') ?></td><td><?= t('station.003') ?></td></tr>
         </table>
         </div>
     </div>
@@ -1221,11 +1219,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                     <div class="form-group">
                         <input class="form-input" type="file" name="avatar" accept="image/jpeg,image/png,image/webp">
                     </div>
-                    <div class="form-hint">支持 JPG / PNG / WEBP，≤2MB；上传后立即生效</div>
+                    <div class="form-hint"><?= t('station.089') ?></div>
                 </div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
-                <button type="submit" class="btn btn-primary">上传头像</button>
+                <button type="submit" class="btn btn-primary"><?= t('station.090') ?></button>
             </div>
         </form>
     </div>
@@ -1239,18 +1237,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="email_change" value="1">
             <div class="form-group">
-                <label class="form-label">新邮箱地址</label>
+                <label class="form-label"><?= t('station.091') ?></label>
                 <div class="form-row">
-                    <input class="form-input" type="email" name="email_new" placeholder="输入新的邮箱地址">
-                    <button type="button" class="btn" id="dashEmailSend">获取验证码</button>
+                    <input class="form-input" type="email" name="email_new" placeholder="<?= t('station.092') ?>">
+                    <button type="button" class="btn" id="dashEmailSend"><?= t('station.093') ?></button>
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label">邮箱验证码（6位）</label>
-                <input class="form-input" type="text" name="email_code" maxlength="6" placeholder="输入邮件中的验证码">
+                <label class="form-label"><?= t('station.094') ?></label>
+                <input class="form-input" type="text" name="email_code" maxlength="6" placeholder="<?= t('station.095') ?>">
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
-                <button type="submit" class="btn btn-primary">确认更换</button>
+                <button type="submit" class="btn btn-primary"><?= t('station.096') ?></button>
             </div>
         </form>
     </div>
@@ -1264,23 +1262,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="profile_save" value="1">
             <div class="form-group">
-                <label class="form-label">昵称</label>
-                <input class="form-input" name="nickname" value="<?= htmlspecialchars($currentUser['nickname'] ?? '') ?>" maxlength="20" placeholder="你的昵称">
+                <label class="form-label"><?= t('station.006') ?></label>
+                <input class="form-input" name="nickname" value="<?= htmlspecialchars($currentUser['nickname'] ?? '') ?>" maxlength="20" placeholder="<?= t('station.177') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label">签名（选填，最多 16 字）</label>
-                <input class="form-input" name="signature" value="<?= htmlspecialchars($currentUser['signature'] ?? '') ?>" maxlength="16" placeholder="一句话介绍自己">
+                <label class="form-label"><?= t('station.097') ?></label>
+                <input class="form-input" name="signature" value="<?= htmlspecialchars($currentUser['signature'] ?? '') ?>" maxlength="16" placeholder="<?= t('station.178') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label">新密码（选填，至少 8 位且含大小写字母与数字；留空不修改）</label>
+                <label class="form-label"><?= t('station.098') ?></label>
                 <input class="form-input" name="password" type="password" placeholder="******">
             </div>
             <div class="form-group">
-                <label class="form-label">确认新密码</label>
+                <label class="form-label"><?= t('station.099') ?></label>
                 <input class="form-input" name="password2" type="password" placeholder="******">
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
-                <button type="submit" class="btn btn-primary">保存</button>
+                <button type="submit" class="btn btn-primary"><?= t('station.100') ?></button>
             </div>
         </form>
     </div>
@@ -1366,46 +1364,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             友站管理
         </div>
-        <div class="page-subtitle">友情链接维护（前台仅展示「启用」状态）；支持抓取站点信息预填与掉链巡检</div>
+        <div class="page-subtitle"><?= t('station.101') ?></div>
     </div>
     <div id="linksAdmin" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>">
         <div class="card">
-            <div class="card-title" id="linkFormTitle">新增友链</div>
+            <div class="card-title" id="linkFormTitle"><?= t('station.102') ?></div>
             <div class="form-group">
-                <label class="form-label">站点名</label>
-                <input class="form-input" id="linkName" maxlength="60" placeholder="对方站点名称">
+                <label class="form-label"><?= t('station.103') ?></label>
+                <input class="form-input" id="linkName" maxlength="60" placeholder="<?= t('station.104') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label">站点地址</label>
+                <label class="form-label"><?= t('station.105') ?></label>
                 <div class="api-url-group">
                     <input class="form-input" id="linkUrl" placeholder="https://example.com">
-                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn">抓取预填</button>
+                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn"><?= t('station.106') ?></button>
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label">描述（可选）</label>
-                <input class="form-input" id="linkDesc" maxlength="200" placeholder="一句话介绍">
+                <label class="form-label"><?= t('station.107') ?></label>
+                <input class="form-input" id="linkDesc" maxlength="200" placeholder="<?= t('station.108') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label">图标地址（可选）</label>
+                <label class="form-label"><?= t('station.109') ?></label>
                 <input class="form-input" id="linkFavicon" placeholder="https://example.com/favicon.ico">
             </div>
             <div class="form-group">
-                <label class="form-label">排序（越小越前）</label>
+                <label class="form-label"><?= t('station.110') ?></label>
                 <input class="form-input" id="linkSort" type="number" value="0" style="max-width:160px">
             </div>
             <div id="linkFormMsg" class="form-hint"></div>
             <div style="display:flex;justify-content:flex-end;gap:10px">
-                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none">取消编辑</button>
-                <button type="button" class="btn btn-primary" id="linkSaveBtn">保存</button>
+                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none"><?= t('station.111') ?></button>
+                <button type="button" class="btn btn-primary" id="linkSaveBtn"><?= t('station.100') ?></button>
             </div>
             <input type="hidden" id="linkId" value="">
         </div>
         <div class="card">
-            <div class="card-title">友链列表</div>
+            <div class="card-title"><?= t('station.112') ?></div>
             <div class="table-wrap">
                 <table id="linksTable">
-                    <tr><th>站点</th><th>状态</th><th>排序</th><th>最近巡检</th><th>操作</th></tr>
+                    <tr><th><?= t('station.113') ?></th><th><?= t('station.114') ?></th><th><?= t('station.080') ?></th><th><?= t('station.115') ?></th><th><?= t('station.018') ?></th></tr>
                 </table>
             </div>
         </div>
@@ -1454,15 +1452,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
             图片管理
         </div>
-        <div class="page-subtitle">站点文章使用的图片资源（<?= count($stImages) ?> 个）——删除前请确认该图片不再被任何文章引用</div>
+        <div class="page-subtitle"><?= t('station.images_subtitle', ['n' => count($stImages)]) ?></div>
     </div>
     <?php if (empty($stImages)): ?>
-    <div class="card"><div class="empty-state"><p>暂无图片资源</p></div></div>
+    <div class="card"><div class="empty-state"><p><?= t('station.116') ?></p></div></div>
     <?php else: ?>
     <div class="card">
         <div class="table-wrap">
         <table>
-            <tr><th>预览</th><th>文件名</th><th>大小</th><th>修改时间</th><th>被引用</th><th>操作</th></tr>
+            <tr><th><?= t('station.117') ?></th><th><?= t('station.118') ?></th><th><?= t('station.119') ?></th><th><?= t('station.120') ?></th><th><?= t('station.121') ?></th><th><?= t('station.018') ?></th></tr>
             <?php foreach ($stImages as $img): ?>
             <?php
             $ref = $stRefCount[$img['name']] ?? 0;
@@ -1473,12 +1471,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <td style="word-break:break-all"><?= htmlspecialchars($img['name']) ?></td>
                 <td><?= $sizeTxt ?></td>
                 <td><?= htmlspecialchars($img['modified']) ?></td>
-                <td><?= $ref > 0 ? '<span style="color:#2563eb">' . $ref . ' 篇</span>' : '<span style="color:#94a3b8">未引用</span>' ?></td>
+                <td><?= $ref > 0 ? '<span style="color:#2563eb">' . t('station.ref_count', ['n' => $ref]) . '</span>' : '<span style="color:#94a3b8">' . t('station.unused') . '</span>' ?></td>
                 <td>
-                    <form method="post" style="display:inline" onsubmit="return confirm(ysmT('确定删除图片「') + '<?= htmlspecialchars($img['name']) ?>' + ysmT('」吗？')<?= $ref > 0 ? ' + \'\\n\\n\' + ysmT(\'警告：该图片正被 \') + ' . $ref . ' + ysmT(\' 篇文章引用，删除后这些文章将无法显示此图。\')' : '' ?>)">
+                    <form method="post" style="display:inline" onsubmit="return confirm(t('station.122') + '<?= htmlspecialchars($img['name']) ?>' + t('station.123')<?= $ref > 0 ? ' + \'\\n\\n\' + t(\'station.img_warn1\') + ' . $ref . ' + t(\'station.img_warn2\')' : '' ?>)">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="image_delete" value="<?= htmlspecialchars($img['name']) ?>">
-                        <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                        <button type="submit" class="btn btn-sm btn-danger"><?= t('station.020') ?></button>
                     </form>
                 </td>
             </tr>
@@ -1494,7 +1492,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 <div class="modal-overlay" id="stDetailModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
     <div class="modal-box user-detail-box">
         <div class="modal-head">
-            <div class="modal-title" id="stDetailTitle">写作者参数</div>
+            <div class="modal-title" id="stDetailTitle"><?= t('station.124') ?></div>
             <button class="modal-close" onclick="document.getElementById('stDetailModal').style.display='none'">&times;</button>
         </div>
         <div class="modal-body" id="stDetailBody"></div>
@@ -1505,8 +1503,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 <div class="modal-overlay" id="stAnnounceModal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
     <div class="modal-box">
         <div class="modal-head">
-            <div class="modal-title">编辑公告</div>
-            <button class="modal-close" onclick="document.getElementById('stAnnounceModal').style.display='none'" aria-label="关闭">&times;</button>
+            <div class="modal-title"><?= t('station.125') ?></div>
+            <button class="modal-close" onclick="document.getElementById('stAnnounceModal').style.display='none'" aria-label="<?= t('station.126') ?>">&times;</button>
         </div>
         <form method="post" id="stAnnounceForm">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -1515,26 +1513,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <div class="modal-body">
                 <!-- v3.2.4：取消「关联文章」——编辑公告不再提供文章关联选项 -->
                 <div class="form-group">
-                    <label class="form-label">公告标题</label>
+                    <label class="form-label"><?= t('station.071') ?></label>
                     <input class="form-input" name="a_title" id="stAnnEditTitle" maxlength="120">
                 </div>
                 <!-- v3.2.3：编辑弹窗 .md 导入 + 正文编辑 -->
                 <div class="form-group">
-                    <label class="form-label">上传 .md 文件覆盖正文（可选）</label>
+                    <label class="form-label"><?= t('station.127') ?></label>
                     <input class="form-input" type="file" id="stAnnEditMdFile" accept=".md,.markdown,text/markdown,text/plain">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">公告正文（Markdown，可选）</label>
+                    <label class="form-label"><?= t('station.074') ?></label>
                     <textarea class="form-input" name="a_body" id="stAnnEditBody" rows="6"></textarea>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">公告内容 / 摘要（留空时自动取正文前 200 字）</label>
+                    <label class="form-label"><?= t('station.076') ?></label>
                     <textarea class="form-input" name="a_summary" id="stAnnEditSummary" rows="3" maxlength="2000"></textarea>
                 </div>
             </div>
             <div class="modal-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:12px 20px">
-                <button type="button" class="btn btn-outline" onclick="document.getElementById('stAnnounceModal').style.display='none'">取消</button>
-                <button type="submit" class="btn btn-primary">保存</button>
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('stAnnounceModal').style.display='none'"><?= t('station.128') ?></button>
+                <button type="submit" class="btn btn-primary"><?= t('station.100') ?></button>
             </div>
         </form>
     </div>
@@ -1562,7 +1560,7 @@ function bindLogoutSubmit(e) {
         if (!emailInput) return;
         var email = emailInput.value.trim();
         var re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-        if (!re.test(email)) { alert(ysmT('请输入正确的邮箱')); return; }
+        if (!re.test(email)) { alert(TK('station.129')); return; }
         var csrfEl = document.querySelector('input[name=csrf_token]');
         var csrf = csrfEl ? csrfEl.value : '';
         sendBtn.disabled = true;
@@ -1573,17 +1571,17 @@ function bindLogoutSubmit(e) {
         }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.success) {
                 var left = 60;
-                sendBtn.textContent = ysmT('{n}s 后重发').replace('{n}', left);
+                sendBtn.textContent = TK('station.130').replace('{n}', left);
                 var t = setInterval(function() {
                     left--;
-                    if (left <= 0) { clearInterval(t); sendBtn.textContent = ysmT('获取验证码'); sendBtn.disabled = false; }
-                    else sendBtn.textContent = ysmT('{n}s 后重发').replace('{n}', left);
+                    if (left <= 0) { clearInterval(t); sendBtn.textContent = TK('station.093'); sendBtn.disabled = false; }
+                    else sendBtn.textContent = TK('station.130').replace('{n}', left);
                 }, 1000);
             } else {
-                alert(d.error || ysmT('发送失败'));
+                alert(d.error || TK('station.131'));
                 sendBtn.disabled = false;
             }
-        }).catch(function() { alert(ysmT('网络错误')); sendBtn.disabled = false; });
+        }).catch(function() { alert(TK('station.132')); sendBtn.disabled = false; });
     });
 })();
 // v3.0.6：名下写作者参数弹窗（仅展示服务端已过滤的本站长名下写作者，无越权/遍历面）
@@ -1596,22 +1594,22 @@ function stOpenDetail(btn) {
     var d = {};
     try { d = JSON.parse(btn.getAttribute('data-detail') || '{}'); } catch (e) { return; }
     var rows = [
-        [ysmT('昵称'), d.nickname], [ysmT('用户名'), d.username || d.account], [ysmT('邮箱'), d.email],
-        [ysmT('归属站长'), d.station], [ysmT('状态'), d.disabled ? ysmT('已禁用') : ysmT('正常')],
-        [ysmT('创建时间'), d.created], [ysmT('签名'), d.signature || '—'],
-        [ysmT('最后登录'), d.last_login]
+        [TK('station.006'), d.nickname], [TK('station.016'), d.username || d.account], [TK('station.133'), d.email],
+        [TK('station.134'), d.station], [TK('station.114'), d.disabled ? TK('station.135') : TK('station.136')],
+        [TK('station.017'), d.created], [TK('station.137'), d.signature || '—'],
+        [TK('station.138'), d.last_login]
     ];
-    var stats = [[ysmT('登录次数'), d.login_count], [ysmT('评论数'), d.comments], [ysmT('文章数'), d.articles]];
+    var stats = [[TK('station.139'), d.login_count], [TK('station.140'), d.comments], [TK('station.141'), d.articles]];
     var h = '<div class="user-detail-grid">';
     rows.forEach(function(r) {
         h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + stEsc(r[1]) + '</span></div>';
     });
-    h += '</div><div class="user-detail-sec">' + ysmT('关联统计') + '</div><div class="user-detail-grid">';
+    h += '</div><div class="user-detail-sec">' + TK('station.142') + '</div><div class="user-detail-grid">';
     stats.forEach(function(r) {
         h += '<div class="user-detail-item"><span class="user-detail-label">' + r[0] + '</span><span class="user-detail-value">' + stEsc(r[1]) + '</span></div>';
     });
     h += '</div>';
-    document.getElementById('stDetailTitle').textContent = ysmT('写作者参数 -') + ' ' + (d.nickname || d.username || d.account || '');
+    document.getElementById('stDetailTitle').textContent = TK('station.143') + ' ' + (d.nickname || d.username || d.account || '');
     document.getElementById('stDetailBody').innerHTML = h;
     document.getElementById('stDetailModal').style.display = 'flex';
 }
@@ -1630,7 +1628,7 @@ function stImportMd(input, titleId, bodyId, summaryId) {
     var f = input.files && input.files[0];
     if (!f) return;
     if (!/\.(md|markdown|txt)$/i.test(f.name) && f.type.indexOf('text') !== 0) {
-        alert(ysmT('请选择 .md / .markdown / .txt 文件')); input.value = ''; return;
+        alert(TK('station.144')); input.value = ''; return;
     }
     var rd = new FileReader();
     rd.onload = function() {
@@ -1644,7 +1642,7 @@ function stImportMd(input, titleId, bodyId, summaryId) {
             document.getElementById(summaryId).value = plain.slice(0, 200);
         }
     };
-    rd.onerror = function() { alert(ysmT('文件读取失败')); };
+    rd.onerror = function() { alert(TK('station.145')); };
     rd.readAsText(f, 'UTF-8');
 }
 // v3.2.3：发布表单 .md 导入绑定
@@ -1686,7 +1684,7 @@ exit;
                 if (res && res.success === false) {
                     var _b = document.createElement('div');
                     _b.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99999;background:#dc2626;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:92vw';
-                    _b.textContent = ysmT('登录环境已变化（换设备/浏览器/隐私模式），保存等操作将被拦截，请重新登录');
+                    _b.textContent = TK('station.146');
                     document.body.appendChild(_b);
                     setTimeout(function() { if (_b.parentNode) _b.parentNode.removeChild(_b); }, 7000);
                 }

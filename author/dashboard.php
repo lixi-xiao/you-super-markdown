@@ -1,8 +1,6 @@
 <?php
 require_once __DIR__ . '/../utils.php';
 // v6.1.0：服务端输出层 i18n
-require_once __DIR__ . '/../lib/i18n-output.php';
-ysmI18nStart();
 secureSessionStart();
 
 if (!checkRole(ROLE_AUTHOR)) {
@@ -188,16 +186,16 @@ if (is_dir($articlesDir)) {
 <link rel="stylesheet" href="../css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
 <!-- v6.1.0：后台 JS 动态文案（弹窗/提示/异步渲染）运行时翻译 -->
 <script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
-<script src="../js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/../js/i18n-live.js') ?>"></script>
+<script src="../js/i18n.js?v=<?= @filemtime(__DIR__ . '/../js/i18n.js') ?>"></script>
 </head>
 <body>
 
 <!-- v3.1.5：移动端顶栏（菜单按钮融入顶栏，与后台统一视觉） -->
 <div class="mobile-topbar" id="mobileTopbar">
-    <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleSidebar()" aria-label="打开菜单">
+    <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleSidebar()" aria-label="<?= t('author.001') ?>">
         <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <div class="mobile-topbar-title">写作者后台</div>
+    <div class="mobile-topbar-title"><?= t('author.002') ?></div>
     <div class="mobile-topbar-user">
         <span class="mobile-topbar-name"><?= htmlspecialchars($currentUser['nickname'] ?? '写作者') ?></span>
     </div>
@@ -207,12 +205,12 @@ if (is_dir($articlesDir)) {
 <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
         <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        <div class="sidebar-title"><span>写作者</span>后台</div>
+        <div class="sidebar-title"><span><?= t('author.003') ?></span><?= t('author.004') ?></div>
         <div class="sidebar-user">
             <div class="sidebar-user-avatar"><?php if (!empty($currentUser['account'])): ?><img src="https://q1.qlogo.cn/g?b=qq&nk=<?= urlencode($currentUser['account']) ?>&s=100" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
             <div class="sidebar-user-info">
                 <div class="sidebar-user-name"><?= htmlspecialchars($currentUser['nickname'] ?? '写作者') ?></div>
-                <div class="sidebar-user-role">写作者</div>
+                <div class="sidebar-user-role"><?= t('author.003') ?></div>
             </div>
         </div>
     </div>
@@ -249,11 +247,11 @@ if (is_dir($articlesDir)) {
 </div>
 
 <div class="main">
-    <?php if ($msg === 'profile_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>个人信息已保存</div><?php endif; ?>
-    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>请求已过期，请重试</div><?php endif; ?>
-    <?php if ($msg === 'nick_empty'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>昵称不能为空</div><?php endif; ?>
-    <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>新密码至少 8 位，且需包含大写字母、小写字母与数字</div><?php endif; ?>
-    <?php if ($msg === 'pw_mismatch'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>两次输入的密码不一致</div><?php endif; ?>
+    <?php if ($msg === 'profile_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.172') ?></div><?php endif; ?>
+    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.447') ?></div><?php endif; ?>
+    <?php if ($msg === 'nick_empty'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('api.951') ?></div><?php endif; ?>
+    <?php if ($msg === 'pw_weak'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('author.033') ?></div><?php endif; ?>
+    <?php if ($msg === 'pw_mismatch'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('author.034') ?></div><?php endif; ?>
 
     <?php if ($tab === 'articles'): ?>
     <div class="page-header">
@@ -261,7 +259,7 @@ if (is_dir($articlesDir)) {
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             我的文章
         </div>
-        <div class="page-subtitle">管理你的创作内容</div>
+        <div class="page-subtitle"><?= t('author.005') ?></div>
     </div>
 
     <div class="card">
@@ -269,22 +267,22 @@ if (is_dir($articlesDir)) {
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             文章列表（<?= count($myArticles) ?> 篇）
         </div>
-        <a href="/sc.php" class="btn btn-primary" style="margin-bottom:16px">+ 写新文章</a>
+        <a href="/sc.php" class="btn btn-primary" style="margin-bottom:16px"><?= t('author.006') ?></a>
         <?php if (empty($myArticles)): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <p>暂无文章，点击上方按钮创建你的第一篇</p>
+            <p><?= t('author.007') ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
         <table>
-            <tr><th>标题</th><th>创建时间</th><th>操作</th></tr>
+            <tr><th><?= t('author.008') ?></th><th><?= t('author.009') ?></th><th><?= t('author.010') ?></th></tr>
             <?php foreach ($myArticles as $a): ?>
             <tr>
                 <td><a class="inline-link" href="/?article=<?= urlencode($a['id'] ?? '') ?>"><?= htmlspecialchars($a['title'] ?? '无标题') ?></a></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['created'] ?? '') ?></td>
                 <td>
-                    <a href="/sc.php?edit=<?= urlencode($a['file'] ?? '') ?>" class="btn-link" style="color:#f59e0b">编辑</a>
+                    <a href="/sc.php?edit=<?= urlencode($a['file'] ?? '') ?>" class="btn-link" style="color:#f59e0b"><?= t('links.011') ?></a>
                 </td>
             </tr>
             <?php endforeach; ?>
@@ -299,17 +297,17 @@ if (is_dir($articlesDir)) {
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             个人信息
         </div>
-        <div class="page-subtitle">修改你的账号头像、昵称、签名、密码与绑定邮箱</div>
+        <div class="page-subtitle"><?= t('author.011') ?></div>
     </div>
-    <?php if ($msg === 'profile_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>个人信息已保存</div><?php endif; ?>
-    <?php if ($msg === 'avatar_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>头像已更新</div><?php endif; ?>
-    <?php if ($msg === 'avatar_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>头像上传失败（仅支持 JPG/PNG/WEBP，≤2MB，且 data/avatars/ 需可写）</div><?php endif; ?>
-    <?php if ($msg === 'email_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>绑定邮箱已更新</div><?php endif; ?>
-    <?php if ($msg === 'email_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱格式不正确</div><?php endif; ?>
-    <?php if ($msg === 'email_taken'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>该邮箱已被其他账号使用</div><?php endif; ?>
-    <?php if ($msg === 'email_code_bad'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>验证码不正确或已过期</div><?php endif; ?>
-    <?php if ($msg === 'email_disabled'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>邮箱验证已关闭，无法更换邮箱</div><?php endif; ?>
-    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>请求已过期，请重试</div><?php endif; ?>
+    <?php if ($msg === 'profile_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.172') ?></div><?php endif; ?>
+    <?php if ($msg === 'avatar_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('js.124') ?></div><?php endif; ?>
+    <?php if ($msg === 'avatar_fail'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('station.173') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('station.174') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_invalid'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('api.907') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_taken'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('api.911') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_code_bad'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('api.938') ?></div><?php endif; ?>
+    <?php if ($msg === 'email_disabled'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('station.175') ?></div><?php endif; ?>
+    <?php if ($msg === 'csrf_error'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.447') ?></div><?php endif; ?>
     <?php $myAvatar = $currentUser['avatar'] ?? '';
           $avatarSrc = ($myAvatar !== '' && strpos($myAvatar, 'data/') === 0) ? '../' . $myAvatar : ($myAvatar !== '' ? $myAvatar : '../api.php?action=avatar&account=' . urlencode($currentUser['account'] ?? '')); ?>
     <div class="card">
@@ -319,10 +317,10 @@ if (is_dir($articlesDir)) {
         </div>
         <div class="table-wrap">
         <table>
-            <tr><th style="width:120px">项目</th><th>内容</th></tr>
-            <tr><td style="color:var(--text-muted)">用户名</td><td><code><?= htmlspecialchars($currentUser['account'] ?? '') ?></code>（不可修改）</td></tr>
-            <tr><td style="color:var(--text-muted)">绑定邮箱</td><td><?= htmlspecialchars($currentUser['email'] ?? '未绑定') ?></td></tr>
-            <tr><td style="color:var(--text-muted)">角色</td><td>写作者</td></tr>
+            <tr><th style="width:120px"><?= t('author.012') ?></th><th><?= t('author.013') ?></th></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('station.016') ?></td><td><code><?= htmlspecialchars($currentUser['account'] ?? '') ?></code><?= t('station.176') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('js.102') ?></td><td><?= htmlspecialchars($currentUser['email'] ?? '未绑定') ?></td></tr>
+            <tr><td style="color:var(--text-muted)"><?= t('author.014') ?></td><td><?= t('author.003') ?></td></tr>
         </table>
         </div>
     </div>
@@ -340,11 +338,11 @@ if (is_dir($articlesDir)) {
                     <div class="form-group">
                         <input class="form-input" type="file" name="avatar" accept="image/jpeg,image/png,image/webp">
                     </div>
-                    <div class="form-hint">支持 JPG / PNG / WEBP，≤2MB；上传后立即生效</div>
+                    <div class="form-hint"><?= t('author.015') ?></div>
                 </div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
-                <button type="submit" class="btn btn-primary">上传头像</button>
+                <button type="submit" class="btn btn-primary"><?= t('author.016') ?></button>
             </div>
         </form>
     </div>
@@ -358,18 +356,18 @@ if (is_dir($articlesDir)) {
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="email_change" value="1">
             <div class="form-group">
-                <label class="form-label">新邮箱地址</label>
+                <label class="form-label"><?= t('author.017') ?></label>
                 <div class="form-row">
-                    <input class="form-input" type="email" name="email_new" placeholder="输入新的邮箱地址">
-                    <button type="button" class="btn" id="dashEmailSend">获取验证码</button>
+                    <input class="form-input" type="email" name="email_new" placeholder="<?= t('author.018') ?>">
+                    <button type="button" class="btn" id="dashEmailSend"><?= t('author.019') ?></button>
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label">邮箱验证码（6位）</label>
-                <input class="form-input" type="text" name="email_code" maxlength="6" placeholder="输入邮件中的验证码">
+                <label class="form-label"><?= t('author.020') ?></label>
+                <input class="form-input" type="text" name="email_code" maxlength="6" placeholder="<?= t('author.021') ?>">
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
-                <button type="submit" class="btn btn-primary">确认更换</button>
+                <button type="submit" class="btn btn-primary"><?= t('author.022') ?></button>
             </div>
         </form>
     </div>
@@ -383,23 +381,23 @@ if (is_dir($articlesDir)) {
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="profile_save" value="1">
             <div class="form-group">
-                <label class="form-label">昵称</label>
-                <input class="form-input" name="nickname" value="<?= htmlspecialchars($currentUser['nickname'] ?? '') ?>" maxlength="20" placeholder="你的昵称">
+                <label class="form-label"><?= t('author.023') ?></label>
+                <input class="form-input" name="nickname" value="<?= htmlspecialchars($currentUser['nickname'] ?? '') ?>" maxlength="20" placeholder="<?= t('station.177') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label">签名（选填，最多 16 字）</label>
-                <input class="form-input" name="signature" value="<?= htmlspecialchars($currentUser['signature'] ?? '') ?>" maxlength="16" placeholder="一句话介绍自己">
+                <label class="form-label"><?= t('author.024') ?></label>
+                <input class="form-input" name="signature" value="<?= htmlspecialchars($currentUser['signature'] ?? '') ?>" maxlength="16" placeholder="<?= t('station.178') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label">新密码（选填，至少 8 位且含大小写字母与数字；留空不修改）</label>
+                <label class="form-label"><?= t('author.025') ?></label>
                 <input class="form-input" name="password" type="password" placeholder="******">
             </div>
             <div class="form-group">
-                <label class="form-label">确认新密码</label>
+                <label class="form-label"><?= t('author.026') ?></label>
                 <input class="form-input" name="password2" type="password" placeholder="******">
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
-                <button type="submit" class="btn btn-primary">保存</button>
+                <button type="submit" class="btn btn-primary"><?= t('author.027') ?></button>
             </div>
         </form>
     </div>
@@ -448,7 +446,7 @@ function bindLogoutSubmit(e) {
         if (!emailInput) return;
         var email = emailInput.value.trim();
         var re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-        if (!re.test(email)) { alert(ysmT('请输入正确的邮箱')); return; }
+        if (!re.test(email)) { alert(TK('author.028')); return; }
         var csrfEl = document.querySelector('input[name=csrf_token]');
         var csrf = csrfEl ? csrfEl.value : '';
         sendBtn.disabled = true;
@@ -459,17 +457,17 @@ function bindLogoutSubmit(e) {
         }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.success) {
                 var left = 60;
-                sendBtn.textContent = ysmT('{n}s 后重发').replace('{n}', left);
+                sendBtn.textContent = TK('author.029').replace('{n}', left);
                 var t = setInterval(function() {
                     left--;
-                    if (left <= 0) { clearInterval(t); sendBtn.textContent = ysmT('获取验证码'); sendBtn.disabled = false; }
-                    else sendBtn.textContent = ysmT('{n}s 后重发').replace('{n}', left);
+                    if (left <= 0) { clearInterval(t); sendBtn.textContent = TK('author.019'); sendBtn.disabled = false; }
+                    else sendBtn.textContent = TK('author.029').replace('{n}', left);
                 }, 1000);
             } else {
-                alert(d.error || ysmT('发送失败'));
+                alert(d.error || TK('author.030'));
                 sendBtn.disabled = false;
             }
-        }).catch(function() { alert(ysmT('网络错误')); sendBtn.disabled = false; });
+        }).catch(function() { alert(TK('author.031')); sendBtn.disabled = false; });
     });
 })();
 </script>
@@ -500,7 +498,7 @@ exit;
                 if (res && res.success === false) {
                     var _b = document.createElement('div');
                     _b.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99999;background:#dc2626;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:92vw';
-                    _b.textContent = ysmT('登录环境已变化（换设备/浏览器/隐私模式），保存等操作将被拦截，请重新登录');
+                    _b.textContent = TK('author.032');
                     document.body.appendChild(_b);
                     setTimeout(function() { if (_b.parentNode) _b.parentNode.removeChild(_b); }, 7000);
                 }

@@ -171,7 +171,6 @@ function verifyHomeUser() {
 }
 function sendJson($responseData, $httpStatus = 200) {
     // v6.1.0：JSON 出口统一翻译 error/message（以简体中文原文为 msgid，缺键原样返回）
-    if (function_exists('ysmTranslateApiPayload')) $responseData = ysmTranslateApiPayload($responseData);
     http_response_code($httpStatus);
     echo json_encode($responseData, JSON_UNESCAPED_UNICODE);
     exit;
@@ -220,7 +219,7 @@ function lookupReplyNickname($replies, $findId) {
 // CSRF 防护：所有 POST 请求需携带有效 X-CSRF-Token
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) {
-        sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+        sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
     }
 }
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
@@ -267,9 +266,9 @@ if ($action === 'send_register_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $reqFp = getRequestFp();
     if (db_rate_count('reg_rates', $ipNow, 60, $reqFp) >= 5) {
         logThreat('reg_flood', $ipNow, $reqFp, 300);
-        sendJson(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429);
+        sendJson(['success' => false, 'error' => tn('api.902')], 429);
     }
-    if (email_exists($email)) sendJson(['success' => false, 'error' => '该邮箱已被注册'], 409);
+    if (email_exists($email)) sendJson(['success' => false, 'error' => tn('api.903')], 409);
     [$ok, $err] = email_code_send($email, 'register', $email);
     if (!$ok) sendJson(['success' => false, 'error' => $err], 400);
     db_rate_add('reg_rates', $ipNow, $reqFp);
@@ -278,24 +277,24 @@ if ($action === 'send_register_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 if ($action === 'avatar') {
     // v6.2.0：头像统一由站内 avatar.php 生成（首字母 SVG），不再回源第三方/QQ 头像
-    if (!verifySessionUser()) sendJson(['success' => false, 'error' => '请先登录'], 403);
+    if (!verifySessionUser()) sendJson(['success' => false, 'error' => tn('api.904')], 403);
     $name = ysmUsernameNormalize($_GET['username'] ?? ($_GET['account'] ?? ''));
-    if ($name === '') sendJson(['success' => false, 'error' => '缺少用户名'], 400);
+    if ($name === '') sendJson(['success' => false, 'error' => tn('api.905')], 400);
     header('Location: /avatar.php?u=' . rawurlencode($name) . '&s=100', true, 302);
     exit;
 }
 // ===== v2.9.0：站长创建写作者——发送验证码到写作者邮箱（需站长登录 + CSRF；v2.11.0 起滑块已移除） =====
 if ($action === 'send_author_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!checkRole(ROLE_STATION_ADMIN)) sendJson(['success' => false, 'error' => '无权限'], 403);
-    if (!verifyCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    if (!checkRole(ROLE_STATION_ADMIN)) sendJson(['success' => false, 'error' => tn('api.906')], 403);
+    if (!verifyCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
     $input = json_decode(file_get_contents('php://input'), true);
     $email = trim($input['email'] ?? '');
     $cfg = loadSiteConfig();
-    if (!email_valid($email)) sendJson(['success' => false, 'error' => '邮箱格式不正确'], 400);
+    if (!email_valid($email)) sendJson(['success' => false, 'error' => tn('api.907')], 400);
     $ipNow = getClientIP();
     $recent = db_one('SELECT COUNT(*) AS c FROM email_codes WHERE ip = ? AND created > ?', [$ipNow, time() - 60])['c'] ?? 0;
-    if ($recent >= 5) sendJson(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429);
-    if (email_exists($email)) sendJson(['success' => false, 'error' => '该邮箱已被使用'], 409);
+    if ($recent >= 5) sendJson(['success' => false, 'error' => tn('api.902')], 429);
+    if (email_exists($email)) sendJson(['success' => false, 'error' => tn('api.908')], 409);
     [$ok, $err] = email_code_send($email, 'author_verify', '站长创建写作者', ROLE_STATION_ADMIN);
     if (!$ok) sendJson(['success' => false, 'error' => $err], 400);
     sendJson(['success' => true, 'ttl' => is_array($err) ? ($err['ttl'] ?? 300) : 300]);
@@ -304,19 +303,19 @@ if ($action === 'send_author_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 // ===== v2.10.0：更换绑定邮箱——发送验证码（登录 + CSRF；受 email_verify_enabled 开关控制，关闭即禁用） =====
 if ($action === 'send_email_change_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $u = verifyHomeUser();
-    if (!$u) sendJson(['success' => false, 'error' => '请先登录'], 401);
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    if (!$u) sendJson(['success' => false, 'error' => tn('api.904')], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
     // v4.5.0：环境校验（换环境/被踢 → 拒绝敏感操作）
-    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => tn('api.909'), 'env_invalid' => true], 401);
     $siteCfg = loadSiteConfig();
-    if (empty($siteCfg['email_verify_enabled'])) sendJson(['success' => false, 'error' => '邮箱验证已关闭'], 403);
+    if (empty($siteCfg['email_verify_enabled'])) sendJson(['success' => false, 'error' => tn('api.910')], 403);
     $input = json_decode(file_get_contents('php://input'), true);
     $email = trim($input['email'] ?? '');
-    if (!email_valid($email)) sendJson(['success' => false, 'error' => '邮箱格式不正确'], 400);
-    if (email_exists($email)) sendJson(['success' => false, 'error' => '该邮箱已被其他账号使用'], 409);
+    if (!email_valid($email)) sendJson(['success' => false, 'error' => tn('api.907')], 400);
+    if (email_exists($email)) sendJson(['success' => false, 'error' => tn('api.911')], 409);
     $ipNow = getClientIP();
     $recent = db_one('SELECT COUNT(*) AS c FROM email_codes WHERE ip = ? AND created > ?', [$ipNow, time() - 60])['c'] ?? 0;
-    if ($recent >= 5) sendJson(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429);
+    if ($recent >= 5) sendJson(['success' => false, 'error' => tn('api.902')], 429);
     [$ok, $err] = email_code_send($email, 'email_change', '更换绑定邮箱', $u['role'] ?? '');
     if (!$ok) sendJson(['success' => false, 'error' => $err], 400);
     sendJson(['success' => true, 'ttl' => is_array($err) ? ($err['ttl'] ?? 300) : 300]);
@@ -325,17 +324,17 @@ if ($action === 'send_email_change_code' && $_SERVER['REQUEST_METHOD'] === 'POST
 // ===== v2.10.0：更换绑定邮箱——验证码原子确认（登录 + CSRF） =====
 if ($action === 'update_email' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $u = verifyHomeUser();
-    if (!$u) sendJson(['success' => false, 'error' => '请先登录'], 401);
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    if (!$u) sendJson(['success' => false, 'error' => tn('api.904')], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
     // v4.5.0：环境校验（换环境/被踢 → 拒绝敏感操作）
-    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => tn('api.909'), 'env_invalid' => true], 401);
     $siteCfg = loadSiteConfig();
-    if (empty($siteCfg['email_verify_enabled'])) sendJson(['success' => false, 'error' => '邮箱验证已关闭'], 403);
+    if (empty($siteCfg['email_verify_enabled'])) sendJson(['success' => false, 'error' => tn('api.910')], 403);
     $input = json_decode(file_get_contents('php://input'), true);
     $email = trim($input['email'] ?? '');
     $code = trim($input['code'] ?? '');
-    if (!email_valid($email)) sendJson(['success' => false, 'error' => '邮箱格式不正确'], 400);
-    if (email_exists($email)) sendJson(['success' => false, 'error' => '该邮箱已被其他账号使用'], 409);
+    if (!email_valid($email)) sendJson(['success' => false, 'error' => tn('api.907')], 400);
+    if (email_exists($email)) sendJson(['success' => false, 'error' => tn('api.911')], 409);
     [$ok, $verr] = email_code_verify($email, $code, 'email_change');
     if (!$ok) sendJson(['success' => false, 'error' => $verr], 400);
     $users = fetchAllUsers();
@@ -352,10 +351,10 @@ if ($action === 'update_email' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 // ===== v2.10.0：头像上传（登录 + CSRF；multipart/form-data，字段名 avatar） =====
 if ($action === 'avatar_upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $u = verifyHomeUser();
-    if (!$u) sendJson(['success' => false, 'error' => '请先登录'], 401);
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    if (!$u) sendJson(['success' => false, 'error' => tn('api.904')], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
     // v4.5.0：环境校验（换环境/被踢 → 拒绝敏感操作）
-    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => tn('api.909'), 'env_invalid' => true], 401);
     [$ok, $res] = avatar_upload($u['id'], $_FILES['avatar'] ?? null);
     if (!$ok) sendJson(['success' => false, 'error' => $res], 400);
     auditLog('avatar_update', $u['id'], '更新头像');
@@ -365,30 +364,30 @@ if ($action === 'avatar_upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 // ===== v3.1.6：文章图片上传（站长/写作者 + CSRF；multipart/form-data，字段名 image；≤5MB） =====
 if ($action === 'article_image_upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // 写作者与站长均可上传文章配图
-    if (!checkRole(ROLE_AUTHOR)) sendJson(['success' => false, 'error' => '无权限'], 403);
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    if (!checkRole(ROLE_AUTHOR)) sendJson(['success' => false, 'error' => tn('api.906')], 403);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
     $file = $_FILES['image'] ?? null;
     if (!$file || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-        sendJson(['success' => false, 'error' => '未收到文件'], 400);
+        sendJson(['success' => false, 'error' => tn('api.912')], 400);
     }
     if ($file['size'] <= 0 || $file['size'] > 5 * 1024 * 1024) {
-        sendJson(['success' => false, 'error' => '图片大小需在 5MB 以内'], 400);
+        sendJson(['success' => false, 'error' => tn('api.913')], 400);
     }
     // MIME 白名单：getimagesize 实测 + 扩展名双重校验（防伪装文件）
     $extMap = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif', 'webp' => 'image/webp'];
     $info = @getimagesize($file['tmp_name']);
     if (!$info || !in_array($info['mime'], array_values($extMap), true)) {
-        sendJson(['success' => false, 'error' => '仅支持 JPG/PNG/GIF/WebP 图片'], 400);
+        sendJson(['success' => false, 'error' => tn('api.914')], 400);
     }
     $origExt = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
     if (!isset($extMap[$origExt])) $origExt = array_search($info['mime'], $extMap) ?: 'png';
     // 内容必须为图片（getimagesize 返回宽高 > 0）
-    if ($info[0] <= 0 || $info[1] <= 0) sendJson(['success' => false, 'error' => '图片文件无效'], 400);
+    if ($info[0] <= 0 || $info[1] <= 0) sendJson(['success' => false, 'error' => tn('api.915')], 400);
     $dir = __DIR__ . '/data/images/';
     if (!is_dir($dir)) @mkdir($dir, 0755, true);
     $fname = date('Ymd') . '_' . bin2hex(random_bytes(8)) . '.' . $origExt;
     if (!move_uploaded_file($file['tmp_name'], $dir . $fname)) {
-        sendJson(['success' => false, 'error' => '保存失败，请检查 data/images/ 目录权限'], 500);
+        sendJson(['success' => false, 'error' => tn('api.916')], 500);
     }
     auditLog('article_image_upload', $fname, '上传文章图片');
     sendJson(['success' => true, 'url' => 'data/images/' . $fname]);
@@ -397,29 +396,29 @@ if ($action === 'article_image_upload' && $_SERVER['REQUEST_METHOD'] === 'POST')
 // ===== v3.3.0：文章视频上传（站长/写作者 + CSRF；multipart/form-data，字段名 video；≤20MB） =====
 // 合法性强制校验：扩展名白名单 → finfo MIME → 容器结构（ftyp box / EBML 魔数）三重校验
 if ($action === 'article_video_upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!checkRole(ROLE_AUTHOR)) sendJson(['success' => false, 'error' => '无权限'], 403);
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    if (!checkRole(ROLE_AUTHOR)) sendJson(['success' => false, 'error' => tn('api.906')], 403);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
     $file = $_FILES['video'] ?? null;
     if (!$file || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-        sendJson(['success' => false, 'error' => '未收到文件'], 400);
+        sendJson(['success' => false, 'error' => tn('api.912')], 400);
     }
     if ($file['size'] <= 0 || $file['size'] > 20 * 1024 * 1024) {
-        sendJson(['success' => false, 'error' => '视频大小需在 20MB 以内'], 400);
+        sendJson(['success' => false, 'error' => tn('api.917')], 400);
     }
     $extMap = ['mp4' => 'video/mp4', 'webm' => 'video/webm'];
     $origExt = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
     if (!isset($extMap[$origExt])) {
-        sendJson(['success' => false, 'error' => '仅支持 MP4/WebM 视频'], 400);
+        sendJson(['success' => false, 'error' => tn('api.918')], 400);
     }
     // 强制校验：内容与声明格式一致、容器结构合法（防伪装/损坏文件）
     if (!validateVideoFile($file['tmp_name'], $origExt)) {
-        sendJson(['success' => false, 'error' => '视频文件校验失败（内容与声明格式不符或文件损坏）'], 400);
+        sendJson(['success' => false, 'error' => tn('api.919')], 400);
     }
     $dir = __DIR__ . '/data/videos/';
     if (!is_dir($dir)) @mkdir($dir, 0755, true);
     $fname = date('Ymd') . '_' . bin2hex(random_bytes(8)) . '.' . $origExt;
     if (!move_uploaded_file($file['tmp_name'], $dir . $fname)) {
-        sendJson(['success' => false, 'error' => '保存失败，请检查 data/videos/ 目录权限'], 500);
+        sendJson(['success' => false, 'error' => tn('api.920')], 500);
     }
     auditLog('article_video_upload', $fname, '上传文章视频');
     sendJson(['success' => true, 'url' => 'data/videos/' . $fname]);
@@ -428,10 +427,10 @@ if ($action === 'article_video_upload' && $_SERVER['REQUEST_METHOD'] === 'POST')
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     $cfgSnap = loadSiteConfig();
     if (empty($cfgSnap['registration_enabled'])) {
-        sendJson(['success' => false, 'error' => '注册已关闭'], 403);
+        sendJson(['success' => false, 'error' => tn('api.921')], 403);
     }
     $ipAddr = getClientIP();
-    if (isIPBanned($ipAddr, 'register')) sendJson(['success' => false, 'error' => '你的 IP 已被封禁，无法注册'], 403);
+    if (isIPBanned($ipAddr, 'register')) sendJson(['success' => false, 'error' => tn('api.922')], 403);
     // v4.7.1：联动封锁拦截（bans type=link + link:ip/fp 登录锁，堵住 register 绕过联动封锁路径）
     $cooldownLeft = checkLinkedBlock();
     if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $cooldownLeft . ' 秒后再试', 'locked_seconds' => $cooldownLeft], 429);
@@ -441,7 +440,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
         logAbnormal($ipAddr, '频繁注册（累计' . $ipRegCount . '次，限制' . $regCap . '次）');
         logThreat('reg_flood', $ipAddr, getRequestFp(), 300);
         // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 已在上行写入）
-        sendJson(['success' => false, 'error' => '注册次数已达上限'], 429);
+        sendJson(['success' => false, 'error' => tn('api.923')], 429);
     }
     $payload = json_decode(file_get_contents('php://input'), true);
     $fpToken = getRequestFp();
@@ -466,7 +465,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     $secret = $payload['password'] ?? '';
     $mailBox = trim($payload['email'] ?? '');
     $otp = $payload['code'] ?? '';
-    if (empty($username) || empty($secret)) sendJson(['success' => false, 'error' => '用户名和密码不能为空'], 400);
+    if (empty($username) || empty($secret)) sendJson(['success' => false, 'error' => tn('api.924')], 400);
     $nameChk = ysmUsernameValidate($username);
     if ($nameChk !== true) sendJson(['success' => false, 'error' => $nameChk], 400);
     $pwChk = validatePassword($secret);
@@ -476,15 +475,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     // v2.11.0：滑块人机验证已彻底移除
     // v2.9.0 邮箱验证码（开关启用时：邮箱格式 + 唯一 + 验证码一次性校验）
     if (!empty($cfgSnap['email_verify_enabled'])) {
-        if (!email_valid($mailBox)) sendJson(['success' => false, 'error' => '邮箱格式不正确'], 400);
-        if (email_exists($mailBox)) sendJson(['success' => false, 'error' => '该邮箱已被注册'], 409);
+        if (!email_valid($mailBox)) sendJson(['success' => false, 'error' => tn('api.907')], 400);
+        if (email_exists($mailBox)) sendJson(['success' => false, 'error' => tn('api.903')], 409);
         [$mailOk, $mailErr] = email_code_verify($mailBox, $otp, 'register');
         if (!$mailOk) sendJson(['success' => false, 'error' => $mailErr], 400);
     }
     $roster = fetchAllUsers();
     foreach ($roster as $candidate) {
-        if (ysmUsernameNormalize($candidate['username'] ?? '') === $username) sendJson(['success' => false, 'error' => '用户名已被占用'], 409);
-        if (($candidate['account'] ?? '') === $username) sendJson(['success' => false, 'error' => '用户名已被占用'], 409);
+        if (ysmUsernameNormalize($candidate['username'] ?? '') === $username) sendJson(['success' => false, 'error' => tn('api.925')], 409);
+        if (($candidate['account'] ?? '') === $username) sendJson(['success' => false, 'error' => tn('api.925')], 409);
     }
     $avatarLink = ysmAvatarUrl($username, 100);
     $fresh = [
@@ -518,7 +517,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
     $ipAddr = getClientIP();
-    if (isIPBanned($ipAddr, 'login')) sendJson(['success' => false, 'error' => '你的 IP 已被封禁，无法登录'], 403);
+    if (isIPBanned($ipAddr, 'login')) sendJson(['success' => false, 'error' => tn('api.926')], 403);
     // v4.7.0：联动威胁评分拦截（IP/指纹任一维度累计超阈值 → 联动封锁）
     $cooldownLeft = checkLinkedBlock();
     if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $cooldownLeft . ' 秒后再试', 'locked_seconds' => $cooldownLeft], 429);
@@ -529,7 +528,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
     $secret = $payload['password'] ?? '';
     // v4.5.0：登录环境指纹（前端上报，服务端与 UA 一起绑定签名）
     $fpToken = getRequestFp();
-    if (empty($loginId) || empty($secret)) sendJson(['success' => false, 'error' => '用户名和密码不能为空'], 400);
+    if (empty($loginId) || empty($secret)) sendJson(['success' => false, 'error' => tn('api.924')], 400);
     // v2.11.0：登录锁定检查（IP+账号双级；60 秒内失败 ≥3 次 → 锁 15 分钟）
     $lockRemain = loginLocked('ip:' . $ipAddr);
     if ($lockRemain <= 0) $lockRemain = loginLocked('account:' . $loginId);
@@ -544,7 +543,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
         $candLegacy = strtolower(trim((string)($candidate['account'] ?? '')));
         if (($candName === $loginId || $candLegacy === $loginId) && password_verify($secret, $candidate['password'])) {
             // v2.11.4：被禁用账号拒绝登录
-            if (!empty($candidate['disabled'])) sendJson(['success' => false, 'error' => '该账号已被禁用，请联系管理员'], 403);
+            if (!empty($candidate['disabled'])) sendJson(['success' => false, 'error' => tn('api.927')], 403);
             // v4.7.0：管理角色陌生设备 → 邮件二次验证（密码通过后仍需验证码才完成登录）
             $isManager = in_array($candidate['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true);
             $fpDigest = computeSessionFp($fpToken);
@@ -598,9 +597,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
         logAbnormal($ipAddr, '频繁错误登录（60秒内' . $failCount . '次，已锁定15分钟）');
         // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 已在上行写入）
         loginFailClear($ipAddr, $loginId);
-        sendJson(['success' => false, 'error' => '登录失败次数过多，请 900 秒后重试', 'locked_seconds' => 900], 429);
+        sendJson(['success' => false, 'error' => tn('api.928'), 'locked_seconds' => 900], 429);
     }
-    sendJson(['success' => false, 'error' => '用户名或密码错误'], 401);
+    sendJson(['success' => false, 'error' => tn('api.929')], 401);
 }
 
 // ===== v4.7.0：陌生设备登录邮件二次验证（验证码原子消费 → 记录设备 → 完成登录） =====
@@ -610,13 +609,13 @@ if ($action === 'device_verify' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
     $code = trim($input['code'] ?? '');
     $pending = $_SESSION['cmt_pending_dev'] ?? null;
-    if (!is_array($pending) || empty($pending['uid']) || empty($pending['email'])) sendJson(['success' => false, 'error' => '验证会话已失效，请重新登录'], 400);
+    if (!is_array($pending) || empty($pending['uid']) || empty($pending['email'])) sendJson(['success' => false, 'error' => tn('api.930')], 400);
     // 重新加载用户（防等待验证码期间被禁用/删除）
     $users = fetchAllUsers();
     $u = null;
     foreach ($users as $uu) { if ($uu['id'] === $pending['uid']) { $u = $uu; break; } }
-    if (!$u) { unset($_SESSION['cmt_pending_dev']); sendJson(['success' => false, 'error' => '账号不存在或已删除'], 400); }
-    if (!empty($u['disabled'])) { unset($_SESSION['cmt_pending_dev']); sendJson(['success' => false, 'error' => '该账号已被禁用'], 403); }
+    if (!$u) { unset($_SESSION['cmt_pending_dev']); sendJson(['success' => false, 'error' => tn('api.931')], 400); }
+    if (!empty($u['disabled'])) { unset($_SESSION['cmt_pending_dev']); sendJson(['success' => false, 'error' => tn('api.932')], 403); }
     [$ok, $verr] = email_code_verify($pending['email'], $code, 'device_login');
     if (!$ok) {
         // 验证码输错 → 威胁计分；连续错过多直接清 pending 防爆破
@@ -649,10 +648,10 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($mode === 'send_code') {
         $linkLeft = checkLinkedBlock();
         if ($linkLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试'], 429);
-        if (empty($account) || empty($email)) sendJson(['success' => false, 'error' => '请填写账号与绑定邮箱'], 400);
+        if (empty($account) || empty($email)) sendJson(['success' => false, 'error' => tn('api.933')], 400);
         // 发码限速（IP 60 秒 ≥5 次 → 计分）
         $recent = db_one('SELECT COUNT(*) AS c FROM email_codes WHERE ip = ? AND created > ?', [$clientIP, time() - 60])['c'] ?? 0;
-        if ($recent >= 5) { logThreat('reset_flood', $clientIP, $reqFp, 300); sendJson(['success' => false, 'error' => '发送过于频繁，请稍后再试'], 429); }
+        if ($recent >= 5) { logThreat('reset_flood', $clientIP, $reqFp, 300); sendJson(['success' => false, 'error' => tn('api.902')], 429); }
         // 账号+邮箱双重匹配（不暴露账号是否存在，统一提示）
         $users = fetchAllUsers();
         $target = null;
@@ -661,13 +660,13 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $uLegacy = strtolower(trim((string)($u['account'] ?? '')));
             if (($uName === $account || $uLegacy === $account) && strcasecmp((string)($u['email'] ?? ''), $email) === 0) { $target = $u; break; }
         }
-        if (!$target) sendJson(['success' => false, 'error' => '账号与邮箱不匹配'], 400);
+        if (!$target) sendJson(['success' => false, 'error' => tn('api.934')], 400);
         // 管理角色：仅常用设备可自助找回；陌生设备 → 联系超管（不发送验证码）
         $isMgmt = in_array($target['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true);
         if ($isMgmt) {
             $fpHash = computeSessionFp($reqFp);
             if (!isKnownDevice($target['id'], $fpHash)) {
-                sendJson(['success' => false, 'error' => '当前设备非常用设备，请使用常用设备找回，或联系站点管理员协助'], 403);
+                sendJson(['success' => false, 'error' => tn('api.935')], 403);
             }
         }
         [$ok, $err] = email_code_send($email, 'password_reset', '找回密码', $target['role'] ?? '');
@@ -679,7 +678,7 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($mode === 'do_reset') {
         $linkLeft = checkLinkedBlock();
         if ($linkLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试'], 429);
-        if (empty($account) || empty($code) || empty($newPw)) sendJson(['success' => false, 'error' => '请完整填写账号、验证码与新密码'], 400);
+        if (empty($account) || empty($code) || empty($newPw)) sendJson(['success' => false, 'error' => tn('api.936')], 400);
         // v4.7.0：同账号验证码失败锁定——3 次失败锁 15 分钟（防 6 位验证码暴力枚举）
         $rstKey = 'rst:' . hash('sha256', 'account|' . strtolower($account));
         $rstLock = loginLocked($rstKey);
@@ -705,9 +704,9 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($rstFails >= 3) {
                 lockLogin($rstKey, 900);
                 logThreat('login_lock', $clientIP, $reqFp, 60);
-                sendJson(['success' => false, 'error' => '验证失败次数过多，请 900 秒后重试', 'locked_seconds' => 900], 429);
+                sendJson(['success' => false, 'error' => tn('api.937'), 'locked_seconds' => 900], 429);
             }
-            sendJson(['success' => false, 'error' => '验证码不正确或已过期'], 400);
+            sendJson(['success' => false, 'error' => tn('api.938')], 400);
         }
         $vp = validatePassword($newPw);
         if ($vp !== true) sendJson(['success' => false, 'error' => $vp], 400);
@@ -715,7 +714,7 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $updated = false;
         foreach ($users as &$uu) { if ($uu['id'] === $target['id']) { $uu['password'] = $newHash; $updated = true; break; } }
         unset($uu);
-        if (!$updated) sendJson(['success' => false, 'error' => '账号状态异常，请联系管理员'], 400);
+        if (!$updated) sendJson(['success' => false, 'error' => tn('api.939')], 400);
         replaceAllUsers($users);
         db_exec('DELETE FROM login_fails WHERE acc = ?', ['rst:' . strtolower($account)]); // 重置成功清除失败计数
         // 密码已变：tv+1 踢全部旧会话 + 吊销 refresh token
@@ -729,6 +728,92 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         sendJson(['success' => true]);
     }
 }
+// ===== v6.0.0：友站（友情链接） =====
+// GET links_list：前台只读——只出 active 友链（访客可访问）
+if ($action === 'links_list') {
+    sendJson(['success' => true, 'links' => db_all("SELECT id, site_name, url, favicon, desc, sort FROM links WHERE status = 'active' ORDER BY sort ASC, place_time DESC")]);
+}
+/** 站长专属操作的前置校验（角色 + 环境） */
+function linksRequireStationAdmin() {
+    $actor = checkRole(ROLE_STATION_ADMIN);
+    if (!$actor) sendJson(['success' => false, 'error' => tn('api.906')], 403);
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => tn('api.909'), 'env_invalid' => true], 401);
+    return $actor;
+}
+// GET links_meta：录入辅助——抓取站点信息预填
+if ($action === 'links_meta' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    linksRequireStationAdmin();
+    $url = trim((string)($_GET['url'] ?? ''));
+    if ($url === '') sendJson(['success' => false, 'error' => tn('api.940')], 400);
+    if (!preg_match('#^https?://#i', $url)) $url = 'https://' . $url;
+    sendJson(linkFetchMeta($url));
+}
+// POST links_save：新增/编辑
+if ($action === 'links_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    linksRequireStationAdmin();
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
+    $b = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($b)) $b = [];
+    $name = trim((string)($b['site_name'] ?? ''));
+    $url = trim((string)($b['url'] ?? ''));
+    $desc = trim((string)($b['desc'] ?? ''));
+    $favicon = trim((string)($b['favicon'] ?? ''));
+    if (mb_strlen($name) > 60) sendJson(['success' => false, 'error' => tn('api.941')], 400);
+    if (mb_strlen($desc) > 200) sendJson(['success' => false, 'error' => tn('api.942')], 400);
+    if ($name === '' || $url === '' || !preg_match('#^https?://#i', $url)) sendJson(['success' => false, 'error' => tn('api.943')], 400);
+    if ($favicon !== '' && !preg_match('#^https?://#i', $favicon)) sendJson(['success' => false, 'error' => tn('api.944')], 400);
+    $id = (int)($b['id'] ?? 0);
+    $sort = (int)($b['sort'] ?? 0);
+    if ($id > 0) {
+        db_exec('UPDATE links SET site_name=?, url=?, desc=?, favicon=?, sort=? WHERE id=?', [$name, $url, $desc, $favicon, $sort, $id]);
+        auditLog('links_edit', $url, '编辑友链 ' . $name);
+    } else {
+        if (db_one('SELECT 1 AS x FROM links WHERE url = ?', [$url])) sendJson(['success' => false, 'error' => tn('api.945')], 400);
+        db_exec('INSERT INTO links (site_name, url, desc, favicon, status, place_time, sort, source) VALUES (?,?,?,?,\'active\',?,?,?)', [$name, $url, $desc, $favicon, time(), $sort, 'manual']);
+        auditLog('links_add', $url, '新增友链 ' . $name);
+    }
+    sendJson(['success' => true]);
+}
+// POST links_delete
+if ($action === 'links_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    linksRequireStationAdmin();
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
+    $b = json_decode(file_get_contents('php://input'), true);
+    $id = (int)($b['id'] ?? 0);
+    $row = db_one('SELECT site_name, url FROM links WHERE id = ?', [$id]);
+    db_exec('DELETE FROM links WHERE id = ?', [$id]);
+    if ($row) auditLog('links_delete', $row['url'], '删除友链 ' . $row['site_name']);
+    sendJson(['success' => true]);
+}
+// POST links_status：启用/停用/标记掉链
+if ($action === 'links_status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    linksRequireStationAdmin();
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
+    $b = json_decode(file_get_contents('php://input'), true);
+    $id = (int)($b['id'] ?? 0);
+    $status = (string)($b['status'] ?? '');
+    if (!in_array($status, ['active', 'pending', 'dead', 'disabled'], true)) sendJson(['success' => false, 'error' => tn('api.946')], 400);
+    db_exec('UPDATE links SET status = ? WHERE id = ?', [$status, $id]);
+    auditLog('links_status', 'link#' . $id, '状态改为 ' . $status);
+    sendJson(['success' => true]);
+}
+// GET links_admin：站长后台列表
+if ($action === 'links_admin' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    linksRequireStationAdmin();
+    sendJson(['success' => true, 'links' => db_all('SELECT * FROM links ORDER BY sort ASC, place_time DESC')]);
+}
+// GET links_check：单条掉链巡检（只读校验后写回状态）
+if ($action === 'links_check' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    linksRequireStationAdmin();
+    $id = (int)($_GET['id'] ?? 0);
+    $row = db_one('SELECT url FROM links WHERE id = ?', [$id]);
+    if (!$row) sendJson(['success' => false, 'error' => tn('api.947')], 404);
+    $alive = linkCheckAlive((string)$row['url']);
+    db_exec('UPDATE links SET last_check = ?, check_count = check_count + 1, status = ? WHERE id = ?', [time(), $alive ? 'active' : 'dead', $id]);
+    sendJson(['success' => true, 'alive' => $alive]);
+}
+
+
 if ($action === 'logout' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // v2.10.2/v4.5.0：超管也可在主页退出——吊销 JWT（jti 黑名单）+ 吊销 refresh token + 销毁会话 + 清 cookie
     $uid = $_SESSION['cmt_user']['id'] ?? '';
@@ -751,13 +836,13 @@ if ($action === 'refresh' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $row = consumeRefreshToken($rt, $reqFp, -1); // 先按记录自身 tv 校验，再取用户当前 tv
     if (!$row) {
         clearRefreshCookie();
-        sendJson(['success' => false, 'error' => '登录已过期或登录环境已变化，请重新登录'], 401);
+        sendJson(['success' => false, 'error' => tn('api.948')], 401);
     }
     $curTV = getUserTV($row['user_id']);
     if ((int)$row['tv'] !== $curTV) {
         revokeUserRefreshTokens($row['user_id']);
         clearRefreshCookie();
-        sendJson(['success' => false, 'error' => '账号已在其他设备登录，当前会话已失效'], 401);
+        sendJson(['success' => false, 'error' => tn('api.949')], 401);
     }
     // 校验通过：重建登录态（保持同一 tv，不踢旧）
     session_regenerate_id(true);
@@ -765,7 +850,7 @@ if ($action === 'refresh' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach (fetchAllUsers() as $uu) {
         if ($uu['id'] === $row['user_id']) { $found = $uu; break; }
     }
-    if (!$found) { clearRefreshCookie(); sendJson(['success' => false, 'error' => '账号不存在'], 401); }
+    if (!$found) { clearRefreshCookie(); sendJson(['success' => false, 'error' => tn('api.950')], 401); }
     $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
     $_SESSION['cmt_sfp'] = getRequestStableFp() !== '' ? computeStableFp(getRequestStableFp()) : '';
     $_SESSION['cmt_tv'] = (int)$curTV;
@@ -793,7 +878,7 @@ if ($action === 'check') {
     if ($u) {
         // v4.5.0：登录态会话但环境校验失败（换浏览器/设备/隐私模式/被踢）→ 提示重新登录
         if (!requireSessionEnv()) {
-            sendJson(['success' => true, 'loggedIn' => false, 'env_invalid' => true, 'error' => '登录环境已变化，请重新登录']);
+            sendJson(['success' => true, 'loggedIn' => false, 'env_invalid' => true, 'error' => tn('api.909')]);
         }
         $safeUser = sanitizeUserForClient($u);
         sendJson(['success' => true, 'loggedIn' => true, 'user' => $safeUser]);
@@ -881,9 +966,9 @@ if ($action === 'user-status') {
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'update_profile') {
     $actor = verifyHomeUser();
-    if (!$actor) sendJson(['success' => false, 'error' => '请先登录'], 401);
+    if (!$actor) sendJson(['success' => false, 'error' => tn('api.904')], 401);
     // v4.5.0：环境校验（改昵称/签名/密码等敏感操作）
-    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => tn('api.909'), 'env_invalid' => true], 401);
     $payload = json_decode(file_get_contents('php://input'), true);
     if (!is_array($payload)) $payload = [];
     // v6.0.0：支持「仅偏好」提交（字体/语言），昵称缺省时保留原值
@@ -891,7 +976,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'update_profile') {
     $displayName = trim($payload['nickname'] ?? '');
     $motto = array_key_exists('signature', $payload) ? trim((string)$payload['signature']) : (string)($actor['signature'] ?? '');
     if ($displayName === '' && $hasPref) $displayName = (string)($actor['nickname'] ?? '');
-    if (empty($displayName)) sendJson(['success' => false, 'error' => '昵称不能为空'], 400);
+    if (empty($displayName)) sendJson(['success' => false, 'error' => tn('api.951')], 400);
     $displayName = mb_substr($displayName, 0, 20, 'UTF-8');
     $motto = mb_substr($motto, 0, 16, 'UTF-8');
     // 字体/语言白名单校验（非法值保持原值）
@@ -927,23 +1012,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'update_profile') {
 // ===== v6.2.0：修改用户名（登录 ID）——密码二次确认 + 唯一性 + 频率限制 + 审计 =====
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'change_username') {
     $actor = verifyHomeUser();
-    if (!$actor) sendJson(['success' => false, 'error' => '请先登录'], 401);
-    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
+    if (!$actor) sendJson(['success' => false, 'error' => tn('api.904')], 401);
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => tn('api.909'), 'env_invalid' => true], 401);
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
     $payload = json_decode(file_get_contents('php://input'), true);
     $newName = ysmUsernameNormalize($payload['username'] ?? '');
     $pw = (string)($payload['password'] ?? '');
-    if ($newName === '' || $pw === '') sendJson(['success' => false, 'error' => '请填写新用户名与当前密码'], 400);
+    if ($newName === '' || $pw === '') sendJson(['success' => false, 'error' => tn('api.952')], 400);
     $chk = ysmUsernameValidate($newName);
     if ($chk !== true) sendJson(['success' => false, 'error' => $chk], 400);
     if (!password_verify($pw, (string)($_SESSION['cmt_user']['pw_hash'] ?? ''))) {
-        sendJson(['success' => false, 'error' => '当前密码不正确'], 403);
+        sendJson(['success' => false, 'error' => tn('api.953')], 403);
     }
-    if (ysmUsernameTaken($newName, $actor['id'])) sendJson(['success' => false, 'error' => '用户名已被占用'], 409);
+    if (ysmUsernameTaken($newName, $actor['id'])) sendJson(['success' => false, 'error' => tn('api.925')], 409);
     // 频率限制：每天最多 1 次（按 audit 表统计）
     $last = db_one("SELECT ts FROM audit WHERE action = 'username_change' AND target = ? ORDER BY rowid DESC LIMIT 1", [$actor['id']]);
     if ($last && strtotime((string)$last['ts']) > time() - 86400) {
-        sendJson(['success' => false, 'error' => '用户名每天只能修改一次'], 429);
+        sendJson(['success' => false, 'error' => tn('api.954')], 429);
     }
     $roster = fetchAllUsers();
     $old = '';
@@ -958,7 +1043,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'change_username') {
     try {
         replaceAllUsers($roster);
     } catch (Throwable $e) {
-        sendJson(['success' => false, 'error' => '用户名已被占用'], 409);
+        sendJson(['success' => false, 'error' => tn('api.925')], 409);
     }
     $_SESSION['cmt_user']['username'] = $newName;
     auditLog('username_change', $actor['id'], '用户名修改：' . ($old !== '' ? $old : '（空）') . ' → ' . $newName);
@@ -966,17 +1051,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'change_username') {
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'admin_setup') {
     $actor = verifySessionUser();
-    if (!$actor || ($actor['role'] ?? '') !== ROLE_SUPER_ADMIN) { logAbnormal(getClientIP(), '越权尝试修改站长信息'); sendJson(['success' => false, 'error' => '无权限'], 403); }
+    if (!$actor || ($actor['role'] ?? '') !== ROLE_SUPER_ADMIN) { logAbnormal(getClientIP(), '越权尝试修改站长信息'); sendJson(['success' => false, 'error' => tn('api.906')], 403); }
     $payload = json_decode(file_get_contents('php://input'), true);
     // v6.2.0：管理员登录标识改为用户名（兼容旧字段 account）
     $adminName = ysmUsernameNormalize($payload['username'] ?? ($payload['account'] ?? ''));
     $displayName = trim($payload['nickname'] ?? '');
     $secret = $payload['password'] ?? '';
-    if (empty($adminName)) sendJson(['success' => false, 'error' => '请填写用户名'], 400);
+    if (empty($adminName)) sendJson(['success' => false, 'error' => tn('api.955')], 400);
     $nameChk = ysmUsernameValidate($adminName);
     if ($nameChk !== true) sendJson(['success' => false, 'error' => $nameChk], 400);
-    if (ysmUsernameTaken($adminName, $actor['id'])) sendJson(['success' => false, 'error' => '用户名已被占用'], 409);
-    if (empty($displayName)) sendJson(['success' => false, 'error' => '请填写昵称'], 400);
+    if (ysmUsernameTaken($adminName, $actor['id'])) sendJson(['success' => false, 'error' => tn('api.925')], 409);
+    if (empty($displayName)) sendJson(['success' => false, 'error' => tn('api.956')], 400);
     if ($secret) {
         $pwChk = validatePassword($secret);
         if ($pwChk !== true) sendJson(['success' => false, 'error' => $pwChk], 400);
@@ -1004,7 +1089,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'admin_setup') {
 }
 if ($action === 'get') {
     $slug = $_GET['article'] ?? '';
-    if (empty($slug)) sendJson(['success' => false, 'error' => '缺少文章参数'], 400);
+    if (empty($slug)) sendJson(['success' => false, 'error' => tn('api.957')], 400);
     // v3.3.11：公告关联文章不展示评论区
     if (isAnnouncementLinkedArticle($slug)) sendJson(['success' => true, 'comments' => [], 'total' => 0, 'page' => 1, 'per_page' => 20, 'total_pages' => 0]);
     // v3.2.6：对外脱敏评论者的 account 与 QQ 头像 URL（防枚举真实 QQ 号）
@@ -1022,28 +1107,28 @@ if ($action === 'get') {
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'post') {
     $ipAddr = getClientIP();
-    if (isIPBanned($ipAddr, 'comment')) sendJson(['success' => false, 'error' => '你的 IP 已被封禁，无法评论'], 403);
+    if (isIPBanned($ipAddr, 'comment')) sendJson(['success' => false, 'error' => tn('api.958')], 403);
     // v4.7.1：联动封锁拦截（堵住 comment 绕过联动封锁路径）
     $cooldownLeft = checkLinkedBlock();
     if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $cooldownLeft . ' 秒后再试', 'locked_seconds' => $cooldownLeft], 429);
     $cfgSnap = loadSiteConfig();
-    if (!($cfgSnap['comments_enabled'] ?? true)) sendJson(['success' => false, 'error' => '评论区已关闭'], 403);
+    if (!($cfgSnap['comments_enabled'] ?? true)) sendJson(['success' => false, 'error' => tn('api.959')], 403);
     // v2.6.5：超管身份默认不参与前台评论（可在超管后台「系统配置」开启 super_admin_comment）
     if (($_SESSION['cmt_user']['role'] ?? '') === ROLE_SUPER_ADMIN && empty($cfgSnap['super_admin_comment'])) {
-        sendJson(['success' => false, 'error' => '超管身份不参与前台评论'], 403);
+        sendJson(['success' => false, 'error' => tn('api.960')], 403);
     }
     $actor = verifyHomeUser();
     // v2.7.1：开启「超管主页评论」后，超管以超管身份评论（不走访客分支）
     if (!$actor && ($_SESSION['cmt_user']['role'] ?? '') === ROLE_SUPER_ADMIN && !empty($cfgSnap['super_admin_comment'])) {
         $actor = verifySessionUser();
     }
-    if (!$actor && empty($cfgSnap['guest_comments_enabled'])) sendJson(['success' => false, 'error' => '请先登录'], 401);
+    if (!$actor && empty($cfgSnap['guest_comments_enabled'])) sendJson(['success' => false, 'error' => tn('api.904')], 401);
     if (!$actor && !empty($cfgSnap['guest_comments_enabled'])) {
         $actor = ['id' => 'guest', 'nickname' => '访客', 'avatar' => '', 'account' => '', 'role' => 'guest'];
     }
     // v4.5.0：登录态用户评论前校验环境（换浏览器/设备/被踢 → 拒绝，提示重新登录）；访客不受影响
     if (($actor['id'] ?? '') !== 'guest' && !requireSessionEnv()) {
-        sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录后再评论', 'env_invalid' => true], 401);
+        sendJson(['success' => false, 'error' => tn('api.961'), 'env_invalid' => true], 401);
     }
     $fpToken = getRequestFp();
     db_rate_add('comment_rates', $ipAddr, $fpToken);
@@ -1054,16 +1139,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'post') {
         logAbnormal($ipAddr, '频繁评论（' . $burstCount . '条/分钟）');
         logThreat('comment_flood', $ipAddr, $fpToken, 300);
         // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 已在上行写入）
-        sendJson(['success' => false, 'error' => '评论太频繁，请稍后再试'], 429);
+        sendJson(['success' => false, 'error' => tn('api.962')], 429);
     }
     $payload = json_decode(file_get_contents('php://input'), true);
     $slug = trim($payload['article'] ?? '');
     $body = trim($payload['content'] ?? '');
     $body = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $body);
-    if (empty($slug)) sendJson(['success' => false, 'error' => '缺少文章参数'], 400);
-    if (isAnnouncementLinkedArticle($slug)) sendJson(['success' => false, 'error' => '公告不支持评论'], 403);
-    if (empty($body)) sendJson(['success' => false, 'error' => '内容不能为空'], 400);
-    if (mb_strlen($body, 'UTF-8') > 1000) sendJson(['success' => false, 'error' => '评论不能超过1000字'], 400);
+    if (empty($slug)) sendJson(['success' => false, 'error' => tn('api.957')], 400);
+    if (isAnnouncementLinkedArticle($slug)) sendJson(['success' => false, 'error' => tn('api.963')], 403);
+    if (empty($body)) sendJson(['success' => false, 'error' => tn('api.964')], 400);
+    if (mb_strlen($body, 'UTF-8') > 1000) sendJson(['success' => false, 'error' => tn('api.965')], 400);
     $thread = fetchCommentTree($slug);
     $roster = fetchAllUsers();
     $authorName = $actor['nickname'] ?? '用户';
@@ -1092,7 +1177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'post') {
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'reply') {
     $ipAddr = getClientIP();
-    if (isIPBanned($ipAddr, 'comment')) sendJson(['success' => false, 'error' => '你的 IP 已被封禁，无法回复'], 403);
+    if (isIPBanned($ipAddr, 'comment')) sendJson(['success' => false, 'error' => tn('api.966')], 403);
     // v4.7.1：联动封锁拦截（堵住 reply 绕过联动封锁路径）
     $cooldownLeft = checkLinkedBlock();
     if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $cooldownLeft . ' 秒后再试', 'locked_seconds' => $cooldownLeft], 429);
@@ -1100,19 +1185,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'reply') {
     $replyConfig = loadSiteConfig();
     // v2.6.5：超管身份默认不参与前台回复（可在超管后台「系统配置」开启 super_admin_comment）
     if (($_SESSION['cmt_user']['role'] ?? '') === ROLE_SUPER_ADMIN && empty($replyConfig['super_admin_comment'])) {
-        sendJson(['success' => false, 'error' => '超管身份不参与前台回复'], 403);
+        sendJson(['success' => false, 'error' => tn('api.967')], 403);
     }
     // v2.7.1：开启「超管主页评论」后，超管以超管身份回复（不走访客分支）
     if (!$actor && ($_SESSION['cmt_user']['role'] ?? '') === ROLE_SUPER_ADMIN && !empty($replyConfig['super_admin_comment'])) {
         $actor = verifySessionUser();
     }
-    if (!$actor && empty($replyConfig['guest_comments_enabled'])) sendJson(['success' => false, 'error' => '请先登录'], 401);
+    if (!$actor && empty($replyConfig['guest_comments_enabled'])) sendJson(['success' => false, 'error' => tn('api.904')], 401);
     if (!$actor && !empty($replyConfig['guest_comments_enabled'])) {
         $actor = ['id' => 'guest', 'nickname' => '访客', 'avatar' => '', 'account' => '', 'role' => 'guest'];
     }
     // v4.5.0：登录态用户回复前校验环境（换浏览器/设备/被踢 → 拒绝）；访客不受影响
     if (($actor['id'] ?? '') !== 'guest' && !requireSessionEnv()) {
-        sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录后再回复', 'env_invalid' => true], 401);
+        sendJson(['success' => false, 'error' => tn('api.968'), 'env_invalid' => true], 401);
     }
     $fpToken = getRequestFp();
     db_rate_add('comment_rates', $ipAddr, $fpToken);
@@ -1123,16 +1208,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'reply') {
         logAbnormal($ipAddr, '频繁回复（' . $burstCount . '条/分钟）');
         logThreat('comment_flood', $ipAddr, $fpToken, 300);
         // v4.8.0：移除单一 addBan，全部走联动封禁（logThreat 已在上行写入）
-        sendJson(['success' => false, 'error' => '回复太频繁，请稍后再试'], 429);
+        sendJson(['success' => false, 'error' => tn('api.969')], 429);
     }
     $payload = json_decode(file_get_contents('php://input'), true);
     $slug = trim($payload['article'] ?? '');
     $parentKey = trim($payload['parent_id'] ?? '');
     $body = trim($payload['content'] ?? '');
     $body = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $body);
-    if (empty($slug) || empty($parentKey) || empty($body)) sendJson(['success' => false, 'error' => '参数不完整'], 400);
-    if (isAnnouncementLinkedArticle($slug)) sendJson(['success' => false, 'error' => '公告不支持评论'], 403);
-    if (mb_strlen($body, 'UTF-8') > 1000) sendJson(['success' => false, 'error' => '回复不能超过1000字'], 400);
+    if (empty($slug) || empty($parentKey) || empty($body)) sendJson(['success' => false, 'error' => tn('api.970')], 400);
+    if (isAnnouncementLinkedArticle($slug)) sendJson(['success' => false, 'error' => tn('api.963')], 403);
+    if (mb_strlen($body, 'UTF-8') > 1000) sendJson(['success' => false, 'error' => tn('api.971')], 400);
     $thread = fetchCommentTree($slug);
     $roster = fetchAllUsers();
     $authorName = $actor['nickname'] ?? '用户';
@@ -1176,7 +1261,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'reply') {
         notifyComment($slug, $authorName, $body, true, $parentName);
         sendJson(['success' => true]);
     }
-    sendJson(['success' => false, 'error' => '父评论不存在'], 404);
+    sendJson(['success' => false, 'error' => tn('api.972')], 404);
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'delete') {
     $actor = verifyHomeUser();
@@ -1184,15 +1269,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'delete') {
     if (!$actor && ($_SESSION['cmt_user']['role'] ?? '') === ROLE_SUPER_ADMIN && !empty(loadSiteConfig()['super_admin_comment'])) {
         $actor = verifySessionUser();
     }
-    if (!$actor) sendJson(['success' => false, 'error' => '请先登录'], 401);
+    if (!$actor) sendJson(['success' => false, 'error' => tn('api.904')], 401);
     // v4.5.0：登录态用户删除评论前校验环境（换浏览器/设备/被踢 → 拒绝）
     if (($actor['id'] ?? '') !== 'guest' && !requireSessionEnv()) {
-        sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录后再操作', 'env_invalid' => true], 401);
+        sendJson(['success' => false, 'error' => tn('api.973'), 'env_invalid' => true], 401);
     }
     $payload = json_decode(file_get_contents('php://input'), true);
     $slug = trim($payload['article'] ?? '');
     $victimId = trim($payload['id'] ?? '');
-    if (empty($slug) || empty($victimId)) sendJson(['success' => false, 'error' => '参数不完整'], 400);
+    if (empty($slug) || empty($victimId)) sendJson(['success' => false, 'error' => tn('api.970')], 400);
     $thread = fetchCommentTree($slug);
     $privileged = in_array(($actor['role'] ?? ''), [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN]);
     $located = false;
@@ -1216,12 +1301,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'delete') {
     }
     if ($located) { persistCommentTree($slug, $thread); sendJson(['success' => true]); }
     logAbnormal(getClientIP(), '越权尝试删除评论: ' . $victimId . ' (文章: ' . $slug . ')');
-    sendJson(['success' => false, 'error' => '评论不存在或无权删除'], 404);
+    sendJson(['success' => false, 'error' => tn('api.974')], 404);
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'bg_upload') {
     $actor = verifySessionUser();
-    if (!$actor || ($actor['role'] ?? '') !== ROLE_SUPER_ADMIN) sendJson(['success' => false, 'error' => '无权限'], 403);
-    if (!isset($_FILES['bg_image']) || $_FILES['bg_image']['error'] !== UPLOAD_ERR_OK) sendJson(['success' => false, 'error' => '上传失败'], 400);
+    if (!$actor || ($actor['role'] ?? '') !== ROLE_SUPER_ADMIN) sendJson(['success' => false, 'error' => tn('api.906')], 403);
+    if (!isset($_FILES['bg_image']) || $_FILES['bg_image']['error'] !== UPLOAD_ERR_OK) sendJson(['success' => false, 'error' => tn('api.975')], 400);
     $upload = $_FILES['bg_image'];
     $mimes = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif', 'webp' => 'image/webp'];
     $rawExt = strtolower(pathinfo($upload['name'], PATHINFO_EXTENSION));
@@ -1234,9 +1319,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'bg_upload') {
         $probedMime = $mimes[$rawExt];
     }
     if (!$probedMime || !in_array($probedMime, array_values($mimes))) {
-        sendJson(['success' => false, 'error' => '仅支持 JPG/PNG/GIF/WebP 格式'], 400);
+        sendJson(['success' => false, 'error' => tn('api.976')], 400);
     }
-    if ($upload['size'] > 10 * 1024 * 1024) sendJson(['success' => false, 'error' => '文件大小不能超过 10MB'], 400);
+    if ($upload['size'] > 10 * 1024 * 1024) sendJson(['success' => false, 'error' => tn('api.977')], 400);
     $keepExt = array_search($probedMime, $mimes) ?: $rawExt;
     $assetName = 'bg_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $keepExt;
     $assetDir = './data/bg/';
@@ -1244,13 +1329,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'bg_upload') {
     if (move_uploaded_file($upload['tmp_name'], $assetDir . $assetName)) {
         sendJson(['success' => true, 'path' => 'data/bg/' . $assetName]);
     }
-    sendJson(['success' => false, 'error' => '保存失败，请检查 data/bg/ 目录权限'], 500);
+    sendJson(['success' => false, 'error' => tn('api.978')], 500);
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'bg_config') {
     $actor = verifySessionUser();
-    if (!$actor || ($actor['role'] ?? '') !== ROLE_SUPER_ADMIN) sendJson(['success' => false, 'error' => '无权限'], 403);
+    if (!$actor || ($actor['role'] ?? '') !== ROLE_SUPER_ADMIN) sendJson(['success' => false, 'error' => tn('api.906')], 403);
     $payload = json_decode(file_get_contents('php://input'), true);
-    if (!$payload) sendJson(['success' => false, 'error' => '无效的请求数据'], 400);
+    if (!$payload) sendJson(['success' => false, 'error' => tn('api.979')], 400);
     $settings = loadSiteConfig();
     $settings['bg_type'] = in_array($payload['bg_type'] ?? '', ['none', 'image', 'api']) ? $payload['bg_type'] : 'none';
     // bg_image 仅允许站内 data/bg/ 路径或 http(s) URL，防止 CSS 值注入
@@ -1768,4 +1853,5 @@ if ($action === 'links_check' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     sendJson(['success' => true, 'alive' => $alive]);
 }
 
-sendJson(['success' => false, 'error' => '未知操作'], 400);
+sendJson(['success' => false, 'error' => tn('api.980')], 400);
+sendJson(['success' => false, 'error' => tn('api.980')], 400);

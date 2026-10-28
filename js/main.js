@@ -1,8 +1,7 @@
 (function() {
-    // v6.3.0：动态文案翻译（简体下原样返回；i18n 运行时在 main.js 之后加载，故调用时再取用）
-    var TT = function(s) {
-        return typeof window.ysmT === "function" ? window.ysmT(s) : s;
-    };
+    // v6.3.0：动态文案取词（key 词表；i18n.js 先于本文件加载）
+    var TK = window.TK || function (k) { return String(k == null ? "" : k); };
+    var TT = TK;
     // v4.5.0：环境指纹——hash(lang|时区|分辨率|canvas 像素|UA)，登录/评论/后台等登录态接口经 X-Fp 头携带；
     //         服务端与会话绑定指纹比对，换浏览器/设备/隐私模式即判定环境变化。访客浏览不受影响。
     //         注意：指纹必须在同一会话内稳定（同步生成，不引入异步哈希，避免首请求与后续请求指纹不一致）。
@@ -921,7 +920,7 @@
             }
         } catch (e) {
             if (seq !== listSeq || (e && e.name === "AbortError")) return;
-            x.innerHTML = '<div class="empty-state">⚠️ ' + TT('加载失败') + '</div>';
+            x.innerHTML = '<div class="empty-state">⚠️ ' + TK('js.001') + '</div>';
         }
     }
     // v3.1.6：首页公告卡片（服务端 window.YSM_ANNOUNCEMENTS 数据；整卡可点跳详情）
@@ -941,15 +940,15 @@
             // 有关联文章 → 点击跳文章详情；无 → 点击弹出完整公告弹窗
             var t = e.article ? ' data-file="' + escapeHTML(e.article) + '"' : ' data-ann-id="' + escapeHTML(e.id) + '"';
             var n = e.cover ? '<div class="ann-card-media"><img class="ann-card-cover" src="' + escapeHTML(e.cover) + '" alt="" loading="lazy" onerror="this.parentNode.style.display=\'none\'"><div class="ann-card-cover-ink"></div></div>' : "";
-            var i = e.type === "update" ? '<span class="ann-card-type update"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M20 6L9 17l-5-5"/></svg>' + TT('更新') + '</span>' : '<span class="ann-card-type manual">' + TT('公告') + '</span>';
+            var i = e.type === "update" ? '<span class="ann-card-type update"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M20 6L9 17l-5-5"/></svg>' + TK('js.002') + '</span>' : '<span class="ann-card-type manual">' + TK('js.003') + '</span>';
             var a = (e.tags || []).map(function(e) {
                 return '<span class="ann-card-tag">#' + escapeHTML(e) + "</span>";
             }).join("");
             return '<div class="ann-card' + (e.cover ? " has-media" : "") + '" role="button" tabindex="0"' + t + ">" + '<div class="ann-card-left">' + 
             // v3.3.16：类型徽章与标题同一行（移动到标题旁边），不再是标题上方独立一行
-            '<div class="ann-card-title-row">' + i + '<h3 class="ann-card-title">' + escapeHTML(e.title) + "</h3></div>" + '<div class="ann-card-meta">' + '<span class="ann-meta-item"><span class="ann-meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>' + escapeHTML(e.date) + "</span>" + (e.words ? '<span class="ann-meta-item"><span class="ann-meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>' + TT('{n}k字').replace('{n}', (e.words / 1e3).toFixed(1)) + "</span>" : "") + "</div>" + (e.summary ? '<p class="ann-card-summary">' + escapeHTML(e.summary) + "</p>" : "") + (a ? '<div class="ann-card-tags">' + a + "</div>" : "") + '<span class="ann-card-more">' + (e.article ? TT("查看文章 →") : TT("查看详情 →")) + "</span>" + "</div>" + n + "</div>";
+            '<div class="ann-card-title-row">' + i + '<h3 class="ann-card-title">' + escapeHTML(e.title) + "</h3></div>" + '<div class="ann-card-meta">' + '<span class="ann-meta-item"><span class="ann-meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>' + escapeHTML(e.date) + "</span>" + (e.words ? '<span class="ann-meta-item"><span class="ann-meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>' + TK('js.004').replace('{n}', (e.words / 1e3).toFixed(1)) + "</span>" : "") + "</div>" + (e.summary ? '<p class="ann-card-summary">' + escapeHTML(e.summary) + "</p>" : "") + (a ? '<div class="ann-card-tags">' + a + "</div>" : "") + '<span class="ann-card-more">' + (e.article ? TK('js.005') : TK('js.006')) + "</span>" + "</div>" + n + "</div>";
         }).join("");
-        e.innerHTML = '<div class="ann-header"><span class="ann-header-icon"><svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></span>' + TT('公告') + '</div>' + '<div class="ann-list">' + (n || '<div class="ann-empty">' + TT('暂无公告') + '</div>') + "</div>";
+        e.innerHTML = '<div class="ann-header"><span class="ann-header-icon"><svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></span>' + TK('js.003') + '</div>' + '<div class="ann-list">' + (n || '<div class="ann-empty">' + TK('js.007') + '</div>') + "</div>";
         // 事件：整卡点击跳文章详情
                 e.querySelectorAll(".ann-card[data-file]").forEach(function(e) {
             e.addEventListener("click", function() {
@@ -1000,7 +999,7 @@
         function openAnnounceDetail(e) {
         var t = document.getElementById("announceModal");
         if (!t) return;
-        t.querySelector(".ann-modal-type").textContent = e.type === "update" ? TT("更新公告") : TT("公告");
+        t.querySelector(".ann-modal-type").textContent = e.type === "update" ? TK('js.008') : TK('js.003');
         t.querySelector(".ann-modal-title").textContent = e.title;
         t.querySelector(".ann-modal-date").textContent = e.date || "";
         // v3.3.15：公告弹窗展示字数（首页公告卡片有字数、点进纯文字公告弹窗却无——补齐）
@@ -1008,7 +1007,7 @@
         if (n) {
             if (e.words && e.words > 0) {
                 n.style.display = "inline-flex";
-                n.innerHTML = '<span class="ann-modal-words-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>' + TT('{n} 字').replace('{n}', e.words);
+                n.innerHTML = '<span class="ann-modal-words-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>' + TK('js.009').replace('{n}', e.words);
             } else {
                 n.style.display = "none";
             }
@@ -1052,7 +1051,7 @@
             });
         } else {
             i.classList.remove("markdown-body");
-            i.textContent = e.summary || TT("（暂无内容）");
+            i.textContent = e.summary || TK('js.010');
         }
         var o = t.querySelector(".ann-modal-link");
         if (e.article) {
@@ -1152,7 +1151,7 @@
         if (!Ie.length) {
             x.innerHTML = "";
             E.style.display = "block";
-            E.textContent = TT("📭 暂无文档");
+            E.textContent = TK('js.011');
             return;
         }
         E.style.display = "none";
@@ -1178,10 +1177,10 @@
         if (!e.length) {
             x.innerHTML = "";
             E.style.display = "block";
-            E.textContent = Me.length ? TT("🔍 没有同时包含所选标签的文章") : TT("🔍 该分类下暂无文章");
+            E.textContent = Me.length ? TK('js.012') : TK('js.013');
             return;
         }
-        x.innerHTML = e.map((e, t) => `\n            <div class="doc-card" data-heat="${escapeHTML(e.heat || "normal")}" data-views="${e.views || 0}" data-views30="${e.views30 || 0}" data-filename="${escapeHTML(e.name)}" style="animation-delay:${t * .05}s">\n                ${e.cover ? `<div class="doc-cover"><img src="${escapeHTML(cardCover(e.cover))}" alt="" loading="lazy" onerror="this.parentNode.style.display='none'"></div>` : ""}\n                <div class="card-title">${e.pinned ? '<span class="card-pin-icon" title="' + TT('置顶') + '"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" fill="currentColor" stroke="none"/></svg></span>' : ""}${escapeHTML(e.displayName)}</div>\n                <div class="card-meta">\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>${e.modified}</span>\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>${e.wordCount}字</span>\n                    ${e.category ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>${escapeHTML(e.category)}</span>` : ""}\n                    ${(e.views || 0) > 0 ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>${e.views}</span>` : ""}\n                </div>\n                <div class="card-excerpt">${escapeHTML(e.excerpt || "")}</div>\n                <div class="card-tags">${e.tags.map(e => `<span class="tag${isTagSelected(e) ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div></div>`).join("");
+        x.innerHTML = e.map((e, t) => `\n            <div class="doc-card" data-heat="${escapeHTML(e.heat || "normal")}" data-views="${e.views || 0}" data-views30="${e.views30 || 0}" data-filename="${escapeHTML(e.name)}" style="animation-delay:${t * .05}s">\n                ${e.cover ? `<div class="doc-cover"><img src="${escapeHTML(cardCover(e.cover))}" alt="" loading="lazy" onerror="this.parentNode.style.display='none'"></div>` : ""}\n                <div class="card-title">${e.pinned ? '<span class="card-pin-icon" title="' + TK('js.014') + '"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" fill="currentColor" stroke="none"/></svg></span>' : ""}${escapeHTML(e.displayName)}</div>\n                <div class="card-meta">\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>${e.modified}</span>\n                    <span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>${e.wordCount}字</span>\n                    ${e.category ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>${escapeHTML(e.category)}</span>` : ""}\n                    ${(e.views || 0) > 0 ? `<span><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>${e.views}</span>` : ""}\n                </div>\n                <div class="card-excerpt">${escapeHTML(e.excerpt || "")}</div>\n                <div class="card-tags">${e.tags.map(e => `<span class="tag${isTagSelected(e) ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div></div>`).join("");
         document.querySelectorAll(".doc-card").forEach(e => e.addEventListener("click", () => loadFile(e.dataset.filename)));
         // v4.0.0：卡片标签点击 → 标签聚合过滤（阻止冒泡，避免误触进入文章）
                 document.querySelectorAll(".doc-card .card-tags .tag").forEach(e => {
@@ -1211,7 +1210,7 @@
                 popTitle.addEventListener("click", function() {
                     popSec.classList.toggle("is-open");
                     var st = popTitle.querySelector(".home-popular-state");
-                    if (st) st.textContent = popSec.classList.contains("is-open") ? TT("收起") : TT("展开");
+                    if (st) st.textContent = popSec.classList.contains("is-open") ? TK('js.015') : TK('js.016');
                 });
             }
         }
@@ -1224,7 +1223,7 @@
             return (b.views || 0) - (a.views || 0);
         }).slice(0, 5);
         if (!list.length) {
-            box.innerHTML = '<div class="home-popular-empty">' + TT('暂无数据') + '</div>';
+            box.innerHTML = '<div class="home-popular-empty">' + TK('js.017') + '</div>';
             return;
         }
         box.innerHTML = list.map(function(e, i) {
@@ -1272,7 +1271,7 @@
         e.classList.add("has-categories");
         var s = Ie.length;
         // v4.0.0：归档视图切换按钮 + 标签聚合条
-                var o = He ? `<div class="category-bar-item active" data-view="archive">${TT('归档')}</div>` : `<div class="category-bar-item" data-view="archive">${TT('归档')}</div>`;
+                var o = He ? `<div class="category-bar-item active" data-view="archive">${TK('js.018')}</div>` : `<div class="category-bar-item" data-view="archive">${TK('js.018')}</div>`;
         var c = `<div class="category-bar-left">${o}<div class="category-bar-item${Be === "" && !Me.length ? " active" : ""}" data-category="">全部 <span class="category-bar-count">${s}</span></div></div>`;
         var r = '<div class="category-bar-divider"></div>';
         var l = "";
@@ -1292,7 +1291,7 @@
         if (Be === "" && a.length > 0) {
             d = `<div class="tag-cloud-row"><div class="tag-cloud">${a.slice(0, 20).map(e => `<span class="tag-cloud-item${isTagSelected(e) ? " active" : ""}" data-tag="${escapeHTML(e)}">#${escapeHTML(e)}</span>`).join("")}</div></div>`;
         }
-        var clr = Me.length ? '<span class="tag-filter-clear" data-clear="1">' + TT('清空') + '</span>' : "";
+        var clr = Me.length ? '<span class="tag-filter-clear" data-clear="1">' + TK('js.019') + '</span>' : "";
         var m = `<div class="category-bar-right">${f}${l}${clr}</div>`;
         e.innerHTML = c + r + m + d;
         e.querySelectorAll(".category-bar-item").forEach(e => {
@@ -1419,19 +1418,19 @@
         L.style.display = "block";
         var e = filteredFiles();
         if (!e.length) {
-            L.innerHTML = '<div class="archive-empty">' + TT('暂无归档内容') + '</div>';
+            L.innerHTML = '<div class="archive-empty">' + TK('js.020') + '</div>';
             return;
         }
         // 按 modified 年月分组（倒序）
                 var t = {};
         e.forEach(e => {
             var n = (e.modified || "").slice(0, 7);
-            if (!n) n = TT("未分类");
+            if (!n) n = TK('js.021');
             (t[n] = t[n] || []).push(e);
         });
         var n = Object.keys(t).sort((e, t) => t.localeCompare(e));
         var i = n.map(e => {
-            var n = t[e].map(e => `\n                <a class="archive-item" data-filename="${escapeHTML(e.name)}">\n                    <span class="archive-item-title">${escapeHTML(e.displayName)}</span>\n                    <span class="archive-item-meta">${escapeHTML(e.modified)}${(e.views || 0) > 0 ? " · " + TT('{n} 浏览').replace('{n}', e.views) : ""}</span>\n                </a>`).join("");
+            var n = t[e].map(e => `\n                <a class="archive-item" data-filename="${escapeHTML(e.name)}">\n                    <span class="archive-item-title">${escapeHTML(e.displayName)}</span>\n                    <span class="archive-item-meta">${escapeHTML(e.modified)}${(e.views || 0) > 0 ? " · " + TK('js.022').replace('{n}', e.views) : ""}</span>\n                </a>`).join("");
             return `<div class="archive-group"><div class="archive-year">${escapeHTML(e)} <span class="archive-year-count">${t[e].length} 篇</span></div><div class="archive-items">${n}</div></div>`;
         }).join("");
         L.innerHTML = i;
@@ -1440,7 +1439,7 @@
     function renderSidebarList(e) {
         if (!ye) return;
         Le.textContent = e.length;
-        ye.innerHTML = e.map(e => `\n            <div class="sidebar-item" data-filename="${escapeHTML(e.name)}">\n                <div class="sidebar-item-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>\n                <div style="flex:1;min-width:0;overflow:hidden;">\n                    <div class="sidebar-item-text">${e.pinned ? '<span class="sidebar-pin-icon" title="' + TT('置顶') + '"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" fill="currentColor" stroke="none"/></svg></span>' : ""}${escapeHTML(e.displayName)}</div>\n                    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e.modified}</div>\n                </div>\n            </div>`).join("");
+        ye.innerHTML = e.map(e => `\n            <div class="sidebar-item" data-filename="${escapeHTML(e.name)}">\n                <div class="sidebar-item-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>\n                <div style="flex:1;min-width:0;overflow:hidden;">\n                    <div class="sidebar-item-text">${e.pinned ? '<span class="sidebar-pin-icon" title="' + TK('js.014') + '"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" fill="currentColor" stroke="none"/></svg></span>' : ""}${escapeHTML(e.displayName)}</div>\n                    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e.modified}</div>\n                </div>\n            </div>`).join("");
         ye.querySelectorAll(".sidebar-item").forEach(e => {
             e.addEventListener("click", () => loadFile(e.dataset.filename));
         });
@@ -1474,7 +1473,7 @@
     function renderSidebarToc(e) {
         if (!ge) return;
         if (!e.length) {
-            ge.innerHTML = '<div style="padding:16px;color:var(--text-muted);text-align:center;font-size:13px;">' + TT('暂无标题') + '</div>';
+            ge.innerHTML = '<div style="padding:16px;color:var(--text-muted);text-align:center;font-size:13px;">' + TK('js.023') + '</div>';
             return;
         }
         renderTocItems(ge, e);
@@ -1525,18 +1524,18 @@
             const seq = ++searchSeq;
             if (searchCtrl) searchCtrl.abort();
             searchCtrl = new AbortController();
-            y.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">' + TT('搜索中…') + '</div>';
+            y.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">' + TK('js.024') + '</div>';
             try {
                 const t = await fetch("?action=search&q=" + encodeURIComponent(e), { signal: searchCtrl.signal });
                 const n = await t.json();
                 if (seq !== searchSeq) return;
                 if (!n.success) {
-                    y.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">' + TT('搜索失败') + '</div>';
+                    y.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">' + TK('js.025') + '</div>';
                     return;
                 }
                 const i = n.files || [];
                 if (!i.length) {
-                    y.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">' + TT('未找到匹配「{q}」的文章').replace('{q}', escapeHTML(e)) + "</div>";
+                    y.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">' + TK('js.026').replace('{q}', escapeHTML(e)) + "</div>";
                     return;
                 }
                 y.innerHTML = i.map(e => `\n                    <div class="dropdown-item" data-filename="${escapeHTML(e.name)}">\n                        <div class="file-icon"><svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>\n                        <div class="file-info"><div class="file-name">${escapeHTML(e.displayName)}</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escapeHTML((e.excerpt || "").slice(0, 60))}</div></div>\n                    </div>`).join("");
@@ -1550,7 +1549,7 @@
                 });
             } catch (e) {
                 if (seq !== searchSeq || (e && e.name === "AbortError")) return;
-                y.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">' + TT('搜索失败') + '</div>';
+                y.innerHTML = '<div style="padding:14px;color:var(--text-muted);text-align:center;font-size:13px">' + TK('js.025') + '</div>';
             }
         }, 250);
     });
@@ -1586,7 +1585,7 @@
     }
     function renderDocumentOutline() {
         if (!Pe.length) {
-            g.innerHTML = '<div style="padding:16px;color:var(--text-muted);text-align:center;">' + TT('暂无标题') + '</div>';
+            g.innerHTML = '<div style="padding:16px;color:var(--text-muted);text-align:center;">' + TK('js.023') + '</div>';
             return;
         }
         renderTocItems(g, Pe);
@@ -1594,7 +1593,7 @@
     }
     function renderTocPopup() {
         if (!Pe.length) {
-            B.innerHTML = '<div style="padding:16px;color:var(--text-muted);text-align:center;">' + TT('暂无标题') + '</div>';
+            B.innerHTML = '<div style="padding:16px;color:var(--text-muted);text-align:center;">' + TK('js.023') + '</div>';
             return;
         }
         renderTocItems(B, Pe);
@@ -1665,7 +1664,7 @@
                 function showCopied() {
                     a.classList.add("copied");
                     a.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>';
-                    showToast(TT("已复制到剪贴板"));
+                    showToast(TK('js.027'));
                     setTimeout(() => {
                         a.classList.remove("copied");
                         a.innerHTML = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
@@ -1704,7 +1703,7 @@
                 const t = document.createElement("div");
                 t.className = "collapse-btn";
                 t.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>';
-                t.title = TT("折叠/展开代码块");
+                t.title = TK('js.028');
                 t.addEventListener("click", t => {
                     t.stopPropagation();
                     e.classList.toggle("collapsed");
@@ -1726,14 +1725,14 @@
             Te.textContent = Ie[e].displayName;
         } else {
             ke.classList.add("disabled");
-            Te.textContent = TT("没有了");
+            Te.textContent = TK('js.029');
         }
         if (t < Ie.length) {
             Se.classList.remove("disabled");
             Ce.textContent = Ie[t].displayName;
         } else {
             Se.classList.add("disabled");
-            Ce.textContent = TT("没有了");
+            Ce.textContent = TK('js.029');
         }
     }
     ke.addEventListener("click", () => {
@@ -1769,9 +1768,9 @@
         t.select();
         try {
             document.execCommand("copy");
-            showToast(TT("链接已复制"));
+            showToast(TK('js.030'));
         } catch (e) {
-            showToast(TT("复制失败，请手动复制"));
+            showToast(TK('js.031'));
         }
         document.body.removeChild(t);
     }
@@ -1835,8 +1834,8 @@
         const n = Math.max(1, Math.round(t / 300));
         let i = '<div class="doc-header">';
         i += '<div class="doc-stats">';
-        i += '<span class="stat-item"><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>' + TT('{n} 字').replace('{n}', t) + "</span>";
-        i += '<span class="stat-item"><span class="meta-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>' + TT('{n} 分钟').replace('{n}', n) + "</span>";
+        i += '<span class="stat-item"><span class="meta-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>' + TK('js.009').replace('{n}', t) + "</span>";
+        i += '<span class="stat-item"><span class="meta-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>' + TK('js.032').replace('{n}', n) + "</span>";
         i += "</div>";
         i += '<div class="doc-title">' + escapeHTML(e.displayName) + "</div>";
         i += '<div class="doc-info">';
@@ -1854,24 +1853,24 @@
         const i = e.license || "CC BY-NC-SA 4.0";
         const a = n ? `<a href="${escapeHTML(n)}" target="_blank" rel="noopener">${escapeHTML(i)}</a>` : escapeHTML(i);
         const s = e.author ? `<span class="info-card-author">${escapeHTML(e.author)}</span>` : "";
-        return `\n        <div class="article-bottom-cards">\n            <div class="share-card">\n                <div class="share-card-top">\n                    <div class="share-card-icon">\n                        <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>\n                    </div>\n                    <div>\n                        <div class="share-card-title">${TT('分享')}</div>\n                        <div class="share-card-desc">${TT('如果这篇文章对你有帮助，欢迎分享给更多人！')}</div>\n                    </div>\n                </div>\n                <button class="share-card-btn" id="shareCardBtnInline">${TT('分享')}</button>\n            </div>\n            <div class="article-info-card">\n                <div class="info-card-title">${escapeHTML(e.displayName)}</div>\n                <div class="info-card-url">${escapeHTML(t)}</div>\n                <div class="info-card-meta">\n                    ${s ? `<div class="info-card-meta-item">\n                        <span class="info-card-meta-label">${TT('作者')}</span>\n                        <span>${s}</span>\n                    </div>` : ""}\n                    <div class="info-card-meta-item">\n                        <span class="info-card-meta-label">${TT('发布于')}</span>\n                        <span>${e.modified}</span>\n                    </div>\n                    <div class="info-card-meta-item">\n                        <span class="info-card-meta-label">${TT('许可证书')}</span>\n                        <span class="info-card-license">${a}</span>\n                    </div>\n                </div>\n            </div>\n        </div>`;
+        return `\n        <div class="article-bottom-cards">\n            <div class="share-card">\n                <div class="share-card-top">\n                    <div class="share-card-icon">\n                        <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>\n                    </div>\n                    <div>\n                        <div class="share-card-title">${TK('js.033')}</div>\n                        <div class="share-card-desc">${TK('js.034')}</div>\n                    </div>\n                </div>\n                <button class="share-card-btn" id="shareCardBtnInline">${TK('js.033')}</button>\n            </div>\n            <div class="article-info-card">\n                <div class="info-card-title">${escapeHTML(e.displayName)}</div>\n                <div class="info-card-url">${escapeHTML(t)}</div>\n                <div class="info-card-meta">\n                    ${s ? `<div class="info-card-meta-item">\n                        <span class="info-card-meta-label">${TK('js.035')}</span>\n                        <span>${s}</span>\n                    </div>` : ""}\n                    <div class="info-card-meta-item">\n                        <span class="info-card-meta-label">${TK('js.036')}</span>\n                        <span>${e.modified}</span>\n                    </div>\n                    <div class="info-card-meta-item">\n                        <span class="info-card-meta-label">${TK('js.037')}</span>\n                        <span class="info-card-license">${a}</span>\n                    </div>\n                </div>\n            </div>\n        </div>`;
     }
     function showNotFound(e) {
         showReading();
-        w.innerHTML = '<div style="text-align:center;padding:60px 20px;">' + '<div style="font-size:4em;font-weight:800;color:var(--accent);line-height:1;margin-bottom:12px;">404</div>' + '<div style="font-size:1.2em;font-weight:600;margin-bottom:8px;">' + TT('文档不存在') + '</div>' + '<div style="color:var(--text-secondary);margin-bottom:24px;">' + (e ? TT('文件 {name} 未找到，可能已被删除。').replace('{name}', escapeHTML(e)) : TT('你访问的页面不存在。')) + "</div>" + '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">' + TT('返回首页') + '</a>' + "</div>";
-        document.title = TT("404 - 文档不存在 | ") + (window.YSM_SITE_TITLE || "You Super Markdown");
+        w.innerHTML = '<div style="text-align:center;padding:60px 20px;">' + '<div style="font-size:4em;font-weight:800;color:var(--accent);line-height:1;margin-bottom:12px;">404</div>' + '<div style="font-size:1.2em;font-weight:600;margin-bottom:8px;">' + TK('js.038') + '</div>' + '<div style="color:var(--text-secondary);margin-bottom:24px;">' + (e ? TK('js.039').replace('{name}', escapeHTML(e)) : TK('js.040')) + "</div>" + '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">' + TK('js.041') + '</a>' + "</div>";
+        document.title = TK('js.042') + (window.YSM_SITE_TITLE || "You Super Markdown");
     }
     // v4.6.1：加载失败（网络错误/响应非 JSON）——与「文件不存在」区分，避免误报"文档不存在"
         function showLoadError(e) {
         showReading();
-        w.innerHTML = '<div style="text-align:center;padding:60px 20px;">' + '<div style="font-size:4em;font-weight:800;color:var(--accent);line-height:1;margin-bottom:12px;">⚠</div>' + '<div style="font-size:1.2em;font-weight:600;margin-bottom:8px;">' + TT('加载失败') + '</div>' + '<div style="color:var(--text-secondary);margin-bottom:24px;">' + (e ? TT('文件 {name} 暂时无法加载，请检查网络后重试。').replace('{name}', escapeHTML(e)) : TT('网络异常，请稍后重试。')) + "</div>" + '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">' + TT('返回首页') + '</a>' + "</div>";
-        document.title = TT("加载失败 | ") + (window.YSM_SITE_TITLE || "You Super Markdown");
+        w.innerHTML = '<div style="text-align:center;padding:60px 20px;">' + '<div style="font-size:4em;font-weight:800;color:var(--accent);line-height:1;margin-bottom:12px;">⚠</div>' + '<div style="font-size:1.2em;font-weight:600;margin-bottom:8px;">' + TK('js.001') + '</div>' + '<div style="color:var(--text-secondary);margin-bottom:24px;">' + (e ? TK('js.043').replace('{name}', escapeHTML(e)) : TK('js.044')) + "</div>" + '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">' + TK('js.041') + '</a>' + "</div>";
+        document.title = TK('js.045') + (window.YSM_SITE_TITLE || "You Super Markdown");
     }
     // v4.6.1：内容已获取但渲染过程出错（marked/highlight 等）——独立提示并输出控制台错误，便于定位
         function showRenderError(e) {
         showReading();
-        w.innerHTML = '<div style="text-align:center;padding:60px 20px;">' + '<div style="font-size:4em;font-weight:800;color:var(--accent);line-height:1;margin-bottom:12px;">!</div>' + '<div style="font-size:1.2em;font-weight:600;margin-bottom:8px;">' + TT('内容渲染失败') + '</div>' + '<div style="color:var(--text-secondary);margin-bottom:24px;">' + TT('文件内容已获取，但页面渲染时发生错误。请查看浏览器控制台或联系管理员。') + '</div>' + '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">' + TT('返回首页') + '</a>' + "</div>";
-        document.title = TT("渲染失败 | ") + (window.YSM_SITE_TITLE || "You Super Markdown");
+        w.innerHTML = '<div style="text-align:center;padding:60px 20px;">' + '<div style="font-size:4em;font-weight:800;color:var(--accent);line-height:1;margin-bottom:12px;">!</div>' + '<div style="font-size:1.2em;font-weight:600;margin-bottom:8px;">' + TK('js.046') + '</div>' + '<div style="color:var(--text-secondary);margin-bottom:24px;">' + TK('js.047') + '</div>' + '<a href="./" style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;">' + TK('js.041') + '</a>' + "</div>";
+        document.title = TK('js.048') + (window.YSM_SITE_TITLE || "You Super Markdown");
     }
     async function loadFile(e, t = true) {
         // v5.4.3：请求序号 + AbortController——开启新加载即取消旧请求；迟到的旧响应静默丢弃
@@ -1879,7 +1878,7 @@
         if (loadCtrl) loadCtrl.abort();
         loadCtrl = new AbortController();
         showReading();
-        w.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:40px;">' + "⏳ " + TT('加载中...') + '</p>';
+        w.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:40px;">' + "⏳ " + TK('js.049') + '</p>';
         Ue = Ie.findIndex(t => t.name === e);
         updatePrevNext();
         if (t) updateUrl(e);
@@ -2045,7 +2044,7 @@
                             var t = getShortUrl(e);
                             if (navigator.clipboard && navigator.clipboard.writeText) {
                                 navigator.clipboard.writeText(t).then(function() {
-                                    showToast(TT("链接已复制"));
+                                    showToast(TK('js.030'));
                                 }).catch(function() {
                                     copyFallback(t);
                                 });
@@ -2058,7 +2057,7 @@
             }
             updatePrevNext();
             if (!localStorage.getItem("md-keyboard-hint-shown")) {
-                setTimeout(() => showToast(TT("← → 切换文章 | ESC 返回首页 | T 回到顶部"), 3e3), 500);
+                setTimeout(() => showToast(TK('js.050'), 3e3), 500);
                 localStorage.setItem("md-keyboard-hint-shown", "1");
             }
             const l = sessionStorage.getItem("md-read-scroll-" + e);
@@ -2235,7 +2234,7 @@
         if (!e) {
             e = document.createElement("div");
             e.className = "kbd-help-overlay";
-            e.innerHTML = `\n        <div class="kbd-help-box">\n            <div class="kbd-help-title">\n                <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/></svg>\n                ${TT('快捷键')}\n            </div>\n            <div class="kbd-help-section">\n                <h4>${TT('导航')}</h4>\n                <div class="kbd-row"><span class="kbd-label">${TT('搜索文档（全文）')}</span><span class="kbd-keys"><kbd>/</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TT('归档视图切换')}</span><span class="kbd-keys"><kbd>A</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TT('打开 RSS 订阅')}</span><span class="kbd-keys"><kbd>R</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TT('上一篇文章')}</span><span class="kbd-keys"><kbd>←</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TT('下一篇文章')}</span><span class="kbd-keys"><kbd>→</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TT('返回首页')}</span><span class="kbd-keys"><kbd>Esc</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TT('回到顶部')}</span><span class="kbd-keys"><kbd>T</kbd></span></div>\n            </div>\n            <div class="kbd-help-section">\n                <h4>${TT('阅读')}</h4>\n                <div class="kbd-row"><span class="kbd-label">${TT('打印文章')}</span><span class="kbd-keys"><kbd>P</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TT('折叠/展开侧边栏')}</span><span class="kbd-keys"><kbd>S</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TT('关闭弹窗')}</span><span class="kbd-keys"><kbd>Esc</kbd></span></div>\n            </div>\n            <div class="kbd-help-section">\n                <h4>${TT('灯箱')}</h4>\n                <div class="kbd-row"><span class="kbd-label">${TT('上一张图片')}</span><span class="kbd-keys"><kbd>←</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TT('下一张图片')}</span><span class="kbd-keys"><kbd>→</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TT('关闭')}</span><span class="kbd-keys"><kbd>Esc</kbd></span></div>\n            </div>\n        </div>`;
+            e.innerHTML = `\n        <div class="kbd-help-box">\n            <div class="kbd-help-title">\n                <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/></svg>\n                ${TK('js.051')}\n            </div>\n            <div class="kbd-help-section">\n                <h4>${TK('js.052')}</h4>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.053')}</span><span class="kbd-keys"><kbd>/</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.054')}</span><span class="kbd-keys"><kbd>A</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.055')}</span><span class="kbd-keys"><kbd>R</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.056')}</span><span class="kbd-keys"><kbd>←</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.057')}</span><span class="kbd-keys"><kbd>→</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.041')}</span><span class="kbd-keys"><kbd>Esc</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.058')}</span><span class="kbd-keys"><kbd>T</kbd></span></div>\n            </div>\n            <div class="kbd-help-section">\n                <h4>${TK('js.059')}</h4>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.060')}</span><span class="kbd-keys"><kbd>P</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.061')}</span><span class="kbd-keys"><kbd>S</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.062')}</span><span class="kbd-keys"><kbd>Esc</kbd></span></div>\n            </div>\n            <div class="kbd-help-section">\n                <h4>${TK('js.063')}</h4>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.064')}</span><span class="kbd-keys"><kbd>←</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.065')}</span><span class="kbd-keys"><kbd>→</kbd></span></div>\n                <div class="kbd-row"><span class="kbd-label">${TK('js.066')}</span><span class="kbd-keys"><kbd>Esc</kbd></span></div>\n            </div>\n        </div>`;
             e.addEventListener("click", t => {
                 if (t.target === e) e.classList.remove("show");
             });
@@ -2348,7 +2347,7 @@
                 a.type = n ? "text" : "password";
                 i.innerHTML = n ? t : e;
                 i.setAttribute("aria-pressed", n ? "true" : "false");
-                i.title = n ? TT("隐藏密码") : TT("显示/隐藏密码");
+                i.title = n ? TK('js.067') : TK('js.068');
             });
         });
     })();
@@ -2419,18 +2418,18 @@
     }
     function cmtGreeting() {
         const e = (new Date).getHours();
-        if (e < 12) return TT("上午好");
-        if (e < 14) return TT("中午好");
-        return TT("下午好");
+        if (e < 12) return TK('js.069');
+        if (e < 14) return TK('js.070');
+        return TK('js.071');
     }
     function cmtFormatTime(e) {
         if (!e) return "";
         const t = new Date(e.replace(/-/g, "/"));
         const n = Date.now();
         const i = (n - t.getTime()) / 1e3;
-        if (i < 60) return TT("刚刚");
-        if (i < 3600) return Math.floor(i / 60) + TT("分钟前");
-        if (i < 86400) return Math.floor(i / 3600) + TT("小时前");
+        if (i < 60) return TK('js.072');
+        if (i < 3600) return Math.floor(i / 60) + TK('js.073');
+        if (i < 86400) return Math.floor(i / 3600) + TK('js.074');
         const a = t.getFullYear(), s = t.getMonth() + 1, o = t.getDate();
         const c = t.getHours().toString().padStart(2, "0");
         const r = t.getMinutes().toString().padStart(2, "0");
@@ -2481,7 +2480,7 @@
             const n = document.getElementById("cmtEditEmail");
             if (n) {
                 n.value = "";
-                n.placeholder = vn.email ? TT('当前绑定：{email}，输入新邮箱更换').replace('{email}', vn.email) : TT("输入邮箱进行绑定");
+                n.placeholder = vn.email ? TK('js.075').replace('{email}', vn.email) : TK('js.076');
             }
             const i = document.getElementById("cmtEditEmailCode");
             if (i) i.value = "";
@@ -2490,7 +2489,7 @@
             const s = document.getElementById("cmtEmailSendCode");
             if (s) {
                 s.disabled = false;
-                s.textContent = TT("获取验证码");
+                s.textContent = TK('js.077');
             }
             cmtOpenModal(Kt);
         };
@@ -2547,11 +2546,11 @@
     });
     function cmtUpdateAuthUI() {
         const e = yn === "login";
-        if (ct) ct.textContent = e ? TT("登录") : TT("注册");
+        if (ct) ct.textContent = e ? TK('js.078') : TK('js.079');
         if (lt) lt.style.display = e ? "flex" : "none";
         if (dt) dt.style.display = e ? "none" : "flex";
-        if (Rt) Rt.textContent = e ? TT("还没有账号？") : TT("已有账号？");
-        if (Ot) Ot.textContent = e ? TT("立即注册") : TT("去登录");
+        if (Rt) Rt.textContent = e ? TK('js.080') : TK('js.081');
+        if (Ot) Ot.textContent = e ? TK('js.082') : TK('js.083');
         if (pt) pt.textContent = "";
         if (ht) ht.textContent = "";
         // v4.7.0：登录/注册切换时隐藏设备验证与找回视图
@@ -2562,13 +2561,13 @@
         const e = mt.value.trim(), t = ut.value;
         pt.textContent = "";
         if (!e || !t) {
-            pt.textContent = TT("请填写QQ号和密码");
+            pt.textContent = TK('js.084');
             return;
         }
         // v2.11.1：提交前动态刷新 token（与当前 session 绑定，杜绝「会话失败」）
                 await ensureFreshCsrf();
         ft.disabled = true;
-        ft.textContent = TT("登录中...");
+        ft.textContent = TK('js.085');
         fetch("api.php?action=login", {
             method: "POST",
             headers: {
@@ -2593,9 +2592,10 @@
                 cmtMaybeGoAdmin();
             } else {
                 // v2.10.2：CSRF 校验失败多为会话 cookie 未生效（浏览器 cookie 策略/瞬态），自动刷新页面一次重取 token+cookie
-                if (e.error === "CSRF 校验失败" && !window.__csrfRetried) { // i18n-ok：后端错误码比较值
+                // v6.3.0：改比稳定错误码 error_code，不再比文案（文案已随语言翻译）
+                if (e.error_code === "csrf" && !window.__csrfRetried) {
                     window.__csrfRetried = true;
-                    pt.textContent = TT("会话校验失败，正在刷新页面，请重新登录...");
+                    pt.textContent = TK('js.086');
                     setTimeout(function() {
                         location.reload();
                     }, 600);
@@ -2604,7 +2604,7 @@
                 // v2.11.0：锁定（429）时显示剩余秒数倒计时
                                 if (e.locked_seconds > 0) {
                     let t = e.locked_seconds;
-                    const fmt = () => TT('登录失败次数过多，请在 {m} 分 {s} 秒后重试').replace('{m}', Math.floor(t / 60)).replace('{s}', t % 60);
+                    const fmt = () => TK('js.087').replace('{m}', Math.floor(t / 60)).replace('{s}', t % 60);
                     pt.textContent = fmt();
                     const n = setInterval(() => {
                         t--;
@@ -2614,28 +2614,28 @@
                         } else pt.textContent = fmt();
                     }, 1e3);
                 } else {
-                    pt.textContent = e.error || TT("登录失败");
+                    pt.textContent = e.error || TK('js.088');
                 }
             }
         }).catch(() => {
-            pt.textContent = TT("网络错误");
+            pt.textContent = TK('js.089');
         }).finally(() => {
             ft.disabled = false;
-            ft.textContent = TT("登录");
+            ft.textContent = TK('js.078');
         });
     });
     // ---- v4.7.0：陌生设备登录邮件二次验证 + 找回密码 ----
     // v4.7.3：切换到设备验证视图（登录返回 need_device_verify 或刷新后 check 报告 pending 时共用，
     //         解决「切后台看邮箱返回后弹窗丢失」——页面被移动端浏览器重载时通过 check 恢复弹窗）
         function cmtShowDevVerify(e) {
-        if (Ft) Ft.textContent = e ? TT('验证码已发送至 {email}，请查收邮箱').replace('{email}', e) : TT("验证码已发送，请查收邮箱");
+        if (Ft) Ft.textContent = e ? TK('js.090').replace('{email}', e) : TK('js.091');
         if (Nt) Nt.textContent = "";
         if (jt) jt.value = "";
         if (lt) lt.style.display = "none";
         if (dt) dt.style.display = "none";
         if ($t) $t.style.display = "none";
         if (Ut) Ut.style.display = "flex";
-        if (ct) ct.textContent = TT("设备验证");
+        if (ct) ct.textContent = TK('js.092');
         setTimeout(() => {
             if (jt) jt.focus();
         }, 60);
@@ -2645,21 +2645,21 @@
         if (Ut) Ut.style.display = "none";
         if ($t) $t.style.display = "none";
         if (dt) dt.style.display = "none";
-        ct.textContent = TT("登录");
-        if (Rt) Rt.textContent = TT("还没有账号？");
-        if (Ot) Ot.textContent = TT("立即注册");
+        ct.textContent = TK('js.078');
+        if (Rt) Rt.textContent = TK('js.080');
+        if (Ot) Ot.textContent = TK('js.082');
     }
     // 设备验证码提交
         if (qt) qt.addEventListener("click", async () => {
         const e = jt.value.trim();
         Nt.textContent = "";
         if (!/^\d{6}$/.test(e)) {
-            Nt.textContent = TT("请输入6位数字验证码");
+            Nt.textContent = TK('js.093');
             return;
         }
         await ensureFreshCsrf();
         qt.disabled = true;
-        qt.textContent = TT("验证中...");
+        qt.textContent = TK('js.094');
         fetch("api.php?action=device_verify", {
             method: "POST",
             headers: {
@@ -2676,18 +2676,18 @@
                 cmtUpdateUI();
                 cmtLoad();
             } else {
-                Nt.textContent = e.error || TT("验证失败");
+                Nt.textContent = e.error || TK('js.095');
                 // 连续输错过多 → 自动返回登录（后端已清 pending）
                                 if (e.fails >= 5) setTimeout(() => {
                     cmtBackToLogin();
-                    Nt.textContent = TT("验证次数过多，请重新登录");
+                    Nt.textContent = TK('js.096');
                 }, 600);
             }
         }).catch(() => {
-            Nt.textContent = TT("网络错误");
+            Nt.textContent = TK('js.089');
         }).finally(() => {
             qt.disabled = false;
-            qt.textContent = TT("确认设备");
+            qt.textContent = TK('js.097');
         });
     });
     if (_t) _t.addEventListener("click", () => {
@@ -2700,7 +2700,7 @@
         if (Ut) Ut.style.display = "none";
         if (dt) dt.style.display = "none";
         $t.style.display = "flex";
-        ct.textContent = TT("找回密码");
+        ct.textContent = TK('js.098');
         Wt.textContent = "";
         setTimeout(() => {
             if (zt) zt.focus();
@@ -2715,12 +2715,12 @@
         const e = zt.value.trim(), t = Dt.value.trim();
         Wt.textContent = "";
         if (!e || !t) {
-            Wt.textContent = TT("请填写账号与绑定邮箱");
+            Wt.textContent = TK('js.099');
             return;
         }
         await ensureFreshCsrf();
         Vt.disabled = true;
-        Vt.textContent = TT("发送中...");
+        Vt.textContent = TK('js.100');
         fetch("api.php?action=password_reset", {
             method: "POST",
             headers: {
@@ -2733,18 +2733,18 @@
             })
         }).then(e => e.json()).then(e => {
             if (e.success) {
-                Wt.textContent = TT('验证码已发送至 {email}，请在5分钟内完成重置').replace('{email}', e.masked_email || TT('绑定邮箱'));
+                Wt.textContent = TK('js.101').replace('{email}', e.masked_email || TK('js.102'));
                 Wt.style.color = "";
             } else {
-                Wt.textContent = e.error || TT("发送失败");
+                Wt.textContent = e.error || TK('js.103');
                 Wt.style.color = "#e5484d";
             }
         }).catch(() => {
-            Wt.textContent = TT("网络错误");
+            Wt.textContent = TK('js.089');
             Wt.style.color = "#e5484d";
         }).finally(() => {
             Vt.disabled = false;
-            Vt.textContent = TT("发送验证码");
+            Vt.textContent = TK('js.104');
         });
     });
     // 重置密码
@@ -2753,12 +2753,12 @@
         Wt.textContent = "";
         Wt.style.color = "";
         if (!e || !t || !n) {
-            Wt.textContent = TT("请完整填写账号、验证码与新密码");
+            Wt.textContent = TK('js.105');
             return;
         }
         await ensureFreshCsrf();
         Qt.disabled = true;
-        Qt.textContent = TT("重置中...");
+        Qt.textContent = TK('js.106');
         fetch("api.php?action=password_reset", {
             method: "POST",
             headers: {
@@ -2772,20 +2772,20 @@
             })
         }).then(e => e.json()).then(e => {
             if (e.success) {
-                Wt.textContent = TT("密码已重置，请使用新密码登录");
+                Wt.textContent = TK('js.107');
                 Jt.value = "";
                 Yt.value = "";
                 setTimeout(() => {
                     cmtBackToLogin();
                 }, 1200);
             } else {
-                Wt.textContent = e.error || TT("重置失败");
+                Wt.textContent = e.error || TK('js.108');
             }
         }).catch(() => {
-            Wt.textContent = TT("网络错误");
+            Wt.textContent = TK('js.089');
         }).finally(() => {
             Qt.disabled = false;
-            Qt.textContent = TT("重置密码");
+            Qt.textContent = TK('js.109');
         });
     });
     // ---- v2.11.0：滑块人机验证组件已彻底移除 ----
@@ -2808,14 +2808,14 @@
         const e = Et.value.trim();
         const t = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
         if (!t.test(e)) {
-            ht.textContent = TT("请输入正确的邮箱");
+            ht.textContent = TK('js.110');
             return;
         }
         ht.textContent = "";
         // 获取随机算术题并弹窗
                 fetch("api.php?action=arith_challenge").then(e => e.json()).then(e => {
             if (!e.success) {
-                ht.textContent = TT("人机验证获取失败，请重试");
+                ht.textContent = TK('js.111');
                 return;
             }
             Tt.textContent = e.expression;
@@ -2825,18 +2825,18 @@
             cmtOpenModal(St);
             setTimeout(() => Ct.focus(), 50);
         }).catch(() => {
-            ht.textContent = TT("网络错误");
+            ht.textContent = TK('js.089');
         });
     });
     // 算术题确认：答对才置 pending，随后才真正发码
         if (Bt) Bt.addEventListener("click", () => {
         const e = Ct.value.trim();
         if (!e) {
-            It.textContent = TT("请输入计算结果");
+            It.textContent = TK('js.112');
             return;
         }
         Bt.disabled = true;
-        It.textContent = TT("验证中...");
+        It.textContent = TK('js.094');
         const t = Et.value.trim();
         fetch("api.php?action=send_register_code", {
             method: "POST",
@@ -2852,17 +2852,17 @@
                 cmtCloseModal(St);
                 ht.textContent = "";
                 let e = 60;
-                bt.textContent = TT('{n}s 后重发').replace('{n}', e);
+                bt.textContent = TK('js.113').replace('{n}', e);
                 const t = setInterval(() => {
                     e--;
                     if (e <= 0) {
                         clearInterval(t);
-                        bt.textContent = TT("获取验证码");
+                        bt.textContent = TK('js.077');
                         bt.disabled = false;
-                    } else bt.textContent = TT('{n}s 后重发').replace('{n}', e);
+                    } else bt.textContent = TK('js.113').replace('{n}', e);
                 }, 1e3);
             } else {
-                It.textContent = e.error || TT("验证失败");
+                It.textContent = e.error || TK('js.095');
                 // 答错/过期：自动换一题重试
                                 fetch("api.php?action=arith_challenge").then(e => e.json()).then(e => {
                     if (e.success) {
@@ -2873,7 +2873,7 @@
                 Bt.disabled = false;
             }
         }).catch(() => {
-            It.textContent = TT("网络错误");
+            It.textContent = TK('js.089');
             Bt.disabled = false;
         });
     });
@@ -2887,27 +2887,27 @@
         const a = kt ? wt.value.trim() : "";
         ht.textContent = "";
         if (!e || !n) {
-            ht.textContent = TT("请填写QQ号和密码");
+            ht.textContent = TK('js.084');
             return;
         }
         if (n.length < 8 || !/[a-z]/.test(n) || !/[A-Z]/.test(n) || !/[0-9]/.test(n)) {
-            ht.textContent = TT("密码至少8位，且需包含大写字母、小写字母与数字");
+            ht.textContent = TK('js.114');
             return;
         }
         if (kt) {
             if (!i) {
-                ht.textContent = TT("请填写邮箱");
+                ht.textContent = TK('js.115');
                 return;
             }
             if (!a) {
-                ht.textContent = TT("请填写邮箱验证码");
+                ht.textContent = TK('js.116');
                 return;
             }
         }
         // v2.11.1：提交前动态刷新 token（与当前 session 绑定）
                 await ensureFreshCsrf();
         xt.disabled = true;
-        xt.textContent = TT("注册中...");
+        xt.textContent = TK('js.117');
         // v4.4.0：注册请求携带蜜罐字段原值（机器人自动填充会被后端静默拒绝）
                 const s = Ht ? Ht.value.trim() : "";
         fetch("api.php?action=register", {
@@ -2932,20 +2932,20 @@
                 cmtUpdateUI();
                 cmtLoad();
             } else {
-                ht.textContent = e.error || TT("注册失败");
+                ht.textContent = e.error || TK('js.118');
             }
         }).catch(() => {
-            ht.textContent = TT("网络错误");
+            ht.textContent = TK('js.089');
         }).finally(() => {
             xt.disabled = false;
-            xt.textContent = TT("注册");
+            xt.textContent = TK('js.079');
         });
     });
     if (nn) nn.addEventListener("click", () => {
         const e = Zt.value.trim(), t = en.value.trim();
         tn.textContent = "";
         if (!e) {
-            tn.textContent = TT("昵称不能为空");
+            tn.textContent = TK('js.119');
             return;
         }
         fetch("api.php?action=update_profile", {
@@ -2964,10 +2964,10 @@
                 cmtCloseModal(Kt);
                 cmtUpdateUI();
             } else {
-                tn.textContent = n.error || TT("保存失败");
+                tn.textContent = n.error || TK('js.120');
             }
         }).catch(() => {
-            tn.textContent = TT("网络错误");
+            tn.textContent = TK('js.089');
         });
     });
     // ===== v2.10.0：头像上传（选择文件后立即上传；登录用户，含 CSRF） =====
@@ -2978,16 +2978,16 @@
         const e = bn.files && bn.files[0];
         if (!e) return;
         if (!/\.(jpg|jpeg|png|webp)$/i.test(e.name)) {
-            tn.textContent = TT("仅支持 JPG / PNG / WEBP 格式");
+            tn.textContent = TK('js.121');
             bn.value = "";
             return;
         }
         if (e.size > 2 * 1024 * 1024) {
-            tn.textContent = TT("图片不能超过 2MB");
+            tn.textContent = TK('js.122');
             bn.value = "";
             return;
         }
-        tn.textContent = TT("头像上传中...");
+        tn.textContent = TK('js.123');
         const t = new FormData;
         t.append("avatar", e);
         fetch("api.php?action=avatar_upload", {
@@ -3002,14 +3002,14 @@
                 const t = document.getElementById("cmtProfileAvatar");
                 if (t) t.innerHTML = '<img src="' + cmtEscape(e.avatar) + '" alt="" onerror="this.style.display=\'none\'">';
                 tn.textContent = "";
-                showToast(TT("头像已更新"));
+                showToast(TK('js.124'));
                 cmtUpdateUI();
             } else {
-                tn.textContent = e.error || TT("上传失败");
+                tn.textContent = e.error || TK('js.125');
             }
             bn.value = "";
         }).catch(() => {
-            tn.textContent = TT("网络错误");
+            tn.textContent = TK('js.089');
             bn.value = "";
         });
     });
@@ -3019,7 +3019,7 @@
         const t = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
         const n = document.getElementById("cmtEmailErr");
         if (!t.test(e)) {
-            if (n) n.textContent = TT("请输入正确的邮箱");
+            if (n) n.textContent = TK('js.110');
             return;
         }
         if (n) n.textContent = "";
@@ -3037,21 +3037,21 @@
             if (e.success) {
                 if (n) n.textContent = "";
                 let e = 60;
-                wn.textContent = TT('{n}s 后重发').replace('{n}', e);
+                wn.textContent = TK('js.113').replace('{n}', e);
                 const t = setInterval(() => {
                     e--;
                     if (e <= 0) {
                         clearInterval(t);
-                        wn.textContent = TT("获取验证码");
+                        wn.textContent = TK('js.077');
                         wn.disabled = false;
-                    } else wn.textContent = TT('{n}s 后重发').replace('{n}', e);
+                    } else wn.textContent = TK('js.113').replace('{n}', e);
                 }, 1e3);
             } else {
-                if (n) n.textContent = e.error || TT("发送失败");
+                if (n) n.textContent = e.error || TK('js.103');
                 wn.disabled = false;
             }
         }).catch(() => {
-            if (n) n.textContent = TT("网络错误");
+            if (n) n.textContent = TK('js.089');
             wn.disabled = false;
         });
     });
@@ -3061,11 +3061,11 @@
         const t = cmtEditEmailCode.value.trim();
         const n = document.getElementById("cmtEmailErr");
         if (!e) {
-            if (n) n.textContent = TT("请先填写新邮箱");
+            if (n) n.textContent = TK('js.126');
             return;
         }
         if (!t) {
-            if (n) n.textContent = TT("请填写邮箱验证码");
+            if (n) n.textContent = TK('js.116');
             return;
         }
         if (n) n.textContent = "";
@@ -3083,17 +3083,17 @@
         }).then(e => e.json()).then(e => {
             if (e.success) {
                 vn.email = e.email;
-                cmtEditEmail.placeholder = TT('当前绑定：{email}，输入新邮箱更换').replace('{email}', e.email);
+                cmtEditEmail.placeholder = TK('js.075').replace('{email}', e.email);
                 cmtEditEmail.value = "";
                 cmtEditEmailCode.value = "";
                 if (n) n.textContent = "";
-                showToast(TT("邮箱绑定成功"));
+                showToast(TK('js.127'));
             } else {
-                if (n) n.textContent = e.error || TT("绑定失败");
+                if (n) n.textContent = e.error || TK('js.128');
             }
             kn.disabled = false;
         }).catch(() => {
-            if (n) n.textContent = TT("网络错误");
+            if (n) n.textContent = TK('js.089');
             kn.disabled = false;
         });
     });
@@ -3101,19 +3101,19 @@
         const e = sn.value.trim(), t = on.value.trim(), n = cn.value, i = rn.value;
         ln.textContent = "";
         if (!e) {
-            ln.textContent = TT("请填写QQ号");
+            ln.textContent = TK('js.129');
             return;
         }
         if (!t) {
-            ln.textContent = TT("请填写昵称");
+            ln.textContent = TK('js.130');
             return;
         }
         if (n && (n.length < 8 || !/[a-z]/.test(n) || !/[A-Z]/.test(n) || !/[0-9]/.test(n))) {
-            ln.textContent = TT("密码至少8位，且需包含大写字母、小写字母与数字");
+            ln.textContent = TK('js.114');
             return;
         }
         if (n !== i) {
-            ln.textContent = TT("两次密码不一致");
+            ln.textContent = TK('js.131');
             return;
         }
         fetch("api.php?action=admin_setup", {
@@ -3135,10 +3135,10 @@
                 cmtCloseModal(an);
                 cmtUpdateUI();
             } else {
-                ln.textContent = e.error || TT("保存失败");
+                ln.textContent = e.error || TK('js.120');
             }
         }).catch(() => {
-            ln.textContent = TT("网络错误");
+            ln.textContent = TK('js.089');
         });
     });
     function cmtUpdateUI() {
@@ -3148,7 +3148,7 @@
         if (Ke) Ke.style.display = e ? "block" : "none";
         if (it) it.disabled = !t;
         if (e) {
-            const e = vn.nickname || TT("用户");
+            const e = vn.nickname || TK('js.132');
             const t = vn.avatar || "";
             if (et) {
                 const t = vn.avatar || "";
@@ -3190,8 +3190,8 @@
                 at.classList.remove("has-content");
                 Sn = 1;
                 cmtLoad();
-            } else showToast(e.error || TT("评论失败"));
-        }).catch(() => showToast(TT("网络错误"))).finally(() => {
+            } else showToast(e.error || TK('js.133'));
+        }).catch(() => showToast(TK('js.089'))).finally(() => {
             at.disabled = false;
         });
     });
@@ -3233,7 +3233,7 @@
         });
     }
     function cmtRenderReply(e, t, n) {
-        if (t > 10) return '<div class="cmt-reply-item"><div class="cmt-reply-text" style="color:var(--text-muted)">' + TT('[嵌套过深]') + '</div></div>';
+        if (t > 10) return '<div class="cmt-reply-item"><div class="cmt-reply-text" style="color:var(--text-muted)">' + TK('js.134') + '</div></div>';
         const i = vn && vn.role === "admin";
         const a = i || vn && vn.id === e.user_id;
         let s = "";
@@ -3244,11 +3244,11 @@
         // v2.10.0：评论头像/昵称可点击打开个人详情页（无 user_id 的匿名/游客评论不生成链接）
                 const c = e.user_id ? '<a class="cmt-user-link" href="user.php?id=' + encodeURIComponent(e.user_id) + '">' : "";
         const r = e.user_id ? "</a>" : "";
-        return '<div class="cmt-reply-item" data-id="' + e.id + '" data-del="' + a + '">' + '<div class="cmt-reply-top"><div class="cmt-reply-avatar">' + c + cmtAvatarHtml(e.avatar, e.nickname, e.account) + r + "</div>" + '<div class="cmt-reply-info"><div class="cmt-reply-name-row">' + c + '<span class="cmt-reply-name">' + cmtEscape(e.nickname || "") + "</span>" + r + o + '<span class="cmt-reply-time">' + cmtFormatTime(e.created_at) + "</span></div>" + "</div></div>" + '<div class="cmt-reply-text">' + cmtEscape(e.content) + "</div>" + '<div class="cmt-reply-actions">' + '<button class="cmt-reply-act cmt-like-btn"><svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><span>' + (e.likes || 0) + "</span></button>" + '<button class="cmt-reply-act cmt-reply-btn"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' + TT('回复') + '</button>' + (a ? '<button class="cmt-reply-act cmt-del-btn" data-id="' + e.id + '"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' + TT('删除') + '</button>' : "") + "</div>" + s + "</div>";
+        return '<div class="cmt-reply-item" data-id="' + e.id + '" data-del="' + a + '">' + '<div class="cmt-reply-top"><div class="cmt-reply-avatar">' + c + cmtAvatarHtml(e.avatar, e.nickname, e.account) + r + "</div>" + '<div class="cmt-reply-info"><div class="cmt-reply-name-row">' + c + '<span class="cmt-reply-name">' + cmtEscape(e.nickname || "") + "</span>" + r + o + '<span class="cmt-reply-time">' + cmtFormatTime(e.created_at) + "</span></div>" + "</div></div>" + '<div class="cmt-reply-text">' + cmtEscape(e.content) + "</div>" + '<div class="cmt-reply-actions">' + '<button class="cmt-reply-act cmt-like-btn"><svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><span>' + (e.likes || 0) + "</span></button>" + '<button class="cmt-reply-act cmt-reply-btn"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' + TK('js.135') + '</button>' + (a ? '<button class="cmt-reply-act cmt-del-btn" data-id="' + e.id + '"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' + TK('js.136') + '</button>' : "") + "</div>" + s + "</div>";
     }
     function cmtRender(e, t) {
         if (!e || !e.length) {
-            st.innerHTML = '<div class="cmt-empty"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' + TT('暂无评论，快来抢沙发吧') + '</div>';
+            st.innerHTML = '<div class="cmt-empty"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' + TK('js.137') + '</div>';
             return;
         }
         const n = vn && vn.role === "admin";
@@ -3263,19 +3263,19 @@
                 const t = e.replies.slice(0, Cn);
                 s = '<div class="cmt-reply-list">' + t.map(t => cmtRenderReply(t, 1, e.nickname || "")).join("");
                 if (e.replies.length > Cn) {
-                    s += '<button class="cmt-more-replies" data-id="' + e.id + '"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>' + TT('查看全部 {n} 条回复').replace('{n}', e.replies.length) + "</button>";
+                    s += '<button class="cmt-more-replies" data-id="' + e.id + '"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>' + TK('js.138').replace('{n}', e.replies.length) + "</button>";
                 }
                 s += "</div>";
             }
             const o = function countReplies(e) {
                 return e.reduce((e, t) => e + 1 + countReplies(t.replies || []), 0);
             }(e.replies || []);
-            const c = o ? '<button class="cmt-reply-expand"><span>' + TT('{n} 条回复').replace('{n}', o) + '</span><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></button>' : "";
+            const c = o ? '<button class="cmt-reply-expand"><span>' + TK('js.139').replace('{n}', o) + '</span><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></button>' : "";
             const r = !e.signature ? " cmt-no-sign" : "";
             // v2.10.0：评论头像/昵称可点击打开个人详情页（无 user_id 的匿名/游客评论不生成链接）
                         const l = e.user_id ? '<a class="cmt-user-link" href="user.php?id=' + encodeURIComponent(e.user_id) + '">' : "";
             const d = e.user_id ? "</a>" : "";
-            return '<div class="cmt-item" data-id="' + e.id + '" data-del="' + i + '">' + '<div class="cmt-top' + r + '"><div class="cmt-avatar">' + l + cmtAvatarHtml(e.avatar, e.nickname, e.account) + d + "</div>" + '<div class="cmt-info"><div class="cmt-name-row">' + l + '<span class="cmt-name">' + cmtEscape(e.nickname || "") + "</span>" + d + '<span class="cmt-time">' + cmtFormatTime(e.created_at) + "</span></div>" + a + "</div></div>" + '<div class="cmt-text">' + cmtEscape(e.content) + "</div>" + '<div class="cmt-actions">' + '<button class="cmt-act cmt-like-btn"><svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><span>' + (e.likes || 0) + "</span></button>" + '<button class="cmt-act cmt-reply-btn"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' + TT('回复') + '</button>' + (i ? '<button class="cmt-act cmt-del-btn" data-id="' + e.id + '"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' + TT('删除') + '</button>' : "") + c + "</div>" + s + '<div class="cmt-reply-input-wrap"><textarea placeholder="' + TT('写下你的回复...') + '"></textarea><div class="cmt-reply-input-bottom"><button class="cmt-reply-send-btn">' + TT('发送') + '</button></div></div></div>';
+            return '<div class="cmt-item" data-id="' + e.id + '" data-del="' + i + '">' + '<div class="cmt-top' + r + '"><div class="cmt-avatar">' + l + cmtAvatarHtml(e.avatar, e.nickname, e.account) + d + "</div>" + '<div class="cmt-info"><div class="cmt-name-row">' + l + '<span class="cmt-name">' + cmtEscape(e.nickname || "") + "</span>" + d + '<span class="cmt-time">' + cmtFormatTime(e.created_at) + "</span></div>" + a + "</div></div>" + '<div class="cmt-text">' + cmtEscape(e.content) + "</div>" + '<div class="cmt-actions">' + '<button class="cmt-act cmt-like-btn"><svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><span>' + (e.likes || 0) + "</span></button>" + '<button class="cmt-act cmt-reply-btn"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' + TK('js.135') + '</button>' + (i ? '<button class="cmt-act cmt-del-btn" data-id="' + e.id + '"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' + TK('js.136') + '</button>' : "") + c + "</div>" + s + '<div class="cmt-reply-input-wrap"><textarea placeholder="' + TK('js.140') + '"></textarea><div class="cmt-reply-input-bottom"><button class="cmt-reply-send-btn">' + TK('js.141') + '</button></div></div></div>';
         }).join("") + renderCmtPager(t || {});
         cmtBindEvents();
         cmtBindPagerEvents();
@@ -3284,12 +3284,12 @@
         function renderCmtPager(e) {
         if (!e || !e.total || e.total <= (e.per_page || 20)) return "";
         var t = e.page, n = e.total_pages;
-        var i = '<div class="cmt-pager">' + '<span class="cmt-pager-info">' + TT('共 {n} 条评论 · 第 {a}/{b} 页').replace('{n}', e.total).replace('{a}', t).replace('{b}', n) + '</span>' + '<div class="cmt-pager-btns">' + '<button class="cmt-pg-btn" data-pg="' + (t - 1) + '"' + (t <= 1 ? " disabled" : "") + ">" + TT('上一页') + "</button>";
+        var i = '<div class="cmt-pager">' + '<span class="cmt-pager-info">' + TK('js.142').replace('{n}', e.total).replace('{a}', t).replace('{b}', n) + '</span>' + '<div class="cmt-pager-btns">' + '<button class="cmt-pg-btn" data-pg="' + (t - 1) + '"' + (t <= 1 ? " disabled" : "") + ">" + TK('js.143') + "</button>";
         var a = Math.max(1, t - 2), s = Math.min(n, t + 2);
         if (a > 1) i += '<span class="cmt-pg-ellipsis">…</span>';
         for (var o = a; o <= s; o++) i += '<button class="cmt-pg-btn' + (o === t ? " active" : "") + '" data-pg="' + o + '">' + o + "</button>";
         if (s < n) i += '<span class="cmt-pg-ellipsis">…</span>';
-        i += '<button class="cmt-pg-btn" data-pg="' + (t + 1) + '"' + (t >= n ? " disabled" : "") + ">" + TT('下一页') + "</button>" + "</div></div>";
+        i += '<button class="cmt-pg-btn" data-pg="' + (t + 1) + '"' + (t >= n ? " disabled" : "") + ">" + TK('js.144') + "</button>" + "</div></div>";
         return i;
     }
     function cmtBindPagerEvents() {
@@ -3333,8 +3333,8 @@
                 n.value = "";
                 e.classList.remove("show");
                 cmtLoad();
-            } else showToast(t.error || TT("回复失败"));
-        }).catch(() => showToast(TT("网络错误")));
+            } else showToast(t.error || TK('js.145'));
+        }).catch(() => showToast(TK('js.089')));
     }
     function cmtBindEvents(e) {
         // v3.3.16：支持传入子树 root——「查看全部」插入的回复节点单独绑定交互事件
@@ -3360,7 +3360,7 @@
                 if (!n) {
                     n = document.createElement("div");
                     n.className = "cmt-reply-input-wrap";
-                    n.innerHTML = '<textarea placeholder="' + TT('写下你的回复...') + '"></textarea><div class="cmt-reply-input-bottom"><button class="cmt-reply-send-btn">' + TT('发送') + '</button></div>';
+                    n.innerHTML = '<textarea placeholder="' + TK('js.140') + '"></textarea><div class="cmt-reply-input-bottom"><button class="cmt-reply-send-btn">' + TK('js.141') + '</button></div>';
                     t.appendChild(n);
                     n.querySelector("textarea").addEventListener("input", function() {
                         const e = n.querySelector(".cmt-reply-send-btn");
@@ -3403,8 +3403,8 @@
                                 article: Fe
                             })
                         }).then(e => e.json()).then(e => {
-                            if (e.success) cmtLoad(); else showToast(e.error || TT("删除失败"));
-                        }).catch(() => showToast(TT("网络错误")));
+                            if (e.success) cmtLoad(); else showToast(e.error || TK('js.146'));
+                        }).catch(() => showToast(TK('js.089')));
                     };
                     mn.classList.add("show");
                 }
@@ -3490,8 +3490,8 @@
                     article: Fe
                 })
             }).then(e => e.json()).then(e => {
-                if (e.success) cmtLoad(); else showToast(e.error || TT("删除失败"));
-            }).catch(() => showToast(TT("网络错误")));
+                if (e.success) cmtLoad(); else showToast(e.error || TK('js.146'));
+            }).catch(() => showToast(TK('js.089')));
         };
         mn.classList.add("show");
     }
@@ -3568,7 +3568,7 @@
                         });
                     }
                     vn = null;
-                    showToast(TT("登录环境已变化，请重新登录"));
+                    showToast(TK('js.147'));
                     cmtUpdateUI();
                 });
             }
@@ -3823,7 +3823,7 @@
         musicSaveState();
     });
     function loadMusicHotSongs() {
-        P.textContent = TT("加载中...");
+        P.textContent = TK('js.049');
         // v4.7.4：按当前平台+榜单拉取（QQ/酷狗榜单经 music.php 服务端聚合，播放地址播放时懒解析）
                 var e = "music.php?platform=" + encodeURIComponent(zn) + "&sortAll=" + encodeURIComponent(Dn);
         fetch(e).then(function(e) {
@@ -3841,7 +3841,7 @@
                         duration: (e.duration || 0) * 1e3
                     };
                 });
-                if (G) G.textContent = TT('{p} · {c} · 共 {n} 首').replace('{p}', TT(_n[zn] || zn)).replace('{c}', TT(Dn)).replace('{n}', Vn.length);
+                if (G) G.textContent = TK('js.148').replace('{p}', TT(_n[zn] || zn)).replace('{c}', TT(Dn)).replace('{n}', Vn.length);
                 renderMusicList();
                 var t = musicLoadState();
                 if (t && t.index >= 0 && t.index < Vn.length) {
@@ -3876,14 +3876,14 @@
                     musicUpdateModeIcon();
                 }
             } else if (e.error) {
-                P.innerHTML = escHtml(e.error) + '，<a href="javascript:void(0)" id="musicRetry">' + TT('点击重试') + '</a>';
+                P.innerHTML = escHtml(e.error) + '，<a href="javascript:void(0)" id="musicRetry">' + TK('js.149') + '</a>';
                 bindRetry();
             } else {
-                P.innerHTML = TT('数据异常') + '，<a href="javascript:void(0)" id="musicRetry">' + TT('点击重试') + '</a>';
+                P.innerHTML = TK('js.150') + '，<a href="javascript:void(0)" id="musicRetry">' + TK('js.149') + '</a>';
                 bindRetry();
             }
         }).catch(function(e) {
-            P.innerHTML = TT('网络错误（{err}）').replace('{err}', escHtml(String(e))) + '，<a href="javascript:void(0)" id="musicRetry">' + TT('点击重试') + '</a>';
+            P.innerHTML = TK('js.151').replace('{err}', escHtml(String(e))) + '，<a href="javascript:void(0)" id="musicRetry">' + TK('js.149') + '</a>';
             bindRetry();
         });
     }
@@ -3934,7 +3934,7 @@
             musicStartPlay("https://music.163.com/song/media/outer/url?id=" + n.id, n, t);
         } else {
             // v4.7.4：QQ/酷狗歌单不预取播放地址 → 播放时懒解析直链（拿到新鲜有效的 CDN 地址）
-            P.textContent = TT("解析播放地址...");
+            P.textContent = TK('js.152');
             fetch("music.php?platform=" + encodeURIComponent(zn) + "&songId=" + encodeURIComponent(n.id)).then(function(e) {
                 return e.json();
             }).then(function(e) {
@@ -3942,11 +3942,11 @@
                     n.url = e.url;
                     musicStartPlay(e.url, n, t);
                 } else {
-                    P.textContent = TT("获取播放地址失败");
+                    P.textContent = TK('js.153');
                     musicHandlePlayFail();
                 }
             }).catch(function() {
-                P.textContent = TT("获取播放地址失败");
+                P.textContent = TK('js.153');
                 musicHandlePlayFail();
             });
         }
@@ -4019,7 +4019,7 @@
     });
     function musicUpdateModeIcon() {
         var e = [ '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/><text x="12" y="15" text-anchor="middle" font-size="8" fill="currentColor" stroke="none">1</text></svg>', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>' ];
-        var t = [ TT("顺序播放"), TT("列表循环"), TT("单曲循环") ];
+        var t = [ TK('js.154'), TK('js.155'), TK('js.156') ];
         if (Z) {
             Z.innerHTML = e[Xn] || e[0];
             Z.title = t[Xn] || t[0];
@@ -4075,14 +4075,14 @@
         }
     });
     function musicLoadLyric(e) {
-        z.innerHTML = '<div class="music-lyric-hint">' + TT('加载中...') + '</div>';
+        z.innerHTML = '<div class="music-lyric-hint">' + TK('js.049') + '</div>';
         ii = [];
         ai = e;
         fetch("music.php?platform=" + zn + "&lyric=" + e).then(function(e) {
             return e.json();
         }).then(function(e) {
             if (!e.success) {
-                z.innerHTML = '<div class="music-lyric-hint">' + TT('暂无歌词') + '</div>';
+                z.innerHTML = '<div class="music-lyric-hint">' + TK('js.157') + '</div>';
                 return;
             }
             if (e.yrc) {
@@ -4099,10 +4099,10 @@
                 musicRenderLyric();
                 if (ci && !X.paused) musicStartWordAnim();
             } else {
-                z.innerHTML = '<div class="music-lyric-hint">' + TT('暂无歌词') + '</div>';
+                z.innerHTML = '<div class="music-lyric-hint">' + TK('js.157') + '</div>';
             }
         }).catch(function() {
-            z.innerHTML = '<div class="music-lyric-hint">' + TT('歌词加载失败') + '</div>';
+            z.innerHTML = '<div class="music-lyric-hint">' + TK('js.158') + '</div>';
         });
     }
     function musicParseYrc(e) {
@@ -4206,7 +4206,7 @@
     }
     function musicRenderLyric() {
         if (!ii.length) {
-            z.innerHTML = '<div class="music-lyric-hint">' + TT('暂无歌词') + '</div>';
+            z.innerHTML = '<div class="music-lyric-hint">' + TK('js.157') + '</div>';
             return;
         }
         var e = "";
@@ -4345,7 +4345,7 @@
         ci = false;
         if (ni) {
             z.scrollTop = 0;
-            z.innerHTML = '<div class="music-lyric-hint">' + TT('加载中...') + '</div>';
+            z.innerHTML = '<div class="music-lyric-hint">' + TK('js.049') + '</div>';
         }
         li(e, t);
         if (ni && e >= 0 && e < Vn.length) {
@@ -4474,7 +4474,7 @@
         };
         function openLoginModal() {
             if (d && m && u && p && f) {
-                m.textContent = TT("登录");
+                m.textContent = TK('js.078');
                 u.style.display = "flex";
                 p.style.display = "none";
                 // v4.7.0：打开时隐藏设备验证与找回视图（上次会话残留清理）
@@ -4482,8 +4482,8 @@
                 if (e) e.style.display = "none";
                 var t = document.getElementById("cmtResetForm");
                 if (t) t.style.display = "none";
-                if (v) v.textContent = TT("还没有账号？");
-                if (y) y.textContent = TT("立即注册");
+                if (v) v.textContent = TK('js.080');
+                if (y) y.textContent = TK('js.082');
                 // v2.11.4：清理残留的切换动画状态（防止打开弹窗时表单仍处于 slide-out/in 中间态）
                                 f.classList.remove("slide-out");
                 f.classList.remove("slide-in");
@@ -4497,10 +4497,10 @@
                 if (typeof window.ysmApplyAccountFont === "function" && (e.home_font === "custom" || e.home_font === "default")) {
                     window.ysmApplyAccountFont(e.home_font);
                 }
-                var t = e.nickname || TT("用户");
+                var t = e.nickname || TK('js.132');
                 var d = e.role || "user";
                 // v2.6.5：超管在主页显示「超管」身份，但无登录/管理/退出入口（需到超管后台退出）
-                                var m = e.isSuperAdmin ? TT("超管") : TT(g[d] || d);
+                                var m = e.isSuperAdmin ? TK('js.159') : TT(g[d] || d);
                 if (n) n.textContent = t;
                 if (i) i.textContent = m;
                 if (a) {
@@ -4530,8 +4530,8 @@
                     }
                 }
             } else {
-                if (n) n.textContent = TT("未登录");
-                if (i) i.textContent = TT("访客");
+                if (n) n.textContent = TK('js.160');
+                if (i) i.textContent = TK('js.161');
                 if (a) a.textContent = "?";
                 if (s) s.style.display = "flex";
                 if (c) c.style.display = "none";
@@ -4578,10 +4578,10 @@
                     if (e.success && e.loggedIn && e.canAccessAdmin && e.adminUrl) {
                         window.location.href = e.adminUrl;
                     } else {
-                        showToast(TT("权限不足，无法进入管理界面"));
+                        showToast(TK('js.162'));
                     }
                 }).catch(function() {
-                    showToast(TT("获取权限信息失败"));
+                    showToast(TK('js.163'));
                 });
             });
         }
@@ -4597,7 +4597,7 @@
                 }
                 if (typeof cmtUpdateUI === "function") cmtUpdateUI();
                 updateDropdown(null);
-                showToast(TT("已退出登录"));
+                showToast(TK('js.164'));
             });
         }
         // v2.11.3：用户下拉「编辑资料」→ 打开个人资料弹窗
@@ -4617,4 +4617,60 @@
         });
     })();
     init();
+})();
+
+/* v6.3.0：手机端「应用」面板（仅 ≤640 生效；桌面按钮保持不变） */
+(function () {
+    function init () {
+        var btn = document.getElementById("btnApps");
+        var panel = document.getElementById("appPanel");
+        var mask = document.getElementById("appPanelMask");
+        if (!btn || !panel) return;
+
+        function open () {
+            panel.hidden = false;
+            if (mask) mask.hidden = false;
+            btn.setAttribute("aria-expanded", "true");
+            var first = panel.querySelector(".app-panel-item");
+            if (first && first.focus) first.focus();
+        }
+        function close () {
+            panel.hidden = true;
+            if (mask) mask.hidden = true;
+            btn.setAttribute("aria-expanded", "false");
+        }
+        function isOpen () { return !panel.hidden; }
+
+        btn.addEventListener("click", function (e) {
+            e.stopPropagation();
+            isOpen() ? close() : open();
+        });
+        if (mask) mask.addEventListener("click", close);
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "Escape" && isOpen()) close();
+        });
+        document.addEventListener("click", function (e) {
+            if (!isOpen()) return;
+            if (panel.contains(e.target) || btn.contains(e.target)) return;
+            close();
+        });
+        window.addEventListener("resize", function () {
+            if (window.innerWidth > 640 && isOpen()) close();
+        });
+
+        panel.addEventListener("click", function (e) {
+            var item = e.target.closest ? e.target.closest(".app-panel-item") : null;
+            if (!item) return;
+            var act = item.getAttribute("data-act");
+            if (!act) return; /* 链接项自行跳转 */
+            close();
+            if (act === "kbd") { if (typeof window.toggleKbdHelp === "function") window.toggleKbdHelp(); return; }
+            if (act === "links") { if (typeof window.ysmOpenLinks === "function") window.ysmOpenLinks(); return; }
+            var map = { toc: "btnToc", font: "btnFont", theme: "btnThemeToggle", color: "btnColor", music: "floatMusicBtn" };
+            var el = document.getElementById(map[act]);
+            if (el) el.click();
+        });
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+    else init();
 })();

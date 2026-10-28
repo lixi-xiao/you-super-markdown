@@ -7,8 +7,6 @@
 require_once __DIR__ . '/utils.php';
 require_once __DIR__ . '/lib/i18n.php';
 // v6.1.0：服务端输出层 i18n
-require_once __DIR__ . '/lib/i18n-output.php';
-ysmI18nStart();
 secureSessionStart();
 
 $id = trim($_GET['id'] ?? '');
@@ -20,7 +18,7 @@ if (!$u) {
     http_response_code(404);
     header('Content-Type: text/html; charset=utf-8');
     echo '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>404 - ' . htmlspecialchars($siteTitle) . '</title><link rel="stylesheet" href="css/style.css?v=' . @filemtime(__DIR__ . '/css/style.css') . '"></head>';
-    echo '<body style="background:var(--bg)"><div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px"><div style="font-size:64px;font-weight:800;color:var(--accent)">404</div><div style="color:var(--text-muted)">用户不存在或无权查看</div><a href="./" style="color:var(--accent);text-decoration:none">← 返回主页</a></div></body></html>';
+    echo '<body style="background:var(--bg)"><div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px"><div style="font-size:64px;font-weight:800;color:var(--accent)">404</div><div style="color:var(--text-muted)">' . t('user.001') . '</div><a href="./" style="color:var(--accent);text-decoration:none">' . t('user.002') . '</a></div></body></html>';
     exit;
 }
 
@@ -95,14 +93,14 @@ $initial = mb_substr($u['nickname'] ?: '?', 0, 1, 'UTF-8');
         <div class="up-name"><?= htmlspecialchars($u['nickname']) ?><span class="up-badge <?= $roleBadgeClass ?>"><?= htmlspecialchars($roleLabel) ?></span></div>
         <div class="up-sign"><?= htmlspecialchars($u['signature'] ?: '这个人很懒，还没有留下签名~') ?></div>
         <div class="up-meta">
-            <div><b><?= htmlspecialchars($u['username'] ?? ($u['account'] ?: '--')) ?></b><br>用户名</div>
-            <div><b><?= htmlspecialchars($u['created'] ?: '--') ?></b><br>注册时间</div>
+            <div><b><?= htmlspecialchars($u['username'] ?? ($u['account'] ?: '--')) ?></b><br><?= t('station.016') ?></div>
+            <div><b><?= htmlspecialchars($u['created'] ?: '--') ?></b><br><?= t('user.003') ?></div>
         </div>
-        <a class="up-back" href="./">← 返回主页</a>
+        <a class="up-back" href="./"><?= t('user.002') ?></a>
     </div>
 </div>
 <!-- v6.0.0：i18n 运行时文案接入 -->
 <script>window.I18N = <?= json_encode(ysmClientI18n(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
-<script src="js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
+<script src="js/i18n.js?v=<?= @filemtime(__DIR__ . '/js/i18n.js') ?>"></script>
 </body>
 </html>

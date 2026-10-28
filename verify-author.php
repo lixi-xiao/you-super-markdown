@@ -1,8 +1,6 @@
 <?php
 require_once __DIR__ . '/utils.php';
 // v6.1.0：服务端输出层 i18n
-require_once __DIR__ . '/lib/i18n-output.php';
-ysmI18nStart();
 secureSessionStart();
 
 $siteCfg = loadSiteConfig();
@@ -42,7 +40,7 @@ if (!$row || $row['status'] !== 'verify_pending' || ($row['email'] ?? '') !== $e
 <meta name="csrf-token" content="<?= htmlspecialchars(generateCsrfToken()) ?>">
 <title>邮箱验证 - <?= htmlspecialchars($title) ?></title>
 <script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
-<script src="/js/i18n-live.js?v=<?= @filemtime(__DIR__ . '/js/i18n-live.js') ?>"></script>
+<script src="/js/i18n.js?v=<?= @filemtime(__DIR__ . '/js/i18n.js') ?>"></script>
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -127,20 +125,20 @@ if (!$row || $row['status'] !== 'verify_pending' || ($row['email'] ?? '') !== $e
 <div class="card">
     <div class="icon">✉</div>
     <div class="brand"><?= htmlspecialchars($title) ?></div>
-    <h1>写作者邮箱验证</h1>
+    <h1><?= t('verify.001') ?></h1>
     <?php if ($done): ?>
-        <p class="desc">邮箱验证通过！我们已通知超管进行最终确认，超管点击确认邮件后，您的写作者账号即可登录。</p>
-        <div class="ok">✓ 验证成功，等待超管确认</div>
+        <p class="desc"><?= t('verify.002') ?></p>
+        <div class="ok"><?= t('verify.003') ?></div>
     <?php elseif ($err !== ''): ?>
         <p class="desc"><?= htmlspecialchars($err) ?></p>
-        <a class="back" href="./">返回首页</a>
+        <a class="back" href="./"><?= t('verify.004') ?></a>
     <?php else: ?>
-        <p class="desc">站长正在为您创建写作者账号，请完成邮箱验证：</p>
+        <p class="desc"><?= t('verify.005') ?></p>
         <div class="email-tag"><?= htmlspecialchars($email) ?></div>
         <form method="post" autocomplete="off">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
-            <input type="text" name="code" maxlength="6" placeholder="6 位验证码" required>
-            <button type="submit" id="submitBtn">验证</button>
+            <input type="text" name="code" maxlength="6" placeholder="<?= t('verify.006') ?>" required>
+            <button type="submit" id="submitBtn"><?= t('verify.007') ?></button>
         </form>
         <div class="err" id="errBox"></div>
     <?php endif; ?>
@@ -150,7 +148,7 @@ if (!$row || $row['status'] !== 'verify_pending' || ($row['email'] ?? '') !== $e
     var form = btn ? btn.form : null;
     if (form) form.addEventListener('submit', function() {
         btn.disabled = true;
-        btn.textContent = ysmT('验证中...');
+        btn.textContent = TK('verify.008');
     });
 </script>
 </body>

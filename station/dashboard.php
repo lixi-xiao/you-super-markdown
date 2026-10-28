@@ -369,7 +369,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         // v3.1.6：公告管理（站长全权：添加/编辑/删除/排序，含更新公告）。内容管理操作，CSRF 校验 + 审计，无需挑战码。
         $annAct = $_POST['announce_action'];
         if ($annAct === 'add') {
-            $aType = ($_POST['a_type'] ?? '') === 'update' ? 'update' : 'manual';
+            // v6.3.3：公告类型不再由站长选择——手动新增一律为「通知」；
+            //          「更新公告」只能由系统在升级流程里自动注入（见 utils.php 的更新历史注入）。
+            $aType = 'manual';
             // v3.2.4：取消「关联文章」功能——站长发布的公告不再关联文章（纯内容展示，不跳文章、不显示评论）
             $aArticle = '';
             $aTitle = trim($_POST['a_title'] ?? '');
@@ -1100,13 +1102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <form method="post" id="announceAddForm">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="announce_action" value="add">
-            <div class="form-group">
-                <label class="form-label"><?= t('station.068') ?></label>
-                <select class="form-input" name="a_type" id="aTypeSel" style="max-width:260px">
-                    <option value="manual" selected><?= t('station.069') ?></option>
-                    <option value="update"><?= t('station.070') ?></option>
-                </select>
-            </div>
+            <!-- v6.3.3：取消「公告类型」选择——手动新增固定为「通知」，「更新公告」只由系统升级流程生成 -->
             <!-- v3.2.4：取消「关联文章」功能——公告为独立内容，不再关联文章 -->
             <div class="form-group">
                 <label class="form-label"><?= t('station.071') ?></label>

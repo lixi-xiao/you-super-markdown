@@ -1861,10 +1861,20 @@ if ($action === 'ai_translation_status' && $_SERVER['REQUEST_METHOD'] === 'GET')
     $out = [];
     foreach (array_keys(ysmSupportedLangs()) as $lc) {
         if ($lc === ysmSourceLang()) continue;
-        list($st,) = articleTranslationStatus($slug, $lc);
-        $out[$lc] = $st === null ? 'none' : $st;
+        list($st, , $row) = articleTranslationStatus($slug, $lc);
+        $out[$lc] = [
+            'status' => $st === null ? 'none' : $st,
+            'updated' => (string)($row['updated_at'] ?? ''),
+            'chars' => isset($row['md']) ? mb_strlen((string)$row['md'], 'UTF-8') : 0,
+        ];
     }
-    sendJson(['success' => true, 'source' => ysmSourceLang(), 'langs' => $out]);
+    sendJson([
+        'success' => true,
+        'source' => ysmSourceLang(),
+        'source_name' => ysmSourceLangName(),
+        'title' => (string)($meta['title'] ?? '') !== '' ? (string)$meta['title'] : preg_replace('/\.md$/i', '', $slug),
+        'langs' => $out,
+    ]);
 }
 
 // GET links_list：前台只读——只出 active 友链（访客可访问，无需登录）

@@ -1082,7 +1082,8 @@ $bgApi = trim((string)($siteConf['bg_api_url'] ?? ''));
 if (($siteConf['bg_type'] ?? 'none') === 'api' && $bgApi === '') $bgApi = FIXED_IMG_API;
 if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t=' . time();
 ?>
-<body data-ysm-custom-font="<?= !empty($__ysmFontOn) ? '1' : '0' ?>" data-guest-comments="<?= !empty($siteConf['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($siteConf['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($siteConf['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($bgApi) ?>" data-bg-blur="<?= !empty($siteConf['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($siteConf['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($siteConf['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($siteConf['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($siteConf['music_auto_play'] ?? '') ?>" data-bg-music="<?= (!empty($siteConf['bg_music_enabled']) && is_file(__DIR__ . '/data/bgm/background.mp3')) ? '1' : '0' ?>">
+<?php $__showLinks = (($_GET['view'] ?? '') === 'links'); ?>
+<body class="<?= $__showLinks ? 'links-open' : '' ?>" data-ysm-custom-font="<?= !empty($__ysmFontOn) ? '1' : '0' ?>" data-guest-comments="<?= !empty($siteConf['guest_comments_enabled']) ? '1' : '0' ?>" data-reg-verify="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-email-change="<?= !empty($siteConf['email_verify_enabled']) ? '1' : '0' ?>" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>" data-bg-type="<?= htmlspecialchars($siteConf['bg_type'] ?? 'none') ?>" data-bg-image="<?= htmlspecialchars($siteConf['bg_image'] ?? '') ?>" data-bg-api-url="<?= htmlspecialchars($bgApi) ?>" data-bg-blur="<?= !empty($siteConf['bg_blur_enabled']) ? '1' : '0' ?>" data-bg-blur-level="<?= intval($siteConf['bg_blur_level'] ?? 0) ?>" data-bg-card-opacity="<?= intval($siteConf['bg_card_opacity'] ?? 100) ?>" data-music-playlist="<?= htmlspecialchars($siteConf['music_playlist_id'] ?? '3778678') ?>" data-music-auto-play="<?= htmlspecialchars($siteConf['music_auto_play'] ?? '') ?>" data-bg-music="<?= (!empty($siteConf['bg_music_enabled']) && is_file(__DIR__ . '/data/bgm/background.mp3')) ? '1' : '0' ?>">
 <header class="top-bar" id="topBar">
     <div class="header-left"><a href="./" class="brand truncate max-w-[40vw] sm:max-w-none" style="text-decoration:none;cursor:pointer;"><?= htmlspecialchars($siteHeading) ?></a></div>
     <div class="header-right">
@@ -1257,7 +1258,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         </div>
     </div>
     <!-- v6.3.0：友站独立页（手机端从「应用」面板进入；桌面无入口但 #links 深链仍可用） -->
-    <div class="links-view" id="linksView" style="display:none">
+    <div class="links-view" id="linksView"<?= $__showLinks ? '' : ' style="display:none"' ?>>
         <div class="links-top">
             <button type="button" class="links-back-btn" onclick="ysmCloseLinks()" aria-label="<?= t('home.043') ?>">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
@@ -1650,6 +1651,7 @@ window.ysmCloseLinks = function(fromHistory){
     var hv = document.getElementById('homeView');
     if (lv) lv.style.display = 'none';
     document.body.classList.remove('links-open');
+    if (location.search.indexOf('view=links') >= 0) { location.href = '/'; return; }
     if (hv) hv.style.display = '';
     if (location.hash === '#links') {
         try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
@@ -1664,10 +1666,8 @@ document.addEventListener('keydown', function(e){
     var lv = document.getElementById('linksView');
     if (lv && lv.style.display !== 'none') { window.ysmCloseLinks(); }
 });
-// v6.3.0：#links 深链在 DOM/资源就绪后再开一次，避免被 main.js 的 showHome() 覆盖
-function ysmOpenLinksFromHash(){ if (location.hash === '#links' && window.ysmOpenLinks) window.ysmOpenLinks(true); }
-document.addEventListener('DOMContentLoaded', ysmOpenLinksFromHash);
-window.addEventListener('load', function(){ ysmOpenLinksFromHash(); setTimeout(ysmOpenLinksFromHash, 400); setTimeout(ysmOpenLinksFromHash, 1200); });
+// v6.3.0：#links 旧深链重定向到服务端视图 ?view=links（不依赖 JS 时序，避免被首页初始化覆盖）
+(function(){ if (location.hash === '#links' && location.search.indexOf('view=links') < 0) { location.replace('/index.php?view=links'); } })();
 // v6.3.0：副栏友链按数量换形态（1–3 条行式、≥4 条两列网格）；「全部」改为内联展开/收起
 (function(){
     var sec = document.getElementById('homeLinks');

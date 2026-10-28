@@ -424,7 +424,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         'created_by' => getCurrentUserId(),
                     ];
                     replaceAllUsers($users);
-                    auditLog('user_create', $newAccount, "创建用户: {$newNick}, 角色: {$newRole}");
+                    auditLog('user_create', $newUsername, "创建用户: {$newNick}, 角色: {$newRole}");
                     $msg = 'user_created';
                 }
             }

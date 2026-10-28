@@ -1667,7 +1667,7 @@ document.addEventListener('keydown', function(e){
 // v6.3.0：#links 深链在 DOM/资源就绪后再开一次，避免被 main.js 的 showHome() 覆盖
 function ysmOpenLinksFromHash(){ if (location.hash === '#links' && window.ysmOpenLinks) window.ysmOpenLinks(true); }
 document.addEventListener('DOMContentLoaded', ysmOpenLinksFromHash);
-window.addEventListener('load', ysmOpenLinksFromHash);
+window.addEventListener('load', function(){ ysmOpenLinksFromHash(); setTimeout(ysmOpenLinksFromHash, 400); setTimeout(ysmOpenLinksFromHash, 1200); });
 // v6.3.0：副栏友链按数量换形态（1–3 条行式、≥4 条两列网格）；「全部」改为内联展开/收起
 (function(){
     var sec = document.getElementById('homeLinks');

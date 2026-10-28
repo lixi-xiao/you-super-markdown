@@ -1319,5 +1319,6 @@ Then enter the challenge code:',
         '简介' => 'Description',
         '联系邮箱' => 'Contact email',
         '链接 7 天内有效，单次使用' => 'The link is valid for 7 days and can be used once',
+        '友链申请' => 'Friend link application',
     ],
 ];

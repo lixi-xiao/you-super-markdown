@@ -11,7 +11,7 @@
     'use strict';
 
     var SCRIPT = 'vendor/mermaid.min.js';
-    var VER = '1';
+    var VER = '2';   // v6.3.8：缓存结构修复（样式选择器前缀化）→ 旧缓存自动失效重渲染
     var LS_PREFIX = 'ysmMmd:';
     var LS_INDEX = 'ysmMmdIdx';
     var MAX_BYTES = 2 * 1024 * 1024;
@@ -75,11 +75,18 @@
     }
 
     // ---- id 前缀化：同一页面注入多份缓存 SVG 时避免 id 冲突 ----
+    // v6.3.8：必须同步改写 <style> 里的 #id 选择器——否则样式整段失效（节点变纯黑块、文字不可见）
     function prefixIds(svg, token) {
         var ids = {};
         svg = svg.replace(/\bid="([^"]+)"/g, function (m, id) {
             ids[id] = 1;
             return 'id="' + token + id + '"';
+        });
+        svg = svg.replace(/<style([^>]*)>([\s\S]*?)<\/style>/g, function (m, attrs, css) {
+            css = css.replace(/#([A-Za-z0-9_-]+)/g, function (mm, id) {
+                return ids[id] ? '#' + token + id : mm;
+            });
+            return '<style' + attrs + '>' + css + '</style>';
         });
         svg = svg.replace(/url\(#([^)]+)\)/g, function (m, id) {
             return ids[id] ? 'url(#' + token + id + ')' : m;

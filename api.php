@@ -762,7 +762,7 @@ if ($action === 'link_apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $base = rtrim((string)(appConfig('site_url') ?: ('https://' . ($_SERVER['HTTP_HOST'] ?? ''))), '/');
     $approve = $base . '/index.php?action=link_review&token=' . $token;
     $detail = "站点名称：{$name}\n网址：{$url}\n简介：{$desc}\n联系邮箱：{$mail}\n\n审核（需登录后台）：\n通过 / 拒绝：{$approve}\n\n令牌 7 天内有效，单次使用。";
-    if (function_exists('sendAlert')) { @sendAlert('友链申请', $detail); }
+    if (function_exists('sendNotice')) { @sendNotice('友链申请', $detail); }
     sendJson(['success' => true]);
 }
 /** 站长专属操作的前置校验（角色 + 环境） */

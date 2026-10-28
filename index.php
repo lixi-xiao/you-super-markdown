@@ -974,11 +974,11 @@ if ($action === 'link_review') {
             }
         }
     }
-    $titles = ['approved' => '已通过', 'rejected' => '已拒绝', 'login' => '请先登录后台', 'expired' => '链接已过期', 'csrf' => '请求已过期', 'done' => '该申请已处理'];
+    $titles = ['approved' => 'links.review_approved', 'rejected' => 'links.review_rejected', 'login' => 'links.review_login', 'expired' => 'links.review_expired', 'csrf' => 'links.review_csrf', 'done' => 'links.review_done'];
     echo '<!DOCTYPE html><html lang="' . htmlspecialchars(ysmLocale()) . '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' . t('links.apply_title') . '</title><link rel="stylesheet" href="/css/style.css"></head><body style="padding:24px">';
     echo '<div style="max-width:560px;margin:40px auto">';
     echo '<h1 style="font-size:1.3em;margin-bottom:16px">' . t('links.apply_title') . '</h1>';
-    if ($msg !== '') echo '<p style="margin-bottom:16px;color:var(--accent)">' . htmlspecialchars($titles[$msg] ?? $msg) . '</p>';
+    if ($msg !== '') echo '<p style="margin-bottom:16px;color:var(--accent)">' . htmlspecialchars(t($titles[$msg] ?? 'links.review_done')) . '</p>';
     if ($row) {
         echo '<div class="share-card"><div class="share-card-top"><div class="share-card-icon"></div><div>';
         echo '<div class="share-card-title">' . htmlspecialchars((string)$row['site_name']) . '</div>';

@@ -1586,12 +1586,22 @@ function sendSmtpMail($to, $subject, $body, $htmlBody = '') {
 }
 
 function sendAlert($type, $detail) {
+    sendAdminMail('告警', $type, $detail);
+}
+
+/** v6.3.0：通知类邮件（如友链申请）——主题用「通知」，不走「告警」口径 */
+function sendNotice($type, $detail) {
+    sendAdminMail('通知', $type, $detail);
+}
+
+/** 管理员邮件统一发送（$kind 仅决定主题前缀：告警 / 通知） */
+function sendAdminMail($kind, $type, $detail) {
     $config = loadSiteConfig();
     $adminEmail = $config['admin_email'] ?? '';
     if (!$adminEmail) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
     $host = safeRequestHost();
-    $subject = "[{$site} 告警] {$type}";
+    $subject = "[{$site} {$kind}] {$type}";
     $now = date('Y-m-d H:i:s');
     $body = "时间：{$now}\n"
           . "服务器：{$host}\n"

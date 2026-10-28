@@ -1312,12 +1312,8 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
             <button type="button" class="links-back-btn" onclick="ysmCloseLinks()" aria-label="<?= t('home.043') ?>">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
-            <span class="links-brand"><?= htmlspecialchars($siteHeading) ?></span>
-        </div>
-        <div class="links-head">
-            <div class="links-head-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div>
             <h2 class="links-title"><?= t('home.013') ?></h2>
-            <p class="links-sub" id="linksCount"><?= $__showLinks && $__ysmActiveLinks > 0 ? t('links.subtitle', ['n' => (int)$__ysmActiveLinks]) : '' ?></p>
+            <span class="links-count" id="linksCount"><?= $__showLinks && $__ysmActiveLinks > 0 ? t('links.subtitle', ['n' => (int)$__ysmActiveLinks]) : '' ?></span>
         </div>
         <div class="links-grid" id="linksGrid"><?php
         if ($__showLinks) {

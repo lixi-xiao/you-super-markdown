@@ -139,6 +139,10 @@ function db_init_schema($pdo) {
     )');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_link_applies_status ON link_applies(status, created)');
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_link_applies_token ON link_applies(token)');
+    // v6.3.9：拒绝理由（后台/邮件拒绝时可选填写，幂等补列）
+    $laCols = [];
+    foreach ($pdo->query('PRAGMA table_info(link_applies)') as $c) { $laCols[] = strtolower($c['name']); }
+    if (!in_array('reject_reason', $laCols, true)) { $pdo->exec("ALTER TABLE link_applies ADD COLUMN reject_reason TEXT"); }
     // v2.9.0：邮箱验证码表（注册 / 写作者验证 / 超管确认链路）
     $pdo->exec('CREATE TABLE IF NOT EXISTS email_codes (
         id TEXT PRIMARY KEY,

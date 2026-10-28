@@ -1358,59 +1358,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <script src="../js/links-admin.js?v=<?= @filemtime(__DIR__ . '/../js/links-admin.js') ?>"></script>
     <?php endif; ?>
 
-    <?php if ($tab === 'links'): ?>
-    <div class="page-header">
-        <div class="page-title">
-            <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            <?= t('admin.471') ?>
-        </div>
-        <div class="page-subtitle"><?= t('station.101') ?></div>
-    </div>
-    <div id="linksAdmin" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>">
-        <div class="card">
-            <div class="card-title" id="linkFormTitle"><?= t('station.102') ?></div>
-            <div class="form-group">
-                <label class="form-label"><?= t('station.103') ?></label>
-                <input class="form-input" id="linkName" maxlength="60" placeholder="<?= t('station.104') ?>">
-            </div>
-            <div class="form-group">
-                <label class="form-label"><?= t('station.105') ?></label>
-                <div class="api-url-group">
-                    <input class="form-input" id="linkUrl" placeholder="https://example.com">
-                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn"><?= t('station.106') ?></button>
-                </div>
-            </div>
-            <div class="form-group">
-                <label class="form-label"><?= t('station.107') ?></label>
-                <input class="form-input" id="linkDesc" maxlength="200" placeholder="<?= t('station.108') ?>">
-            </div>
-            <div class="form-group">
-                <label class="form-label"><?= t('station.109') ?></label>
-                <input class="form-input" id="linkFavicon" placeholder="https://example.com/favicon.ico">
-            </div>
-            <div class="form-group">
-                <label class="form-label"><?= t('station.110') ?></label>
-                <input class="form-input" id="linkSort" type="number" value="0" style="max-width:160px">
-            </div>
-            <div id="linkFormMsg" class="form-hint"></div>
-            <div style="display:flex;justify-content:flex-end;gap:10px">
-                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none"><?= t('station.111') ?></button>
-                <button type="button" class="btn btn-primary" id="linkSaveBtn"><?= t('station.100') ?></button>
-            </div>
-            <input type="hidden" id="linkId" value="">
-        </div>
-        <div class="card">
-            <div class="card-title"><?= t('station.112') ?></div>
-            <div class="table-wrap">
-                <table id="linksTable" class="tbl-wide">
-                    <tr><th><?= t('station.113') ?></th><th><?= t('station.114') ?></th><th><?= t('station.080') ?></th><th><?= t('station.115') ?></th><th><?= t('station.018') ?></th></tr>
-                </table>
-            </div>
-        </div>
-    </div>
-    <script src="../js/fp.js?v=<?= @filemtime(__DIR__ . '/../js/fp.js') ?>"></script>
-    <script src="../js/links-admin.js?v=<?= @filemtime(__DIR__ . '/../js/links-admin.js') ?>"></script>
-    <?php endif; ?>
 
     <?php if ($tab === 'images'): ?>
     <?php

@@ -2456,12 +2456,12 @@ function sendAlert($type, $detail) {
 }
 
 /** v6.3.0：通知类邮件（如友链申请）——主题用「通知」，不走「告警」口径 */
-function sendNotice($type, $detail) {
-    sendAdminMail('通知', $type, $detail);
+function sendNotice($type, $detail, $htmlDetail = null) {
+    sendAdminMail('通知', $type, $detail, $htmlDetail);
 }
 
 /** 管理员邮件统一发送（$kind 仅决定主题前缀：告警 / 通知） */
-function sendAdminMail($kind, $type, $detail) {
+function sendAdminMail($kind, $type, $detail, $htmlDetail = null) {
     $config = loadSiteConfig();
     $adminEmail = $config['admin_email'] ?? '';
     if (!$adminEmail) return;
@@ -2477,7 +2477,7 @@ function sendAdminMail($kind, $type, $detail) {
           . ysmMailT('服务器', $lang) . "：{$host}\n"
           . ysmMailT('事件类型', $lang) . "：{$typeT}\n"
           . ysmMailT('详情', $lang) . "：{$detail}\n";
-    $html = renderMailHtml($site, $type, $detail, ['server' => $host, 'time' => $now], null, null, $lang);
+    $html = renderMailHtml($site, $type, $detail, ['server' => $host, 'time' => $now], $htmlDetail, null, $lang);
     // v2.8.0：优先 SMTP 直连（无 MTA 依赖）；未配置退回 mail 命令；失败落盘 alert.log 可追溯
     $smtp = getSmtpConfig();
     if ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '') {
@@ -3041,6 +3041,58 @@ function ysmAvatarUrl($username, $size = 100) {
     if ($u === '') return '';
     return '/avatar.php?u=' . rawurlencode($u) . '&s=' . max(24, min(256, (int)$size));
 }
+
+// ---- v6.0.0：友站（站长专属；录入辅助抓取 + 掉链巡检，只读校验） ----
+/** 抓取目标站点元数据用于录入预填（name/desc/favicon；不执行 JS、限大小、白名单协议） */
+/** v6.3.9：友链申请统计（待审核 / 已通过 / 已拒绝 / 已过期 / 已展示） */
+function linkApplyCounts() {
+    $out = ['pending' => 0, 'approved' => 0, 'rejected' => 0, 'expired' => 0];
+    foreach (db_all('SELECT status, COUNT(*) AS c FROM link_applies GROUP BY status') as $r) {
+        $k = (string)($r['status'] ?? '');
+        if (isset($out[$k])) $out[$k] = (int)$r['c'];
+    }
+    $row = db_one("SELECT COUNT(*) AS c FROM links WHERE status='active'");
+    $out['active'] = (int)($row['c'] ?? 0);
+    return $out;
+}
+
+/** v6.3.9：通过 / 拒绝友链申请——邮件审核页与站长后台共用同一实现，避免两套逻辑 */
+function linkApplyDecide($row, $decision, $actorId = 'system', $reason = '') {
+    if (!is_array($row) || empty($row['id'])) return 'invalid';
+    if ((string)($row['status'] ?? '') !== 'pending') return 'done';
+    if ((int)($row['token_expires'] ?? 0) > 0 && (int)$row['token_expires'] < time()) {
+        db_exec("UPDATE link_applies SET status='expired' WHERE id=?", [$row['id']]);
+        return 'expired';
+    }
+    $now = date('Y-m-d H:i:s');
+    if ($decision === 'approve') {
+        db_exec("INSERT OR IGNORE INTO links (site_name,url,favicon,desc,status,place_time,last_check,check_count,sort,source) VALUES (?,?,?,?,'active',?,0,0,99,'apply')",
+            [(string)$row['site_name'], (string)$row['url'], (string)($row['favicon'] ?? ''), (string)($row['desc'] ?? ''), time()]);
+        db_exec("UPDATE link_applies SET status='approved', decided_at=?, decided_by=?, reject_reason='' WHERE id=?", [$now, (string)$actorId, $row['id']]);
+        auditLog('link_apply_approve', (string)$row['site_name'], '友链申请通过：' . $row['url'], 'success');
+        return 'approved';
+    }
+    $reason = mb_substr(trim((string)$reason), 0, 200, 'UTF-8');
+    db_exec("UPDATE link_applies SET status='rejected', decided_at=?, decided_by=?, reject_reason=? WHERE id=?", [$now, (string)$actorId, $reason, $row['id']]);
+    auditLog('link_apply_reject', (string)$row['site_name'], '友链申请拒绝：' . $row['url'] . ($reason !== '' ? '（' . $reason . '）' : ''), 'success');
+    return 'rejected';
+}
+
+/** v6.3.9：撤销「刚通过」的申请（结果页误点恢复，删除自动插入的友链并回到待审核） */
+function linkApplyUndo($row, $actorId = 'system') {
+    if (!is_array($row) || (string)($row['status'] ?? '') !== 'approved') return false;
+    db_exec("DELETE FROM links WHERE url = ? AND source = 'apply'", [(string)$row['url']]);
+    db_exec("UPDATE link_applies SET status='pending', decided_at='', decided_by='', reject_reason='' WHERE id=?", [$row['id']]);
+    auditLog('link_apply_undo', (string)$row['site_name'], '撤销友链通过：' . $row['url'], 'success');
+    return true;
+}
+
+/** v6.3.9：友链申请是否必须审核后展示（默认需要；关闭后访客申请直接上架） */
+function linkReviewRequired() {
+    $c = loadSiteConfig();
+    return !isset($c['link_review_required']) || !empty($c['link_review_required']);
+}
+
 
 /** 启用中的友链数量（v6.1.0：无友链时前台不渲染入口，避免进入空视图） */
 function countActiveLinks() {

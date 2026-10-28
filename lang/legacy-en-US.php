@@ -1312,5 +1312,12 @@ Then enter the challenge code:',
         '这是一封来自 {site} 的邮件配置测试。' => 'This is a mail configuration test from {site}.',
         '如果你收到此邮件，说明 SMTP 配置正确，告警邮件可以正常发送。' => 'If you received this email, SMTP is configured correctly and alert emails will be delivered.',
 
+        '审核这条申请' => 'Review this application',
+        '访问该站点' => 'Visit this site',
+        '站点名称' => 'Site name',
+        '网址' => 'URL',
+        '简介' => 'Description',
+        '联系邮箱' => 'Contact email',
+        '链接 7 天内有效，单次使用' => 'The link is valid for 7 days and can be used once',
     ],
 ];

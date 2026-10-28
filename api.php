@@ -779,14 +779,45 @@ if ($action === 'link_apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = genId();
     $token = bin2hex(random_bytes(16));
     $exp = time() + 7 * 86400;
+    $needReview = linkReviewRequired();
     db_exec('INSERT INTO link_applies (id, site_name, url, desc, favicon, email, status, token, token_expires, ip, created) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
         [$id, $name, $url, $desc, $fav, $mail, 'pending', $token, $exp, $ip, date('Y-m-d H:i:s')]);
-    auditLog('link_apply', $name, '访客提交友链申请：' . $url, 'success');
+    if (!$needReview) {
+        // v6.3.9：站点关闭「新友链需审核」→ 直接上架（仍发通知邮件）
+        linkApplyDecide(['id' => $id, 'site_name' => $name, 'url' => $url, 'favicon' => $fav, 'desc' => $desc,
+            'token_expires' => $exp, 'status' => 'pending'], 'approve', 'auto');
+    }
+    auditLog('link_apply', $name, '访客提交友链申请：' . $url . ($needReview ? '' : '（免审核直接上架）'), 'success');
     $base = rtrim((string)(appConfig('site_url') ?: ('https://' . ($_SERVER['HTTP_HOST'] ?? ''))), '/');
     $approve = $base . '/index.php?action=link_review&token=' . $token;
-    $detail = "站点名称：{$name}\n网址：{$url}\n简介：{$desc}\n联系邮箱：{$mail}\n\n审核（需登录后台）：\n通过 / 拒绝：{$approve}\n\n令牌 7 天内有效，单次使用。";
-    if (function_exists('sendNotice')) { @sendNotice('友链申请', $detail); }
-    sendJson(['success' => true]);
+    $ml = function_exists('ysmAdminMailLang') ? ysmAdminMailLang() : 'zh-CN';
+    $tReview = function_exists('ysmMailT') ? ysmMailT('审核这条申请', $ml) : 'Review';
+    $tVisit = function_exists('ysmMailT') ? ysmMailT('访问该站点', $ml) : 'Visit';
+    $mSite = ysmMailT('站点名称', $ml);
+    $mUrl = ysmMailT('网址', $ml);
+    $mDesc = ysmMailT('简介', $ml);
+    $mMail = ysmMailT('联系邮箱', $ml);
+    $mTtl = ysmMailT('链接 7 天内有效，单次使用', $ml);
+    $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+    $detail = "站点名称：{$name}\n网址：{$url}\n简介：{$desc}\n联系邮箱：{$mail}\n\n"
+        . ($needReview ? "审核（打开链接做一道算术题即可通过/拒绝）：\n{$approve}\n\n令牌 7 天内有效，单次使用。" : "本站已开启免审核，已自动收录。\n{$approve}");
+    $htmlDetail = '<div style="font-size:14.5px;line-height:2;color:#2d3748;">'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #edf0f5;border-radius:12px;font-size:13.5px;">'
+        . '<tr><td style="padding:10px 16px;width:84px;color:#94a3b8;">' . $e($mSite) . '</td><td style="padding:10px 16px;color:#1e293b;font-weight:600;">' . $e($name) . '</td></tr>'
+        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e($mUrl) . '</td><td style="padding:10px 16px;"><a href="' . $e($url) . '" style="color:#2563eb;text-decoration:none;">' . $e($url) . '</a></td></tr>'
+        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e($mDesc) . '</td><td style="padding:10px 16px;color:#334155;">' . $e($desc) . '</td></tr>'
+        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e($mMail) . '</td><td style="padding:10px 16px;color:#334155;">' . $e($mail) . '</td></tr>'
+        . '</table>'
+        . '<div style="text-align:center;margin-top:22px;">'
+        . '<a href="' . $e($approve) . '" style="display:inline-block;background:linear-gradient(135deg,#1f3a5f 0%,#2a4a75 100%);color:#fff;font-size:15px;font-weight:600;padding:13px 34px;border-radius:999px;text-decoration:none;">' . $e($tReview) . '</a>'
+        . '</div>'
+        . '<div style="text-align:center;margin-top:12px;">'
+        . '<a href="' . $e($url) . '" style="display:inline-block;background:#fff;border:1px solid #e2e8f0;color:#334155;font-size:13.5px;padding:10px 26px;border-radius:999px;text-decoration:none;">' . $e($tVisit) . '</a>'
+        . '</div>'
+        . '<div style="text-align:center;margin-top:12px;color:#94a3b8;font-size:12px;">' . $e($mTtl) . '</div>'
+        . '</div>';
+    if (function_exists('sendNotice')) { @sendNotice('友链申请', $detail, $htmlDetail); }
+    sendJson(['success' => true, 'auto_approved' => !$needReview]);
 }
 /** 站长专属操作的前置校验（角色 + 环境） */
 function linksRequireStationAdmin() {
@@ -866,6 +897,47 @@ if ($action === 'links_check' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $alive = linkCheckAlive((string)$row['url']);
     db_exec('UPDATE links SET last_check = ?, check_count = check_count + 1, status = ? WHERE id = ?', [time(), $alive ? 'active' : 'dead', $id]);
     sendJson(['success' => true, 'alive' => $alive]);
+}
+// GET links_applies_list：友链申请（待审核 / 已拒绝）+ 统计 + 展示设置（v6.3.9）
+if ($action === 'links_applies_list' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    linksRequireStationAdmin();
+    $pending = db_all("SELECT id, site_name, url, desc, favicon, email, created, token_expires FROM link_applies WHERE status='pending' ORDER BY created DESC LIMIT 100");
+    $rejected = db_all("SELECT id, site_name, url, email, decided_at, reject_reason FROM link_applies WHERE status='rejected' ORDER BY decided_at DESC LIMIT 50");
+    sendJson([
+        'success' => true,
+        'counts' => linkApplyCounts(),
+        'pending' => $pending,
+        'rejected' => $rejected,
+        'review_required' => linkReviewRequired() ? 1 : 0,
+    ]);
+}
+// POST links_apply_decide：通过 / 拒绝（站长；与邮件审核共用 linkApplyDecide）
+if ($action === 'links_apply_decide' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $actor = linksRequireStationAdmin();
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
+    $b = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($b)) $b = [];
+    $id = (string)($b['id'] ?? '');
+    $dec = (string)($b['decision'] ?? '');
+    if ($id === '' || !in_array($dec, ['approve', 'reject'], true)) sendJson(['success' => false, 'error' => tn('api.946')], 400);
+    $row = db_one('SELECT * FROM link_applies WHERE id = ?', [$id]);
+    if (!$row) sendJson(['success' => false, 'error' => tn('api.947')], 404);
+    $res = linkApplyDecide($row, $dec, (string)($actor['id'] ?? ''), (string)($b['reason'] ?? ''));
+    sendJson(['success' => in_array($res, ['approved', 'rejected'], true), 'result' => $res, 'counts' => linkApplyCounts()]);
+}
+// GET/POST links_setting：展示设置——新友链是否需要审核后展示（v6.3.9）
+if ($action === 'links_setting') {
+    linksRequireStationAdmin();
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
+        $b = json_decode(file_get_contents('php://input'), true);
+        if (!is_array($b)) $b = [];
+        $cfg = loadSiteConfig();
+        $cfg['link_review_required'] = !empty($b['review_required']) ? 1 : 0;
+        saveSiteConfig($cfg);
+        auditLog('links_setting', 'link_review_required', '新友链需审核后展示：' . ($cfg['link_review_required'] ? '开' : '关'));
+    }
+    sendJson(['success' => true, 'review_required' => linkReviewRequired() ? 1 : 0]);
 }
 
 
@@ -1877,89 +1949,6 @@ if ($action === 'ai_translation_status' && $_SERVER['REQUEST_METHOD'] === 'GET')
     ]);
 }
 
-// GET links_list：前台只读——只出 active 友链（访客可访问，无需登录）
-if ($action === 'links_list') {
-    $rows = db_all("SELECT id, site_name, url, favicon, desc, sort FROM links WHERE status = 'active' ORDER BY sort ASC, place_time DESC");
-    sendJson(['success' => true, 'links' => $rows]);
-}
-// GET links_meta：站长录入辅助——抓取站点信息预填（仅站长）
-if ($action === 'links_meta' && $_SERVER['REQUEST_METHOD'] === 'GET') {
-    $actor = checkRole(ROLE_STATION_ADMIN);
-    $url = trim((string)($_GET['url'] ?? ''));
-    if ($url === '') sendJson(['success' => false, 'error' => '请填写站点地址'], 400);
-    // 统一补全 https
-    if (!preg_match('#^https?://#i', $url)) $url = 'https://' . $url;
-    $r = linkFetchMeta($url);
-    sendJson($r);
-}
-// POST links_save / links_delete / links_status / links_sort：站长专属管理
-function linksAwaitStationAdmin() {
-    $actor = checkRole(ROLE_STATION_ADMIN);
-    aiRequireFreshBackendSession();
-    return $actor;
-}
-if ($action === 'links_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    linksAwaitStationAdmin();
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
-    $b = aiJsonBody();
-    $name = trim((string)($b['site_name'] ?? ''));
-    $url = trim((string)($b['url'] ?? ''));
-    $desc = trim((string)($b['desc'] ?? ''));
-    $favicon = trim((string)($b['favicon'] ?? ''));
-    if (mb_strlen($name) > 60) sendJson(['success' => false, 'error' => '站点名过长'], 400);
-    if (mb_strlen($desc) > 200) sendJson(['success' => false, 'error' => '描述过长'], 400);
-    if ($name === '' || $url === '' || !preg_match('#^https?://#i', $url)) sendJson(['success' => false, 'error' => '站点名与地址必填，地址须为 http(s)'], 400);
-    if ($favicon !== '' && !preg_match('#^https?://#i', $favicon)) sendJson(['success' => false, 'error' => 'favicon 须为 http(s) 地址'], 400);
-    $id = (int)($b['id'] ?? 0);
-    $sort = (int)($b['sort'] ?? 0);
-    if ($id > 0) {
-        db_exec('UPDATE links SET site_name=?, url=?, desc=?, favicon=?, sort=? WHERE id=?', [$name, $url, $desc, $favicon, $sort, $id]);
-        auditLog('links_edit', $url, '编辑友链 ' . $name);
-    } else {
-        $exists = db_one('SELECT 1 AS x FROM links WHERE url = ?', [$url]);
-        if ($exists) sendJson(['success' => false, 'error' => '该站点已存在'], 400);
-        db_exec('INSERT INTO links (site_name, url, desc, favicon, status, place_time, sort, source) VALUES (?,?,?,?,\'active\',?,?,? )',
-            [$name, $url, $desc, $favicon, time(), $sort, 'manual']);
-        auditLog('links_add', $url, '新增友链 ' . $name);
-    }
-    sendJson(['success' => true]);
-}
-if ($action === 'links_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    linksAwaitStationAdmin();
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
-    $b = aiJsonBody();
-    $id = (int)($b['id'] ?? 0);
-    $row = db_one('SELECT site_name, url FROM links WHERE id = ?', [$id]);
-    db_exec('DELETE FROM links WHERE id = ?', [$id]);
-    if ($row) auditLog('links_delete', $row['url'], '删除友链 ' . $row['site_name']);
-    sendJson(['success' => true]);
-}
-if ($action === 'links_status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    linksAwaitStationAdmin();
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => 'CSRF 校验失败'], 403);
-    $b = aiJsonBody();
-    $id = (int)($b['id'] ?? 0);
-    $status = in_array((string)($b['status'] ?? ''), ['active', 'pending', 'dead', 'disabled'], true) ? (string)$b['status'] : '';
-    if ($status === '') sendJson(['success' => false, 'error' => '状态无效'], 400);
-    db_exec('UPDATE links SET status = ? WHERE id = ?', [$status, $id]);
-    auditLog('links_status', 'link#' . $id, '状态改为 ' . $status);
-    sendJson(['success' => true]);
-}
-// GET links_admin：站长后台列表（含状态/巡检信息）
-if ($action === 'links_admin' && $_SERVER['REQUEST_METHOD'] === 'GET') {
-    $actor = checkRole(ROLE_STATION_ADMIN);
-    sendJson(['success' => true, 'links' => db_all('SELECT * FROM links ORDER BY sort ASC, place_time DESC')]);
-}
-// GET links_check：站长触发单条掉链巡检（只读校验）
-if ($action === 'links_check' && $_SERVER['REQUEST_METHOD'] === 'GET') {
-    $actor = checkRole(ROLE_STATION_ADMIN);
-    $id = (int)($_GET['id'] ?? 0);
-    $row = db_one('SELECT url FROM links WHERE id = ?', [$id]);
-    if (!$row) sendJson(['success' => false, 'error' => '友链不存在'], 404);
-    $alive = linkCheckAlive((string)$row['url']);
-    db_exec('UPDATE links SET last_check = ?, check_count = check_count + 1, status = ? WHERE id = ?', [time(), $alive ? 'active' : 'dead', $id]);
-    sendJson(['success' => true, 'alive' => $alive]);
-}
 
 sendJson(['success' => false, 'error' => tn('api.980')], 400);
 sendJson(['success' => false, 'error' => tn('api.980')], 400);

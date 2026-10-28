@@ -1256,19 +1256,18 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
             </aside>
         </div>
     </div>
-    <!-- v6.0.0：友站（友情链接）卡片墙；v6.1.0：补 ×/ESC/深链退出，空态可直接返回 -->
+    <!-- v6.3.0：友站独立页（手机端从「应用」面板进入；桌面无入口但 #links 深链仍可用） -->
     <div class="links-view" id="linksView" style="display:none">
         <div class="links-head">
             <button type="button" class="links-back-btn" onclick="ysmCloseLinks()" aria-label="<?= t('home.043') ?>">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg><span><?= t('home.043') ?></span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
             <h2 class="links-title"><?= t('home.013') ?></h2>
-            <button type="button" class="links-close-btn" onclick="ysmCloseLinks()" aria-label="<?= t('home.044') ?>">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
+            <span class="links-count" id="linksCount" aria-hidden="true"></span>
         </div>
         <div class="links-grid" id="linksGrid"></div>
         <div class="links-empty" id="linksEmpty" style="display:none">
+            <div class="links-empty-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div>
             <div class="links-empty-text"><?= t('home.045') ?></div>
             <button type="button" class="btn btn-outline" onclick="ysmCloseLinks()"><?= t('home.046') ?></button>
         </div>
@@ -1615,6 +1614,8 @@ window.ysmOpenLinks = function(fromHistory){
     if (empty) { empty.style.display = 'none'; }
     fetch('api.php?action=links_list').then(function(r){ return r.json(); }).then(function(d){
         var links = (d && d.links) || [];
+        var cnt = document.getElementById('linksCount');
+        if (cnt) { cnt.textContent = links.length ? String(links.length) : ''; }
         if (!links.length) { if (empty) empty.style.display = 'block'; return; }
         var esc = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
         grid.innerHTML = links.map(function(x){

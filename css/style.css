@@ -1166,3 +1166,39 @@ body.bg-blur .nf-card{background:hsla(0,0%,100%,var(--bg-card-opacity,0.8));back
   #topBar .header-right .icon-btn::after { content: ''; position: absolute; inset: -2px; }
   #topBar .header-right .icon-btn svg { width: 19px; height: 19px; }
 }
+
+/* v6.3.0 修订：友链页整体容器 + 头部重排（去掉双关闭按钮、统一视觉） */
+.links-view {
+  background: rgba(255,255,255,0.74);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 12px 12px 20px;
+  margin: 10px auto 24px;
+  box-shadow: var(--shadow-sm);
+}
+[data-theme="dark"] .links-view { background: rgba(22,27,34,0.76); }
+.links-head { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; }
+.links-back-btn {
+  width: 40px; height: 40px; min-width: 40px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface); color: var(--text-secondary);
+  cursor: pointer; transition: color .18s, border-color .18s, background .18s;
+}
+.links-back-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-light); }
+.links-back-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.links-title { flex: 1; min-width: 0; margin: 0; font-size: 1.12em; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+.links-count { flex-shrink: 0; font-size: 0.76em; font-weight: 600; color: var(--accent); background: var(--accent-light); border-radius: 999px; padding: 2px 9px; }
+.links-close-btn { display: none; }
+.links-grid { gap: 10px; }
+.link-card { background: var(--surface); }
+.link-card:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.links-empty-ic { width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 18px; background: var(--accent-light); color: var(--accent); display: flex; align-items: center; justify-content: center; }
+.links-empty-ic svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+@media (max-width: 640px) {
+  .links-view { border-radius: 16px; padding: 10px 10px 18px; margin: 8px 0 20px; }
+  .links-title { font-size: 1.06em; }
+}

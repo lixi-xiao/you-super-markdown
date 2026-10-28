@@ -137,6 +137,16 @@ function db_init_schema($pdo) {
         sort INTEGER DEFAULT 0, source TEXT DEFAULT \'manual\'
     )');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_links_status_sort ON links(status, sort)');
+    // v6.3.0：友链申请（前台提交 → 邮件通知站长 → 审核入站）
+    $pdo->exec('CREATE TABLE IF NOT EXISTS link_applies (
+        id TEXT PRIMARY KEY,
+        site_name TEXT, url TEXT, desc TEXT, favicon TEXT, email TEXT,
+        status TEXT DEFAULT \'pending\',
+        token TEXT, token_expires INTEGER,
+        ip TEXT, created TEXT, decided_at TEXT, decided_by TEXT
+    )');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_link_applies_status ON link_applies(status, created)');
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_link_applies_token ON link_applies(token)');
     // v2.9.0：邮箱验证码表（注册 / 写作者验证 / 超管确认链路）
     $pdo->exec('CREATE TABLE IF NOT EXISTS email_codes (
         id TEXT PRIMARY KEY,

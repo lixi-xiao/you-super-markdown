@@ -1217,3 +1217,63 @@ body.bg-blur .nf-card{background:hsla(0,0%,100%,var(--bg-card-opacity,0.8));back
 .links-grid { padding: 0 2px; }
 .link-card { box-shadow: none; border-color: var(--border); }
 .link-card:hover { box-shadow: var(--shadow-sm); }
+
+/* v6.3.0：友链页独占一屏——隐藏全局顶栏与浮动按钮，改为页内单条顶栏（避免"两个顶栏"） */
+body.links-open .top-bar { display: none !important; }
+body.links-open .floating-buttons { display: none !important; }
+body.links-open .main-container { padding-top: 0; }
+
+.links-top {
+  position: sticky; top: 0; z-index: 130;
+  display: flex; align-items: center; gap: 10px;
+  height: 52px; padding: 0 12px; margin: -12px -12px 12px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.links-brand {
+  flex: 1; min-width: 0; font-size: 0.95em; font-weight: 650; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.links-top .links-back-btn { width: 36px; height: 36px; min-width: 36px; border-radius: 10px; }
+.links-view { margin-top: 0; padding-top: 0; }
+.links-head { gap: 10px; }
+.links-head-ic {
+  display: inline-flex; width: 34px; height: 34px; border-radius: 12px;
+  align-items: center; justify-content: center;
+  background: var(--accent-light); color: var(--accent); flex-shrink: 0;
+}
+.links-head-ic svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.links-title { font-size: 1.3em; font-weight: 800; letter-spacing: -0.02em; }
+.links-sub { flex-basis: 100%; margin: 2px 0 0 0; font-size: 0.8em; color: var(--text-muted); }
+.links-head { flex-wrap: wrap; border-bottom: none; padding-bottom: 0; margin-bottom: 14px; align-items: center; }
+.links-sub { order: 3; }
+@media (max-width: 640px) {
+  .links-top { margin: -10px -10px 12px; height: 50px; }
+  .links-title { font-size: 1.2em; }
+  .links-view { padding: 0 10px 20px; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+  [data-theme="dark"] .links-view { background: transparent; }
+  .links-grid { gap: 12px; }
+  .link-card { padding: 16px 14px; border-radius: 16px; box-shadow: var(--shadow-sm); }
+  .link-fav { width: 52px; height: 52px; border-radius: 14px; }
+  .link-name { font-size: 1.02em; }
+  .link-desc { font-size: 0.86em; }
+}
+
+/* v6.3.0：友链页为独占视图（main.js 的 showHome 会把 homeView 设回 block，用 !important 压住） */
+body.links-open #homeView,
+body.links-open #readingView { display: none !important; }
+
+/* 友链页标题区：图标 + 标题同一行，副标题在下方（左对齐） */
+.links-head { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 2px; align-items: center; }
+.links-head-ic { grid-row: 1; }
+.links-title { grid-column: 2; grid-row: 1; justify-self: start; margin: 0; }
+.links-sub { grid-column: 2; grid-row: 2; margin: 0; }
+
+/* v6.3.0：标题行定稿（#linksView 提权，避免被旧规则干扰） */
+#linksView .links-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 4px 2px 14px; padding: 0; border: 0; }
+#linksView .links-head-ic { width: 34px; height: 34px; border-radius: 12px; }
+#linksView .links-title { flex: 0 0 auto; margin: 0; font-size: 1.28em; font-weight: 800; text-align: left; }
+#linksView .links-sub { flex: 0 0 100%; margin: 0; font-size: 0.8em; color: var(--text-muted); }
+#linksView .links-sub:empty { display: none; }
+
+#linksView .links-head { justify-content: flex-start; }
+#linksView .links-title { flex: 0 1 auto; }

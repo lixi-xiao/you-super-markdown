@@ -1258,12 +1258,16 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
     </div>
     <!-- v6.3.0：友站独立页（手机端从「应用」面板进入；桌面无入口但 #links 深链仍可用） -->
     <div class="links-view" id="linksView" style="display:none">
-        <div class="links-head">
+        <div class="links-top">
             <button type="button" class="links-back-btn" onclick="ysmCloseLinks()" aria-label="<?= t('home.043') ?>">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
+            <span class="links-brand"><?= htmlspecialchars($siteHeading) ?></span>
+        </div>
+        <div class="links-head">
+            <div class="links-head-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div>
             <h2 class="links-title"><?= t('home.013') ?></h2>
-            <span class="links-count" id="linksCount" aria-hidden="true"></span>
+            <p class="links-sub" id="linksCount"></p>
         </div>
         <div class="links-grid" id="linksGrid"></div>
         <div class="links-empty" id="linksEmpty" style="display:none">
@@ -1604,6 +1608,7 @@ window.ysmOpenLinks = function(fromHistory){
     if (hv) hv.style.display = 'none';
     if (rv) rv.style.display = 'none';
     if (lv) lv.style.display = 'block';
+    document.body.classList.add('links-open');
     if (!fromHistory) {
         try { history.pushState({ ysmView: 'links' }, '', '#links'); window.ysmLinksPushed = true; } catch (e) {}
     }
@@ -1644,6 +1649,7 @@ window.ysmCloseLinks = function(fromHistory){
     var lv = document.getElementById('linksView');
     var hv = document.getElementById('homeView');
     if (lv) lv.style.display = 'none';
+    document.body.classList.remove('links-open');
     if (hv) hv.style.display = '';
     if (location.hash === '#links') {
         try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}

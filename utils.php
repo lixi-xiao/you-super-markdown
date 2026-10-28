@@ -624,6 +624,17 @@ function selfProtectAlert($context, $ip, $detail = '') {
          . ($detail !== '' ? '：' . $detail : '');
     auditLog('self_protect_skip', 'security', $msg, 'blocked');
     @file_put_contents(ALERT_LOG, date('Y-m-d H:i:s') . " [自封保护] {$msg}\n", FILE_APPEND | LOCK_EX);
+    // v6.3.2：同一「IP + 上下文」24 小时内只发一封邮件——蜜罐把服务器自身 IP 记为攻击方时会连续触发，
+    //         不去重会反复发信（安全判定不变，仍逐条写审计与 alert.log）。
+    $dedupKey = 'self_protect_mail:' . md5($ip . '|' . $context);
+    try {
+        $row = db_one('SELECT value FROM meta WHERE key = ?', [$dedupKey]);
+        $last = (int)($row['value'] ?? 0);
+        if ($last > 0 && (time() - $last) < 86400) return;
+        db_exec('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [$dedupKey, (string)time()]);
+    } catch (Throwable $e) {
+        // 去重失败不影响告警本身
+    }
     sendAlert('自封保护（已跳过封禁）', $msg . "\nIP：" . $ip . "\n上下文：" . $context);
 }
 // ============================================================

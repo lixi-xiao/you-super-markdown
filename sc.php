@@ -557,6 +557,10 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                         <span class="file-info-name" id="fileInfoName"></span>
                         <button type="button" class="file-info-remove" id="fileRemoveBtn">&times;</button>
                     </div>
+                    <!-- v6.3.2：选中 .md/.txt 后可先在本地渲染预览，确认无误再提交 -->
+                    <div class="md-preview-bar">
+                        <button type="button" class="btn btn-sm btn-outline" id="filePreviewBtn" data-md-preview-file="fileInput" style="display:none"><?= t('editor.076') ?></button>
+                    </div>
                 </div>
             </div>
             <div class="method-panel" data-panel="url">
@@ -570,6 +574,10 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                     <label class="form-label"><?= t('editor.011') ?></label>
                     <textarea class="form-input" name="content" id="contentArea" style="min-height:160px;font-family:monospace" placeholder="<?= t('editor.012') ?>"></textarea>
                     <p class="form-hint" id="charCount"></p>
+                    <div class="md-preview-bar">
+                        <button type="button" class="btn btn-sm btn-outline" data-md-preview="contentArea" data-md-preview-title="<?= t('editor.076') ?>"><?= t('editor.076') ?></button>
+                        <span class="form-hint"><?= t('editor.082') ?></span>
+                    </div>
                 </div>
             </div>
             <div class="method-panel" data-panel="rich">
@@ -711,7 +719,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
         </div>
         <?php else: ?>
         <div class="table-wrap">
-        <table>
+        <table class="tbl-xwide">
             <tr><th><?= t('editor.039') ?></th><th><?= t('editor.040') ?></th><th><?= t('editor.041') ?></th><th><?= t('editor.042') ?></th><th><?= t('editor.043') ?></th><th><?= t('editor.044') ?></th></tr>
             <?php foreach ($docItems as $f): ?>
             <?php
@@ -783,6 +791,10 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                     </div>
                     <textarea class="form-input" name="content" id="editContent" style="min-height:200px;font-family:monospace" placeholder="<?= t('editor.052') ?>"></textarea>
                     <p class="form-hint" id="editCharCount"></p>
+                    <div class="md-preview-bar">
+                        <button type="button" class="btn btn-sm btn-outline" data-md-preview="editContent" data-md-preview-title="<?= t('editor.076') ?>"><?= t('editor.076') ?></button>
+                        <span class="form-hint"><?= t('editor.082') ?></span>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label"><?= t('editor.034') ?></label>
@@ -1143,5 +1155,7 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { openDeleteConfirmModal(this.dataset.name, this.dataset.display); });
 });
 </script>
+<!-- v6.3.2：Markdown 正文预览 -->
+<script src="js/md-preview.js?v=<?= @filemtime(__DIR__ . '/js/md-preview.js') ?>"></script>
 </body>
 </html>

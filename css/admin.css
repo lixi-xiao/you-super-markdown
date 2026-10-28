@@ -2131,6 +2131,24 @@ td code {
     /* 表格紧凑（table-wrap 已有横向滚动） */
     th, td { padding: 9px 10px; }
 
+    /* v6.3.2：数据表在窄屏按内容给最小宽度，避免多列被压成竖排文字 */
+    .table-wrap > table.tbl-wide { min-width: 660px; }
+    .table-wrap > table.tbl-xwide { min-width: 820px; }
+    #linksTable { min-width: 640px; }
+    #linksTable td:first-child { min-width: 180px; }
+
+    /* 卡片内的「标签-值 / 表单」两列表：标签列固定比例，控件吃满剩余宽度 */
+    .card > table { table-layout: fixed; }
+    .card > table td:first-child { width: 40%; white-space: normal; }
+    .card > table td:last-child { word-break: break-word; }
+    .card > table .form-input,
+    .card > table .form-select { width: 100% !important; max-width: 100%; }
+
+    /* 表格内操作按钮不换行、垂直居中 */
+    .table-wrap td { vertical-align: middle; }
+    .table-wrap td .btn,
+    .table-wrap td .btn-link { white-space: nowrap; }
+
     /* 更新状态/版本/备份条目紧凑 */
     .version-display { flex-direction: column; align-items: flex-start; gap: 8px; }
     .update-progress-step { padding: 9px 12px; }
@@ -2179,4 +2197,149 @@ td code {
 
     /* 行内操作按钮组不折行挤压 */
     .ban-item-actions, .modal-actions { gap: 8px; }
+}
+/* ================================================================
+   v6.3.2：Markdown 正文预览（编辑器「预览」浮层）
+   不依赖前台 css/style.css——这里给一套精简排版，深浅色沿用后台变量。
+   ================================================================ */
+.md-preview-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+.md-preview-mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 120;
+    display: none;
+}
+.md-preview-mask.open { display: block; }
+.md-preview-panel {
+    position: fixed;
+    z-index: 121;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(920px, 92vw);
+    max-height: 88vh;
+    display: none;
+    flex-direction: column;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+.md-preview-panel.open { display: flex; }
+.md-preview-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.md-preview-title {
+    flex: 1;
+    min-width: 0;
+    font-weight: 700;
+    font-size: 0.98em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.md-preview-close {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+.md-preview-close:hover { color: var(--text); border-color: var(--accent); }
+.md-preview-body {
+    padding: 8px 20px 28px;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* 预览正文排版（作用域限定在浮层内，避免影响后台其它页面） */
+.md-preview-body h1, .md-preview-body h2, .md-preview-body h3, .md-preview-body h4 {
+    margin: 1.4em 0 0.6em;
+    font-weight: 700;
+    line-height: 1.35;
+    color: var(--text);
+}
+.md-preview-body h1 { font-size: 1.7em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; margin-top: 0.4em; }
+.md-preview-body h2 { font-size: 1.35em; border-bottom: 1px solid var(--border); padding-bottom: 0.25em; }
+.md-preview-body h3 { font-size: 1.15em; }
+.md-preview-body h4 { font-size: 1.02em; }
+.md-preview-body p, .md-preview-body li { font-size: 0.95em; line-height: 1.8; color: var(--text-secondary); }
+.md-preview-body p { margin: 0.9em 0; }
+.md-preview-body ul, .md-preview-body ol { margin: 0.8em 0; padding-left: 1.4em; }
+.md-preview-body li { margin: 0.3em 0; }
+.md-preview-body a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(45, 212, 191, 0.4); }
+.md-preview-body blockquote {
+    margin: 1em 0;
+    padding: 0.6em 1em;
+    border-left: 3px solid var(--accent);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-secondary);
+    border-radius: 0 8px 8px 0;
+}
+.md-preview-body code {
+    font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    font-size: 0.86em;
+    background: rgba(255, 255, 255, 0.07);
+    padding: 0.15em 0.4em;
+    border-radius: 5px;
+}
+.md-preview-body pre {
+    margin: 1em 0;
+    padding: 14px 16px;
+    background: #0f172a;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow-x: auto;
+}
+.md-preview-body pre code { background: transparent; padding: 0; font-size: 0.85em; }
+.md-preview-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+    font-size: 0.9em;
+}
+.md-preview-body th, .md-preview-body td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+}
+.md-preview-body th { background: rgba(255, 255, 255, 0.04); color: var(--text); }
+.md-preview-body img { max-width: 100%; height: auto; border-radius: 10px; }
+.md-preview-body hr { border: none; border-top: 1px solid var(--border); margin: 1.6em 0; }
+.md-preview-body .mermaid { overflow-x: auto; margin: 1em 0; text-align: center; }
+.md-preview-empty { color: var(--text-muted); font-size: 0.9em; padding: 24px 0; text-align: center; }
+
+@media (max-width: 640px) {
+    /* 手机上预览改为底部全屏弹层 */
+    .md-preview-panel {
+        left: 0;
+        right: 0;
+        bottom: 0;
+        top: auto;
+        transform: none;
+        width: 100%;
+        max-height: 92vh;
+        border-radius: 16px 16px 0 0;
+    }
+    .md-preview-body { padding: 6px 14px 32px; }
+    .md-preview-body h1 { font-size: 1.45em; }
+    .md-preview-body h2 { font-size: 1.2em; }
 }

@@ -1303,7 +1303,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <?= t('admin.487') ?><span class="card-badge"><?= $saPaged['total'] ?></span>
         </div>
-        <div class="table-wrap"><table>
+        <div class="table-wrap"><table class="tbl-wide">
             <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.015') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th></tr>
             <?php foreach ($saPaged['items'] as $u): ?>
             <tr>
@@ -1325,7 +1325,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
             <?= t('admin.558') ?><span class="card-badge"><?= $stPaged['total'] ?></span>
         </div>
-        <div class="table-wrap"><table>
+        <div class="table-wrap"><table class="tbl-wide">
             <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th><th><?= t('admin.032') ?></th></tr>
             <?php foreach ($stPaged['items'] as $u): ?>
             <tr>
@@ -1347,7 +1347,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
             <?= t('admin.557') ?><span class="card-badge"><?= $auPaged['total'] ?></span>
         </div>
-        <div class="table-wrap"><table>
+        <div class="table-wrap"><table class="tbl-xwide">
             <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.033') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th><th><?= t('admin.032') ?></th></tr>
             <?php foreach ($auPaged['items'] as $u): ?>
             <tr>
@@ -1370,7 +1370,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
             <?= t('admin.559') ?><span class="card-badge"><?= $usPaged['total'] ?></span>
         </div>
-        <div class="table-wrap"><table>
+        <div class="table-wrap"><table class="tbl-wide">
             <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th><th><?= t('admin.032') ?></th></tr>
             <?php foreach ($usPaged['items'] as $u): ?>
             <tr>
@@ -1433,7 +1433,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <?php if ($q !== ''): ?><span class="result-count"><?= t('common.match_count', ['n' => $pageData['total']]) ?></span><?php endif; ?>
         </div>
         <div class="table-wrap">
-        <table>
+        <table class="tbl-xwide">
             <tr><th><?= t('admin.035') ?></th><th><?= t('admin.036') ?></th><th><?= t('admin.015') ?></th><th><?= t('admin.032') ?></th><th><?= t('admin.037') ?></th><th><?= t('admin.038') ?></th><th>IP</th></tr>
             <?php if (empty($pageData['items'])): ?>
             <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:28px"><?= $q !== '' ? '未找到匹配「' . htmlspecialchars($q) . '」的记录' : '暂无审计日志' ?></td></tr>
@@ -1901,7 +1901,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         </div>
         <?php else: ?>
         <div class="table-wrap">
-        <table>
+        <table class="tbl-xwide">
             <tr><th><?= t('admin.035') ?></th><th><?= t('admin.036') ?></th><th><?= t('admin.015') ?></th><th><?= t('admin.032') ?></th><th><?= t('admin.037') ?></th><th><?= t('admin.038') ?></th><th><?= t('admin.084') ?></th></tr>
             <?php foreach ($auditData['items'] as $log): ?>
             <tr>
@@ -2278,7 +2278,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <div class="card">
             <div class="card-title"><?= t('admin.144') ?></div>
             <div class="table-wrap">
-                <table id="linksTable">
+                <table id="linksTable" class="tbl-wide">
                     <tr><th><?= t('admin.145') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.146') ?></th><th><?= t('admin.147') ?></th><th><?= t('admin.032') ?></th></tr>
                 </table>
             </div>
@@ -3089,7 +3089,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <?php if (empty($hfishData['items'])): ?>
         <div class="empty-state"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg><p><?= t('admin.271') ?></p></div>
         <?php else: ?>
-        <div class="table-wrap"><table>
+        <div class="table-wrap"><table class="tbl-xwide">
             <tr><th>IP</th><th><?= t('admin.272') ?></th><th><?= t('admin.273') ?></th><th><?= t('admin.274') ?></th><th>UA</th><th><?= t('admin.275') ?></th><th><?= t('admin.030') ?></th></tr>
             <?php foreach ($hfishData['items'] as $a): ?>
             <tr>
@@ -3330,7 +3330,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <button class="btn btn-secondary" type="submit"><?= t('admin.009') ?></button>
         </form>
         <div class="table-wrap">
-        <table>
+        <table class="tbl-xwide">
             <tr><th><?= t('admin.035') ?></th><th><?= t('admin.321') ?></th><th><?= t('admin.322') ?></th><th><?= t('admin.323') ?></th><th>IP</th><th><?= t('admin.324') ?></th><th><?= t('admin.030') ?></th></tr>
             <?php foreach ($codesPaged['rows'] as $c): ?>
             <tr>
@@ -3356,7 +3356,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <button class="btn btn-secondary" type="submit"><?= t('admin.009') ?></button>
         </form>
         <div class="table-wrap">
-        <table>
+        <table class="tbl-xwide">
             <tr><th><?= t('admin.325') ?></th><th><?= t('admin.321') ?></th><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.326') ?></th></tr>
             <?php foreach ($pendsPaged['rows'] as $pd): ?>
             <tr>
@@ -3393,7 +3393,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title"><?= t('admin.327') ?></div>
         <div class="table-wrap">
-        <table>
+        <table class="tbl-xwide">
             <tr><th><?= t('admin.328') ?></th><th><?= t('admin.329') ?></th><th><?= t('admin.330') ?></th><th><?= t('admin.331') ?></th><th><?= t('admin.332') ?></th><th><?= t('admin.032') ?></th></tr>
             <?php foreach ($threatRows as $tr): $locked = (int)$tr['locked_left']; ?>
             <tr>
@@ -3438,7 +3438,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         $devPages = max(1, (int)ceil($devTotal / $dpp));
         if ($dp > $devPages) { $dp = $devPages; [$devRows, $devTotal] = getDevicesPaginated($dp, $dpp); }
         ?>
-        <table>
+        <table class="tbl-xwide">
             <tr><th><?= t('admin.335') ?></th><th><?= t('admin.015') ?></th><th><?= t('admin.336') ?></th><th>UA</th><th><?= t('admin.337') ?></th><th><?= t('admin.338') ?></th><th><?= t('admin.032') ?></th></tr>
             <?php foreach ($devRows as $d): ?>
             <tr>

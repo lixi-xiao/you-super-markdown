@@ -1042,6 +1042,13 @@ return [
     // ---- v6.3.0 pass2 ----
     'user.003' => 'Registered at',
     'editor.075' => 'Document deleted',
+    'editor.076' => 'Preview',
+    'editor.077' => 'Close preview',
+    'editor.078' => 'This file type cannot be previewed — import it first',
+    'editor.079' => 'Failed to render the preview — please check the content',
+    'editor.080' => 'Rendering preview…',
+    'editor.081' => 'Nothing to preview yet — type or upload Markdown first',
+    'editor.082' => 'Rendered locally only — nothing is uploaded or saved',
     'admin.369' => 'Configuration saved',
     'admin.370' => 'User created',
     'admin.371' => 'User deleted',

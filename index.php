@@ -1721,11 +1721,11 @@ document.addEventListener('click', function(e){
     if (isBtn) { langMenu.style.display = langMenu.style.display === 'block' ? 'none' : 'block'; return; }
     if (!isOpt) langMenu.style.display = 'none';
 });</script>
+<!-- v6.3.0：i18n 运行时必须在 main.js（defer）之前就绪，否则 TK 取不到词典会回退成 key -->
+<script src="js/i18n.js?v=<?= @filemtime(__DIR__ . '/js/i18n.js') ?>"></script>
 <script src="js/main.js?v=<?= filemtime(__DIR__ . '/js/main.js') ?>" defer></script>
 <!-- v5.1.0 P3：外壳增强（滚动边界 / 键盘焦点环）；纯增量，与 main.js 无重叠 -->
 <script src="js/ui.js?v=<?= @filemtime(__DIR__ . '/js/ui.js') ?>" defer></script>
-<!-- v6.0.0：i18n 运行时文案接入（首页全部 UI 文案按当前语言翻译；文章/评论等用户内容不翻译） -->
-<script src="js/i18n.js?v=<?= @filemtime(__DIR__ . '/js/i18n.js') ?>" defer></script>
 <script>
 // 背景图片应用
 (function() {

@@ -1146,3 +1146,23 @@ body.bg-blur .nf-card{background:hsla(0,0%,100%,var(--bg-card-opacity,0.8));back
 @media (max-width: 640px) {
   #homeLinks { display: none !important; }
 }
+
+/* v6.3.0：手机端主栏只保留 搜索/用户/语言 + 应用触发器；RSS/音乐/明暗收进面板 */
+@media (max-width: 640px) {
+  .top-bar .icon-btn[id="btnRss"],
+  .top-bar .icon-btn[id="floatMusicBtn"],
+  .top-bar .icon-btn[id="btnThemeToggle"] { display: none; }
+}
+
+/* v6.3.0：手机端顶栏图标不参与压缩（保证 40px 触控宽度不被 flex 挤小） */
+@media (max-width: 640px) {
+  .top-bar .header-right .icon-btn { flex: 0 0 auto; }
+  .top-bar .brand { min-width: 0; }
+}
+
+/* v6.3.0：手机端顶栏图标统一 40px，并用伪元素把可点区域扩到 44px */
+@media (max-width: 640px) {
+  #topBar .header-right .icon-btn { width: 40px; height: 40px; position: relative; }
+  #topBar .header-right .icon-btn::after { content: ''; position: absolute; inset: -2px; }
+  #topBar .header-right .icon-btn svg { width: 19px; height: 19px; }
+}

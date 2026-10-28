@@ -21,10 +21,10 @@
         try {
             if (typeof window.TK === 'function') {
                 var v = window.TK(key);
-                if (v && v !== key) return v;
+                if (v) return v;
             }
         } catch (e) {}
-        return def;
+        return def || key;
     }
     function themeName() {
         return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default';
@@ -108,7 +108,7 @@
         if (!el || el.__ysmTip) return;
         var tip = document.createElement('div');
         tip.className = 'ysm-mmd-tip';
-        tip.innerHTML = '<span class="ysm-mmd-dot"></span>' + T('js.165', '图表加载中…');
+        tip.innerHTML = '<span class="ysm-mmd-dot"></span>' + T('js.165');
         el.parentNode.insertBefore(tip, el);
         el.__ysmTip = tip;
     }
@@ -118,11 +118,11 @@
         var tip = document.createElement('div');
         tip.className = 'ysm-mmd-tip ysm-mmd-tip-err';
         var span = document.createElement('span');
-        span.textContent = T('js.166', '图表加载失败');
+        span.textContent = T('js.166');
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'ysm-mmd-retry';
-        btn.textContent = T('js.149', '点击重试');
+        btn.textContent = T('js.149');
         btn.addEventListener('click', function () {
             removeTip(el);
             el.removeAttribute('data-processed');

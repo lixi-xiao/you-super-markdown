@@ -794,15 +794,20 @@ if ($action === 'link_apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $ml = function_exists('ysmAdminMailLang') ? ysmAdminMailLang() : 'zh-CN';
     $tReview = function_exists('ysmMailT') ? ysmMailT('审核这条申请', $ml) : 'Review';
     $tVisit = function_exists('ysmMailT') ? ysmMailT('访问该站点', $ml) : 'Visit';
+    $mSite = ysmMailT('站点名称', $ml);
+    $mUrl = ysmMailT('网址', $ml);
+    $mDesc = ysmMailT('简介', $ml);
+    $mMail = ysmMailT('联系邮箱', $ml);
+    $mTtl = ysmMailT('链接 7 天内有效，单次使用', $ml);
     $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
     $detail = "站点名称：{$name}\n网址：{$url}\n简介：{$desc}\n联系邮箱：{$mail}\n\n"
         . ($needReview ? "审核（打开链接做一道算术题即可通过/拒绝）：\n{$approve}\n\n令牌 7 天内有效，单次使用。" : "本站已开启免审核，已自动收录。\n{$approve}");
     $htmlDetail = '<div style="font-size:14.5px;line-height:2;color:#2d3748;">'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #edf0f5;border-radius:12px;font-size:13.5px;">'
-        . '<tr><td style="padding:10px 16px;width:84px;color:#94a3b8;">' . $e(ysmMailT('站点名称', $ml)) . '</td><td style="padding:10px 16px;color:#1e293b;font-weight:600;">' . $e($name) . '</td></tr>'
-        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e(ysmMailT('网址', $ml)) . '</td><td style="padding:10px 16px;"><a href="' . $e($url) . '" style="color:#2563eb;text-decoration:none;">' . $e($url) . '</a></td></tr>'
-        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e(ysmMailT('简介', $ml)) . '</td><td style="padding:10px 16px;color:#334155;">' . $e($desc) . '</td></tr>'
-        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e(ysmMailT('联系邮箱', $ml)) . '</td><td style="padding:10px 16px;color:#334155;">' . $e($mail) . '</td></tr>'
+        . '<tr><td style="padding:10px 16px;width:84px;color:#94a3b8;">' . $e($mSite) . '</td><td style="padding:10px 16px;color:#1e293b;font-weight:600;">' . $e($name) . '</td></tr>'
+        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e($mUrl) . '</td><td style="padding:10px 16px;"><a href="' . $e($url) . '" style="color:#2563eb;text-decoration:none;">' . $e($url) . '</a></td></tr>'
+        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e($mDesc) . '</td><td style="padding:10px 16px;color:#334155;">' . $e($desc) . '</td></tr>'
+        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e($mMail) . '</td><td style="padding:10px 16px;color:#334155;">' . $e($mail) . '</td></tr>'
         . '</table>'
         . '<div style="text-align:center;margin-top:22px;">'
         . '<a href="' . $e($approve) . '" style="display:inline-block;background:linear-gradient(135deg,#1f3a5f 0%,#2a4a75 100%);color:#fff;font-size:15px;font-weight:600;padding:13px 34px;border-radius:999px;text-decoration:none;">' . $e($tReview) . '</a>'
@@ -810,7 +815,7 @@ if ($action === 'link_apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         . '<div style="text-align:center;margin-top:12px;">'
         . '<a href="' . $e($url) . '" style="display:inline-block;background:#fff;border:1px solid #e2e8f0;color:#334155;font-size:13.5px;padding:10px 26px;border-radius:999px;text-decoration:none;">' . $e($tVisit) . '</a>'
         . '</div>'
-        . '<div style="text-align:center;margin-top:12px;color:#94a3b8;font-size:12px;">' . $e(ysmMailT('链接 7 天内有效，单次使用', $ml)) . '</div>'
+        . '<div style="text-align:center;margin-top:12px;color:#94a3b8;font-size:12px;">' . $e($mTtl) . '</div>'
         . '</div>';
     if (function_exists('sendNotice')) { @sendNotice('友链申请', $detail, $htmlDetail); }
     sendJson(['success' => true, 'auto_approved' => !$needReview]);

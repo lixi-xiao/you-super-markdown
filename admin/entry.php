@@ -60,6 +60,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $reqFp = trim((string)($_POST['fingerprint'] ?? ''));
     if ($reqFp !== '' && preg_match('/^[a-f0-9]{16,64}$/i', $reqFp)) $reqFp = strtolower($reqFp);
     else $reqFp = '';
+    // v6.3.6：稳定指纹（UA + 浏览器语言 + 时区桶）——会话并绑定，后续 canvas/缩放/旋转漂移不再误判环境变化
+    $reqSfp = trim((string)($_POST['sfp'] ?? ''));
+    if ($reqSfp !== '' && preg_match('/^[a-f0-9]{16,64}$/i', $reqSfp)) $reqSfp = strtolower($reqSfp);
+    else $reqSfp = '';
 
     // v4.7.0：设备验证码提交分支（OTP 通过但为陌生设备时出现的验证码表单）
     if (isset($_POST['device_code'])) {
@@ -80,6 +84,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     unset($_SESSION['cmt_pending_dev']);
                     $newTV = bumpUserTV($superAdmin['id']);
                     $_SESSION['cmt_fp'] = computeSessionFp($pending['fp'] ?? $reqFp);
+                    // v6.3.6：OTP 路径同样绑定稳定指纹（此前缺失 → 超管后台任何指纹漂移都判「环境已变化」）
+                    $__devSfp = (string)($pending['sfp'] ?? $reqSfp);
+                    $_SESSION['cmt_sfp'] = $__devSfp !== '' ? computeStableFp($__devSfp) : '';
                     $_SESSION['cmt_tv'] = $newTV;
                     $_SESSION['cmt_login_ts'] = time();
                     establishBackendSession(); // v5.3.1：完整认证完成 → 建立独立后台会话标记
@@ -143,6 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($devEmail !== '' && !isKnownDevice($superAdmin['id'], $fpHash)) {
                     $_SESSION['cmt_pending_dev'] = [
                         'uid' => $superAdmin['id'], 'fp_hash' => $fpHash, 'fp' => $reqFp,
+                        'sfp' => $reqSfp,
                         'email' => $devEmail, 'role' => ROLE_SUPER_ADMIN,
                         'ts' => time(),   // v4.7.3：与 api.php 的 check 清理逻辑对齐
                     ];
@@ -159,6 +167,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // v4.6.0：超管严格 30 分钟会话——不签发 refresh（30 分钟后必须重新 OTP 登录）
                     $newTV = bumpUserTV($superAdmin['id']);
                     $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
+                    // v6.3.6：绑定稳定指纹（UA + 浏览器语言 + 时区桶），消除 canvas/缩放/旋转导致的误报
+                    $_SESSION['cmt_sfp'] = $reqSfp !== '' ? computeStableFp($reqSfp) : '';
                     $_SESSION['cmt_tv'] = $newTV;
                     $_SESSION['cmt_login_ts'] = time();
                     establishBackendSession(); // v5.3.1：完整认证完成 → 建立独立后台会话标记
@@ -238,6 +248,7 @@ if (!$needDeviceVerify && is_array($pendingNow)
             <form method="post">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <input type="hidden" name="device_code" value="1">
+                <input type="hidden" name="sfp" class="js-sfp">
                 <div class="entry-input-wrap">
                     <input class="entry-input" type="text" name="device_code_input" placeholder="• • • • • •" maxlength="6" autocomplete="off" autofocus>
                     <div class="entry-input-label"><?= t('admin.365') ?></div>
@@ -253,6 +264,7 @@ if (!$needDeviceVerify && is_array($pendingNow)
             <form method="post">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <input type="hidden" name="fingerprint" id="fpInput">
+                <input type="hidden" name="sfp" class="js-sfp">
                 <div class="entry-input-wrap">
                     <input class="entry-input" type="text" name="otp" placeholder="• • • • • •" maxlength="12" autocomplete="off" autofocus>
                     <div class="entry-input-label"><?= t('admin.367') ?></div>
@@ -281,7 +293,13 @@ if (!$needDeviceVerify && is_array($pendingNow)
         function fpFnv(s) { var h = 0x811c9dc5; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return ('00000000' + (h >>> 0).toString(16)).slice(-8); }
         function fpCanvas() { try { var c = document.createElement('canvas'); c.width = 200; c.height = 40; var x = c.getContext('2d'); x.textBaseline = 'top'; x.font = '14px Arial'; x.fillStyle = '#f60'; x.fillRect(0, 0, 200, 40); x.fillStyle = '#069'; x.fillText('YouSuperMarkdown\u2620' + navigator.userAgent.length, 5, 12); var d = c.toDataURL(); return d.length + ':' + d.slice(-64); } catch (e) { return ''; } }
         var parts = [navigator.language || '', new Date().getTimezoneOffset(), (screen.width || 0) + 'x' + (screen.height || 0), fpCanvas(), navigator.userAgent];
-        document.getElementById('fpInput').value = fpFnv(parts.join('|')) + fpFnv(parts.join('~')) + fpFnv(navigator.userAgent);
+        var fpEl = document.getElementById('fpInput');
+        if (fpEl) fpEl.value = fpFnv(parts.join('|')) + fpFnv(parts.join('~')) + fpFnv(navigator.userAgent);
+        // v6.3.6：稳定指纹（UA + 浏览器语言 + 时区桶），与前台/后台算法一致
+        var tzB = Math.round((new Date()).getTimezoneOffset() / 120) * 120;
+        var sp = [navigator.language || '', String(tzB), navigator.userAgent];
+        var sfp = fpFnv(sp.join('|')) + fpFnv(sp.join('~'));
+        Array.prototype.forEach.call(document.querySelectorAll('.js-sfp'), function (el) { el.value = sfp; });
     })();
     </script>
 </body>

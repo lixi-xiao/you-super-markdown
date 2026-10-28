@@ -2342,4 +2342,26 @@ td code {
     .md-preview-body { padding: 6px 14px 32px; }
     .md-preview-body h1 { font-size: 1.45em; }
     .md-preview-body h2 { font-size: 1.2em; }
+    /* v6.3.6：手机端代码块/挑战码不再被右侧裁切 */
+    .md-preview-body pre code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-size: 12px; }
+    .code-block { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+/* ---------- v6.3.6：Mermaid 图表加载占位 / 失败重试（后台预览） ---------- */
+.ysm-mmd-tip {
+    display: flex; align-items: center; gap: 8px;
+    margin: 1em 0 .4em; padding: 10px 14px;
+    border: 1px dashed var(--border); border-radius: 10px;
+    background: rgba(127, 127, 127, .08);
+    color: var(--text-secondary); font-size: 13px;
+}
+.ysm-mmd-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    animation: ysmMmdPulse 1s ease-in-out infinite; flex: 0 0 auto;
+}
+@keyframes ysmMmdPulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+.ysm-mmd-tip-err { border-color: #ef4444; color: #ef4444; background: rgba(239, 68, 68, .08); }
+.ysm-mmd-retry {
+    margin-left: auto; padding: 4px 10px; border: 1px solid currentColor; border-radius: 8px;
+    background: transparent; color: inherit; font-size: 12px; cursor: pointer;
 }

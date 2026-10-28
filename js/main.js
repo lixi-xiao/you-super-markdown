@@ -255,6 +255,11 @@
     function renderMermaidBlocks(e, n) {
         n = n || function() {};
         try {
+            // v6.3.6：统一走 mermaid-loader（预加载 + 本地 SVG 缓存 + 占位/重试）
+            if (typeof window.ysmMermaidRenderAll === "function") {
+                window.ysmMermaidRenderAll(e, n);
+                return;
+            }
             var i = e.querySelectorAll("pre code.language-mermaid");
             if (!i.length) {
                 n();
@@ -308,7 +313,15 @@
     //   避免新旧 SVG 叠加/泄漏）；连续切换用 Promise 链串行，杜绝并发 mermaid.run 内部状态错乱。
     var __ysmMermaidRerenderSeq = Promise.resolve();
     async function ysmMermaidRerenderOnce() {
-        if (!window.mermaid || typeof mermaid.run !== "function") return;
+        if (!window.mermaid || typeof mermaid.run !== "function") {
+            // v6.3.6：图表全部命中本地缓存时库不会被加载；切换主题需要重渲染 → 按需补载一次
+            if (typeof window.ysmMermaidEnsure === "function" && document.querySelectorAll(".mermaid").length) {
+                window.ysmMermaidEnsure().then(function (ok) {
+                    if (ok) { ysmMermaidInit(); ysmMermaidRerenderOnce(); }
+                });
+            }
+            return;
+        }
         var list = document.querySelectorAll(".mermaid");
         if (!list.length) return;
         var theme = ysmMermaidTheme();

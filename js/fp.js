@@ -56,4 +56,32 @@
         }
     };
     window.ysmGetFp = ysmGetFp;
+    // v6.3.6：后台统一注入指纹头——站长/写作者/超管后台不加载 main.js，
+    //   此前只有个别脚本手工带 X-Fp，漏带即被判定「登录环境已变化」。
+    //   这里对同源 api.php 请求统一补 X-Fp（完整）+ X-FpS（稳定），已有头不覆盖。
+    (function ysmPatchFetch() {
+        if (window.__ysmFpPatched) return;
+        var orig = window.fetch;
+        if (!orig) return;
+        window.__ysmFpPatched = true;
+        window.fetch = function (input, init) {
+            init = init || {};
+            var url = String(input);
+            if (url.indexOf('api.php') !== -1) {
+                var h = {};
+                var src = init.headers || {};
+                if (typeof src.forEach === 'function' && !Array.isArray(src) && typeof src.get === 'function') {
+                    src.forEach(function (v, k) { h[k] = v; });
+                } else if (Array.isArray(src)) {
+                    src.forEach(function (p) { if (p && p.length === 2) h[p[0]] = p[1]; });
+                } else {
+                    for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) h[k] = src[k];
+                }
+                if (!h['X-Fp'] && !h['x-fp']) h['X-Fp'] = ysmGetFp();
+                if (!h['X-FpS'] && !h['x-fps']) h['X-FpS'] = window.ysmGetStableFp();
+                init.headers = h;
+            }
+            return orig.call(this, input, init);
+        };
+    })();
 })();

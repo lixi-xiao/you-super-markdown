@@ -28,9 +28,12 @@ if (backendSessionExpired()) {
 
 // v4.5.0：升级即全量重登 + 并发踢旧——旧会话（无 cmt_fp/cmt_tv）或 token_version 不匹配（被新登录踢出）→ 强制重登
 if (empty($_SESSION['cmt_fp']) || !isset($_SESSION['cmt_tv']) || (int)$_SESSION['cmt_tv'] !== getUserTV($_SESSION['cmt_user']['id'] ?? '')) {
+    // v6.3.6：有指纹但 tv 不一致 = 账号在别处重新登录被踢，不能再报「登录环境已变化」
+    $__kicked = !empty($_SESSION['cmt_fp']) && isset($_SESSION['cmt_tv'])
+        && (int)$_SESSION['cmt_tv'] !== getUserTV($_SESSION['cmt_user']['id'] ?? '');
     session_unset();
     session_destroy();
-    header('Location: /?admin_login=1&env=1');
+    header('Location: /?admin_login=1&' . ($__kicked ? 'kicked=1' : 'env=1'));
     exit;
 }
 
@@ -187,6 +190,8 @@ if (is_dir($articlesDir)) {
 <!-- v6.1.0：后台 JS 动态文案（弹窗/提示/异步渲染）运行时翻译 -->
 <script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
 <script src="../js/i18n.js?v=<?= @filemtime(__DIR__ . '/../js/i18n.js') ?>"></script>
+<!-- v6.3.6：统一环境指纹（含 api.php 请求自动注入 X-Fp/X-FpS） -->
+<script src="../js/fp.js?v=<?= @filemtime(__DIR__ . '/../js/fp.js') ?>"></script>
 </head>
 <body>
 
@@ -457,28 +462,37 @@ exit;
 ?>
 <?php endif; ?>
 <script>
-// v4.5.0：环境指纹上报校验——页面加载后上报当前环境指纹（与登录时一致的算法），服务端比对会话绑定指纹
+// v6.3.6：环境指纹上报——完整指纹 + 稳定指纹（X-FpS）；失败重试 1 次，仍失败才提示
 (function() {
     function fpFnv(s) { var h = 0x811c9dc5; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return ('00000000' + (h >>> 0).toString(16)).slice(-8); }
     function fpCanvas() { try { var c = document.createElement('canvas'); c.width = 200; c.height = 40; var x = c.getContext('2d'); x.textBaseline = 'top'; x.font = '14px Arial'; x.fillStyle = '#f60'; x.fillRect(0, 0, 200, 40); x.fillStyle = '#069'; x.fillText('YouSuperMarkdown\u2620' + navigator.userAgent.length, 5, 12); var d = c.toDataURL(); return d.length + ':' + d.slice(-64); } catch (e) { return ''; } }
-    var parts = [navigator.language || '', new Date().getTimezoneOffset(), (screen.width || 0) + 'x' + (screen.height || 0), fpCanvas(), navigator.userAgent];
-    var fp = fpFnv(parts.join('|')) + fpFnv(parts.join('~')) + fpFnv(navigator.userAgent);
-    fetch('/api.php?action=csrf').then(r => r.json()).then(function(d) {
-        if (!d.success || !d.csrf_token) return;
-        // v4.6.1：fp_report 结果回显——环境不匹配时立即明确提示（否则保存等写操作被静默拦截，用户误以为"保存不生效"）
-        fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp, 'X-CSRF-Token': d.csrf_token } })
+    function fullFp() {
+        if (typeof window.ysmGetFp === 'function') return window.ysmGetFp();
+        var parts = [navigator.language || '', new Date().getTimezoneOffset(), (screen.width || 0) + 'x' + (screen.height || 0), fpCanvas(), navigator.userAgent];
+        return fpFnv(parts.join('|')) + fpFnv(parts.join('~')) + fpFnv(navigator.userAgent);
+    }
+    function stableFp() {
+        if (typeof window.ysmGetStableFp === 'function') return window.ysmGetStableFp();
+        var b = Math.round((new Date()).getTimezoneOffset() / 120) * 120;
+        var s = [navigator.language || '', String(b), navigator.userAgent];
+        return fpFnv(s.join('|')) + fpFnv(s.join('~'));
+    }
+    var fp = fullFp(), sfp = stableFp(), tries = 0;
+    function report() {
+        fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp, 'X-FpS': sfp } })
             .then(function(r) { return r.json(); })
             .then(function(res) {
-                if (res && res.success === false) {
-                    var _b = document.createElement('div');
-                    _b.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99999;background:#dc2626;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:92vw';
-                    _b.textContent = TK('author.032');
-                    document.body.appendChild(_b);
-                    setTimeout(function() { if (_b.parentNode) _b.parentNode.removeChild(_b); }, 7000);
-                }
+                if (res && res.success) return;
+                if (tries++ < 1) { setTimeout(report, 800); return; }
+                var _b = document.createElement('div');
+                _b.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99999;background:#dc2626;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:92vw';
+                _b.textContent = TK('author.032');
+                document.body.appendChild(_b);
+                setTimeout(function() { if (_b.parentNode) _b.parentNode.removeChild(_b); }, 7000);
             })
-            .catch(function() {});
-    }).catch(function() {});
+            .catch(function() { if (tries++ < 1) setTimeout(report, 800); });
+    }
+    report();
 })();
 </script>
 </body>

@@ -1037,7 +1037,8 @@ case "${1:-}" in
                 \$event = trim((string)base64_decode((string)getenv('EVENT_B64')));
                 \$subject = '[You Super Markdown] ' . mb_substr(\$msg, 0, 60);
                 // v5.4.1：两行 badge 下行「具体事件」——第 3 参数给事件标签则用之，否则由正文自动兜底（不再只显示"通知"）
-                \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')], null, \$event);
+                \$ml = ysmAdminMailLang();
+                \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')], null, \$event, \$ml);
                 [\$ok, \$err] = sendSmtpMail(\$to, \$subject, \$msg, \$html);
                 echo \$ok ? 'MAIL_OK' : ('MAIL_FAIL: ' . \$err);
             "
@@ -1133,10 +1134,11 @@ case "${1:-}" in
             \$to = \$cfg['admin_email'] ?? '';
             if (\$to === '') { echo 'NO_ADMIN_EMAIL'; exit(0); }
             \$site = \$cfg['site_title'] ?? 'You Super Markdown';
-            \$msg = 'SMTP 授权码已更新成功。若收到此邮件说明新的授权码配置正确，安全告警可正常发送。';
+            \$ml = ysmAdminMailLang();
+            \$msg = ysmMailT('SMTP 授权码已更新成功。若收到此邮件说明新的授权码配置正确，安全告警可正常发送。', \$ml);
             // v5.4.1：两行 badge 下行「具体事件」——此处语义为 SMTP 授权码更新，显式传入避免只显示"通知"
-            \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')], null, 'SMTP 授权码已更新');
-            [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown] SMTP 授权码已更新', \$msg, \$html);
+            \$html = renderMailHtml(\$site, '通知', \$msg, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')], null, 'SMTP 授权码已更新', \$ml);
+            [\$ok, \$err] = sendSmtpMail(\$to, '[You Super Markdown] ' . ysmMailT('SMTP 授权码已更新', \$ml), \$msg, \$html);
             echo \$ok ? 'MAIL_OK' : ('MAIL_FAIL: ' . \$err);
         " 2>/dev/null)
         case "$TEST_RESULT" in
@@ -1379,9 +1381,10 @@ case "${1:-}" in
                 \$cfg = loadSiteConfig();
                 \$to = trim((string)(\$cfg['admin_email'] ?? ''));
                 \$site = \$cfg['site_title'] ?? 'You Super Markdown';
-                \$body = '体检测试邮件：若收到本邮件，说明 SMTP 与超管邮箱配置可用。';
-                \$html = renderMailHtml(\$site, '体检测试', \$body, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')]);
-                [\$ok, \$err] = sendSmtpMail(\$to, '[' . \$site . '] 体检测试邮件', \$body, \$html);
+                \$ml = ysmAdminMailLang();
+                \$body = ysmMailT('体检测试邮件：若收到本邮件，说明 SMTP 与超管邮箱配置可用。', \$ml);
+                \$html = renderMailHtml(\$site, '体检测试', \$body, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')], null, null, \$ml);
+                [\$ok, \$err] = sendSmtpMail(\$to, '[' . \$site . '] ' . ysmMailT('体检测试邮件', \$ml), \$body, \$html);
                 echo \$ok ? 'OK' : ('FAIL: ' . \$err);
             " 2>/dev/null)
             case "$MAIL_RC" in

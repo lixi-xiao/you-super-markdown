@@ -1126,7 +1126,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
     <div class="app-panel-gap"></div>
     <a class="app-panel-item" role="menuitem" href="/index.php?action=rss_guide" target="_blank" rel="noopener"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M5 13a6 6 0 0 1 6 6"/><path d="M5 7a12 12 0 0 1 12 12"/><circle cx="5" cy="19" r="1"/></svg></span><span class="app-panel-text"><?= t('home.014') ?></span></a>
     <?php if ($__ysmActiveLinks > 0): ?>
-    <button type="button" class="app-panel-item" role="menuitem" data-act="links"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span><span class="app-panel-text"><?= t('home.013') ?></span><span class="app-panel-count"><?= (int)$__ysmActiveLinks ?></span></button>
+    <a class="app-panel-item" role="menuitem" href="/index.php?view=links"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span><span class="app-panel-text"><?= t('home.013') ?></span><span class="app-panel-count"><?= (int)$__ysmActiveLinks ?></span></a>
     <?php endif; ?>
     <?php if ($musicEnabled): ?>
     <button type="button" class="app-panel-item" role="menuitem" data-act="music"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span><span class="app-panel-text"><?= t('home.015') ?></span></button>
@@ -1268,9 +1268,23 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         <div class="links-head">
             <div class="links-head-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div>
             <h2 class="links-title"><?= t('home.013') ?></h2>
-            <p class="links-sub" id="linksCount"></p>
+            <p class="links-sub" id="linksCount"><?= $__showLinks && $__ysmActiveLinks > 0 ? t('links.subtitle', ['n' => (int)$__ysmActiveLinks]) : '' ?></p>
         </div>
-        <div class="links-grid" id="linksGrid"></div>
+        <div class="links-grid" id="linksGrid"><?php
+        if ($__showLinks) {
+            foreach (db_all("SELECT site_name, url, favicon, desc FROM links WHERE status = 'active' ORDER BY sort ASC, place_time DESC") as $__lk) {
+                $__host = parse_url((string)$__lk['url'], PHP_URL_HOST);
+                echo '<a class="link-card" href="' . htmlspecialchars($__lk['url'], ENT_QUOTES) . '" target="_blank" rel="noopener nofollow">';
+                echo $__lk['favicon'] !== ''
+                    ? '<img class="link-fav" src="' . htmlspecialchars($__lk['favicon'], ENT_QUOTES) . '" alt="" loading="lazy">'
+                    : '<span class="link-fav link-fav-ph">' . htmlspecialchars(mb_strtoupper(mb_substr((string)$__lk['site_name'], 0, 1))) . '</span>';
+                echo '<span class="link-body"><span class="link-name">' . htmlspecialchars((string)$__lk['site_name']) . '</span>';
+                if ((string)$__lk['desc'] !== '') echo '<span class="link-desc">' . htmlspecialchars((string)$__lk['desc']) . '</span>';
+                if ($__host) echo '<span class="link-host">' . htmlspecialchars($__host) . '</span>';
+                echo '</span><span class="link-arrow"><svg viewBox="0 0 24 24"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></span></a>';
+            }
+        }
+    ?></div>
         <div class="links-empty" id="linksEmpty" style="display:none">
             <div class="links-empty-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div>
             <div class="links-empty-text"><?= t('home.045') ?></div>
@@ -1668,10 +1682,6 @@ document.addEventListener('keydown', function(e){
 });
 // v6.3.0：#links 旧深链重定向到服务端视图 ?view=links（不依赖 JS 时序，避免被首页初始化覆盖）
 (function(){ if (location.hash === '#links' && location.search.indexOf('view=links') < 0) { location.replace('/index.php?view=links'); } })();
-// v6.3.0：服务端视图 ?view=links 首屏也要拉取友链数据（网格渲染在 ysmOpenLinks 内）
-document.addEventListener('DOMContentLoaded', function(){
-    if (document.body.classList.contains('links-open') && window.ysmOpenLinks) window.ysmOpenLinks(true);
-});
 // v6.3.0：副栏友链按数量换形态（1–3 条行式、≥4 条两列网格）；「全部」改为内联展开/收起
 (function(){
     var sec = document.getElementById('homeLinks');

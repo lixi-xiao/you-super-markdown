@@ -1103,7 +1103,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Micr
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
         <input type="text" name="website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
         <div class="field">
-            <label><?= t('links.review_arith') ?>：<?= htmlspecialchars((string)$arith) ?> = ?</label>
+            <label><?= t('links.review_arith') ?>：<?= htmlspecialchars((string)$arith) ?></label>
             <input type="text" name="arith_answer" inputmode="numeric" pattern="[0-9-]*" maxlength="6" required>
         </div>
         <div class="field">

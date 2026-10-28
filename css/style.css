@@ -1287,3 +1287,25 @@ body.links-open #readingView { display: none !important; }
 #linksView .links-sub { flex: 0 0 100%; margin: 0; font-size: 0.82em; color: var(--text-muted); }
 #linksView .links-sub:empty { display: none; }
 #linksView .links-grid { padding: 0 12px 24px; }
+
+/* v6.3.0：友链申请表单与站长信息卡 */
+.links-apply { margin: 6px 12px 16px; }
+.links-apply-open {
+  width: 100%; min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px dashed var(--border); border-radius: 14px; background: transparent;
+  color: var(--text-secondary); font-size: 0.92em; font-weight: 600; cursor: pointer;
+}
+.links-apply-open:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-light); }
+.links-apply-open svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.links-apply-form { margin-top: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); display: flex; flex-direction: column; gap: 10px; }
+.links-apply-row { display: flex; flex-direction: column; gap: 4px; }
+.links-apply-row label { font-size: 0.78em; color: var(--text-muted); }
+.links-apply-row input { height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-size: 16px; font-family: inherit; }
+.links-apply-row input:focus { outline: none; border-color: var(--accent); }
+.links-apply-msg { margin: 0; font-size: 0.8em; color: var(--accent); min-height: 1em; }
+.links-apply-submit { width: 100%; min-height: 44px; border-radius: 12px; }
+.links-siteinfo { margin: 0 12px 24px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.links-siteinfo-title { font-size: 0.86em; font-weight: 700; margin-bottom: 8px; color: var(--text); }
+.links-siteinfo dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+.links-siteinfo dt { font-size: 0.78em; color: var(--text-muted); }
+.links-siteinfo dd { margin: 0; font-size: 0.82em; color: var(--text-secondary); word-break: break-all; }

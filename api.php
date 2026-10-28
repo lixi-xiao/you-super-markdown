@@ -734,6 +734,37 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($action === 'links_list') {
     sendJson(['success' => true, 'links' => db_all("SELECT id, site_name, url, favicon, desc, sort FROM links WHERE status = 'active' ORDER BY sort ASC, place_time DESC")]);
 }
+// POST link_apply：访客提交友链申请（写 link_applies + 邮件通知站长，带一次性审核令牌）
+if ($action === 'link_apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $name = trim((string)($in['site_name'] ?? ''));
+    $url  = trim((string)($in['url'] ?? ''));
+    $desc = trim((string)($in['desc'] ?? ''));
+    $mail = trim((string)($in['email'] ?? ''));
+    $fav  = trim((string)($in['favicon'] ?? ''));
+    if (mb_strlen($name) < 2 || mb_strlen($name) > 60) sendJson(['success' => false, 'error' => tn('api.990')], 400);
+    if (!preg_match('#^https?://#i', $url) || !filter_var($url, FILTER_VALIDATE_URL)) sendJson(['success' => false, 'error' => tn('api.991')], 400);
+    if ($desc === '' || mb_strlen($desc) > 200) sendJson(['success' => false, 'error' => tn('api.992')], 400);
+    if (!function_exists('email_valid') || !email_valid($mail)) sendJson(['success' => false, 'error' => tn('api.993')], 400);
+    if ($fav !== '' && !preg_match('#^https?://#i', $fav)) $fav = '';
+    $ip = getClientIP();
+    $row = db_one("SELECT COUNT(*) AS c FROM link_applies WHERE ip = ? AND created > ?", [$ip, date('Y-m-d H:i:s', time() - 86400)]);
+    if ($row && (int)$row['c'] >= 3) sendJson(['success' => false, 'error' => tn('api.994')], 429);
+    if (db_one('SELECT 1 AS x FROM links WHERE url = ?', [$url]) || db_one("SELECT 1 AS x FROM link_applies WHERE url = ? AND status = 'pending'", [$url])) {
+        sendJson(['success' => false, 'error' => tn('api.995')], 409);
+    }
+    $id = genId();
+    $token = bin2hex(random_bytes(16));
+    $exp = time() + 7 * 86400;
+    db_exec('INSERT INTO link_applies (id, site_name, url, desc, favicon, email, status, token, token_expires, ip, created) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [$id, $name, $url, $desc, $fav, $mail, 'pending', $token, $exp, $ip, date('Y-m-d H:i:s')]);
+    auditLog('link_apply', $name, '访客提交友链申请：' . $url, 'success');
+    $base = rtrim((string)(appConfig('site_url') ?: ('https://' . ($_SERVER['HTTP_HOST'] ?? ''))), '/');
+    $approve = $base . '/index.php?action=link_review&token=' . $token;
+    $detail = "站点名称：{$name}\n网址：{$url}\n简介：{$desc}\n联系邮箱：{$mail}\n\n审核（需登录后台）：\n通过 / 拒绝：{$approve}\n\n令牌 7 天内有效，单次使用。";
+    if (function_exists('sendAlert')) { @sendAlert('友链申请', $detail); }
+    sendJson(['success' => true]);
+}
 /** 站长专属操作的前置校验（角色 + 环境） */
 function linksRequireStationAdmin() {
     $actor = checkRole(ROLE_STATION_ADMIN);

@@ -475,7 +475,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>文档管理 - <?= htmlspecialchars($siteTitle) ?></title>
+<title><?= t('admin.509') ?> - <?= htmlspecialchars($siteTitle) ?></title>
 <meta name="csrf-token" content="<?= htmlspecialchars(generateCsrfToken()) ?>">
 <link rel="stylesheet" href="css/admin.css?v=<?= @filemtime(__DIR__ . '/css/admin.css') ?>">
 <!-- v6.1.0：后台 JS 动态文案运行时翻译 -->
@@ -492,27 +492,27 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
     <nav class="sidebar-nav">
         <a href="sc.php" class="sidebar-link active">
             <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-            文章列表
+            <?= t('admin.507') ?>
         </a>
         <?php if ($isStationAdmin): ?>
         <a href="station/dashboard.php" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-            站长后台
+            <?= t('admin.606') ?>
         </a>
         <?php endif; ?>
         <?php if ($isAuthor): ?>
         <a href="author/dashboard.php" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            写作者后台
+            <?= t('admin.605') ?>
         </a>
         <?php endif; ?>
         <a href="index.php" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-            返回首页
+            <?= t('admin.504') ?>
         </a>
         <a href="#" onclick="bindLogoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            退出登录
+            <?= t('admin.480') ?>
         </a>
     </nav>
 </div>
@@ -521,7 +521,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            文档管理
+            <?= t('admin.509') ?>
         </div>
         <div class="page-subtitle"><?= t('editor.003') ?></div>
     </div>
@@ -535,7 +535,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            上传新文档
+            <?= t('admin.508') ?>
         </div>
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -702,7 +702,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-            已有文章（<?= count($docItems) ?> 篇）
+            <?= t('admin.611', ['n' => count($docItems)]) ?>
         </div>
         <?php if (empty($docItems)): ?>
         <div class="empty-state">

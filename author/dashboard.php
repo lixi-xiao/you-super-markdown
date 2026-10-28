@@ -182,7 +182,7 @@ if (is_dir($articlesDir)) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>写作者后台 - <?= htmlspecialchars($siteTitle) ?></title>
+<title><?= t('admin.605') ?> - <?= htmlspecialchars($siteTitle) ?></title>
 <link rel="stylesheet" href="../css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
 <!-- v6.1.0：后台 JS 动态文案（弹窗/提示/异步渲染）运行时翻译 -->
 <script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
@@ -197,7 +197,7 @@ if (is_dir($articlesDir)) {
     </button>
     <div class="mobile-topbar-title"><?= t('author.002') ?></div>
     <div class="mobile-topbar-user">
-        <span class="mobile-topbar-name"><?= htmlspecialchars($currentUser['nickname'] ?? '写作者') ?></span>
+        <span class="mobile-topbar-name"><?= htmlspecialchars($currentUser['nickname'] ?? t('admin.557')) ?></span>
     </div>
 </div>
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
@@ -207,7 +207,7 @@ if (is_dir($articlesDir)) {
         <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         <div class="sidebar-title"><span><?= t('author.003') ?></span><?= t('author.004') ?></div>
         <div class="sidebar-user">
-            <div class="sidebar-user-avatar"><?php if (!empty($currentUser['account'])): ?><img src="https://q1.qlogo.cn/g?b=qq&nk=<?= urlencode($currentUser['account']) ?>&s=100" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
+            <div class="sidebar-user-avatar"><?php if (!empty($currentUser['account'])): ?><img src="<?= htmlspecialchars(ysmAvatarUrl($currentUser['username'] ?? ($currentUser['account'] ?? ''), 100)) ?>" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
             <div class="sidebar-user-info">
                 <div class="sidebar-user-name"><?= htmlspecialchars($currentUser['nickname'] ?? '写作者') ?></div>
                 <div class="sidebar-user-role"><?= t('author.003') ?></div>
@@ -217,25 +217,25 @@ if (is_dir($articlesDir)) {
     <nav class="sidebar-nav">
         <a href="dashboard.php" class="sidebar-link <?= $tab==='articles'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-            我的文章
+            <?= t('admin.505') ?>
         </a>
         <a href="dashboard.php?tab=profile" class="sidebar-link <?= $tab==='profile'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            个人信息
+            <?= t('admin.502') ?>
         </a>
         <!-- v2.6.5：与站长后台一致的「发表文章」入口 -->
         <a href="/sc.php" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-            发表文章
+            <?= t('admin.510') ?>
         </a>
         <!-- v2.11.4：快捷返回主界面 -->
         <a href="/" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-            返回主页
+            <?= t('admin.503') ?>
         </a>
         <a href="#" onclick="bindLogoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            退出登录
+            <?= t('admin.480') ?>
         </a>
     </nav>
 </div>
@@ -251,7 +251,7 @@ if (is_dir($articlesDir)) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            我的文章
+            <?= t('admin.505') ?>
         </div>
         <div class="page-subtitle"><?= t('author.005') ?></div>
     </div>
@@ -259,7 +259,7 @@ if (is_dir($articlesDir)) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            文章列表（<?= count($myArticles) ?> 篇）
+            <?= t('admin.599', ['n' => count($myArticles)]) ?>
         </div>
         <a href="/sc.php" class="btn btn-primary" style="margin-bottom:16px"><?= t('author.006') ?></a>
         <?php if (empty($myArticles)): ?>
@@ -289,7 +289,7 @@ if (is_dir($articlesDir)) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            个人信息
+            <?= t('admin.502') ?>
         </div>
         <div class="page-subtitle"><?= t('author.011') ?></div>
     </div>
@@ -307,7 +307,7 @@ if (is_dir($articlesDir)) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            账号信息
+            <?= t('admin.501') ?>
         </div>
         <div class="table-wrap">
         <table>
@@ -321,7 +321,7 @@ if (is_dir($articlesDir)) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-            头像
+            <?= t('admin.511') ?>
         </div>
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -344,7 +344,7 @@ if (is_dir($articlesDir)) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            更换绑定邮箱
+            <?= t('admin.499') ?>
         </div>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -369,7 +369,7 @@ if (is_dir($articlesDir)) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-            编辑资料
+            <?= t('admin.500') ?>
         </div>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">

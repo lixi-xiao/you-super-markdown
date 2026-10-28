@@ -47,7 +47,7 @@ function kugou_getPlaylist($id, $sortAll = '', $cookies = '') {
         $list[] = [
             'name' => $s['songname'] ?? '',
             'id' => $s['hash'],
-            'url' => '', // 懒解析：播放时经 music.php?platform=kugou&songId=<hash> 取直链
+            'url' => '', // i18n-ok 懒解析：播放时经 music.php?platform=kugou&songId=<hash> 取直链
             'picurl' => '',
             'artistsname' => implode(' / ', $artists),
             'duration' => (int)($s['duration'] ?? 0),

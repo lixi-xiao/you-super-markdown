@@ -930,7 +930,7 @@ if ($action === 'rss') {
     echo '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>' . "\n";
     echo '<title>' . $siteTitle . '</title>' . "\n";
     echo '<link>' . htmlspecialchars($baseUrl, ENT_XML1, 'UTF-8') . '</link>' . "\n";
-    echo '<description>' . $siteTitle . ' 的最新内容</description>' . "\n";
+    echo '<description>' . t('home.116', ['site' => $siteTitle]) . '</description>' . "\n";
     echo '<atom:link href="' . htmlspecialchars($self, ENT_XML1, 'UTF-8') . '" rel="self" type="application/rss+xml"/>' . "\n";
     echo '<lastBuildDate>' . date(DATE_RFC2822) . '</lastBuildDate>' . "\n";
     foreach (array_slice($feed, 0, 20) as $f) {

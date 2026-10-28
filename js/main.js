@@ -4655,12 +4655,18 @@
             if (!item) return;
             var act = item.getAttribute("data-act");
             if (!act) return; /* 链接项自行跳转 */
+            // v6.3.1：先阻断冒泡——否则关闭面板后，本次点击继续冒泡到 document，
+            // 命中「点面板外就关闭」的监听，会把刚打开的目标面板立刻关掉（表现为点了没反应）。
+            e.stopPropagation();
+            e.preventDefault();
             close();
             if (act === "kbd") { if (typeof window.toggleKbdHelp === "function") window.toggleKbdHelp(); return; }
             if (act === "links") { if (typeof window.ysmOpenLinks === "function") window.ysmOpenLinks(); return; }
             var map = { toc: "btnToc", font: "btnFont", theme: "btnThemeToggle", color: "btnColor", music: "floatMusicBtn" };
             var el = document.getElementById(map[act]);
-            if (el) el.click();
+            if (!el) return;
+            // 延后一拍触发，确保面板状态与目标面板的开合顺序稳定（合成 click 不再与本次冒泡竞争）
+            setTimeout(function () { try { el.click(); } catch (err) {} }, 0);
         });
     }
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

@@ -114,10 +114,10 @@ $stMyNick = $currentUser['nickname'] ?? '';
 function stAuthorDetail($a, $statComments, $statArticles, $myNick) {
     return [
         'nickname' => $a['nickname'] ?? '', 'account' => (string)($a['username'] ?? ($a['account'] ?? '')),
-        'email' => $a['email'] ?? '未绑定', 'station' => $myNick,
+        'email' => $a['email'] ?? t('admin.592'), 'station' => $myNick,
         'disabled' => !empty($a['disabled']),
         'created' => $a['created'] ?? '', 'signature' => $a['signature'] ?? '',
-        'last_login' => $a['last_login'] ?? '从未登录',
+        'last_login' => $a['last_login'] ?? t('admin.593'),
         'login_count' => (int)($a['login_count'] ?? 0),
         'comments' => $statComments[$a['id']] ?? 0,
         'articles' => $statArticles[$a['id']] ?? 0,
@@ -454,7 +454,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>站长后台 - <?= htmlspecialchars($siteTitle) ?></title>
+<title><?= t('admin.606') ?> - <?= htmlspecialchars($siteTitle) ?></title>
 <link rel="stylesheet" href="../css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
 <!-- v6.1.0：后台 JS 动态文案（弹窗/提示/异步渲染）运行时翻译 -->
 <script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
@@ -469,7 +469,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     </button>
     <div class="mobile-topbar-title"><?= t('station.002') ?></div>
     <div class="mobile-topbar-user">
-        <span class="mobile-topbar-name"><?= htmlspecialchars($currentUser['nickname'] ?? '站长') ?></span>
+        <span class="mobile-topbar-name"><?= htmlspecialchars($currentUser['nickname'] ?? t('admin.558')) ?></span>
     </div>
 </div>
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
@@ -487,52 +487,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         </div>
     </div>
     <nav class="sidebar-nav">
+        <div class="sidebar-group"><?= t('admin.482') ?></div>
         <a href="dashboard.php" class="sidebar-link <?= $tab==='authors'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-            写作者管理
+            <?= t('admin.498') ?>
         </a>
+        <div class="sidebar-group"><?= t('admin.481') ?></div>
         <a href="dashboard.php?tab=ui" class="sidebar-link <?= $tab==='ui'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            主界面及功能设置
-        </a>
-        <a href="dashboard.php?tab=banlog" class="sidebar-link <?= $tab==='banlog'?'active':'' ?>">
-            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            封禁日志（只读）
-        </a>
-        <a href="dashboard.php?tab=threat" class="sidebar-link <?= $tab==='threat'?'active':'' ?>">
-            <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>
-            联动风控（只读）
+            <?= t('admin.470') ?>
         </a>
         <a href="dashboard.php?tab=announce" class="sidebar-link <?= $tab==='announce'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            公告管理
+            <?= t('admin.495') ?>
         </a>
-        <!-- v4.0.0：图片资源管理 -->
         <a href="dashboard.php?tab=images" class="sidebar-link <?= $tab==='images'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            图片管理
+            <?= t('admin.497') ?>
         </a>
-        <!-- v6.0.0：友站（友情链接）管理 -->
         <a href="dashboard.php?tab=links" class="sidebar-link <?= $tab==='links'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            友站管理
+            <?= t('admin.471') ?>
         </a>
+        <div class="sidebar-group"><?= t('admin.483') ?></div>
+        <a href="dashboard.php?tab=banlog" class="sidebar-link <?= $tab==='banlog'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <?= t('admin.608') ?>
+        </a>
+        <a href="dashboard.php?tab=threat" class="sidebar-link <?= $tab==='threat'?'active':'' ?>">
+            <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>
+            <?= t('admin.613') ?>
+        </a>
+        <div class="sidebar-group"><?= t('admin.484') ?></div>
         <a href="dashboard.php?tab=profile" class="sidebar-link <?= $tab==='profile'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            个人信息
+            <?= t('admin.502') ?>
         </a>
         <a href="/sc.php" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-            发表文章
+            <?= t('admin.510') ?>
         </a>
-        <!-- v2.11.4：快捷返回主界面 -->
         <a href="/" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-            返回主页
+            <?= t('admin.503') ?>
         </a>
         <a href="#" onclick="bindLogoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            退出登录
+            <?= t('admin.480') ?>
         </a>
     </nav>
 </div>
@@ -559,7 +560,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-            写作者管理
+            <?= t('admin.498') ?>
         </div>
         <div class="page-subtitle"><?= t('station.005') ?></div>
     </div>
@@ -567,7 +568,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-            创建写作者
+            <?= t('admin.588') ?>
         </div>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -606,7 +607,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-            我的写作者（<?= count($myAuthors) ?> 人）
+            <?= t('admin.598', ['n' => count($myAuthors)]) ?>
         </div>
         <?php if (empty($myAuthors)): ?>
         <div class="empty-state">
@@ -624,7 +625,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['created'] ?? '') ?></td>
                 <td>
                     <button type="button" class="btn-link" onclick="stOpenDetail(this)" data-detail='<?= htmlspecialchars(json_encode(stAuthorDetail($a, $st_statComments, $st_statArticles, $stMyNick), JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>'><?= t('station.156') ?></button>
-                    <form method="post" style="display:inline" onsubmit="return confirm(t('station.019') + ' <?= htmlspecialchars($a['nickname'] ?? '') ?>' + t('station.qmark'))">
+                    <form method="post" style="display:inline" data-confirm="<?= htmlspecialchars(t('station.019') . ' ' . ($a['nickname'] ?? '') . t('station.qmark'), ENT_QUOTES) ?>" onsubmit="return ysmConfirm(this)">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="action" value="delete_author">
                         <input type="hidden" name="user_id" value="<?= htmlspecialchars($a['id']) ?>">
@@ -651,7 +652,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            主界面及功能设置
+            <?= t('admin.470') ?>
         </div>
         <div class="page-subtitle"><?= t('station.021') ?></div>
     </div>
@@ -659,7 +660,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-            音乐播放器设置
+            <?= t('admin.515') ?>
         </div>
         <!-- v5.3.0：音乐为「预设通道」——歌单 ID / 默认播放歌曲 / Cookies 三项已固定，后台不再展示。
              采用 display:none 隐藏（可回退：删除本包装 <div> 的 style 即恢复显示）。输入元素保留在 DOM 中，
@@ -690,13 +691,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <div class="toggle-desc"><?= t('station.029') ?></div>
             </div>
             <input class="form-input" type="file" id="bgMusicFileInput" name="bg_music_file" accept=".mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.wma,audio/*" style="margin-top:8px">
-            <p class="form-hint" id="bgMusicStatus"><?php $bmSize = bgMusicSize(); echo $bmSize > 0 ? ('当前背景音：' . round($bmSize / 1024 / 1024, 1) . ' MB（上传新文件可替换）') : '尚未上传背景音乐（mp3/wav/flac/m4a 等 ≤100MB，服务器自动转码压缩为 96kbps mp3）'; ?></p>
+            <p class="form-hint" id="bgMusicStatus"><?php $bmSize = bgMusicSize(); echo $bmSize > 0 ? (t('admin.584') . round($bmSize / 1024 / 1024, 1) . t('admin.585')) : t('admin.586'); ?></p>
         </div>
     </div>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-            背景类型
+            <?= t('admin.512') ?>
         </div>
         <div class="bg-type-grid bg-vis-grid">
             <label class="bg-type-card <?= $bgType==='none'?'active':'' ?>" data-type="none"><input type="radio" name="bg_type" value="none" <?= $bgType==='none'?'checked':'' ?>><div class="type-icon none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div><div class="type-name"><?= t('station.044') ?></div></label>
@@ -887,14 +888,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            封禁日志
+            <?= t('admin.517') ?>
         </div>
         <div class="page-subtitle"><?= t('station.054') ?></div>
     </div>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-            封禁列表（共 <?= $banData['total'] ?> 条）
+            <?= t('admin.563', ['n' => $banData['total']]) ?>
         </div>
         <div class="log-toolbar">
             <form method="get" action="dashboard.php" class="log-toolbar-search">
@@ -909,7 +910,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <?php if (empty($banTypes)): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-            <p><?= $banQ !== '' ? '未找到匹配「' . htmlspecialchars($banQ) . '」的记录' : '暂无封禁记录' ?></p>
+            <p><?= $banQ !== '' ? t('admin.570', ['q' => $banQ]) : t('admin.590') ?></p>
         </div>
         <?php else: ?>
         <div class="ban-list">
@@ -936,7 +937,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-            登录日志（共 <?= $loginData['total'] ?> 条）
+            <?= t('admin.565', ['n' => $loginData['total']]) ?>
         </div>
         <div class="log-toolbar">
             <form method="get" action="dashboard.php" class="log-toolbar-search">
@@ -951,7 +952,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <?php if (empty($loginLogs)): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-            <p><?= $loginQ !== '' ? '未找到匹配「' . htmlspecialchars($loginQ) . '」的记录' : '暂无登录日志' ?></p>
+            <p><?= $loginQ !== '' ? t('admin.570', ['q' => $loginQ]) : t('admin.568') ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
@@ -972,7 +973,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            越权访问记录（共 <?= $unauthData['total'] ?> 条）
+            <?= t('admin.564', ['n' => $unauthData['total']]) ?>
         </div>
         <div class="log-toolbar">
             <form method="get" action="dashboard.php" class="log-toolbar-search">
@@ -987,7 +988,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <?php if (empty($unauthLogs)): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            <p><?= $unauthQ !== '' ? '未找到匹配「' . htmlspecialchars($unauthQ) . '」的记录' : '暂无越权访问记录' ?></p>
+            <p><?= $unauthQ !== '' ? t('admin.570', ['q' => $unauthQ]) : t('admin.567') ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
@@ -1054,7 +1055,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            公告管理
+            <?= t('admin.495') ?>
         </div>
         <div class="page-subtitle"><?= t('station.065') ?></div>
     </div>
@@ -1067,7 +1068,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            更新公告可视范围
+            <?= t('admin.521') ?>
         </div>
         <p class="form-hint" style="margin-bottom:12px"><?= t('station.066') ?></p>
         <form method="post">
@@ -1086,7 +1087,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-            发布新公告
+            <?= t('admin.589') ?>
         </div>
         <form method="post" id="announceAddForm">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -1125,7 +1126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            公告列表（<?= count($annList) ?> 条）
+            <?= t('admin.597', ['n' => count($annList)]) ?>
         </div>
         <?php if (empty($annList)): ?>
         <div class="empty-state">
@@ -1150,7 +1151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($an['date']) ?></td>
                 <td>
                     <button type="button" class="btn-link" onclick="stEditAnnounce(this)" data-id="<?= htmlspecialchars($an['id']) ?>" data-type="<?= htmlspecialchars($an['type']) ?>" data-article="<?= htmlspecialchars($an['article']) ?>" data-title="<?= htmlspecialchars($an['title']) ?>" data-summary="<?= htmlspecialchars($an['summary']) ?>" data-body="<?= htmlspecialchars($an['body'] ?? '') ?>"><?= t('links.011') ?></button>
-                    <form method="post" style="display:inline" onsubmit="return confirm(t('station.084'))">
+                    <form method="post" style="display:inline" data-confirm="<?= htmlspecialchars(t('station.084'), ENT_QUOTES) ?>" onsubmit="return ysmConfirm(this)">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="announce_action" value="delete">
                         <input type="hidden" name="a_id" value="<?= htmlspecialchars($an['id']) ?>">
@@ -1168,7 +1169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            个人信息
+            <?= t('admin.502') ?>
         </div>
         <div class="page-subtitle"><?= t('station.085') ?></div>
     </div>
@@ -1186,7 +1187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            账号信息
+            <?= t('admin.501') ?>
         </div>
         <div class="table-wrap">
         <table>
@@ -1200,7 +1201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-            头像
+            <?= t('admin.511') ?>
         </div>
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -1223,7 +1224,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            更换绑定邮箱
+            <?= t('admin.499') ?>
         </div>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -1248,7 +1249,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-            编辑资料
+            <?= t('admin.500') ?>
         </div>
         <form method="post">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -1280,7 +1281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            友站管理
+            <?= t('admin.471') ?>
         </div>
         <div class="page-subtitle"><?= t('station.101') ?></div>
     </div>
@@ -1368,7 +1369,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            图片管理
+            <?= t('admin.497') ?>
         </div>
         <div class="page-subtitle"><?= t('station.images_subtitle', ['n' => count($stImages)]) ?></div>
     </div>
@@ -1391,7 +1392,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                 <td><?= htmlspecialchars($img['modified']) ?></td>
                 <td><?= $ref > 0 ? '<span style="color:#2563eb">' . t('station.ref_count', ['n' => $ref]) . '</span>' : '<span style="color:#94a3b8">' . t('station.unused') . '</span>' ?></td>
                 <td>
-                    <form method="post" style="display:inline" onsubmit="return confirm(t('station.122') + '<?= htmlspecialchars($img['name']) ?>' + t('station.123')<?= $ref > 0 ? ' + \'\\n\\n\' + t(\'station.img_warn1\') + ' . $ref . ' + t(\'station.img_warn2\')' : '' ?>)">
+                    <form method="post" style="display:inline" data-confirm="<?= htmlspecialchars(t('station.122') . ($img['name']) . t('station.123') . ($ref > 0 ? "\n\n" . t('station.img_warn1') . $ref . t('station.img_warn2') : ''), ENT_QUOTES) ?>" onsubmit="return ysmConfirm(this)">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="image_delete" value="<?= htmlspecialchars($img['name']) ?>">
                         <button type="submit" class="btn btn-sm btn-danger"><?= t('station.020') ?></button>
@@ -1457,6 +1458,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
 </div>
 
 <script>
+// v6.3.1：统一确认——文案由服务端 t() 写进 data-confirm，避免在 JS 里调 PHP 的 t() 导致 ReferenceError（确认被跳过）
+function ysmConfirm(el) {
+    var m = (el && el.getAttribute) ? (el.getAttribute('data-confirm') || '') : '';
+    return m === '' ? true : confirm(m);
+}
 function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebarOverlay').classList.toggle('active');

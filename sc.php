@@ -3,8 +3,10 @@ require_once __DIR__ . '/utils.php';
 // v6.1.0：服务端输出层 i18n
 secureSessionStart();
 
-// 权限检查：站长或写作者可访问
-if (!checkRole(ROLE_STATION_ADMIN) && !checkRole(ROLE_AUTHOR)) {
+// 权限检查：**仅站长与写作者**可访问（超管管站点、不参与文章管理——checkRole 是层级匹配，
+// 这里必须按精确角色判断，否则超管会因层级更高而通过）
+$__docRole = (string)($_SESSION['cmt_user']['role'] ?? '');
+if (!in_array($__docRole, [ROLE_STATION_ADMIN, ROLE_AUTHOR, 'admin'], true)) {
     logUnauthorized('越权尝试访问文档管理');
     header('Location: /?admin_login=1');
     exit;

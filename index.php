@@ -425,8 +425,19 @@ if ($__ysmShortMiss && ($_GET['action'] ?? '') === '') {
 $action = $_GET['action'] ?? '';
 
 // CSRF 防护：index.php 所有 POST 操作（pin/unpin/delete/update）统一校验
+// v6.3.10：原生表单（如友链审核页）没有自定义头，允许回退取 csrf_token 字段——此前一律 403 并输出裸 JSON
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) {
+    $__csrf = (string)($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+    if ($__csrf === '') $__csrf = (string)($_POST['csrf_token'] ?? '');
+    if (!checkCsrfToken($__csrf)) {
+        // 友链审核页给友好页而不是裸 JSON
+        if ($action === 'link_review') {
+            header('Content-Type: text/html; charset=utf-8');
+            echo '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'
+                . htmlspecialchars(t('links.apply_title')) . '</title></head><body style="font:15px/1.7 -apple-system,sans-serif;padding:32px;text-align:center">'
+                . '<p>' . htmlspecialchars(t('links.review_csrf')) . '</p><p><a href="/">' . htmlspecialchars(t('links.review_back')) . '</a></p></body></html>';
+            exit;
+        }
         sendJson(['success' => false, 'error' => tn('api.901')], 403);
     }
 }

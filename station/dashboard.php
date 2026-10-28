@@ -203,7 +203,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
                                 'created_by' => $myId,
                             ];
                             replaceAllUsers($users);
-                            auditLog('author_create', $newAccount, "站长创建写作者: {$newNick}");
+                            auditLog('author_create', $newUsername, "站长创建写作者: {$newNick}");
                             $msg = 'author_created';
                         }
                     }

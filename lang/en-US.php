@@ -633,8 +633,6 @@ return [
     'station.066' => 'Only controls who can see the “update history” update announcement (guests / regular users / admin roles); other announcements are always visible',
     'station.067' => 'Save visibility',
     'station.068' => 'Type',
-    'station.069' => 'Manual announcement',
-    'station.070' => 'Update notice',
     'station.071' => 'Announcement title',
     'station.072' => 'Upload a .md file (optional, fills in the body and summary below)',
     'station.073' => 'Select a finished Markdown announcement document to load its content automatically; you can also paste Markdown directly below. The homepage renders it as rich text with headings/lists/bold/images.',

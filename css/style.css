@@ -1202,3 +1202,18 @@ body.bg-blur .nf-card{background:hsla(0,0%,100%,var(--bg-card-opacity,0.8));back
   .links-view { border-radius: 16px; padding: 10px 10px 18px; margin: 8px 0 20px; }
   .links-title { font-size: 1.06em; }
 }
+
+/* v6.3.0 修订2：友链页去掉半透明色带、补分隔线与最小高度、空角标隐藏 */
+.links-view {
+  background: var(--surface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  min-height: 240px;
+  padding: 12px 12px 18px;
+}
+[data-theme="dark"] .links-view { background: var(--surface); }
+.links-head { padding: 2px 2px 10px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+.links-count:empty { display: none; }
+.links-grid { padding: 0 2px; }
+.link-card { box-shadow: none; border-color: var(--border); }
+.link-card:hover { box-shadow: var(--shadow-sm); }

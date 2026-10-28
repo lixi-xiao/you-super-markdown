@@ -4019,17 +4019,17 @@ function renderPager(array $p, string $pageParam, array $extra = [], string $per
     }
     $html = '<nav class="pagination">';
     // 左：总数 + 每页条数（始终显示）
-    $html .= '<div class="pagination-info"><span class="page-info">共 <strong>' . (int)$p['total'] . '</strong> 条</span>'
-           . '<label class="per-page">每页 <select data-pp-url="' . $enc($ppTpl) . '" onchange="if(this.dataset.ppUrl)location.href=this.dataset.ppUrl.replace(\'__PP__\',this.value)">';
+    $html .= '<div class="pagination-info"><span class="page-info">' . t('admin.617', ['n' => (int)$p['total']]) . '</span>'
+           . '<label class="per-page">' . t('admin.618') . ' <select data-pp-url="' . $enc($ppTpl) . '" onchange="if(this.dataset.ppUrl)location.href=this.dataset.ppUrl.replace(\'__PP__\',this.value)">';
     foreach ([10, 20, 50, 100] as $opt) {
         $html .= '<option value="' . $opt . '"' . ($opt === $perPage ? ' selected' : '') . '>' . $opt . '</option>';
     }
-    $html .= '</select> 条</label></div>';
+    $html .= '</select>' . t('admin.619') . '</label></div>';
     // 中：页码按钮（仅多页时显示）
     if ($showNav) {
         $html .= '<div class="pagination-btns">';
-        $html .= '<a class="page-btn" href="' . $link(1) . '" title="首页">« 首页</a>';
-        $html .= '<a class="page-btn" href="' . $link(max(1, $page - 1)) . '" title="上一页">‹ 上一页</a>';
+        $html .= '<a class="page-btn" href="' . $link(1) . '" title="' . t('admin.620') . '">« ' . t('admin.620') . '</a>';
+        $html .= '<a class="page-btn" href="' . $link(max(1, $page - 1)) . '" title="' . t('admin.621') . '">‹ ' . t('admin.621') . '</a>';
         $prev = 0;
         foreach ($seq as $pg) {
             if ($pg - $prev > 1) $html .= '<span class="page-btn page-ellipsis">…</span>';
@@ -4038,17 +4038,17 @@ function renderPager(array $p, string $pageParam, array $extra = [], string $per
                 : '<a class="page-btn" href="' . $link($pg) . '">' . $pg . '</a>';
             $prev = $pg;
         }
-        $html .= '<a class="page-btn" href="' . $link(min($pages, $page + 1)) . '" title="下一页">下一页 ›</a>';
-        $html .= '<a class="page-btn" href="' . $link($pages) . '" title="末页">末页 »</a>';
+        $html .= '<a class="page-btn" href="' . $link(min($pages, $page + 1)) . '" title="' . t('admin.622') . '">' . t('admin.622') . ' ›</a>';
+        $html .= '<a class="page-btn" href="' . $link($pages) . '" title="' . t('admin.623') . '">' . t('admin.623') . ' »</a>';
         $html .= '</div>';
     }
     // 右：页码信息 + 跳转（仅多页时显示）
     if ($showNav) {
-        $html .= '<div class="pagination-jump"><span class="page-info">第 ' . $page . ' / ' . $pages . ' 页</span>'
-               . '<input type="number" class="page-jump" min="1" max="' . $pages . '" placeholder="页码" data-pg-url="' . $enc($pgTpl) . '" '
+        $html .= '<div class="pagination-jump"><span class="page-info">' . t('admin.624', ['a' => $page, 'b' => $pages]) . '</span>'
+               . '<input type="number" class="page-jump" min="1" max="' . $pages . '" placeholder="' . t('admin.625') . '" data-pg-url="' . $enc($pgTpl) . '" '
                . 'onchange="if(this.value&&this.dataset.pgUrl)location.href=this.dataset.pgUrl.replace(\'__PG__\',this.value)" '
                . 'onkeydown="if(event.key===\'Enter\')this.onchange()">'
-               . '<button type="button" class="page-btn" onclick="var i=this.previousElementSibling;if(i&&i.value&&i.dataset.pgUrl)location.href=i.dataset.pgUrl.replace(\'__PG__\',i.value)">跳转</button></div>';
+               . '<button type="button" class="page-btn" onclick="var i=this.previousElementSibling;if(i&&i.value&&i.dataset.pgUrl)location.href=i.dataset.pgUrl.replace(\'__PG__\',i.value)">' . t('admin.626') . '</button></div>';
     }
     return $html . '</nav>';
 }

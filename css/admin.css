@@ -175,6 +175,16 @@ body {
     flex-direction: column;
     gap: 2px;
 }
+/* v6.3.1：侧栏分组标题（只做视觉分段，不改变链接与权限） */
+.sidebar-group {
+    margin: 12px 14px 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+.sidebar-nav > .sidebar-group:first-child { margin-top: 2px; }
 .sidebar-link {
     display: flex;
     align-items: center;

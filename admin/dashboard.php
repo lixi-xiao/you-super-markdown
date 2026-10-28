@@ -1023,7 +1023,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>高级管理员后台 - <?= htmlspecialchars($siteTitle) ?></title>
+<title><?= t('admin.571') ?> - <?= htmlspecialchars($siteTitle) ?></title>
 <link rel="stylesheet" href="../css/admin.css?v=<?= @filemtime(__DIR__ . '/../css/admin.css') ?>">
 <!-- v6.1.0：后台 JS 动态文案（弹窗/提示/异步渲染）运行时翻译 -->
 <script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
@@ -1051,60 +1051,63 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <nav class="sidebar-nav">
         <a href="dashboard.php" class="sidebar-link <?= (!isset($_GET['tab']) || $_GET['tab'] === 'overview') ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-            总览
+            <?= t('admin.465') ?>
         </a>
+        <div class="sidebar-group"><?= t('admin.482') ?></div>
         <a href="dashboard.php?tab=users" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'users' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            用户管理
+            <?= t('admin.466') ?>
         </a>
-        <a href="dashboard.php?tab=logs" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'logs' ? 'active' : '' ?>">
-            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-            审计日志
-        </a>
-        <a href="dashboard.php?tab=config" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'config' ? 'active' : '' ?>">
-            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            安全设置
-        </a>
-        <a href="dashboard.php?tab=security" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'security' ? 'active' : '' ?>">
-            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            安全监控
-        </a>
+        <div class="sidebar-group"><?= t('admin.481') ?></div>
         <a href="dashboard.php?tab=ui" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'ui' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            主界面及功能设置
+            <?= t('admin.470') ?>
         </a>
-        <!-- v6.0.0：友站（友情链接）管理 -->
         <a href="dashboard.php?tab=links" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'links' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            友站管理
-        </a>
-        <a href="dashboard.php?tab=update" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'update' ? 'active' : '' ?>">
-            <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            在线更新
-        </a>
-        <a href="dashboard.php?tab=guard" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'guard' ? 'active' : '' ?>">
-            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
-            守护进程
+            <?= t('admin.471') ?>
         </a>
         <a href="dashboard.php?tab=data" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'data' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-            数据管理
+            <?= t('admin.474') ?>
         </a>
-        <a href="dashboard.php?tab=hfish" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'hfish' ? 'active' : '' ?>">
-            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
-            蜜罐安全
+        <div class="sidebar-group"><?= t('admin.483') ?></div>
+        <a href="dashboard.php?tab=config" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'config' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <?= t('admin.468') ?>
         </a>
-        <a href="dashboard.php?tab=mail" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'mail' ? 'active' : '' ?>">
-            <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            邮件设置
-        </a>
-        <a href="dashboard.php?tab=verify" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'verify' ? 'active' : '' ?>">
-            <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/><circle cx="12" cy="13" r="1"/></svg>
-            注册验证
+        <a href="dashboard.php?tab=security" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'security' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <?= t('admin.469') ?>
         </a>
         <a href="dashboard.php?tab=threat" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'threat' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>
-            联动风控
+            <?= t('admin.478') ?>
+        </a>
+        <a href="dashboard.php?tab=hfish" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'hfish' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
+            <?= t('admin.475') ?>
+        </a>
+        <a href="dashboard.php?tab=verify" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'verify' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/><circle cx="12" cy="13" r="1"/></svg>
+            <?= t('admin.477') ?>
+        </a>
+        <a href="dashboard.php?tab=logs" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'logs' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <?= t('admin.467') ?>
+        </a>
+        <div class="sidebar-group"><?= t('admin.484') ?></div>
+        <a href="dashboard.php?tab=update" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'update' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            <?= t('admin.472') ?>
+        </a>
+        <a href="dashboard.php?tab=guard" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'guard' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+            <?= t('admin.473') ?>
+        </a>
+        <a href="dashboard.php?tab=mail" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'mail' ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            <?= t('admin.476') ?>
         </a>
         <a href="dashboard.php?tab=ai" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'ai' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
@@ -1112,7 +1115,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         </a>
         <a href="#" onclick="bindLogoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            退出登录
+            <?= t('admin.480') ?>
         </a>
     </nav>
 </div>
@@ -1133,8 +1136,8 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <?php $flashPwd = $_SESSION['flash_reset_pwd']; unset($_SESSION['flash_reset_pwd']); ?>
     <div class="msg msg-warn" style="border:1px dashed var(--accent);background:var(--accent-light,#f0f5ff)">
         <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        用户 <strong><?= htmlspecialchars($flashPwd['account'] ?? '') ?></strong><?= t('admin.380') ?><code style="font-size:1.1em;font-weight:700"><?= htmlspecialchars($flashPwd['pwd'] ?? '') ?></code>
-        （仅本次显示，请立即复制并安全告知用户）
+        <?= t('admin.560') ?> <strong><?= htmlspecialchars($flashPwd['account'] ?? '') ?></strong><?= t('admin.380') ?><code style="font-size:1.1em;font-weight:700"><?= htmlspecialchars($flashPwd['pwd'] ?? '') ?></code>
+        <?= t('admin.583') ?>
     </div>
     <?php endif; ?>
     <?php if ($msg === 'account_duplicate'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('admin.381') ?></div><?php endif; ?>
@@ -1144,7 +1147,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <?php if (!$updateNotifyReady): ?>
     <div class="msg msg-warning">
         <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        <strong><?= t('admin.005') ?></strong><?= t('admin.006') ?><code>sudo ysm-admin check</code> 体检）。
+        <strong><?= t('admin.005') ?></strong><?= t('admin.006') ?><code>sudo ysm-admin check</code><?= t('admin.572') ?>
     </div>
     <?php endif; ?>
 
@@ -1164,7 +1167,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-            系统总览
+            <?= t('admin.485') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.007') ?></div>
     </div>
@@ -1179,7 +1182,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-            系统信息
+            <?= t('admin.486') ?>
         </div>
         <div class="table-wrap">
         <table>
@@ -1196,7 +1199,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            用户管理
+            <?= t('admin.466') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.008') ?></div>
     </div>
@@ -1223,7 +1226,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-            创建用户
+            <?= t('admin.488') ?>
         </div>
         <form method="post" class="need-challenge">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -1334,7 +1337,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         $name = htmlspecialchars($u['nickname'] ?? '');
         $account = htmlspecialchars($u['username'] ?? ($u['account'] ?? ''));
         $roleKey = (string)($u['role'] ?? 'user');
-        $roleLabel = ['station_admin' => '站长', 'author' => '写作者', 'user' => '普通用户'][$roleKey] ?? '普通用户';
+        $roleLabel = ['station_admin' => t('admin.558'), 'author' => t('admin.557'), 'user' => t('admin.559')][$roleKey] ?? t('admin.559');
         $initial = htmlspecialchars(mb_strlen($u['nickname'] ?? '') ? mb_substr((string)$u['nickname'], 0, 1) : '?');
         $statusTxt = !empty($u['disabled']) ? '已禁用' : '正常';
         $statusColor = !empty($u['disabled']) ? 'var(--danger)' : 'var(--text-muted)';
@@ -1350,7 +1353,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         $h .= '<div class="user-op-sep"></div><div class="user-op-head">' . t('admin.021') . '</div>';
         $h .= '<form method="post" class="need-challenge"><input type="hidden" name="csrf_token" value="' . $tok . '"><input type="hidden" name="action" value="set_user_role"><input type="hidden" name="user_id" value="' . $uid . '"><input type="hidden" name="challenge_code">';
         $h .= '<div class="user-op-form"><div class="user-op-row"><span class="user-op-label">' . t('admin.015') . '</span><select class="form-select" name="role">';
-        foreach ([ROLE_STATION_ADMIN => '站长', ROLE_AUTHOR => '写作者', ROLE_USER => '普通用户'] as $rv => $rl) {
+        foreach ([ROLE_STATION_ADMIN => t('admin.558'), ROLE_AUTHOR => t('admin.557'), ROLE_USER => t('admin.559')] as $rv => $rl) {
             $sel = ($u['role'] ?? '') === $rv ? ' selected' : '';
             $h .= '<option value="' . $rv . '"' . $sel . '>' . $rl . '</option>';
         }
@@ -1388,7 +1391,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            系统管理员<span class="card-badge"><?= $saPaged['total'] ?></span>
+            <?= t('admin.487') ?><span class="card-badge"><?= $saPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.015') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th></tr>
@@ -1401,7 +1404,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($u['created'] ?? '') ?></td>
             </tr>
             <?php endforeach; ?>
-            <?php if (!$saPaged['items']): ?><tr><td colspan="5" class="table-empty"><?= $usersQ !== '' ? '无匹配用户' : '暂无数据' ?></td></tr><?php endif; ?>
+            <?php if (!$saPaged['items']): ?><tr><td colspan="5" class="table-empty"><?= $usersQ !== '' ? t('admin.601') : t('admin.600') ?></td></tr><?php endif; ?>
         </table></div>
         <?= renderPager($saPaged, 'sa_page', $saPgExtra, 'sa_per_page') ?>
     </div>
@@ -1410,7 +1413,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-            站长<span class="card-badge"><?= $stPaged['total'] ?></span>
+            <?= t('admin.558') ?><span class="card-badge"><?= $stPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th><th><?= t('admin.032') ?></th></tr>
@@ -1432,7 +1435,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
-            写作者<span class="card-badge"><?= $auPaged['total'] ?></span>
+            <?= t('admin.557') ?><span class="card-badge"><?= $auPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.033') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th><th><?= t('admin.032') ?></th></tr>
@@ -1455,7 +1458,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-            普通用户<span class="card-badge"><?= $usPaged['total'] ?></span>
+            <?= t('admin.559') ?><span class="card-badge"><?= $usPaged['total'] ?></span>
         </div>
         <div class="table-wrap"><table>
             <tr><th><?= t('admin.010') ?></th><th><?= t('admin.029') ?></th><th><?= t('admin.030') ?></th><th><?= t('admin.031') ?></th><th><?= t('admin.032') ?></th></tr>
@@ -1477,7 +1480,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-            审计日志
+            <?= t('admin.467') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.034') ?></div>
     </div>
@@ -1492,7 +1495,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card card-danger">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            哈希链校验失败！日志可能已被篡改。
+            <?= t('admin.614') ?>
         </div>
         <p style="color:#fca5a5;font-size:0.9em"><?= t('admin.chain_broken_at', ['n' => $chainResult['broken_at']]) ?></p>
     </div>
@@ -1500,14 +1503,14 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card card-success">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            哈希链校验通过（共 <?= $chainResult['count'] ?> 条）
+            <?= t('admin.561', ['n' => $chainResult['count']]) ?>
         </div>
     </div>
     <?php endif; ?>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            最近操作记录（共 <?= $pageData['total'] ?> 条）
+            <?= t('admin.562', ['n' => $pageData['total']]) ?>
         </div>
         <div class="log-toolbar">
             <form class="log-toolbar-search" method="get" action="dashboard.php">
@@ -1546,7 +1549,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            安全设置
+            <?= t('admin.468') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.039') ?></div>
     </div>
@@ -1554,7 +1557,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            安全设置
+            <?= t('admin.468') ?>
         </div>
         <form method="post" class="need-challenge">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -1574,7 +1577,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <div style="padding-top:16px;border-top:1px solid var(--border);margin-bottom:16px">
                 <div class="card-title" style="margin-bottom:8px">
                     <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    自动防护
+                    <?= t('admin.516') ?>
                 </div>
             </div>
             <div class="toggle-row">
@@ -1612,7 +1615,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <div style="padding-top:16px;border-top:1px solid var(--border);margin-bottom:16px">
                 <div class="card-title" style="margin-bottom:8px">
                     <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    自定义入口路径（L1 隐藏入口扩展）
+                    <?= t('admin.610') ?>
                 </div>
                 <p class="form-hint" style="margin-bottom:12px"><?= t('admin.049') ?></p>
             </div>
@@ -1678,7 +1681,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     </div>
 
     <?php
-    $typeLabels = ['register' => '注册', 'comment' => '评论', 'login' => '登录'];
+    $typeLabels = ['register' => t('admin.602'), 'comment' => t('admin.603'), 'login' => t('admin.604')];
     ?>
     <?php elseif ($tab === 'security'): ?>
     <?php
@@ -1692,14 +1695,14 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            安全监控
+            <?= t('admin.469') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.062') ?></div>
     </div>
     <?php if ($banMsg):
         $msgText = match($banMsg) {
-            'cleared' => '操作日志已清空',
-            'recovered' => '操作日志已从镜像恢复',
+            'cleared' => t('admin.546'),
+            'recovered' => t('admin.545'),
             default => $banMsg,
         };
     ?>
@@ -1708,7 +1711,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            添加封禁
+            <?= t('admin.492') ?>
         </div>
         <form method="post" class="need-challenge">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -1738,7 +1741,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-            封禁列表（共 <?= $banData['total'] ?> 条）
+            <?= t('admin.563', ['n' => $banData['total']]) ?>
         </div>
         <?php if (empty($banData['items'])): ?>
         <div class="empty-state">
@@ -1843,7 +1846,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            越权访问日志（共 <?= $unauthData['total'] ?> 条）
+            <?= t('admin.564', ['n' => $unauthData['total']]) ?>
         </div>
         <div class="log-toolbar">
             <form method="get" action="dashboard.php" class="log-toolbar-search">
@@ -1855,7 +1858,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <span class="toolbar-spacer"></span>
             <?php if ($unauthQ !== ''): ?><span class="result-count"><?= t('common.match_count', ['n' => $unauthData['total']]) ?></span><?php endif; ?>
             <?php if ($unauthData['total'] > 0): ?>
-            <form method="post" onsubmit="return confirm(t('admin.078'))">
+            <form method="post" data-confirm="<?= htmlspecialchars(t('admin.078'), ENT_QUOTES) ?>" onsubmit="return ysmConfirm(this)">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                 <input type="hidden" name="clear_unauth" value="1">
                 <button type="submit" class="btn btn-sm btn-outline" style="color:#ef4444;border-color:#fecaca"><?= t('admin.079') ?></button>
@@ -1865,7 +1868,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <?php if (empty($unauthData['items'])): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            <p><?= $unauthQ !== '' ? '未找到匹配「' . htmlspecialchars($unauthQ) . '」的记录' : '暂无越权访问记录' ?></p>
+            <p><?= $unauthQ !== '' ? t('admin.570', ['q' => $unauthQ]) : t('admin.567') ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
@@ -1893,7 +1896,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-            登录日志（共 <?= $loginData['total'] ?> 条）
+            <?= t('admin.565', ['n' => $loginData['total']]) ?>
         </div>
         <div class="log-toolbar">
             <form class="log-toolbar-search" method="get" action="dashboard.php">
@@ -1908,7 +1911,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <?php if (empty($loginData['items'])): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-            <p><?= $loginQ !== '' ? '未找到匹配「' . htmlspecialchars($loginQ) . '」的记录' : '暂无登录日志' ?></p>
+            <p><?= $loginQ !== '' ? t('admin.570', ['q' => $loginQ]) : t('admin.568') ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
@@ -1936,15 +1939,15 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            操作日志（共 <?= $auditData['total'] ?> 条）
+            <?= t('admin.566', ['n' => $auditData['total']]) ?>
         </div>
         <div style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <span style="font-size:0.82em;color:var(--text-muted)"><?= t('admin.080') ?></span>
             <span class="chain-badge <?= $chainResult['valid'] ? 'chain-valid' : 'chain-invalid' ?>" style="font-size:0.82em">
                 <?php if ($chainResult['valid']): ?>
-                ● 完整（<?= $chainResult['count'] ?> 条记录）
+                <?= t('admin.615', ['n' => $chainResult['count']]) ?>
                 <?php else: ?>
-                ✗ 断裂（第 <?= ($chainResult['broken_at'] ?? 0) + 1 ?> 条异常）
+                <?= t('admin.616', ['n' => ($chainResult['broken_at'] ?? 0) + 1]) ?>
                 <?php endif; ?>
             </span>
             <?php $__mir = auditMirrorStatus(); $__rr = readAuditRecoverResult(); ?>
@@ -1984,7 +1987,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <?php if (empty($auditData['items'])): ?>
         <div class="empty-state">
             <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            <p><?= $auditQ !== '' ? '未找到匹配「' . htmlspecialchars($auditQ) . '」的记录' : '暂无操作日志' ?></p>
+            <p><?= $auditQ !== '' ? t('admin.570', ['q' => $auditQ]) : t('admin.569') ?></p>
         </div>
         <?php else: ?>
         <div class="table-wrap">
@@ -2021,7 +2024,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            主界面及功能设置
+            <?= t('admin.470') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.085') ?></div>
     </div>
@@ -2032,7 +2035,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-            站点设置
+            <?= t('admin.573') ?>
         </div>
         <div class="form-group">
             <label class="form-label"><?= t('admin.086') ?></label>
@@ -2061,7 +2064,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-            音乐播放器设置
+            <?= t('admin.515') ?>
         </div>
         <!-- v5.3.0：音乐为「预设通道」——歌单 ID / 默认播放歌曲 / Cookies 三项已固定，后台不再展示。
              采用 display:none 隐藏（可回退：删除本包装 <div> 的 style 即恢复显示）。输入元素保留在 DOM 中，
@@ -2098,7 +2101,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-            背景类型
+            <?= t('admin.512') ?>
         </div>
         <div class="bg-type-grid bg-vis-grid">
             <label class="bg-type-card <?= $bgType==='none'?'active':'' ?>" data-type="none"><input type="radio" name="bg_type" value="none" <?= $bgType==='none'?'checked':'' ?>><div class="type-icon none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div><div class="type-name"><?= t('station.044') ?></div></label>
@@ -2203,7 +2206,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <input type="hidden" name="_lang_save" value="1">
         <div class="card-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-            语言与字体
+            <?= t('admin.514') ?>
         </div>
         <div class="form-group">
             <label class="form-label"><?= t('admin.114') ?></label>
@@ -2240,7 +2243,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <input type="hidden" name="_font_upload" value="1">
         <div class="card-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="9" y1="20" x2="15" y2="20"/></svg>
-            自定义字体文件
+            <?= t('admin.513') ?>
         </div>
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;word-break:break-all">
             <?= t('admin.font_current') ?><?= $customFontName !== '' ? htmlspecialchars($customFontName) : t('admin.font_none') ?>
@@ -2254,7 +2257,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         </div>
         <?php if ($customFontName !== ''): ?>
         <div style="margin-top:10px">
-            <button type="submit" class="btn btn-outline" name="_font_remove" value="1" onclick="return confirm(t('admin.124'))"><?= t('admin.125') ?></button>
+            <button type="submit" class="btn btn-outline" name="_font_remove" value="1" data-confirm="<?= htmlspecialchars(t('admin.124'), ENT_QUOTES) ?>" onclick="return ysmConfirm(this)"><?= t('admin.125') ?></button>
         </div>
         <?php endif; ?>
     </form>
@@ -2325,7 +2328,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            友站管理
+            <?= t('admin.471') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.133') ?></div>
     </div>
@@ -2378,7 +2381,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            在线更新
+            <?= t('admin.472') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.148') ?></div>
     </div>
@@ -2396,7 +2399,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <div>
                 <button class="btn btn-primary" onclick="checkUpdate()" id="checkUpdateBtn">
                     <svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                    检查更新
+                    <?= t('admin.491') ?>
                 </button>
             </div>
         </div>
@@ -2415,11 +2418,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <div style="font-weight:600;color:var(--text);margin-bottom:6px"><?= t('admin.150') ?></div>
             <div style="display:flex;flex-direction:column;gap:8px">
                 <div><span style="font-weight:600;color:var(--accent)"><?= t('admin.151') ?></span><br>
-                在服务器终端（SSH）执行 <code>sudo ysm-admin apply-update</code><?= t('admin.152') ?></div>
+                <?= t('admin.609') ?><code>sudo ysm-admin apply-update</code><?= t('admin.152') ?></div>
                 <div><span style="font-weight:600;color:var(--accent)"><?= t('admin.153') ?></span><br>
-                在下方「手动更新」区上传 <code>ZIP / tar.gz</code><?= t('admin.154') ?><code>sudo ysm-admin apply-update</code><?= t('admin.155') ?></div>
+                <?= t('admin.576') ?><code>ZIP / tar.gz</code><?= t('admin.154') ?><code>sudo ysm-admin apply-update</code><?= t('admin.155') ?></div>
                 <div><span style="font-weight:600;color:var(--accent)"><?= t('admin.156') ?></span><br>
-                点击上方「检查更新」自动连接 GitHub 仓库，识别最新版本并展示可用的更新包，选定后按提示在 SSH 执行 <code>sudo ysm-admin apply-update</code>。</div>
+                <?= t('admin.577') ?><code>sudo ysm-admin apply-update</code>。</div>
             </div>
             <div style="font-weight:600;color:var(--text);margin:10px 0 6px"><?= t('admin.157') ?></div>
             <div style="display:flex;flex-direction:column;gap:8px">
@@ -2438,7 +2441,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <!-- v3.2.2：跨版本更新必须使用全量包提示 -->
             <div id="crossVerHint" class="msg" style="display:none;margin:0 0 12px;background:rgba(245,158,11,0.14);color:#b45309">
                 <svg viewBox="0 0 24 24" width="16" height="16" style="vertical-align:-3px;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                <strong><?= t('admin.173') ?></strong><?= t('admin.174') ?><b><?= t('admin.158') ?></b>，请勿选择增量包。
+                <strong><?= t('admin.173') ?></strong><?= t('admin.174') ?><b><?= t('admin.158') ?></b><?= t('admin.578') ?>
             </div>
             <p style="color:var(--text-secondary)"><?= t('admin.175') ?><strong id="newVersionText"></strong><?= t('admin.176') ?></p>
             <!-- v3.2.0：在线更新自动识别仓库发布的全量包 / 增量包，由站长选择 -->
@@ -2462,11 +2465,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap">
                 <button class="btn btn-primary" onclick="showChallengeModal()" id="startUpdateBtn">
                     <svg viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                    执行更新
+                    <?= t('admin.490') ?>
                 </button>
                 <button class="btn btn-secondary" onclick="document.getElementById('uploadPkgInput').click()">
                     <svg viewBox="0 0 24 24" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                    上传更新包
+                    <?= t('admin.494') ?>
                 </button>
             </div>
             <input type="file" id="uploadPkgInput" accept=".zip,.gz,.tar.gz" style="display:none">
@@ -2491,7 +2494,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <div>
             <button class="btn btn-secondary" onclick="document.getElementById('uploadPkgInput').click()">
                 <svg viewBox="0 0 24 24" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                上传更新包
+                <?= t('admin.494') ?>
             </button>
             <input type="file" id="uploadPkgInput" accept=".zip,.gz,.tar.gz" style="display:none">
         </div>
@@ -2999,7 +3002,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
-            守护进程
+            <?= t('admin.473') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.246') ?></div>
     </div>
@@ -3013,7 +3016,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            守护进程状态
+            <?= t('admin.574') ?>
         </div>
         <table>
             <tr><td style="color:var(--text-muted)"><?= t('admin.030') ?></td>
@@ -3037,7 +3040,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-            数据管理
+            <?= t('admin.474') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.247') ?></div>
     </div>
@@ -3097,7 +3100,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <div style="margin-top:12px">
                 <button class="btn btn-primary" type="submit">
                     <svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                    保存配置
+                    <?= t('admin.489') ?>
                 </button>
                 <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px"><?= t('admin.261') ?></span>
             </div>
@@ -3130,7 +3133,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
-            蜜罐安全
+            <?= t('admin.475') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.268') ?></div>
     </div>
@@ -3164,7 +3167,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
             <button class="btn btn-primary" onclick="hfishSync()" id="hfishSyncBtn">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                立即同步
+                <?= t('admin.493') ?>
             </button>
             <span id="hfishSyncMsg" style="font-size:0.85em;color:var(--text-muted)"></span>
         </div>
@@ -3186,7 +3189,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 <td style="font-size:0.85em"><?= htmlspecialchars(implode(', ', array_keys($a['honeypots'] ?? [])) ?: '-') ?></td>
                 <td style="font-size:0.82em;color:var(--text-muted)"><?= htmlspecialchars(implode(', ', array_keys($a['uas'] ?? [])) ?: '-') ?></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['date'] ?? '') ?></td>
-                <td><?php if (!empty($a['banned'])): ?><span class="chain-badge chain-invalid"><?= t('admin.435') ?></span><?php elseif (!empty($a['skip'])): ?><span class="chain-badge" style="background:rgba(251,191,36,.15);color:#d97706" title="<?= htmlspecialchars($a['skip_reason'] ?? '内网/链路本地地址豁免') ?>"><?= t('admin.436') ?></span><?php else: ?><span class="chain-badge chain-valid"><?= t('admin.437') ?></span><?php endif; ?></td>
+                <td><?php if (!empty($a['banned'])): ?><span class="chain-badge chain-invalid"><?= t('admin.435') ?></span><?php elseif (!empty($a['skip'])): ?><span class="chain-badge" style="background:rgba(251,191,36,.15);color:#d97706" title="<?= htmlspecialchars($a['skip_reason'] ?? t('admin.587')) ?>"><?= t('admin.436') ?></span><?php else: ?><span class="chain-badge chain-valid"><?= t('admin.437') ?></span><?php endif; ?></td>
             </tr>
             <?php endforeach; ?>
         </table></div>
@@ -3227,7 +3230,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            邮件设置
+            <?= t('admin.476') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.280') ?></div>
     </div>
@@ -3280,13 +3283,13 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                         <?php else: ?>
                         <span style="color:#ef4444;font-size:0.85em"><?= t('admin.298') ?><code>sudo ysm-admin set-smtp-pass</code><?= t('admin.294') ?><code>zz-ysm-secret.conf</code><?= t('admin.299') ?></span>
                         <?php endif; ?></td></tr>
-                <tr><td style="color:var(--text-muted)">发件人（可空=账号）</td>
+                <tr><td style="color:var(--text-muted)"><?= t('admin.575') ?></td>
                     <td><input class="form-input" style="width:220px" type="text" name="smtp_from" value="<?= htmlspecialchars($smtpCfg['from']) ?>" placeholder="<?= t('admin.446') ?>"></td></tr>
             </table>
             <div style="margin-top:12px">
                 <button class="btn btn-primary" type="submit">
                     <svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                    保存配置
+                    <?= t('admin.489') ?>
                 </button>
                 <span style="color:var(--text-muted);font-size:0.82em;margin-left:8px"><?= t('admin.261') ?></span>
             </div>
@@ -3357,7 +3360,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            注册验证
+            <?= t('admin.477') ?>
         </div>
         <div class="page-subtitle"><?= t('admin.310') ?></div>
     </div>
@@ -3497,13 +3500,13 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 </td>
                 <td>
                     <?php if ($locked > 0 || $tr['score'] >= 50): ?>
-                    <form method="post" class="need-challenge" style="display:inline">
+                    <form method="post" class="need-challenge" style="display:inline" data-confirm="<?= htmlspecialchars(t('admin.cf_unlink'), ENT_QUOTES) ?>">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="clear_linked" value="1">
                         <input type="hidden" name="link_dim_type" value="<?= htmlspecialchars($tr['dim_type']) ?>">
                         <input type="hidden" name="link_dim_key" value="<?= htmlspecialchars($tr['dim_key']) ?>">
                         <input type="hidden" name="challenge_code">
-                        <button class="btn btn-sm btn-outline" data-confirm="<?= t('admin.cf_unlink') ?>"><?= t('admin.333') ?></button>
+                        <button class="btn btn-sm btn-outline"><?= t('admin.333') ?></button>
                     </form>
                     <?php endif; ?>
                 </td>
@@ -3536,13 +3539,13 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 <td><?= date('Y-m-d', (int)$d['first_seen']) ?></td>
                 <td><?= date('Y-m-d', (int)$d['last_seen']) ?></td>
                 <td>
-                    <form method="post" class="need-challenge" style="display:inline">
+                    <form method="post" class="need-challenge" style="display:inline" data-confirm="<?= htmlspecialchars(t('admin.cf_device'), ENT_QUOTES) ?>">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
                         <input type="hidden" name="remove_device" value="1">
                         <input type="hidden" name="device_uid" value="<?= htmlspecialchars($d['user_id']) ?>">
                         <input type="hidden" name="device_id" value="<?= htmlspecialchars($d['id']) ?>">
                         <input type="hidden" name="challenge_code">
-                        <button class="btn btn-sm btn-outline" data-confirm="<?= t('admin.cf_device') ?>"><?= t('admin.339') ?></button>
+                        <button class="btn btn-sm btn-outline"><?= t('admin.339') ?></button>
                     </form>
                 </td>
             </tr>
@@ -3772,6 +3775,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     </div>
 
 <script>
+// v6.3.1：统一确认——文案由服务端 t() 写进 data-confirm，避免在 JS 里调 PHP 的 t() 导致 ReferenceError（确认被跳过）
+function ysmConfirm(el) {
+    var m = (el && el.getAttribute) ? (el.getAttribute('data-confirm') || '') : '';
+    return m === '' ? true : confirm(m);
+}
 // 敏感操作挑战码统一处理：提交前弹出确认码输入（SSH: sudo ysm-admin challenge）
 // v3.0.3：改为事件委托（document submit），支持动态注入的 need-challenge 表单（用户操作弹窗）
 document.addEventListener('submit', function(e) {

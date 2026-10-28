@@ -38,7 +38,7 @@ if (!$row || $row['status'] !== 'verify_pending' || ($row['email'] ?? '') !== $e
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="csrf-token" content="<?= htmlspecialchars(generateCsrfToken()) ?>">
-<title>邮箱验证 - <?= htmlspecialchars($title) ?></title>
+<title><?= t('verify.009') ?> - <?= htmlspecialchars($title) ?></title>
 <script>window.I18N = <?= json_encode(ysmClientI18n('admin'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;</script>
 <script src="/js/i18n.js?v=<?= @filemtime(__DIR__ . '/js/i18n.js') ?>"></script>
 <style>

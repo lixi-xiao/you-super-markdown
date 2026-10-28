@@ -1580,7 +1580,8 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
 </script>
 <?php endif; ?>
 <script src="js/translate-admin.js?v=<?= @filemtime(__DIR__ . '/js/translate-admin.js') ?>"></script>
-<!-- v6.3.2：Markdown 正文预览 -->
+<!-- v6.3.2：Markdown 正文预览；v6.3.6：图表统一走 mermaid-loader（预加载 + 本地 SVG 缓存） -->
+<script src="js/mermaid-loader.js?v=<?= @filemtime(__DIR__ . '/js/mermaid-loader.js') ?>"></script>
 <script src="js/md-preview.js?v=<?= @filemtime(__DIR__ . '/js/md-preview.js') ?>"></script>
 </body>
 </html>

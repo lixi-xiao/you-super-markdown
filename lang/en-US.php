@@ -919,6 +919,8 @@ return [
     'js.162' => 'No permission to open the dashboard',
     'js.163' => 'Failed to get permission info',
     'js.164' => 'Signed out',
+    'js.165' => 'Loading diagram…',
+    'js.166' => 'Failed to load diagram',
     // ---- links ----
     'links.001' => 'Enable',
     'links.002' => 'Pending',

@@ -1866,6 +1866,8 @@ document.addEventListener('click', function(e){
 });</script>
 <!-- v6.3.0：i18n 运行时必须在 main.js（defer）之前就绪，否则 TK 取不到词典会回退成 key -->
 <script src="js/i18n.js?v=<?= @filemtime(__DIR__ . '/js/i18n.js') ?>"></script>
+<!-- v6.3.6：Mermaid 统一加载器（预加载 + 本地 SVG 缓存 + 占位/重试），必须先于 main.js 执行 -->
+<script src="js/mermaid-loader.js?v=<?= @filemtime(__DIR__ . '/js/mermaid-loader.js') ?>" defer></script>
 <script src="js/main.js?v=<?= filemtime(__DIR__ . '/js/main.js') ?>" defer></script>
 <!-- v5.1.0 P3：外壳增强（滚动边界 / 键盘焦点环）；纯增量，与 main.js 无重叠 -->
 <script src="js/ui.js?v=<?= @filemtime(__DIR__ . '/js/ui.js') ?>" defer></script>
@@ -1911,7 +1913,9 @@ document.addEventListener('DOMContentLoaded', function() {
 // v4.6.1：后台会话/环境拦截后的明确提示——后台写操作被拒时不再静默跳转，回首页明确告知原因
 $loginHint = '';
 if (isset($_GET['admin_login']) && $_GET['admin_login'] === '1') {
-    if (isset($_GET['env']) && $_GET['env'] === '1') $loginHint = '登录环境已变化（换设备/浏览器/隐私模式），后台操作已被拦截，请重新登录';
+    // v6.3.6：区分「真·环境变化」与「账号在别处重新登录（被踢）」——后者与环境无关，旧文案会误导
+    if (isset($_GET['kicked']) && $_GET['kicked'] === '1') $loginHint = '账号已在其他设备或标签页重新登录，本会话已失效，请重新登录';
+    elseif (isset($_GET['env']) && $_GET['env'] === '1') $loginHint = '登录环境已变化（换设备/浏览器/隐私模式），后台操作已被拦截，请重新登录';
     elseif (isset($_GET['expired']) && $_GET['expired'] === '1') $loginHint = '登录会话已过期，请重新登录';
     else $loginHint = '请先登录后台';
 }

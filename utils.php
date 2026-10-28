@@ -2139,8 +2139,18 @@ function ysmMailLang($email) {
     if ($email === '') return 'zh-CN';
     if (isset($cache[$email])) return $cache[$email];
     $lang = '';
+    $role = '';
     foreach (fetchAllUsers() as $u) {
-        if (strtolower(trim((string)($u['email'] ?? ''))) === $email) { $lang = (string)($u['home_lang'] ?? ''); break; }
+        if (strtolower(trim((string)($u['email'] ?? ''))) === $email) {
+            $lang = (string)($u['home_lang'] ?? '');
+            $role = (string)($u['role'] ?? '');
+            break;
+        }
+    }
+    // v6.3.6：超管账号的邮件固定跟随「站点默认语言」（不受账号 home_lang 影响）
+    if ($role === ROLE_SUPER_ADMIN) {
+        $cache[$email] = ysmAdminMailLang();
+        return $cache[$email];
     }
     $supported = function_exists('ysmSupportedLangs') ? ysmSupportedLangs() : ['zh-CN' => []];
     if ($lang === '' || !isset($supported[$lang])) {
@@ -2148,6 +2158,20 @@ function ysmMailLang($email) {
     }
     if ($lang === '' || !isset($supported[$lang])) $lang = 'zh-CN';
     $cache[$email] = $lang;
+    return $lang;
+}
+
+/**
+ * v6.3.6：管理员/系统邮件语言——固定跟随「站点默认语言」（缺失或未启用时回落 zh-CN）。
+ * 用于：告警、通知、登录提醒、密码重置、评论通知、更新通知、SMTP 测试、CLI 邮件等发往管理员的邮件。
+ */
+function ysmAdminMailLang() {
+    static $lang = null;
+    if ($lang !== null) return $lang;
+    $supported = function_exists('ysmSupportedLangs') ? ysmSupportedLangs() : ['zh-CN' => []];
+    $l = (string)(loadSiteConfig()['default_lang'] ?? '');
+    if ($l === '' || !isset($supported[$l])) $l = 'zh-CN';
+    $lang = $l;
     return $lang;
 }
 
@@ -2443,13 +2467,17 @@ function sendAdminMail($kind, $type, $detail) {
     if (!$adminEmail) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
     $host = safeRequestHost();
-    $subject = "[{$site} {$kind}] {$type}";
+    // v6.3.6：管理员邮件固定跟随站点默认语言
+    $lang = ysmAdminMailLang();
+    $kindT = ysmMailT($kind, $lang);
+    $typeT = ysmMailT($type, $lang);
+    $subject = "[{$site} {$kindT}] {$typeT}";
     $now = date('Y-m-d H:i:s');
-    $body = "时间：{$now}\n"
-          . "服务器：{$host}\n"
-          . "事件类型：{$type}\n"
-          . "详情：{$detail}\n";
-    $html = renderMailHtml($site, $type, $detail, ['server' => $host, 'time' => $now]);
+    $body = ysmMailT('时间', $lang) . "：{$now}\n"
+          . ysmMailT('服务器', $lang) . "：{$host}\n"
+          . ysmMailT('事件类型', $lang) . "：{$typeT}\n"
+          . ysmMailT('详情', $lang) . "：{$detail}\n";
+    $html = renderMailHtml($site, $type, $detail, ['server' => $host, 'time' => $now], null, null, $lang);
     // v2.8.0：优先 SMTP 直连（无 MTA 依赖）；未配置退回 mail 命令；失败落盘 alert.log 可追溯
     $smtp = getSmtpConfig();
     if ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '') {
@@ -2480,14 +2508,17 @@ function notifyLoginEvent($u, $clientIP) {
     if (!in_array($u['role'] ?? '', [ROLE_SUPER_ADMIN, ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
     $host = safeRequestHost();
-    $subject = "[{$site} 通知] {$roleName}登录";
+    // v6.3.6：管理员邮件固定跟随站点默认语言
+    $lang = ysmAdminMailLang();
+    $roleT = ysmMailT($roleName, $lang);
+    $subject = "[" . $site . " " . ysmMailT('通知', $lang) . "] " . $roleT . ysmMailT('登录', $lang);
     $now = date('Y-m-d H:i:s');
-    $body = "时间：{$now}\n"
-          . "服务器：{$host}\n"
-          . "账号：{$u['nickname']}（" . ($u['username'] ?? ($u['account'] ?? '')) . "）\n"
-          . "角色：{$roleName}\n"
+    $body = ysmMailT('时间', $lang) . "：{$now}\n"
+          . ysmMailT('服务器', $lang) . "：{$host}\n"
+          . ysmMailT('账号', $lang) . "：{$u['nickname']}（" . ($u['username'] ?? ($u['account'] ?? '')) . "）\n"
+          . ysmMailT('角色', $lang) . "：{$roleT}\n"
           . "IP：{$clientIP}";
-    $html = renderMailHtml($site, $subject, $body, ['server' => $host, 'time' => $now]);
+    $html = renderMailHtml($site, $subject, $body, ['server' => $host, 'time' => $now], null, null, $lang);
     $smtp = getSmtpConfig();
     if ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '') {
         [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body, $html);
@@ -2510,16 +2541,19 @@ function notifyPasswordReset($u, $clientIP, $mode) {
     if ($adminEmail === '' || !email_valid($adminEmail)) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
     $host = safeRequestHost();
-    $modeLabel = $mode === 'admin_reset' ? '超管协助重置码' : '邮箱验证码自助找回';
+    // v6.3.6：管理员邮件固定跟随站点默认语言
+    $lang = ysmAdminMailLang();
+    $modeLabel = ysmMailT($mode === 'admin_reset' ? '超管协助重置码' : '邮箱验证码自助找回', $lang);
+    $roleT = ysmMailT((string)($u['role'] ?? ''), $lang);
     $now = date('Y-m-d H:i:s');
-    $subject = "[{$site} 通知] 账号密码已重置";
-    $body = "账号：{$u['nickname']}（" . ($u['username'] ?? ($u['account'] ?? '')) . "）\n"
-          . "角色：{$u['role']}\n"
-          . "重置方式：{$modeLabel}\n"
+    $subject = "[" . $site . " " . ysmMailT('通知', $lang) . "] " . ysmMailT('账号密码已重置', $lang);
+    $body = ysmMailT('账号', $lang) . "：{$u['nickname']}（" . ($u['username'] ?? ($u['account'] ?? '')) . "）\n"
+          . ysmMailT('角色', $lang) . "：{$roleT}\n"
+          . ysmMailT('重置方式', $lang) . "：{$modeLabel}\n"
           . "IP：{$clientIP}\n"
-          . "时间：{$now}\n\n"
-          . "若非本人操作，请立即在超管后台检查该账号登录/越权日志。";
-    $html = renderMailHtml($site, $subject, $body, ['server' => $host, 'time' => $now]);
+          . ysmMailT('时间', $lang) . "：{$now}\n\n"
+          . ysmMailT('若非本人操作，请立即在超管后台检查该账号登录/越权日志。', $lang);
+    $html = renderMailHtml($site, $subject, $body, ['server' => $host, 'time' => $now], null, null, $lang);
     $smtp = getSmtpConfig();
     if ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '') {
         [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body, $html);
@@ -2544,26 +2578,28 @@ function notifyComment($article, $nickname, $content, $isReply = false, $parentN
     if ($to === '' || !email_valid($to)) return;
     $site = $config['site_title'] ?? 'You Super Markdown';
     $host = safeRequestHost();
+    // v6.3.6：评论通知发往管理员邮箱 → 固定跟随站点默认语言
+    $lang = ysmAdminMailLang();
     $kind = $isReply ? '新回复' : '新评论';
-    $subject = "[{$site} 通知] {$kind}：{$nickname}";
+    $subject = "[" . $site . " " . ysmMailT('通知', $lang) . "] " . ysmMailT($kind, $lang) . "：" . $nickname;
     $articleTitle = $article;
     if (preg_match('/<!--META(.*?)-->/s', @file_get_contents(__DIR__ . '/data/articles/' . basename($article)), $am)) {
         $ameta = json_decode(trim($am[1]), true);
         if (!empty($ameta['title'])) $articleTitle = $ameta['title'];
     }
     $now = date('Y-m-d H:i:s');
-    $body = "文章：《{$articleTitle}》\n"
-          . ($isReply && $parentNick !== '' ? "回复对象：{$parentNick}\n" : '')
-          . "评论者：{$nickname}\n"
-          . "内容：{$content}\n"
-          . "时间：{$now}";
+    $body = ysmMailT('文章', $lang) . "：《{$articleTitle}》\n"
+          . ($isReply && $parentNick !== '' ? ysmMailT('回复对象', $lang) . "：{$parentNick}\n" : '')
+          . ysmMailT('评论者', $lang) . "：{$nickname}\n"
+          . ysmMailT('内容', $lang) . "：{$content}\n"
+          . ysmMailT('时间', $lang) . "：{$now}";
     $htmlDetail = '<div style="font-size:14.5px;line-height:2.0;color:#2d3748;">'
-        . '<p style="margin:0 0 10px;">文章：《<b>' . htmlspecialchars($articleTitle, ENT_QUOTES, 'UTF-8') . '</b>》</p>'
-        . ($isReply && $parentNick !== '' ? '<p style="margin:0 0 10px;color:#5b6b80;">回复对象：' . htmlspecialchars($parentNick, ENT_QUOTES, 'UTF-8') . '</p>' : '')
-        . '<p style="margin:0 0 10px;color:#5b6b80;">评论者：' . htmlspecialchars($nickname, ENT_QUOTES, 'UTF-8') . '</p>'
+        . '<p style="margin:0 0 10px;">' . htmlspecialchars(ysmMailT('文章', $lang), ENT_QUOTES, 'UTF-8') . '：《<b>' . htmlspecialchars($articleTitle, ENT_QUOTES, 'UTF-8') . '</b>》</p>'
+        . ($isReply && $parentNick !== '' ? '<p style="margin:0 0 10px;color:#5b6b80;">' . htmlspecialchars(ysmMailT('回复对象', $lang), ENT_QUOTES, 'UTF-8') . '：' . htmlspecialchars($parentNick, ENT_QUOTES, 'UTF-8') . '</p>' : '')
+        . '<p style="margin:0 0 10px;color:#5b6b80;">' . htmlspecialchars(ysmMailT('评论者', $lang), ENT_QUOTES, 'UTF-8') . '：' . htmlspecialchars($nickname, ENT_QUOTES, 'UTF-8') . '</p>'
         . '<div style="background:#f7f9fc;border:1px solid #eaeef4;border-radius:12px;padding:14px 18px;color:#334155;margin:12px 0;">'
         . nl2br(htmlspecialchars($content, ENT_QUOTES, 'UTF-8')) . '</div></div>';
-    $html = renderMailHtml($site, $kind, $body, ['server' => $host, 'time' => $now], $htmlDetail);
+    $html = renderMailHtml($site, $kind, $body, ['server' => $host, 'time' => $now], $htmlDetail, null, $lang);
     $smtp = getSmtpConfig();
     if ($smtp['host'] !== '' && $smtp['user'] !== '' && $smtp['pass'] !== '') {
         [$ok, $err] = sendSmtpMail($to, $subject, $body, $html);
@@ -2768,13 +2804,48 @@ function requireSessionEnv() {
     if (!isset($_SESSION['cmt_tv'])) return false;
     $uid = $_SESSION['cmt_user']['id'] ?? '';
     if ($uid === '' || (int)$_SESSION['cmt_tv'] !== getUserTV($uid)) return false;
-    // v6.0.0-beta（E）：已信任设备（管理角色 + device_fps 已登记）且有稳定指纹绑定 → 放宽到稳定指纹，
-    // 手机端旋转/canvas/时区漂移不再被误判换设备；未知设备/无稳定绑定仍走严格比对（安全基线）。
-    if (isTrustedDevice($uid) && trim((string)($_SESSION['cmt_sfp'] ?? '')) !== '') {
-        return fpRelaxedMatches($_SESSION['cmt_fp'], getRequestFp(), $_SESSION['cmt_sfp'], getRequestStableFp());
+    // 1) 严格匹配：完整指纹（UA + 语言/时区/分辨率/canvas）一致 → 直接放行
+    if (fpMatches($_SESSION['cmt_fp'], getRequestFp())) {
+        // 旧会话/OTP 入口未绑定稳定指纹 → 本次严格通过即补齐，后续漂移可兜底放行
+        if (trim((string)($_SESSION['cmt_sfp'] ?? '')) === '' && getRequestStableFp() !== '') {
+            $_SESSION['cmt_sfp'] = computeStableFp(getRequestStableFp());
+        }
+        return true;
     }
-    return fpMatches($_SESSION['cmt_fp'], getRequestFp());
+    // 2) v6.3.6：稳定指纹兜底——canvas 随机化 / 浏览器缩放 / 分辨率变化 / 手机横竖屏切换会让
+    //    完整指纹漂移，但设备与浏览器并未更换；此前一律判「登录环境已变化」→ 后台持续误报。
+    //    稳定指纹仍强绑定 UA（换浏览器/设备必然不同）+ 浏览器语言 + 时区桶；
+    //    命中后就地重绑完整指纹并写审计（同账号 1h 去重），不阻断任何后台操作。
+    if (envStableMatches()) {
+        $reqFp = getRequestFp();
+        if ($reqFp !== '') $_SESSION['cmt_fp'] = computeSessionFp($reqFp);
+        $_SESSION['cmt_sfp'] = computeStableFp(getRequestStableFp());
+        envRebindAudit($uid);
+        return true;
+    }
+    return false;
 }
+/**
+ * v6.3.6：稳定指纹比对——会话绑定与本次请求的稳定指纹（UA + 浏览器语言 + 时区桶）是否一致。
+ * 说明：稳定指纹不含 canvas / 分辨率，因此浏览器缩放、canvas 随机化、屏幕旋转不会导致误判。
+ */
+function envStableMatches() {
+    $bound = trim((string)($_SESSION['cmt_sfp'] ?? ''));
+    $req = getRequestStableFp();
+    if ($bound === '' || $req === '') return false;
+    return hash_equals($bound, computeStableFp($req));
+}
+/** v6.3.6：稳定指纹兜底放行后的自愈审计（同账号 1 小时内只记一条，避免刷审计表） */
+function envRebindAudit($uid) {
+    if ($uid === '') return;
+    $key = 'env_rebind:' . $uid;
+    $row = db_one('SELECT value FROM meta WHERE key = ?', [$key]);
+    $last = (int)($row['value'] ?? 0);
+    if ($last > 0 && (time() - $last) < 3600) return;
+    db_exec('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [$key, (string)time()]);
+    auditLog('env_soft_rebind', $uid, '环境指纹漂移已自动重绑（UA/浏览器语言/时区一致）');
+}
+
 // ---- token_version（同账号并发踢旧）----
 function getUserTV($uid) {
     $r = db_one('SELECT tv FROM users WHERE id = ?', [$uid]);
@@ -2804,9 +2875,10 @@ function issueRefreshToken($uid, $sessionFp, $tv, $sessionSfp = '') {
     return $token;
 }
 /**
- * 消费 refresh token：校验存在/未吊销/未过期/tv 匹配；环境指纹放行规则（v6.0.0-beta 加固）：
- *  - 已信任设备（管理角色 + device_fps 已登记）→ 允许「稳定指纹」放宽（旋转/canvas/时区漂移不踢）
- *  - 未知设备 / 无稳定指纹绑定 / 高敏写入 → 一律严格指纹比对，不降级
+ * 消费 refresh token：校验存在/未吊销/未过期/tv 匹配；环境指纹放行规则（v6.3.6）：
+ *  - 严格指纹一致 → 放行
+ *  - 否则稳定指纹（UA + 浏览器语言 + 时区桶）一致 → 视为同一环境，就地重绑该 token 的指纹后放行
+ *  - 两者都不一致 → 拒绝（换浏览器/设备）
  */
 function consumeRefreshToken($token, $requestFp, $userTV) {
     if (!is_string($token) || strlen($token) !== 64 || !ctype_xdigit($token)) return null;
@@ -2815,11 +2887,14 @@ function consumeRefreshToken($token, $requestFp, $userTV) {
     if ((int)$row['expires'] < time()) { db_exec('DELETE FROM refresh_tokens WHERE id = ?', [$row['id']]); return null; }
     if ((int)$row['tv'] !== (int)$userTV) return null;
     $uid = $row['user_id'];
-    // 已信任设备且签发了稳定指纹 → 放宽比对；否则严格
-    if (isTrustedDevice($uid) && trim((string)($row['sfp'] ?? '')) !== '') {
-        if (!fpRelaxedMatches((string)$row['fp'], $requestFp, (string)$row['sfp'], getRequestStableFp())) return null;
-    } else {
-        if (!hash_equals((string)$row['fp'], computeSessionFp($requestFp))) return null;
+    $strictOk = ($requestFp !== '') && hash_equals((string)$row['fp'], computeSessionFp($requestFp));
+    if (!$strictOk) {
+        $reqSfp = getRequestStableFp();
+        $boundSfp = trim((string)($row['sfp'] ?? ''));
+        if ($boundSfp === '' || $reqSfp === '' || !hash_equals($boundSfp, computeStableFp($reqSfp))) return null;
+        // v6.3.6：稳定指纹一致（canvas/缩放/旋转漂移）→ 就地重绑，避免 30 天登录态被误踢
+        db_exec('UPDATE refresh_tokens SET fp = ?, sfp = ? WHERE id = ?',
+            [computeSessionFp($requestFp), computeStableFp($reqSfp), $row['id']]);
     }
     db_exec('UPDATE refresh_tokens SET last_used = ? WHERE id = ?', [time(), $row['id']]);
     return $row;
@@ -3368,11 +3443,13 @@ function sendAlertDigest() {
     }
 
     $site = $config['site_title'] ?? 'You Super Markdown';
-    $head = sprintf('本小时新增联动封锁 %d 条（L1/L1.5/L2 按等级合并汇报；L3 永久封禁仍即时通知）。', $total);
+    // v6.3.6：管理员邮件固定跟随站点默认语言
+    $lang = ysmAdminMailLang();
+    $head = ysmMailT('本小时新增联动封锁 {n} 条（L1/L1.5/L2 按等级合并汇报；L3 永久封禁仍即时通知）。', $lang, ['n' => $total]);
     $detailHtml = '<div style="color:#475569;">' . $e($head) . '</div>' . $html;
     $plainFull = $head . "\n\n" . $plain;
-    $subject = "[{$site} 告警] 联动封锁汇总（{$total} 条）";
-    $bhtml = renderMailHtml($site, '告警', $plainFull, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')], $detailHtml, '联动封锁汇总');
+    $subject = "[" . $site . " " . ysmMailT('告警', $lang) . "] " . ysmMailT('联动封锁汇总', $lang) . "（{$total}）";
+    $bhtml = renderMailHtml($site, '告警', $plainFull, ['server' => gethostname(), 'time' => date('Y-m-d H:i:s')], $detailHtml, '联动封锁汇总', $lang);
 
     $smtp = getSmtpConfig();
     if ($smtp['host'] === '' || $smtp['user'] === '' || $smtp['pass'] === '') {
@@ -3621,25 +3698,32 @@ function sendAdminConfirmMail($pendingId, $token, $nick, $account, $email) {
     $site = $cfg['site_title'] ?? 'You Super Markdown';
     $now = date('Y-m-d H:i:s');
     $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
-    $subject = "[{$site}] 写作者创建确认";
-    $body = "站长申请创建写作者：\n昵称：{$nick}\n用户名：{$account}\n邮箱：{$email}\n\n"
-          . "点击以下链接确认（" . intdiv($ttl, 3600) . " 小时内有效，一次性）：\n{$link}\n\n时间：{$now}";
-    // v2.9.0：确认邮件信息卡（昵称/QQ/邮箱）+ 渐变确认按钮
+    // v6.3.6：发往超管邮箱 → 跟随站点默认语言
+    $lang = ysmAdminMailLang();
+    $hours = intdiv($ttl, 3600);
+    $subject = "[" . $site . "] " . ysmMailT('写作者创建确认', $lang);
+    $body = ysmMailT('站长申请创建写作者：', $lang) . "\n"
+          . ysmMailT('昵称', $lang) . "：{$nick}\n"
+          . ysmMailT('用户名', $lang) . "：{$account}\n"
+          . ysmMailT('邮箱', $lang) . "：{$email}\n\n"
+          . ysmMailT('点击以下链接确认（{h} 小时内有效，一次性）：', $lang, ['h' => $hours]) . "\n{$link}\n\n"
+          . ysmMailT('时间', $lang) . "：{$now}";
+    // v2.9.0：确认邮件信息卡（昵称/用户名/邮箱）+ 渐变确认按钮
     $htmlDetail = '<div style="text-align:center;">'
-        . '<span style="display:inline-block;background:#eef3fb;color:#1f3a5f;font-size:12px;font-weight:600;padding:6px 16px;border-radius:999px;">站长申请创建写作者</span>'
+        . '<span style="display:inline-block;background:#eef3fb;color:#1f3a5f;font-size:12px;font-weight:600;padding:6px 16px;border-radius:999px;">' . $e(ysmMailT('站长申请创建写作者', $lang)) . '</span>'
         . '</div>'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px;background:#f8fafc;border:1px solid #edf0f5;border-radius:12px;">'
-        . '<tr><td style="padding:14px 20px;width:76px;color:#a0aec0;font-size:12px;">昵称</td><td style="padding:14px 20px;color:#2d3748;font-size:14px;font-weight:600;">' . $e($nick) . '</td></tr>'
-        . '<tr><td style="padding:10px 20px;width:76px;color:#a0aec0;font-size:12px;border-top:1px solid #edf0f5;">用户名</td><td style="padding:10px 20px;color:#2d3748;font-size:14px;border-top:1px solid #edf0f5;">' . $e($account) . '</td></tr>'
-        . '<tr><td style="padding:10px 20px;width:76px;color:#a0aec0;font-size:12px;border-top:1px solid #edf0f5;">邮箱</td><td style="padding:10px 20px;color:#2d3748;font-size:14px;border-top:1px solid #edf0f5;">' . $e($email) . '</td></tr>'
+        . '<tr><td style="padding:14px 20px;width:76px;color:#a0aec0;font-size:12px;">' . $e(ysmMailT('昵称', $lang)) . '</td><td style="padding:14px 20px;color:#2d3748;font-size:14px;font-weight:600;">' . $e($nick) . '</td></tr>'
+        . '<tr><td style="padding:10px 20px;width:76px;color:#a0aec0;font-size:12px;border-top:1px solid #edf0f5;">' . $e(ysmMailT('用户名', $lang)) . '</td><td style="padding:10px 20px;color:#2d3748;font-size:14px;border-top:1px solid #edf0f5;">' . $e($account) . '</td></tr>'
+        . '<tr><td style="padding:10px 20px;width:76px;color:#a0aec0;font-size:12px;border-top:1px solid #edf0f5;">' . $e(ysmMailT('邮箱', $lang)) . '</td><td style="padding:10px 20px;color:#2d3748;font-size:14px;border-top:1px solid #edf0f5;">' . $e($email) . '</td></tr>'
         . '</table>'
         . '<div style="text-align:center;margin-top:26px;">'
-        . '<a href="' . $link . '" style="display:inline-block;background:linear-gradient(135deg,#1f3a5f 0%,#2a4a75 100%);color:#ffffff;font-size:15px;font-weight:600;padding:14px 40px;border-radius:999px;text-decoration:none;">确认创建写作者</a>'
+        . '<a href="' . $link . '" style="display:inline-block;background:linear-gradient(135deg,#1f3a5f 0%,#2a4a75 100%);color:#ffffff;font-size:15px;font-weight:600;padding:14px 40px;border-radius:999px;text-decoration:none;">' . $e(ysmMailT('确认创建写作者', $lang)) . '</a>'
         . '</div>'
         . '<div style="text-align:center;margin-top:16px;">'
-        . '<span style="display:inline-block;background:#fff3e0;color:#b26a00;font-size:12px;font-weight:600;padding:5px 14px;border-radius:999px;">链接 ' . intdiv($ttl, 3600) . ' 小时内有效 · 一次性</span>'
+        . '<span style="display:inline-block;background:#fff3e0;color:#b26a00;font-size:12px;font-weight:600;padding:5px 14px;border-radius:999px;">' . $e(ysmMailT('链接 {h} 小时内有效 · 一次性', $lang, ['h' => $hours])) . '</span>'
         . '</div>';
-    $html = renderMailHtml($site, '写作者创建确认', '', ['server' => $host, 'time' => $now], $htmlDetail);
+    $html = renderMailHtml($site, '写作者创建确认', '', ['server' => $host, 'time' => $now], $htmlDetail, null, $lang);
     [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body, $html);
     if (!$ok) {
         logAlertFail("写作者确认邮件发送失败: {$err}");
@@ -4584,16 +4668,18 @@ function notifyUpdateAvailable($result, $channel = 'stable') {
     $site = $config['site_title'] ?? 'You Super Markdown';
     $notes = trim((string)($result['release_notes'] ?? ''));
     if (mb_strlen($notes) > 800) $notes = mb_substr($notes, 0, 800) . '…';
-    $chLabel = $channel === 'beta' ? '测试版（含预发布）' : '正式版';
+    // v6.3.6：管理员邮件固定跟随站点默认语言
+    $lang = ysmAdminMailLang();
+    $chLabel = ysmMailT($channel === 'beta' ? '测试版（含预发布）' : '正式版', $lang);
     $now = date('Y-m-d H:i:s');
-    $subject = "[{$site} 通知] 发现新版本 v{$latest}";
-    $body = "检查更新发现新版本：\n"
-          . "当前版本：v{$current}\n"
-          . "最新版本：v{$latest}\n"
-          . "更新通道：{$chLabel}\n"
-          . ($notes !== '' ? "\n【版本说明】\n{$notes}\n" : '')
-          . "\n请登录超管后台「在线更新」查看，并在 SSH 执行 sudo ysm-admin apply-update 完成升级（升级前自动备份、强制验签）。";
-    $html = renderMailHtml($site, "发现新版本 v{$latest}", $body, ['server' => gethostname(), 'time' => $now]);
+    $subject = "[" . $site . " " . ysmMailT('通知', $lang) . "] " . ysmMailT('发现新版本', $lang) . " v{$latest}";
+    $body = ysmMailT('检查更新发现新版本：', $lang) . "\n"
+          . ysmMailT('当前版本', $lang) . "：v{$current}\n"
+          . ysmMailT('最新版本', $lang) . "：v{$latest}\n"
+          . ysmMailT('更新通道', $lang) . "：{$chLabel}\n"
+          . ($notes !== '' ? "\n" . ysmMailT('版本说明', $lang) . "\n{$notes}\n" : '')
+          . "\n" . ysmMailT('请登录超管后台「在线更新」查看，并在 SSH 执行 sudo ysm-admin apply-update 完成升级（升级前自动备份、强制验签）。', $lang);
+    $html = renderMailHtml($site, ysmMailT('发现新版本', $lang) . " v{$latest}", $body, ['server' => gethostname(), 'time' => $now], null, null, $lang);
     [$ok, $err] = sendSmtpMail($adminEmail, $subject, $body, $html);
     if ($ok) {
         $config['update_notified_version'] = $latest;

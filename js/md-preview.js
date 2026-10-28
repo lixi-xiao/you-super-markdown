@@ -63,7 +63,24 @@
         return /\$\$[\s\S]+?\$\$/.test(md) || /(^|[^\\$])\$[^\s$][^\n$]*\$/.test(md) || /\\\(|\\\[/.test(md);
     }
 
+    function ensureLoader() {
+        if (typeof window.ysmMermaidRenderAll === 'function') return Promise.resolve(true);
+        return loadScript('js/mermaid-loader.js').then(function () {
+            return typeof window.ysmMermaidRenderAll === 'function';
+        }).catch(function () { return false; });
+    }
+
     function renderMermaid(box) {
+        var codes = box.querySelectorAll('pre > code.language-mermaid');
+        if (!codes.length) return Promise.resolve();
+        // v6.3.6：与前台共用统一加载器（预加载 + 本地 SVG 缓存 + 占位/重试）
+        return ensureLoader().then(function (ok) {
+            if (ok) return window.ysmMermaidRenderAll(box);
+            return legacyRenderMermaid(box);
+        });
+    }
+
+    function legacyRenderMermaid(box) {
         var codes = box.querySelectorAll('pre > code.language-mermaid');
         if (!codes.length) return Promise.resolve();
         Array.prototype.forEach.call(codes, function (c) {

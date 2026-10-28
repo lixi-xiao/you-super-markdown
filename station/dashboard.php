@@ -1028,7 +1028,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title"><?= t('station.058') ?></div>
         <div class="table-wrap">
-        <table>
+        <table class="tbl-wide">
             <tr><th><?= t('station.059') ?></th><th><?= t('station.060') ?></th><th><?= t('station.061') ?></th><th><?= t('station.062') ?></th><th><?= t('station.063') ?></th></tr>
             <?php foreach ($threatRows as $tr): $locked = (int)$tr['locked_left']; ?>
             <tr>
@@ -1143,7 +1143,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         </div>
         <?php else: ?>
         <div class="table-wrap">
-        <table>
+        <table class="tbl-xwide">
             <tr><th style="width:64px"><?= t('station.080') ?></th><th><?= t('station.081') ?></th><th><?= t('station.068') ?></th><th><?= t('station.082') ?></th><th><?= t('station.083') ?></th><th style="width:150px"><?= t('station.018') ?></th></tr>
             <?php foreach ($annList as $ai => $an): ?>
             <tr>
@@ -1403,7 +1403,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <div class="card">
             <div class="card-title"><?= t('station.112') ?></div>
             <div class="table-wrap">
-                <table id="linksTable">
+                <table id="linksTable" class="tbl-wide">
                     <tr><th><?= t('station.113') ?></th><th><?= t('station.114') ?></th><th><?= t('station.080') ?></th><th><?= t('station.115') ?></th><th><?= t('station.018') ?></th></tr>
                 </table>
             </div>
@@ -1460,7 +1460,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <?php else: ?>
     <div class="card">
         <div class="table-wrap">
-        <table>
+        <table class="tbl-xwide">
             <tr><th><?= t('station.117') ?></th><th><?= t('station.118') ?></th><th><?= t('station.119') ?></th><th><?= t('station.120') ?></th><th><?= t('station.121') ?></th><th><?= t('station.018') ?></th></tr>
             <?php foreach ($stImages as $img): ?>
             <?php

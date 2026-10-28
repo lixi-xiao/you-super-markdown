@@ -236,8 +236,24 @@ def main():
     snapshot['l1_cnt'] = threshold
     snapshot['l2_cnt'] = l2_cnt
     snapshot['l3_cnt'] = l3_cnt
+    # v6.3.2：服务器自身 IP（config.threat_self_ips）不写入威胁事件——蜜罐经 NAT 回环会把自身出口 IP
+    #         记为攻击方，写进去只会触发「自封保护」告警邮件（系统本就不可能封自己）。判定为自身 IP 的
+    #         记录在快照里标注豁免原因，便于后台核对。
+    self_ips = set()
+    raw_self = cfg.get('threat_self_ips')
+    if isinstance(raw_self, str):
+        try:
+            raw_self = json.loads(raw_self)
+        except Exception:
+            raw_self = []
+    if isinstance(raw_self, list):
+        self_ips = {str(x).strip() for x in raw_self if str(x).strip()}
     if err is None:
         for a in attacks:
+            if a['ip'] in self_ips:
+                a['skip'] = True
+                a['skip_reason'] = '服务器自身 IP（自封保护，不参与封禁与威胁计分）'
+                continue
             if a['attack_cnt'] >= threshold:
                 if skip_private and is_private_ip(a['ip']):
                     # v4.1.7-fix：超阈值但内网/链路本地豁免 → 快照标记，后台展示豁免原因（避免"超阈值未封禁"困惑）

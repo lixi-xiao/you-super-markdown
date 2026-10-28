@@ -1668,6 +1668,10 @@ document.addEventListener('keydown', function(e){
 });
 // v6.3.0：#links 旧深链重定向到服务端视图 ?view=links（不依赖 JS 时序，避免被首页初始化覆盖）
 (function(){ if (location.hash === '#links' && location.search.indexOf('view=links') < 0) { location.replace('/index.php?view=links'); } })();
+// v6.3.0：服务端视图 ?view=links 首屏也要拉取友链数据（网格渲染在 ysmOpenLinks 内）
+document.addEventListener('DOMContentLoaded', function(){
+    if (document.body.classList.contains('links-open') && window.ysmOpenLinks) window.ysmOpenLinks(true);
+});
 // v6.3.0：副栏友链按数量换形态（1–3 条行式、≥4 条两列网格）；「全部」改为内联展开/收起
 (function(){
     var sec = document.getElementById('homeLinks');

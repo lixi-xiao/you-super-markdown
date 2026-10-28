@@ -282,6 +282,7 @@ if (is_dir($articlesDir)) {
                 <td><a class="inline-link" href="/?article=<?= urlencode($a['id'] ?? '') ?>"><?= htmlspecialchars($a['title'] ?? '无标题') ?></a></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['created'] ?? '') ?></td>
                 <td>
+                    <span class="tr-entry" data-tr-slug="<?= htmlspecialchars($a['file'] ?? '') ?>"></span>
                     <a href="/sc.php?edit=<?= urlencode($a['file'] ?? '') ?>" class="btn-link" style="color:#f59e0b"><?= t('links.011') ?></a>
                 </td>
             </tr>
@@ -407,14 +408,14 @@ if (is_dir($articlesDir)) {
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
             AI 写作
         </div>
-        <div class="page-subtitle">配置你个人的 AI 服务商 Key（绑定你的站内账号；密文存储，明文永不回显）</div>
+        <div class="page-subtitle"><?= t('ai.058') ?></div>
     </div>
     <div id="aiKeyNotice" class="msg" style="display:none"></div>
     <div class="card">
-        <div class="card-title">说明</div>
+        <div class="card-title"><?= t('ai.059') ?></div>
         <div class="form-hint">
             你选择的文章内容将发送至所选第三方服务商进行处理；额度由你的账号自担。<br>
-            服务商与模型由超管维护（base_url 固定，不可自定义；<b>模型只能从名单里选择</b>）；Key 必须通过"测试连接"才会保存。可在上方开关账号级「思考模式」（默认关闭）。
+            <?= t('ai.060') ?><b><?= t('ai.061') ?></b><?= t('ai.062') ?>
         </div>
     </div>
     <div id="aiKeyManager" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>"></div>
@@ -507,5 +508,6 @@ exit;
     }).catch(function() {});
 })();
 </script>
+<script src="../js/translate-admin.js?v=<?= @filemtime(__DIR__ . '/../js/translate-admin.js') ?>"></script>
 </body>
 </html>

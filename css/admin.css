@@ -2366,3 +2366,13 @@ td code {
     .ai-admin .ai-provider-table td { font-size: 14px; padding: 10px 12px; white-space: nowrap; }
     .ai-admin .ai-provider-table code { white-space: nowrap; }
 }
+/* v6.3.1：后台「AI 译本」控件（文章列表行内） */
+.tr-entry{display:inline-block;position:relative;vertical-align:middle}
+.tr-entry-btn{padding:2px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-secondary);font-size:12px;cursor:pointer}
+.tr-entry-btn:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-light)}
+.tr-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:50;min-width:200px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-md)}
+.tr-menu-item{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:8px;background:transparent;color:var(--text);font-size:13px;cursor:pointer;text-align:left}
+.tr-menu-item:hover{background:var(--accent-light)}
+.tr-state{font-size:11px;color:var(--text-muted)}
+.tr-state-done{color:#16a34a}
+.tr-state-stale{color:#d97706}

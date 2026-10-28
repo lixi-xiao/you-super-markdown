@@ -1225,3 +1225,6 @@ body.links-open .main-container { padding-top: 0; }
 .links-siteinfo dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
 .links-siteinfo dt { font-size: 0.78em; color: var(--text-muted); }
 .links-siteinfo dd { margin: 0; font-size: 0.82em; color: var(--text-secondary); word-break: break-all; }
+
+/* v6.3.1：AI 译文提示条（阅读页顶部；无译本时由 JS 隐藏） */
+.doc-tr-notice{margin:0 0 14px;padding:10px 14px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:10px;background:var(--accent-light);color:var(--text-secondary);font-size:.84em;line-height:1.6;}

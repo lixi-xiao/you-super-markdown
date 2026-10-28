@@ -919,6 +919,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['_lang_save'])) {
     // 首页默认语言（必须是已启用语言；否则回落 zh-CN）
     $dftLang = trim($_POST['default_lang'] ?? '');
     $config['default_lang'] = in_array($dftLang, $enabled, true) ? $dftLang : 'zh-CN';
+    // v6.3.1：内容原语种（AI 译本以它为「原文语言」；必须是已启用语言，默认 zh-CN）
+    $srcLang = trim($_POST['source_lang'] ?? '');
+    $config['source_lang'] = in_array($srcLang, $enabled, true) ? $srcLang : 'zh-CN';
     // 自定义字体开关（关闭不清文件，便于随时重新启用）
     $config['custom_font_enabled'] = !empty($_POST['custom_font_enabled']);
     saveSiteConfig($config);
@@ -2216,6 +2219,16 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 <?php endforeach; ?>
             </select>
             <p class="form-hint"><?= t('admin.115') ?></p>
+        </div>
+        <!-- v6.3.1：内容原语种（AI 译本的「原文语言」；与界面默认语言是两件事） -->
+        <div class="form-group">
+            <label class="form-label"><?= t('ai.source_lang') ?></label>
+            <select class="form-input" name="source_lang">
+                <?php foreach ($allLangsAdmin as $lc => $info): if (in_array($lc, $disabledLangs, true)) continue; ?>
+                <option value="<?= htmlspecialchars($lc) ?>" <?= ysmSourceLang() === $lc ? 'selected' : '' ?>><?= htmlspecialchars($info['name']) ?>（<?= htmlspecialchars($lc) ?>）</option>
+                <?php endforeach; ?>
+            </select>
+            <p class="form-hint"><?= t('ai.source_lang_hint') ?></p>
         </div>
         <div class="form-group">
             <label class="form-label"><?= t('admin.116') ?></label>
@@ -3592,11 +3605,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
             AI 写作
         </div>
-        <div class="page-subtitle">站级开关与服务商白名单（超管仅管理"站"的层面，不接触任何人的 Key）</div>
+        <div class="page-subtitle"><?= t('ai.025') ?></div>
     </div>
-    <?php if ($msg === 'ai_cleared'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>已清除该用户的 AI Key</div><?php endif; ?>
-    <?php if ($msg === 'ai_models_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>已保存「模型与长度」配置</div><?php endif; ?>
-    <?php if ($msg === 'challenge_failed'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>挑战码无效或已过期，请重新生成</div><?php endif; ?>
+    <?php if ($msg === 'ai_cleared'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('ai.026') ?></div><?php endif; ?>
+    <?php if ($msg === 'ai_models_saved'): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('ai.027') ?></div><?php endif; ?>
+    <?php if ($msg === 'challenge_failed'): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= t('ai.066') ?></div><?php endif; ?>
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
@@ -3613,29 +3626,29 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <div class="ai-toggle-card is-primary">
                 <input type="checkbox" name="ai_enabled" id="aiEnabled" value="1" <?= !empty($config['ai_enabled']) ? 'checked' : '' ?>>
                 <div>
-                    <label for="aiEnabled" class="ai-toggle-label">启用 AI 写作（总开关）</label>
-                    <div class="form-hint" style="margin:0">关闭后所有角色均无法使用 AI 写作（已配置的 Key 保留）</div>
+                    <label for="aiEnabled" class="ai-toggle-label"><?= t('ai.028') ?></label>
+                    <div class="form-hint" style="margin:0"><?= t('ai.029') ?></div>
                 </div>
             </div>
             <div class="ai-toggle-card">
                 <input type="checkbox" name="ai_role_station_admin" id="aiRoleSt" value="1" <?= !empty($config['ai_role_station_admin']) ? 'checked' : '' ?>>
                 <div>
-                    <label for="aiRoleSt" class="ai-toggle-label">站长可用</label>
-                    <div class="form-hint" style="margin:0">允许 ROLE_STATION_ADMIN 在编辑器中使用 AI 写作</div>
+                    <label for="aiRoleSt" class="ai-toggle-label"><?= t('ai.030') ?></label>
+                    <div class="form-hint" style="margin:0"><?= t('ai.031') ?></div>
                 </div>
             </div>
             <div class="ai-toggle-card">
                 <input type="checkbox" name="ai_role_author" id="aiRoleAuthor" value="1" <?= !empty($config['ai_role_author']) ? 'checked' : '' ?>>
                 <div>
-                    <label for="aiRoleAuthor" class="ai-toggle-label">写作者可用</label>
-                    <div class="form-hint" style="margin:0">允许 ROLE_AUTHOR 在编辑器中使用 AI 写作</div>
+                    <label for="aiRoleAuthor" class="ai-toggle-label"><?= t('ai.032') ?></label>
+                    <div class="form-hint" style="margin:0"><?= t('ai.033') ?></div>
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label">服务商预设白名单（base_url 固定；使用者只能选，不能自定义）</label>
+                <label class="form-label"><?= t('ai.034') ?></label>
                 <div class="table-wrap ai-provider-table">
                 <table>
-                    <tr><th style="width:60px">启用</th><th>服务商</th><th>base_url（固定）</th></tr>
+                    <tr><th style="width:60px"><?= t('ai.035') ?></th><th><?= t('ai.008') ?></th><th><?= t('ai.037') ?></th></tr>
                     <?php foreach ($aiBuiltin as $pid => $p): ?>
                     <tr>
                         <td><input type="checkbox" name="ai_providers[]" value="<?= htmlspecialchars($pid) ?>" <?= in_array($pid, $aiEnabledIds, true) ? 'checked' : '' ?> style="width:16px;height:16px;accent-color:var(--accent)"></td>
@@ -3645,10 +3658,10 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                     <?php endforeach; ?>
                 </table>
                 </div>
-                <div class="form-hint">模型由超管在下方「模型与长度」中按服务商维护（使用者只能从名单里选，不支持自定义地址）。后端调用时 base_url 一律取自本白名单，不接受前端传入 URL（防 SSRF）。</div>
+                <div class="form-hint"><?= t('ai.038') ?></div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
-                <button type="submit" class="btn btn-primary">保存 AI 配置</button>
+                <button type="submit" class="btn btn-primary"><?= t('ai.039') ?></button>
             </div>
         </form>
     </div>
@@ -3658,7 +3671,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             模型与长度
         </div>
         <div class="form-hint" style="margin-bottom:12px">
-            按服务商维护可用模型名单与长度上限；使用者只能在名单里选择（<b>不支持自定义地址</b>）。<br>
+            <?= t('ai.040') ?><b><?= t('ai.064') ?></b>）。<br>
             「单次输入上限」为处理后正文字符上限（留空回退 20000）；「最大输出」为 tokens（留空则不传，用服务商默认）；「超时 / 流式超时」为秒（留空回退 60 / 120）。
         </div>
         <form method="post" class="need-challenge" id="aiModelsForm">
@@ -3669,21 +3682,21 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <div class="ai-model-provider">
                 <div class="ai-model-provider-head">
                     <span class="ai-model-provider-name"><?= htmlspecialchars($p['label']) ?></span>
-                    <button type="button" class="btn btn-sm btn-outline" onclick="aiModelAddRow('<?= htmlspecialchars($pid) ?>')">+ 添加模型</button>
+                    <button type="button" class="btn btn-sm btn-outline" onclick="aiModelAddRow('<?= htmlspecialchars($pid) ?>')"><?= t('ai.065') ?></button>
                 </div>
                 <div class="table-wrap">
                 <table class="ai-model-table">
-                    <thead><tr><th>模型 id</th><th>展示名</th><th>单次输入上限(字)</th><th>最大输出(tokens)</th><th>超时(秒)</th><th>流式超时(秒)</th><th style="width:70px"></th></tr></thead>
+                    <thead><tr><th><?= t('ai.042') ?></th><th><?= t('ai.043') ?></th><th><?= t('ai.044') ?></th><th><?= t('ai.045') ?></th><th><?= t('ai.046') ?></th><th><?= t('ai.047') ?></th><th style="width:70px"></th></tr></thead>
                     <tbody data-provider="<?= htmlspecialchars($pid) ?>">
                     <?php foreach ($rows as $ri => $m): ?>
                     <tr>
-                        <td><input class="form-input" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][id]" value="<?= htmlspecialchars($m['id']) ?>" placeholder="如 deepseek-flash"></td>
-                        <td><input class="form-input" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][label]" value="<?= htmlspecialchars($m['label']) ?>" placeholder="展示名"></td>
+                        <td><input class="form-input" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][id]" value="<?= htmlspecialchars($m['id']) ?>" placeholder="<?= t('ai.048') ?>"></td>
+                        <td><input class="form-input" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][label]" value="<?= htmlspecialchars($m['label']) ?>" placeholder="<?= t('ai.043') ?>"></td>
                         <td><input class="form-input" type="number" min="0" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][max_input_chars]" value="<?= (int)$m['max_input_chars'] ?>"></td>
                         <td><input class="form-input" type="number" min="0" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][max_out_tokens]" value="<?= (int)$m['max_out_tokens'] ?>"></td>
                         <td><input class="form-input" type="number" min="0" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][timeout]" value="<?= (int)$m['timeout'] ?>"></td>
                         <td><input class="form-input" type="number" min="0" name="ai_model_catalog[<?= htmlspecialchars($pid) ?>][<?= (int)$ri ?>][timeout_stream]" value="<?= (int)$m['timeout_stream'] ?>"></td>
-                        <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">删除</button></td>
+                        <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()"><?= t('ai.049') ?></button></td>
                     </tr>
                     <?php endforeach; ?>
                     </tbody>
@@ -3692,7 +3705,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             </div>
             <?php endforeach; ?>
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
-                <button type="submit" class="btn btn-primary">保存模型与长度</button>
+                <button type="submit" class="btn btn-primary"><?= t('ai.050') ?></button>
             </div>
         </form>
     </div>
@@ -3702,17 +3715,17 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             清除某人的 AI Key（仅清除，不能查看）
         </div>
         <div class="form-hint" style="margin-bottom:12px">
-            出于隐私，超管<b>无法查看</b>任何用户的 Key（含末四位）。此处仅提供"清除"能力：清除后该用户需重新配置。
+            <?= t('ai.051') ?><b><?= t('ai.052') ?></b><?= t('ai.053') ?>
         </div>
-        <form method="post" class="need-challenge" data-confirm="确定清除该用户的全部 AI Key？此操作不可撤销。">
+        <form method="post" class="need-challenge" data-confirm="<?= t('ai.054') ?>">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
             <input type="hidden" name="ai_clear_user" id="aiClearUser" value="">
             <input type="hidden" name="challenge_code">
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">选择用户（站长 / 写作者）</label>
+                    <label class="form-label"><?= t('ai.055') ?></label>
                     <select class="form-select" onchange="document.getElementById('aiClearUser').value=this.value">
-                        <option value="">请选择</option>
+                        <option value=""><?= t('ai.056') ?></option>
                         <?php foreach ($aiCandidates as $cu): ?>
                         <option value="<?= htmlspecialchars($cu['id']) ?>"><?= htmlspecialchars(($cu['nickname'] ?? '') . '（' . ($cu['account'] ?? '') . '，' . ($cu['role'] ?? '') . '）') ?></option>
                         <?php endforeach; ?>
@@ -3720,7 +3733,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 </div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
-                <button type="submit" class="btn btn-danger">清除该用户 AI Key</button>
+                <button type="submit" class="btn btn-danger"><?= t('ai.057') ?></button>
             </div>
         </form>
     </div>

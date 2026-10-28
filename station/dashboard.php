@@ -1289,14 +1289,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
             AI 写作
         </div>
-        <div class="page-subtitle">配置你个人的 AI 服务商 Key（绑定你的站内账号；密文存储，明文永不回显）</div>
+        <div class="page-subtitle"><?= t('ai.058') ?></div>
     </div>
     <div id="aiKeyNotice" class="msg" style="display:none"></div>
     <div class="card">
-        <div class="card-title">说明</div>
+        <div class="card-title"><?= t('ai.059') ?></div>
         <div class="form-hint">
             你选择的文章内容将发送至所选第三方服务商进行处理；额度由你的账号自担。<br>
-            服务商与模型由超管维护（base_url 固定，不可自定义；<b>模型只能从名单里选择</b>）；Key 必须通过"测试连接"才会保存。可在上方开关账号级「思考模式」（默认关闭）。
+            <?= t('ai.060') ?><b><?= t('ai.061') ?></b><?= t('ai.062') ?>
         </div>
     </div>
     <div id="aiKeyManager" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>"></div>
@@ -1311,46 +1311,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             友站管理
         </div>
-        <div class="page-subtitle">友情链接维护（前台仅展示「启用」状态）；支持抓取站点信息预填与掉链巡检</div>
+        <div class="page-subtitle"><?= t('links.025') ?></div>
     </div>
     <div id="linksAdmin" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>">
         <div class="card">
-            <div class="card-title" id="linkFormTitle">新增友链</div>
+            <div class="card-title" id="linkFormTitle"><?= t('links.026') ?></div>
             <div class="form-group">
-                <label class="form-label">站点名</label>
-                <input class="form-input" id="linkName" maxlength="60" placeholder="对方站点名称">
+                <label class="form-label"><?= t('links.027') ?></label>
+                <input class="form-input" id="linkName" maxlength="60" placeholder="<?= t('links.028') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label">站点地址</label>
+                <label class="form-label"><?= t('links.029') ?></label>
                 <div class="api-url-group">
                     <input class="form-input" id="linkUrl" placeholder="https://example.com">
-                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn">抓取预填</button>
+                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn"><?= t('links.030') ?></button>
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label">描述（可选）</label>
-                <input class="form-input" id="linkDesc" maxlength="200" placeholder="一句话介绍">
+                <label class="form-label"><?= t('links.031') ?></label>
+                <input class="form-input" id="linkDesc" maxlength="200" placeholder="<?= t('links.032') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label">图标地址（可选）</label>
+                <label class="form-label"><?= t('links.033') ?></label>
                 <input class="form-input" id="linkFavicon" placeholder="https://example.com/favicon.ico">
             </div>
             <div class="form-group">
-                <label class="form-label">排序（越小越前）</label>
+                <label class="form-label"><?= t('links.034') ?></label>
                 <input class="form-input" id="linkSort" type="number" value="0" style="max-width:160px">
             </div>
             <div id="linkFormMsg" class="form-hint"></div>
             <div style="display:flex;justify-content:flex-end;gap:10px">
-                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none">取消编辑</button>
-                <button type="button" class="btn btn-primary" id="linkSaveBtn">保存</button>
+                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none"><?= t('links.035') ?></button>
+                <button type="button" class="btn btn-primary" id="linkSaveBtn"><?= t('links.036') ?></button>
             </div>
             <input type="hidden" id="linkId" value="">
         </div>
         <div class="card">
-            <div class="card-title">友链列表</div>
+            <div class="card-title"><?= t('links.037') ?></div>
             <div class="table-wrap">
                 <table id="linksTable">
-                    <tr><th>站点</th><th>状态</th><th>排序</th><th>最近巡检</th><th>操作</th></tr>
+                    <tr><th><?= t('links.038') ?></th><th><?= t('links.039') ?></th><th><?= t('links.040') ?></th><th><?= t('links.041') ?></th><th><?= t('links.042') ?></th></tr>
                 </table>
             </div>
         </div>

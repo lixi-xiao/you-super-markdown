@@ -1799,6 +1799,8 @@ if ($action === 'ai_translate' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $lang = (string)($body['lang'] ?? '');
     // v6.0.0-beta：目标语言必须是 i18n 字库内已有的 locale（只翻有字库的语言，缺字典即拒绝）
     if ($lang === '' || !isset(ysmSupportedLangs()[$lang])) sendJson(['success' => false, 'error' => '该语言暂无字库，暂不可翻译'], 400);
+    // v6.3.1：目标语言不能等于内容原语种（超管可配，默认 zh-CN）
+    if ($lang === ysmSourceLang()) sendJson(['success' => false, 'error' => '目标语言与原文语言相同，无需翻译'], 400);
     $path = articleSourcePath($slug);
     if (!$path) sendJson(['success' => false, 'error' => '文章不存在'], 404);
     $meta = readArticleMeta($path);
@@ -1806,22 +1808,63 @@ if ($action === 'ai_translate' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         logUnauthorized('越权尝试翻译他人文章: ' . $slug);
         sendJson(['success' => false, 'error' => '只能翻译自己管理的文章'], 403);
     }
+    // v6.3.1：与 ai_run 对齐——先取服务商/模型并做白名单校验（下线模型不再继续外呼）
+    $provider = aiDefaultProvider($actor['id']);
+    if ($provider === '' || aiProviderBaseUrl($provider) === '') {
+        auditLog('ai_translate', $slug, '未配置 AI Key，拒绝翻译', 'failed');
+        sendJson(['success' => false, 'error' => '请先配置 AI Key'], 400);
+    }
+    $keyRow = db_one('SELECT * FROM ai_keys WHERE user_id = ? AND provider = ?', [$actor['id'], $provider]);
+    if (!$keyRow) sendJson(['success' => false, 'error' => '该服务商尚未配置 Key'], 400);
+    $model = trim((string)$keyRow['model']);
+    if ($model === '' || aiFindModel($provider, $model) === null) {
+        auditLog('ai_translate', $provider . '/' . $model, '模型不在可用名单，拒绝翻译', 'failed');
+        sendJson(['success' => false, 'error' => '该模型已下线或不在可用名单，请重新选择模型', 'need_reselect' => true], 400);
+    }
+    if (aiBreakerOpen($provider)) {
+        sendJson(['success' => false, 'error' => aiBreakerNotice($provider), 'degraded' => true, 'retry_after' => aiBreakerRemaining($provider)], 503);
+    }
     $uid = $actor['id'];
     if (aiDailyQuotaExceeded($uid)) sendJson(['success' => false, 'error' => '今日 AI 配额已用完，请明日再试'], 429);
     if (!aiInflightAcquire($uid)) sendJson(['success' => false, 'error' => '当前已在处理请求，请稍后再试'], 429);
     register_shutdown_function(function () use ($uid) { aiInflightRelease($uid); });
-    if (aiRateBlockedUid($uid)) sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
+    if (aiRateBlockedUid($uid)) {
+        auditLog('ai_translate', $slug, '账号维度调用过频，拒绝', 'failed');
+        sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
+    }
+    $ip = getClientIP();
+    $fp = $_SESSION['cmt_fp'] ?? '';
+    if (aiRateBlocked($ip, $fp)) sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
     $src = (string)@file_get_contents($path);
     list($ok, $result) = aiTranslateMd($src, $lang, $actor);
-    aiRateHit(getClientIP(), $_SESSION['cmt_fp'] ?? '');
+    aiRateHit($ip, $fp);
     aiRateHitUid($uid);
     aiDailyQuotaAdd($uid);
-    if (!$ok) sendJson(['success' => false, 'error' => $result], 400);
+    if (!$ok) {
+        auditLog('ai_translate', $slug, '翻译失败 lang=' . $lang, 'failed');
+        sendJson(['success' => false, 'error' => $result], 400);
+    }
     db_exec('INSERT INTO article_translations (article_id, target_lang, md, src_digest, status, model, created_at, updated_at) '
-        . 'VALUES (?,?,?,?,\'done\',?,?,?) ON CONFLICT(article_id, target_lang) DO UPDATE SET md=excluded.md, src_digest=excluded.src_digest, status=\'done\', updated_at=excluded.updated_at',
-        [$slug, $lang, $result, hash('sha256', $src), (string)($body['provider'] ?? ''), time(), time()]);
-    auditLog('ai_translate', $slug, '生成译本 lang=' . $lang);
+        . 'VALUES (?,?,?,?,\'done\',?,?,?) ON CONFLICT(article_id, target_lang) DO UPDATE SET md=excluded.md, src_digest=excluded.src_digest, status=\'done\', model=excluded.model, updated_at=excluded.updated_at',
+        [$slug, $lang, $result, hash('sha256', $src), $model . '@' . $provider, time(), time()]);
+    auditLog('ai_translate', $slug, '生成译本 lang=' . $lang . ' model=' . $model);
     sendJson(['success' => true, 'lang' => $lang]);
+}
+// GET ai_translation_status：某文章各语种的译本状态（写作者/站长可查自己可管理的文章）
+if ($action === 'ai_translation_status' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $actor = aiActionUserAllowed();
+    $slug = trim((string)($_GET['slug'] ?? ''));
+    $path = $slug !== '' ? articleSourcePath($slug) : null;
+    if (!$path) sendJson(['success' => false, 'error' => '文章不存在'], 404);
+    $meta = readArticleMeta($path);
+    if (!canManageArticleFp($meta, $actor)) sendJson(['success' => false, 'error' => '无权查看该文章'], 403);
+    $out = [];
+    foreach (array_keys(ysmSupportedLangs()) as $lc) {
+        if ($lc === ysmSourceLang()) continue;
+        list($st,) = articleTranslationStatus($slug, $lc);
+        $out[$lc] = $st === null ? 'none' : $st;
+    }
+    sendJson(['success' => true, 'source' => ysmSourceLang(), 'langs' => $out]);
 }
 
 // GET links_list：前台只读——只出 active 友链（访客可访问，无需登录）

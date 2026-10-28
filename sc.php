@@ -735,7 +735,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                     <button class="btn-link pin-btn <?= $f['pinned'] ? 'pinned' : '' ?>" data-name="<?= htmlspecialchars($f['name']) ?>" data-pinned="<?= $f['pinned'] ? '1' : '0' ?>"><?= $f['pinned'] ? '已置顶' : '置顶' ?></button>
                 </td>
                 <td><a class="btn-link" href="index.php?file=<?= urlencode($f['name']) ?>" target="_blank"><?= t('editor.042') ?></a></td>
-                <td><button class="btn-link edit-article-btn" data-name="<?= htmlspecialchars($f['name']) ?>"><?= t('links.011') ?></button></td>
+                <td><button class="btn-link edit-article-btn" data-name="<?= htmlspecialchars($f['name']) ?>"><?= t('links.011') ?></button> <span class="tr-entry" data-tr-slug="<?= htmlspecialchars($f['name']) ?>"></span></td>
                 <td><button class="btn-link danger delete-article-btn" data-name="<?= htmlspecialchars($f['name']) ?>" data-display="<?= htmlspecialchars($f['displayName']) ?>"><?= t('links.013') ?></button></td>
             </tr>
             <?php endforeach; ?>
@@ -787,8 +787,8 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
                         <input type="file" id="videoUploadInput" accept="video/mp4,video/webm" style="display:none">
                         <span class="form-hint" id="videoUploadHint" style="margin-left:10px"></span>
                         <?php if ($aiToolEnabled): ?>
-                        <button type="button" class="btn btn-sm btn-outline" id="btnAiWrite" style="margin-left:8px">AI 写作</button>
-                        <span class="form-hint" style="margin-left:8px">在下方选中文本后点此打开</span>
+                        <button type="button" class="btn btn-sm btn-outline" id="btnAiWrite" style="margin-left:8px"><?= t('admin.479') ?></button>
+                        <span class="form-hint" style="margin-left:8px"><?= t('ai.001') ?></span>
                         <?php endif; ?>
                     </div>
                     <textarea class="form-input" name="content" id="editContent" style="min-height:200px;font-family:monospace" placeholder="<?= t('editor.052') ?>"></textarea>
@@ -867,65 +867,65 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 <!-- ===== v5.4.0-beta：AI 写作侧边浮层（选中文本 → 动作 → 流式 → 差异预览 → 插入/替换/撤销） ===== -->
 <div class="ai-drawer" id="aiDrawer" style="display:none">
     <div class="ai-drawer-head">
-        <span class="ai-drawer-title">AI 写作</span>
-        <button type="button" class="ai-drawer-close" id="aiDrawerClose" aria-label="关闭">&times;</button>
+        <span class="ai-drawer-title"><?= t('admin.479') ?></span>
+        <button type="button" class="ai-drawer-close" id="aiDrawerClose" aria-label="<?= t('ai.002') ?>">&times;</button>
     </div>
     <div class="ai-drawer-body">
         <div class="ai-group">
-            <div class="ai-group-title">处理方式</div>
+            <div class="ai-group-title"><?= t('ai.003') ?></div>
             <div class="ai-field">
-                <label class="ai-label">动作</label>
+                <label class="ai-label"><?= t('ai.004') ?></label>
                 <div class="ai-actions" id="aiActionChips"></div>
             </div>
             <div class="ai-field" id="aiStyleWrap" style="display:none">
-                <label class="ai-label">目标风格</label>
+                <label class="ai-label"><?= t('ai.005') ?></label>
                 <select class="ai-select" id="aiStyle"></select>
             </div>
             <div class="ai-field" id="aiLangWrap" style="display:none">
-                <label class="ai-label">目标语言</label>
+                <label class="ai-label"><?= t('ai.006') ?></label>
                 <select class="ai-select" id="aiLang"></select>
             </div>
         </div>
         <div class="ai-group">
-            <div class="ai-group-title">服务商与原文</div>
+            <div class="ai-group-title"><?= t('ai.007') ?></div>
             <div class="ai-field">
-                <label class="ai-label">服务商</label>
+                <label class="ai-label"><?= t('ai.008') ?></label>
                 <select class="ai-select" id="aiProvider"></select>
                 <div class="ai-hint" id="aiProviderHint"></div>
             </div>
             <div class="ai-field">
-                <label class="ai-label">选中文本</label>
+                <label class="ai-label"><?= t('ai.009') ?></label>
                 <div class="ai-src" id="aiSrc"></div>
             </div>
         </div>
         <div class="ai-run-row">
-            <button type="button" class="ai-btn ai-btn-primary" id="aiRunBtn">开始生成</button>
-            <button type="button" class="ai-btn" id="aiCancelBtn" style="display:none">取消</button>
-            <button type="button" class="ai-btn" id="aiRetryBtn" style="display:none">重试</button>
+            <button type="button" class="ai-btn ai-btn-primary" id="aiRunBtn"><?= t('ai.010') ?></button>
+            <button type="button" class="ai-btn" id="aiCancelBtn" style="display:none"><?= t('ai.011') ?></button>
+            <button type="button" class="ai-btn" id="aiRetryBtn" style="display:none"><?= t('ai.012') ?></button>
             <span class="ai-status" id="aiStatus"></span>
         </div>
         <div class="ai-field ai-result" id="aiResultWrap" style="display:none">
             <div class="ai-diff">
-                <div class="ai-diff-col"><div class="ai-diff-title">原文</div><div class="ai-diff-body" id="aiDiffOld"></div></div>
-                <div class="ai-diff-col"><div class="ai-diff-title">结果</div><div class="ai-diff-body" id="aiDiffNew"></div></div>
+                <div class="ai-diff-col"><div class="ai-diff-title"><?= t('ai.013') ?></div><div class="ai-diff-body" id="aiDiffOld"></div></div>
+                <div class="ai-diff-col"><div class="ai-diff-title"><?= t('ai.014') ?></div><div class="ai-diff-body" id="aiDiffNew"></div></div>
             </div>
             <div class="ai-apply-row">
-                <button type="button" class="ai-btn" id="aiInsertBtn">插入</button>
-                <button type="button" class="ai-btn ai-btn-primary" id="aiReplaceBtn">替换</button>
-                <button type="button" class="ai-btn" id="aiUndoBtn" style="display:none">撤销</button>
+                <button type="button" class="ai-btn" id="aiInsertBtn"><?= t('ai.015') ?></button>
+                <button type="button" class="ai-btn ai-btn-primary" id="aiReplaceBtn"><?= t('ai.016') ?></button>
+                <button type="button" class="ai-btn" id="aiUndoBtn" style="display:none"><?= t('ai.017') ?></button>
             </div>
         </div>
     </div>
 </div>
 <div class="ai-privacy-mask" id="aiPrivacyMask" style="display:none">
     <div class="ai-privacy-box">
-        <h3>隐私提示</h3>
-        <p>你选中的内容将发送至<b>你选择的第三方服务商</b>（AI 服务商）进行处理。请勿处理包含个人隐私或敏感信息的文本。</p>
-        <p>额度由你的账号自担；本站仅做代理转发，不记录正文。</p>
-        <p class="ai-privacy-ver">告知版本：<b id="aiPrivacyVer"><?= htmlspecialchars(aiPrivacyVersion()) ?></b>（说明更新后需重新确认）</p>
+        <h3><?= t('ai.018') ?></h3>
+        <p><?= t('ai.019') ?><b><?= t('ai.063') ?></b><?= t('ai.020') ?></p>
+        <p><?= t('ai.021') ?></p>
+        <p class="ai-privacy-ver"><?= t('ai.022') ?><b id="aiPrivacyVer"><?= htmlspecialchars(aiPrivacyVersion()) ?></b><?= t('ai.023') ?></p>
         <div class="ai-apply-row" style="justify-content:flex-end">
-            <button type="button" class="ai-btn" id="aiPrivacyCancel">取消</button>
-            <button type="button" class="ai-btn ai-btn-primary" id="aiPrivacyOk">我已知晓，继续</button>
+            <button type="button" class="ai-btn" id="aiPrivacyCancel"><?= t('ai.011') ?></button>
+            <button type="button" class="ai-btn ai-btn-primary" id="aiPrivacyOk"><?= t('ai.024') ?></button>
         </div>
     </div>
 </div>
@@ -1539,5 +1539,6 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
 })();
 </script>
 <?php endif; ?>
+<script src="js/translate-admin.js?v=<?= @filemtime(__DIR__ . '/js/translate-admin.js') ?>"></script>
 </body>
 </html>

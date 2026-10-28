@@ -597,6 +597,28 @@ if ('list' === $action) {
     $page = max(1, intval($_GET['page'] ?? 1));
     $perPage = max(1, min(200, intval($_GET['per_page'] ?? 100)));
     $pageSlice = array_slice($articleItems, ($page - 1) * $perPage, $perPage);
+    // v6.3.1：当前语言有译本时，卡片标题与摘要改用译本（避免「英文界面 + 中文摘要」）
+    $__listLang = ysmLocale();
+    if ($__listLang !== ysmSourceLang() && $pageSlice) {
+        $__names = array_map(function ($x) { return $x['name']; }, $pageSlice);
+        $__in = implode(',', array_fill(0, count($__names), '?'));
+        $__rows = db_all("SELECT article_id, md FROM article_translations WHERE target_lang = ? AND article_id IN ($__in)",
+            array_merge([$__listLang], $__names));
+        $__trMap = [];
+        foreach ($__rows as $__r) { $__trMap[$__r['article_id']] = (string)$__r['md']; }
+        foreach ($pageSlice as &$__it) {
+            $__md = $__trMap[$__it['name']] ?? '';
+            if (trim($__md) === '') continue;
+            if (preg_match('/^\s*#\s+(.+)$/m', $__md, $__tm)) {
+                $__t = trim($__tm[1]);
+                if ($__t !== '') $__it['displayName'] = $__t;
+            }
+            $__body = preg_replace('/^\s*#\s+.+$/m', '', $__md);
+            $__plain = trim(preg_replace('/\s+/u', ' ', preg_replace('/[#>*_`\[\]()!|]/u', ' ', $__body)));
+            if ($__plain !== '') $__it['excerpt'] = mb_substr($__plain, 0, 120, 'UTF-8');
+        }
+        unset($__it);
+    }
     echo json_encode(['success' => true, 'files' => $pageSlice, 'count' => $total, 'page' => $page, 'per_page' => $perPage, 'total_pages' => max(1, ceil($total / $perPage))], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -696,13 +718,20 @@ if ($action === 'read') {
         }
     }
     $content = preg_replace('/<!--META.*?-->\n?/s', '', $content);
-    // v6.0.0：按当前浏览语言读取 AI 译本（无译本/zh-CN/语言已停用时保持原文；stale 译本照常展示但标注）
+    // v6.0.0：按当前浏览语言读取 AI 译本（无译本/源语种/语言已停用时保持原文；stale 译本照常展示但标注）
+    // v6.3.1：源语种由超管配置（config.source_lang），不再写死 zh-CN
     $__trLang = ysmLocale();
+    $__trSource = ysmSourceLang();
     $__trStatus = null;
-    if ($__trLang !== 'zh-CN') {
+    if ($__trLang !== $__trSource) {
         [$__trStatus, $__trMd] = articleTranslationStatus($filename, $__trLang);
         if (is_string($__trMd) && trim($__trMd) !== '') {
             $content = preg_replace('/<!--META.*?-->\n?/s', '', $__trMd);
+            // v6.3.1：标题跟随译文（译本含 H1 时用之），避免「英文正文 + 中文标题」
+            if (preg_match('/^\s*#\s+(.+)$/m', $content, $__tm)) {
+                $__tTitle = trim($__tm[1]);
+                if ($__tTitle !== '') $displayName = $__tTitle;
+            }
         } else {
             $__trStatus = null; // 无译本 → 视为原文
         }
@@ -736,6 +765,8 @@ if ($action === 'read') {
         'modified' => date('Y-m-d H:i', filemtime($filepath)),
         'wordCount' => $wordCount,
         'lang' => $__trLang,
+        'sourceLang' => $__trSource,
+        'sourceLangName' => ysmSourceLangName(),
         'translationStatus' => $__trStatus,
         'views' => (int)db_one('SELECT views FROM page_views WHERE article = ?', [$filename])['views'] ?? 0
     ], JSON_UNESCAPED_UNICODE);
@@ -1373,6 +1404,8 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         </div>
     </div>
     <div class="reading-view" id="readingView">
+        <!-- v6.3.1：AI 译文提示（无译本时由 JS 隐藏） -->
+        <div class="doc-tr-notice" id="docTrNotice" style="display:none" role="status"></div>
         <div class="markdown-body" id="markdownBody"></div>
         <div class="cmt-capsule-section" id="commentSection" style="display:none;">
             <div class="cmt-capsule-bar" id="cmtCapsuleBar">

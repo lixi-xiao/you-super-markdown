@@ -667,6 +667,16 @@
             return e(t, n);
         };
     })();
+    // v6.3.1：阅读页「本文由 AI 翻译」提示（status: done/stale；无译本时不显示）
+    window.ysmShowTrNotice = function (status, srcName) {
+        var el = document.getElementById("docTrNotice");
+        if (!el) return;
+        if (!status) { el.style.display = "none"; el.textContent = ""; return; }
+        var txt = TK("ai.notice_translated", { lang: srcName || "" });
+        if (status === "stale") txt += " " + TK("ai.notice_stale");
+        el.textContent = txt;
+        el.style.display = "";
+    };
     function setAccentHue(e) {
         document.documentElement.style.setProperty("--accent-hue", e);
         localStorage.setItem("md-reader-hue", e);
@@ -1945,6 +1955,8 @@
                         o = protectLatexDelims(o);
             const c = typeof marked !== "undefined" ? marked.parse(o) : "<pre>" + escapeHTML(o) + "</pre>";
             w.innerHTML = buildDocHeader(s) + c + buildBottomCards(s);
+            // v6.3.1：告知读者本文为 AI 译文（stale 时提示可能过期）
+            if (window.ysmShowTrNotice) window.ysmShowTrNotice(n.translationStatus, n.sourceLangName);
             w.querySelectorAll("table").forEach(e => {
                 if (!e.parentElement.classList.contains("table-wrapper")) {
                     const t = document.createElement("div");

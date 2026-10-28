@@ -1532,6 +1532,27 @@ function aiTranslateMd($md, $targetLang, $actor) {
     }
     return [true, implode("\n\n", $out)];
 }
+/** v6.3.1：内容原语种（超管可配；默认 zh-CN）。文章正文被视为该语言，译本只对其他语言生成/展示。 */
+function ysmSourceLang() {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $dft = 'zh-CN';
+    if (function_exists('loadSiteConfig')) {
+        $v = (string)(loadSiteConfig()['source_lang'] ?? '');
+        if ($v !== '' && function_exists('ysmSupportedLangs') && isset(ysmSupportedLangs()[$v])) $dft = $v;
+    }
+    $cache = $dft;
+    return $cache;
+}
+/** 源语种显示名（用于「原文：xx」提示） */
+function ysmSourceLangName() {
+    $l = ysmSourceLang();
+    if (function_exists('ysmAllLangs')) {
+        $all = ysmAllLangs();
+        if (isset($all[$l]['name'])) return (string)$all[$l]['name'];
+    }
+    return $l;
+}
 /** 读某文章某语种译本，返回 [status, md(可空), meta]，判 stale（源文 digest 变化） */
 function articleTranslationStatus($aid, $lang) {
     $row = db_one('SELECT * FROM article_translations WHERE article_id = ? AND target_lang = ?', [$aid, $lang]);

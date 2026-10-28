@@ -1620,7 +1620,7 @@ window.ysmOpenLinks = function(fromHistory){
     fetch('api.php?action=links_list').then(function(r){ return r.json(); }).then(function(d){
         var links = (d && d.links) || [];
         var cnt = document.getElementById('linksCount');
-        if (cnt) { cnt.textContent = links.length ? String(links.length) : ''; }
+        if (cnt) { cnt.textContent = links.length ? TK('links.subtitle', { n: links.length }) : ''; }
         if (!links.length) { if (empty) empty.style.display = 'block'; return; }
         var esc = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
         grid.innerHTML = links.map(function(x){

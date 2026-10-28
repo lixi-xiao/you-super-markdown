@@ -1232,4 +1232,5 @@ return [
     'admin.font_none' => 'Not uploaded (bundled font removed)',
     'admin.font_enabled' => 'Enabled',
     'admin.font_disabled' => 'Disabled',
+    'links.subtitle' => '{n} site(s) in total',
 ];

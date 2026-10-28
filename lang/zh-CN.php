@@ -1232,4 +1232,5 @@ return [
     'admin.font_none' => '未上传（内置萝莉体已移除）',
     'admin.font_enabled' => '已启用',
     'admin.font_disabled' => '未启用',
+    'links.subtitle' => '共 {n} 个站点',
 ];

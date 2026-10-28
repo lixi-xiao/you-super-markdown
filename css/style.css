@@ -1277,3 +1277,13 @@ body.links-open #readingView { display: none !important; }
 
 #linksView .links-head { justify-content: flex-start; }
 #linksView .links-title { flex: 0 1 auto; }
+
+/* v6.3.0 定稿：友链页改为普通文档流（去掉 sticky 与负边距，彻底消除重叠） */
+#linksView { padding: 0 !important; margin: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; min-height: 0 !important; }
+#linksView .links-top { position: static !important; top: auto; margin: 0 !important; padding: 10px 12px; height: auto; display: flex; align-items: center; gap: 10px; background: var(--surface); border-bottom: 1px solid var(--border); }
+#linksView .links-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0; padding: 14px 12px 8px; border: 0; }
+#linksView .links-head-ic { width: 34px; height: 34px; flex: 0 0 34px; }
+#linksView .links-title { flex: 0 0 auto; margin: 0; font-size: 1.24em; font-weight: 800; text-align: left; }
+#linksView .links-sub { flex: 0 0 100%; margin: 0; font-size: 0.82em; color: var(--text-muted); }
+#linksView .links-sub:empty { display: none; }
+#linksView .links-grid { padding: 0 12px 24px; }

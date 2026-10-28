@@ -1232,4 +1232,5 @@ return [
     'admin.font_none' => '未上傳（內建蘿莉體已移除）',
     'admin.font_enabled' => '已啟用',
     'admin.font_disabled' => '未啟用',
+    'links.subtitle' => '共 {n} 個站點',
 ];

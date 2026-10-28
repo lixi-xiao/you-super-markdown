@@ -1232,4 +1232,5 @@ return [
     'admin.font_none' => '未アップロード（内蔵フォントは削除済み）',
     'admin.font_enabled' => '有効',
     'admin.font_disabled' => '無効',
+    'links.subtitle' => '全 {n} サイト',
 ];

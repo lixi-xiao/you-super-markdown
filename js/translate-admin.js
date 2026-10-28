@@ -16,6 +16,14 @@
         var m = document.querySelector('meta[name="csrf-token"]');
         return m ? m.content : '';
     }
+    // v6.3.3：后台 AI 接口要求环境指纹头（requireSessionEnv 比对 X-Fp / 稳定指纹 X-FpS）。
+    // 本页不加载 main.js，其 fetch 包装不会自动注入——缺头会被判成「登录环境已变化」。
+    function fpHeaders() {
+        var h = {};
+        if (typeof window.ysmGetFp === 'function') h['X-Fp'] = window.ysmGetFp();
+        if (typeof window.ysmGetStableFp === 'function') h['X-FpS'] = window.ysmGetStableFp();
+        return h;
+    }
     function langName(code) {
         var ls = (window.I18N && window.I18N.langs) || {};
         return (ls[code] && ls[code].name) || code;
@@ -44,7 +52,7 @@
             var old = entry.querySelector('.tr-menu');
             if (old) { old.remove(); return; }
             btn.disabled = true;
-            fetch('api.php?action=ai_translation_status&slug=' + encodeURIComponent(slug), { credentials: 'same-origin' })
+            fetch('api.php?action=ai_translation_status&slug=' + encodeURIComponent(slug), { credentials: 'same-origin', headers: fpHeaders() })
                 .then(function (r) { return r.json(); })
                 .then(function (j) {
                     if (!j || !j.success) throw new Error((j && j.error) || T('ai.tr_fail'));
@@ -62,7 +70,7 @@
                         fetch('api.php?action=ai_translate', {
                             method: 'POST',
                             credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() },
+                            headers: Object.assign({ 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() }, fpHeaders()),
                             body: JSON.stringify({ slug: slug, lang: lc })
                         }).then(function (r) { return r.json(); }).then(function (res) {
                             if (res && res.success) {

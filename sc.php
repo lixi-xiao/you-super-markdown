@@ -1252,6 +1252,9 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
     var aiConfigUrl = <?= json_encode($aiConfigUrl) ?>;
     var cfg = null, captured = '', result = '', lastSel = { start: 0, end: 0 };
+    // v6.3.3：最近一次有效选区快照——点击按钮等操作可能让 textarea 失焦、选区归零，
+    //         打开浮层时用它兜底，保证「先选中、再点按钮」这条路始终取到用户刚选的内容。
+    var selSnap = { start: 0, end: 0 };
     var undoValue = null, busy = false, finalized = false, curAction = 'polish';
     // v5.4.2-beta：记住上次选择（动作/服务商/风格/语言）——localStorage，纯前端偏好，不含任何 Key
     var PREF_KEY = 'ysm_ai_pref';
@@ -1367,9 +1370,14 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     $('aiLang').addEventListener('change', savePref);
 
     function openDrawer() {
-        var s = ta.selectionStart, e = ta.selectionEnd, sel = ta.value.slice(s, e);
+        var s = ta.selectionStart, e = ta.selectionEnd;
+        // v6.3.3：选区可能因点击按钮而丢失——回退到最近一次有效选区快照
+        if (s === e && selSnap.end > selSnap.start) { s = selSnap.start; e = selSnap.end; }
+        var sel = ta.value.slice(s, e);
         if (!sel.trim()) { alert(T('请先在编辑框中选中要处理的文本')); return; }
         captured = sel; lastSel = { start: s, end: e };
+        // 把焦点和选区还给编辑框（不滚动页面），避免浮层打开后编辑器里的选中态消失
+        try { ta.focus({ preventScroll: true }); ta.setSelectionRange(s, e); } catch (err) {}
         $('aiSrc').textContent = sel;
         $('aiResultWrap').style.display = 'none';
         $('aiUndoBtn').style.display = 'none';
@@ -1378,7 +1386,18 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         hideFab();
         if (!cfg.privacy_ack) $('aiPrivacyMask').style.display = 'flex';
     }
-    function closeDrawer() { if (controller) { try { controller.abort(); } catch (e) {} } drawer.style.display = 'none'; hideFab(); }
+    function closeDrawer() {
+        if (controller) { try { controller.abort(); } catch (e) {} }
+        drawer.style.display = 'none';
+        hideFab();
+        // v6.3.3：关闭后把焦点与选区还给编辑框（不滚动页面）
+        try {
+            if (lastSel.end > lastSel.start) {
+                ta.focus({ preventScroll: true });
+                ta.setSelectionRange(lastSel.start, lastSel.end);
+            }
+        } catch (err) {}
+    }
 
     $('aiPrivacyOk').addEventListener('click', function() {
         $('aiPrivacyMask').style.display = 'none';
@@ -1517,7 +1536,12 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     });
     $('aiDrawerClose').addEventListener('click', closeDrawer);
     var btn = $('btnAiWrite');
-    if (btn) btn.addEventListener('click', openDrawer);
+    if (btn) {
+        // v6.3.3：按钮抢焦点会让 textarea 失焦、选区归零（表现为「选中文本后一点按钮，选中就没了」）。
+        // 在 mousedown 阶段阻止默认行为，保持编辑框的焦点与选区，click 仍照常触发。
+        btn.addEventListener('mousedown', function(e) { e.preventDefault(); });
+        btn.addEventListener('click', openDrawer);
+    }
 
     // 选中文本后在编辑框右上角浮出入口（侧边浮层触发）
     var fab = document.createElement('div');
@@ -1528,6 +1552,8 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     fab.addEventListener('mousedown', function(e) { e.preventDefault(); openDrawer(); });
     function hideFab() { fab.style.display = 'none'; }
     function maybeFab() {
+        // v6.3.3：先记录有效选区快照（浮层打开时也要记，供关闭后恢复）
+        if (ta.selectionEnd > ta.selectionStart) selSnap = { start: ta.selectionStart, end: ta.selectionEnd };
         if (drawer.style.display === 'flex') return;
         var sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
         if (!sel.trim()) { hideFab(); return; }

@@ -1114,7 +1114,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         </a>
         <a href="dashboard.php?tab=ai" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'ai' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
-            AI 写作
+            <?= t('ai.067') ?>
         </a>
         <a href="#" onclick="bindLogoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -3603,7 +3603,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
-            AI 写作
+            <?= t('ai.067') ?>
         </div>
         <div class="page-subtitle"><?= t('ai.025') ?></div>
     </div>

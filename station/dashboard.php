@@ -530,7 +530,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <?php if (aiRoleAllowed(ROLE_STATION_ADMIN)): ?>
         <a href="dashboard.php?tab=ai" class="sidebar-link <?= $tab==='ai'?'active':'' ?>">
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
-            AI 写作
+            <?= t('ai.067') ?>
         </a>
         <?php endif; ?>
         <a href="/sc.php" class="sidebar-link">
@@ -1283,7 +1283,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
-            AI 写作
+            <?= t('ai.067') ?>
         </div>
         <div class="page-subtitle"><?= t('ai.058') ?></div>
     </div>

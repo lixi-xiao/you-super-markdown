@@ -1522,4 +1522,5 @@ return [
     'ai.064' => 'custom URLs are not supported',
     'ai.065' => '+ Add model',
     'ai.066' => 'The challenge code is invalid or expired. Please generate a new one.',
+    'ai.067' => 'AI settings',
 ];

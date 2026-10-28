@@ -780,14 +780,40 @@ if ($action === 'link_apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = genId();
     $token = bin2hex(random_bytes(16));
     $exp = time() + 7 * 86400;
+    $needReview = linkReviewRequired();
     db_exec('INSERT INTO link_applies (id, site_name, url, desc, favicon, email, status, token, token_expires, ip, created) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
         [$id, $name, $url, $desc, $fav, $mail, 'pending', $token, $exp, $ip, date('Y-m-d H:i:s')]);
-    auditLog('link_apply', $name, '访客提交友链申请：' . $url, 'success');
+    if (!$needReview) {
+        // v6.3.9：站点关闭「新友链需审核」→ 直接上架（仍发通知邮件）
+        linkApplyDecide(['id' => $id, 'site_name' => $name, 'url' => $url, 'favicon' => $fav, 'desc' => $desc,
+            'token_expires' => $exp, 'status' => 'pending'], 'approve', 'auto');
+    }
+    auditLog('link_apply', $name, '访客提交友链申请：' . $url . ($needReview ? '' : '（免审核直接上架）'), 'success');
     $base = rtrim((string)(appConfig('site_url') ?: ('https://' . ($_SERVER['HTTP_HOST'] ?? ''))), '/');
     $approve = $base . '/index.php?action=link_review&token=' . $token;
-    $detail = "站点名称：{$name}\n网址：{$url}\n简介：{$desc}\n联系邮箱：{$mail}\n\n审核（需登录后台）：\n通过 / 拒绝：{$approve}\n\n令牌 7 天内有效，单次使用。";
-    if (function_exists('sendNotice')) { @sendNotice('友链申请', $detail); }
-    sendJson(['success' => true]);
+    $ml = function_exists('ysmAdminMailLang') ? ysmAdminMailLang() : 'zh-CN';
+    $tReview = function_exists('ysmMailT') ? ysmMailT('审核这条申请', $ml) : 'Review';
+    $tVisit = function_exists('ysmMailT') ? ysmMailT('访问该站点', $ml) : 'Visit';
+    $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+    $detail = "站点名称：{$name}\n网址：{$url}\n简介：{$desc}\n联系邮箱：{$mail}\n\n"
+        . ($needReview ? "审核（打开链接做一道算术题即可通过/拒绝）：\n{$approve}\n\n令牌 7 天内有效，单次使用。" : "本站已开启免审核，已自动收录。\n{$approve}");
+    $htmlDetail = '<div style="font-size:14.5px;line-height:2;color:#2d3748;">'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #edf0f5;border-radius:12px;font-size:13.5px;">'
+        . '<tr><td style="padding:10px 16px;width:84px;color:#94a3b8;">' . $e(ysmMailT('站点名称', $ml)) . '</td><td style="padding:10px 16px;color:#1e293b;font-weight:600;">' . $e($name) . '</td></tr>'
+        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e(ysmMailT('网址', $ml)) . '</td><td style="padding:10px 16px;"><a href="' . $e($url) . '" style="color:#2563eb;text-decoration:none;">' . $e($url) . '</a></td></tr>'
+        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e(ysmMailT('简介', $ml)) . '</td><td style="padding:10px 16px;color:#334155;">' . $e($desc) . '</td></tr>'
+        . '<tr><td style="padding:10px 16px;color:#94a3b8;">' . $e(ysmMailT('联系邮箱', $ml)) . '</td><td style="padding:10px 16px;color:#334155;">' . $e($mail) . '</td></tr>'
+        . '</table>'
+        . '<div style="text-align:center;margin-top:22px;">'
+        . '<a href="' . $e($approve) . '" style="display:inline-block;background:linear-gradient(135deg,#1f3a5f 0%,#2a4a75 100%);color:#fff;font-size:15px;font-weight:600;padding:13px 34px;border-radius:999px;text-decoration:none;">' . $e($tReview) . '</a>'
+        . '</div>'
+        . '<div style="text-align:center;margin-top:12px;">'
+        . '<a href="' . $e($url) . '" style="display:inline-block;background:#fff;border:1px solid #e2e8f0;color:#334155;font-size:13.5px;padding:10px 26px;border-radius:999px;text-decoration:none;">' . $e($tVisit) . '</a>'
+        . '</div>'
+        . '<div style="text-align:center;margin-top:12px;color:#94a3b8;font-size:12px;">' . $e(ysmMailT('链接 7 天内有效，单次使用', $ml)) . '</div>'
+        . '</div>';
+    if (function_exists('sendNotice')) { @sendNotice('友链申请', $detail, $htmlDetail); }
+    sendJson(['success' => true, 'auto_approved' => !$needReview]);
 }
 /** 站长专属操作的前置校验（角色 + 环境） */
 function linksRequireStationAdmin() {
@@ -867,6 +893,47 @@ if ($action === 'links_check' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $alive = linkCheckAlive((string)$row['url']);
     db_exec('UPDATE links SET last_check = ?, check_count = check_count + 1, status = ? WHERE id = ?', [time(), $alive ? 'active' : 'dead', $id]);
     sendJson(['success' => true, 'alive' => $alive]);
+}
+// GET links_applies_list：友链申请（待审核 / 已拒绝）+ 统计 + 展示设置（v6.3.9）
+if ($action === 'links_applies_list' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    linksRequireStationAdmin();
+    $pending = db_all("SELECT id, site_name, url, desc, favicon, email, created, token_expires FROM link_applies WHERE status='pending' ORDER BY created DESC LIMIT 100");
+    $rejected = db_all("SELECT id, site_name, url, email, decided_at, reject_reason FROM link_applies WHERE status='rejected' ORDER BY decided_at DESC LIMIT 50");
+    sendJson([
+        'success' => true,
+        'counts' => linkApplyCounts(),
+        'pending' => $pending,
+        'rejected' => $rejected,
+        'review_required' => linkReviewRequired() ? 1 : 0,
+    ]);
+}
+// POST links_apply_decide：通过 / 拒绝（站长；与邮件审核共用 linkApplyDecide）
+if ($action === 'links_apply_decide' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $actor = linksRequireStationAdmin();
+    if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
+    $b = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($b)) $b = [];
+    $id = (string)($b['id'] ?? '');
+    $dec = (string)($b['decision'] ?? '');
+    if ($id === '' || !in_array($dec, ['approve', 'reject'], true)) sendJson(['success' => false, 'error' => tn('api.946')], 400);
+    $row = db_one('SELECT * FROM link_applies WHERE id = ?', [$id]);
+    if (!$row) sendJson(['success' => false, 'error' => tn('api.947')], 404);
+    $res = linkApplyDecide($row, $dec, (string)($actor['id'] ?? ''), (string)($b['reason'] ?? ''));
+    sendJson(['success' => in_array($res, ['approved', 'rejected'], true), 'result' => $res, 'counts' => linkApplyCounts()]);
+}
+// GET/POST links_setting：展示设置——新友链是否需要审核后展示（v6.3.9）
+if ($action === 'links_setting') {
+    linksRequireStationAdmin();
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!checkCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) sendJson(['success' => false, 'error' => tn('api.901'), 'error_code' => 'csrf'], 403);
+        $b = json_decode(file_get_contents('php://input'), true);
+        if (!is_array($b)) $b = [];
+        $cfg = loadSiteConfig();
+        $cfg['link_review_required'] = !empty($b['review_required']) ? 1 : 0;
+        saveSiteConfig($cfg);
+        auditLog('links_setting', 'link_review_required', '新友链需审核后展示：' . ($cfg['link_review_required'] ? '开' : '关'));
+    }
+    sendJson(['success' => true, 'review_required' => linkReviewRequired() ? 1 : 0]);
 }
 
 

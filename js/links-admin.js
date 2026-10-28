@@ -180,6 +180,91 @@
         });
     }
 
+    // ================= v6.3.9：申请审核（待审核 / 已拒绝 / 展示设置 / 统计） =================
+    function setCount(id, n) { var e = el(id); if (e) e.textContent = n; }
+
+    function itemHtml(r, isPending) {
+        var meta = [r.url, r.email, r.created || r.decided_at || ''].filter(Boolean).map(esc).join(' · ');
+        return '<div class="link-item" data-id="' + esc(r.id) + '">' +
+            '<div class="link-item-main">' +
+                '<div class="link-item-title">' + esc(r.site_name) + '</div>' +
+                (r.desc ? '<div class="link-item-desc">' + esc(r.desc) + '</div>' : '') +
+                '<div class="link-item-meta">' + meta + '</div>' +
+                (r.reject_reason ? '<div class="link-item-meta" style="color:#dc2626">' + esc(r.reject_reason) + '</div>' : '') +
+            '</div>' +
+            '<div class="link-item-acts">' +
+                (isPending
+                    ? '<button class="btn btn-sm btn-primary" data-aa="approve">' + TK('links.apply_approve') + '</button>' +
+                      '<button class="btn btn-sm btn-outline" data-aa="reject">' + TK('links.apply_reject') + '</button>' +
+                      '<a class="btn btn-sm btn-outline" href="' + esc(r.url) + '" target="_blank" rel="noopener">' + TK('links.dash_visit') + '</a>'
+                    : '<a class="btn btn-sm btn-outline" href="' + esc(r.url) + '" target="_blank" rel="noopener">' + TK('links.dash_visit') + '</a>') +
+            '</div>' +
+        '</div>';
+    }
+
+    function loadApplies() {
+        api('../api.php?action=links_applies_list').then(function (d) {
+            if (!d || !d.success) return;
+            var c = d.counts || {};
+            setCount('lsPending', c.pending || 0);
+            setCount('lsActive', c.active || 0);
+            setCount('lsRejected', c.rejected || 0);
+            setCount('linkPendingCount', '(' + (c.pending || 0) + ')');
+            setCount('linkRejectedCount', '(' + (c.rejected || 0) + ')');
+            var box = el('linkReviewRequired');
+            if (box) box.checked = !!d.review_required;
+            var pl = el('linkPendingList');
+            if (pl) pl.innerHTML = (d.pending && d.pending.length)
+                ? d.pending.map(function (r) { return itemHtml(r, true); }).join('')
+                : '<div class="link-empty">' + TK('links.dash_empty') + '</div>';
+            var rl = el('linkRejectedList');
+            if (rl) rl.innerHTML = (d.rejected && d.rejected.length)
+                ? d.rejected.map(function (r) { return itemHtml(r, false); }).join('')
+                : '<div class="link-empty">' + TK('links.dash_empty') + '</div>';
+        }).catch(function () {});
+    }
+
+    function decide(id, decision, btn) {
+        var body = { id: id, decision: decision, reason: '' };
+        if (decision === 'reject') {
+            var why = window.prompt(TK('links.dash_reason_prompt'), '');
+            if (why === null) return;
+            body.reason = String(why).slice(0, 60);
+        }
+        if (btn) btn.disabled = true;
+        api('../api.php?action=links_apply_decide', { method: 'POST', body: JSON.stringify(body) }).then(function (d) {
+            if (d && d.success) { loadApplies(); load(); }
+            else if (btn) { btn.disabled = false; formMsg((d && d.error) || TK('links.019')); }
+        }).catch(function () { if (btn) btn.disabled = false; });
+    }
+
+    var pendingBox = el('linkPendingList');
+    if (pendingBox) {
+        pendingBox.addEventListener('click', function (e) {
+            var btn = e.target.closest('button[data-aa]');
+            if (!btn) return;
+            var item = btn.closest('.link-item');
+            if (!item) return;
+            decide(item.getAttribute('data-id'), btn.getAttribute('data-aa'), btn);
+        });
+    }
+
+    var setting = el('linkReviewRequired');
+    if (setting) {
+        setting.addEventListener('change', function () {
+            api('../api.php?action=links_setting', { method: 'POST', body: JSON.stringify({ review_required: setting.checked ? 1 : 0 }) })
+                .then(function (d) { if (!d || !d.success) setting.checked = !setting.checked; });
+        });
+    }
+
+    document.querySelectorAll('.link-stat[data-jump]').forEach(function (b) {
+        b.addEventListener('click', function () {
+            var t = el(b.getAttribute('data-jump'));
+            if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+
     resetForm();
     load();
+    loadApplies();
 })();

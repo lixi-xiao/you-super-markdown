@@ -39,7 +39,8 @@ function sendJson($respData, $httpStatus = 200) {
 //       按请求类型输出 og/twitter 元数据，否则任何文章链接分享出去都只显示站点卡片。
 // 站点默认描述（站点模式回退文案，沿用既有静态文案）
 if (!defined('YSM_SHARE_SITE_DESC')) {
-    define('YSM_SHARE_SITE_DESC', '一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器');
+    // v6.3.9：站点描述走 i18n（此前硬编码中文，切到其它语言仍是中文）
+    define('YSM_SHARE_SITE_DESC', t('site.desc'));
 }
 
 /** scheme + host（绝对 URL 基址）；兼容反代后的 X-Forwarded-Proto / HTTPS，Host 头做白名单加固（防 Host 注入）
@@ -222,10 +223,10 @@ function ysmRenderShortNotFound($siteName, $siteConf = []) {
     $bgBlur = !empty($siteConf['bg_blur_enabled']) ? '1' : '0';
     $bgBlurLevel = intval($siteConf['bg_blur_level'] ?? 0);
     $bgCardOpacity = intval($siteConf['bg_card_opacity'] ?? 100);
-    $shortTitle = '文档不存在';
+    $shortTitle = t('js.038');
     $shareMeta = [
         'type' => 'website', 'site' => $siteName, 'title' => $shortTitle,
-        'desc' => '该分享链接对应的文档不存在或已被移除，请检查链接是否正确。',
+        'desc' => t('home.001'),
         'image' => ysmSharePoolCover(), 'url' => ysmShareOrigin() . '/',
     ];
     header('Content-Type: text/html; charset=utf-8');
@@ -948,52 +949,136 @@ if ($action === 'rss') {
     exit;
 }
 
-// v6.3.0：友链申请审核（邮件令牌 + 登录态 + CSRF；通过后自动入 links）
+// v6.3.9：友链申请审核（邮件链接直达；算术题 + 蜜罐；通过 / 拒绝 / 撤销，无需登录后台）
 if ($action === 'link_review') {
     $token = preg_replace('/[^a-f0-9]/', '', (string)($_GET['token'] ?? ''));
-    $actor = function_exists('checkRole') ? checkRole(ROLE_STATION_ADMIN) : false;
     $row = $token !== '' ? db_one('SELECT * FROM link_applies WHERE token = ?', [$token]) : null;
     $msg = '';
-    if ($row && (int)$row['token_expires'] < time()) { $msg = 'expired'; }
-    if (!$actor) { $msg = $msg ?: 'login'; }
-    if ($row && $actor && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        if (!checkCsrfToken($_POST['csrf_token'] ?? '')) { $msg = 'csrf'; }
-        elseif ($row['status'] !== 'pending') { $msg = 'done'; }
-        else {
-            $dec = ($_POST['decision'] ?? '') === 'approve' ? 'approve' : 'reject';
-            if ($dec === 'approve') {
-                db_exec("INSERT OR IGNORE INTO links (site_name,url,favicon,desc,status,place_time,last_check,check_count,sort,source) VALUES (?,?,?,?,'active',?,0,0,99,'apply')",
-                    [$row['site_name'], $row['url'], (string)$row['favicon'], (string)$row['desc'], time()]);
-                db_exec("UPDATE link_applies SET status='approved', decided_at=?, decided_by=? WHERE id=?", [date('Y-m-d H:i:s'), (string)$actor['id'], $row['id']]);
-                auditLog('link_apply_approve', (string)$row['site_name'], '友链申请通过：' . $row['url'], 'success');
-                $msg = 'approved';
-            } else {
-                db_exec("UPDATE link_applies SET status='rejected', decided_at=?, decided_by=? WHERE id=?", [date('Y-m-d H:i:s'), (string)$actor['id'], $row['id']]);
-                auditLog('link_apply_reject', (string)$row['site_name'], '友链申请拒绝：' . $row['url'], 'success');
-                $msg = 'rejected';
+    if (!$row) {
+        $msg = 'invalid';
+    } elseif ((string)($row['status'] ?? '') === 'pending' && (int)$row['token_expires'] < time()) {
+        db_exec("UPDATE link_applies SET status='expired' WHERE id=? AND status='pending'", [$row['id']]);
+        $row = db_one('SELECT * FROM link_applies WHERE token = ?', [$token]);
+        $msg = 'expired';
+    }
+    if ($row && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $dec = (string)($_POST['decision'] ?? 'approve');
+        // 蜜罐：真人不会填这一栏；命中即静默失败并计入威胁
+        if (trim((string)($_POST['website'] ?? '')) !== '') {
+            auditLog('link_review_honeypot', (string)$row['site_name'], '审核页蜜罐命中，已拒绝执行', 'failed');
+            logThreat('honeypot', getClientIP(), getRequestFp(), 300);
+            $msg = 'bot';
+        } elseif ($dec === 'undo') {
+            if (!checkCsrfToken($_POST['csrf_token'] ?? '')) { $msg = 'csrf'; }
+            elseif (linkApplyUndo($row, 'email')) { $msg = 'undone'; }
+            else { $msg = 'done'; }
+            $row = db_one('SELECT * FROM link_applies WHERE token = ?', [$token]);
+        } else {
+            [$arithOk, ] = verifyArithChallenge((string)($_POST['arith_answer'] ?? ''));
+            if (!$arithOk) { $msg = 'arith'; }
+            else {
+                $res = linkApplyDecide($row, $dec === 'reject' ? 'reject' : 'approve', 'email', (string)($_POST['reason'] ?? ''));
+                $msg = $res;
+                $row = db_one('SELECT * FROM link_applies WHERE token = ?', [$token]);
             }
         }
     }
-    $titles = ['approved' => 'links.review_approved', 'rejected' => 'links.review_rejected', 'login' => 'links.review_login', 'expired' => 'links.review_expired', 'csrf' => 'links.review_csrf', 'done' => 'links.review_done'];
-    echo '<!DOCTYPE html><html lang="' . htmlspecialchars(ysmLocale()) . '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' . t('links.apply_title') . '</title><link rel="stylesheet" href="/css/style.css"></head><body style="padding:24px">';
-    echo '<div style="max-width:560px;margin:40px auto">';
-    echo '<h1 style="font-size:1.3em;margin-bottom:16px">' . t('links.apply_title') . '</h1>';
-    if ($msg !== '') echo '<p style="margin-bottom:16px;color:var(--accent)">' . htmlspecialchars(t($titles[$msg] ?? 'links.review_done')) . '</p>';
-    if ($row) {
-        echo '<div class="share-card"><div class="share-card-top"><div class="share-card-icon"></div><div>';
-        echo '<div class="share-card-title">' . htmlspecialchars((string)$row['site_name']) . '</div>';
-        echo '<div class="share-card-desc">' . htmlspecialchars((string)$row['url']) . '<br>' . htmlspecialchars((string)$row['desc']) . '<br>' . htmlspecialchars((string)$row['email']) . '</div>';
-        echo '</div></div>';
-        if ($actor && $row['status'] === 'pending' && $msg !== 'approved' && $msg !== 'rejected') {
-            echo '<form method="post" style="display:flex;gap:10px;margin-top:14px">'
-                . '<input type="hidden" name="csrf_token" value="' . htmlspecialchars(generateCsrfToken()) . '">'
-                . '<button class="btn btn-primary" name="decision" value="approve" type="submit">' . t('links.apply_approve') . '</button>'
-                . '<button class="btn btn-outline" name="decision" value="reject" type="submit">' . t('links.apply_reject') . '</button>'
-                . '</form>';
-        }
-        echo '</div>';
-    }
-    echo '</div></body></html>';
+    $pending = $row && (string)($row['status'] ?? '') === 'pending';
+    $arith = $pending ? genArithChallenge() : '';
+    $__siteTitle = (string)(loadSiteConfig()['site_title'] ?? 'You Super Markdown');
+    $msgKey = [
+        'approved' => 'links.review_approved', 'rejected' => 'links.review_rejected',
+        'expired' => 'links.review_expired', 'done' => 'links.review_done',
+        'csrf' => 'links.review_csrf', 'invalid' => 'links.review_invalid',
+        'bot' => 'links.review_bot', 'arith' => 'links.review_arith_bad',
+        'undone' => 'links.review_undo_ok',
+    ];
+    $msgOk = in_array($msg, ['approved', 'rejected', 'undone'], true);
+    header('Content-Type: text/html; charset=utf-8');
+    ?><!DOCTYPE html>
+<html lang="<?= htmlspecialchars(ysmLocale()) ?>" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title><?= t('links.apply_title') ?> - <?= htmlspecialchars($__siteTitle) ?></title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:linear-gradient(160deg,#f0f4ff 0%,#e6ecf7 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:18px;color:#1e293b}
+.card{background:#fff;border-radius:16px;box-shadow:0 8px 30px rgba(31,58,95,.12);width:100%;max-width:460px;padding:26px 22px}
+.hd{font-size:18px;font-weight:700;color:#1f3a5f;margin-bottom:4px}
+.sub{font-size:12.5px;color:#7b8a9c;margin-bottom:16px}
+.msg{padding:10px 12px;border-radius:10px;font-size:13.5px;line-height:1.6;margin-bottom:14px}
+.msg.ok{background:#ecfdf5;color:#166534}
+.msg.err{background:#fef2f2;color:#b91c1c}
+.row{display:flex;gap:10px;padding:8px 0;border-bottom:1px dashed #eef1f6;font-size:13.5px}
+.row:last-child{border-bottom:none}
+.k{color:#93a2b4;flex:0 0 84px}
+.v{color:#334155;word-break:break-all}
+.link{color:#2563eb;text-decoration:none}
+.act{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.btn{display:block;width:100%;padding:12px 16px;border-radius:12px;border:none;font-size:15px;font-weight:600;cursor:pointer;text-align:center;text-decoration:none}
+.btn.pri{background:linear-gradient(135deg,#1f3a5f,#2a4a75);color:#fff}
+.btn.rej{background:#fff;border:1px solid #e5e9f0;color:#c0392b}
+.btn.ghost{background:#fff;border:1px solid #e5e9f0;color:#334155}
+.btn.line{background:#fff;border:1px solid #e5e9f0;color:#2563eb}
+.field{margin-top:12px}
+.field label{display:block;font-size:12.5px;color:#7b8a9c;margin-bottom:6px}
+.field input{width:100%;padding:11px 12px;border:1px solid #e2e8f0;border-radius:10px;font-size:15px;outline:none}
+.field input:focus{border-color:#2a4a75}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.hint{font-size:12px;color:#93a2b4;margin-top:10px;line-height:1.6;text-align:center}
+</style>
+</head>
+<body>
+<div class="card">
+    <div class="hd"><?= t('links.apply_title') ?></div>
+    <div class="sub"><?= t('links.review_sub') ?></div>
+    <?php if ($msg !== ''): ?>
+    <div class="msg <?= $msgOk ? 'ok' : 'err' ?>"><?= htmlspecialchars(t($msgKey[$msg] ?? 'links.review_done')) ?></div>
+    <?php endif; ?>
+    <?php if ($row): ?>
+    <div class="row"><div class="k"><?= t('links.027') ?></div><div class="v"><?= htmlspecialchars((string)$row['site_name']) ?></div></div>
+    <div class="row"><div class="k"><?= t('links.029') ?></div><div class="v"><a class="link" href="<?= htmlspecialchars((string)$row['url']) ?>" target="_blank" rel="noopener noreferrer"><?= htmlspecialchars((string)$row['url']) ?></a></div></div>
+    <div class="row"><div class="k"><?= t('links.031') ?></div><div class="v"><?= htmlspecialchars((string)$row['desc']) ?></div></div>
+    <div class="row"><div class="k"><?= t('links.review_field_email') ?></div><div class="v"><?= htmlspecialchars((string)$row['email']) ?></div></div>
+    <div class="row"><div class="k"><?= t('links.review_field_time') ?></div><div class="v"><?= htmlspecialchars((string)$row['created']) ?></div></div>
+    <?php endif; ?>
+    <?php if ($pending): ?>
+    <form method="post" autocomplete="off">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+        <input type="text" name="website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <div class="field">
+            <label><?= t('links.review_arith') ?>：<?= htmlspecialchars((string)$arith) ?> = ?</label>
+            <input type="text" name="arith_answer" inputmode="numeric" pattern="[0-9-]*" maxlength="6" required>
+        </div>
+        <div class="field">
+            <label><?= t('links.review_reason') ?></label>
+            <input type="text" name="reason" maxlength="60">
+        </div>
+        <div class="act">
+            <button class="btn pri" type="submit" name="decision" value="approve"><?= t('links.apply_approve') ?></button>
+            <button class="btn rej" type="submit" name="decision" value="reject"><?= t('links.apply_reject') ?></button>
+            <a class="btn line" href="<?= htmlspecialchars((string)$row['url']) ?>" target="_blank" rel="noopener noreferrer"><?= t('links.review_visit') ?></a>
+        </div>
+        <div class="hint"><?= t('links.review_hint') ?></div>
+    </form>
+    <?php else: ?>
+    <div class="act">
+        <?php if ($row && (string)$row['status'] === 'approved'): ?>
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+            <input type="hidden" name="decision" value="undo">
+            <button class="btn ghost" type="submit"><?= t('links.review_undo') ?></button>
+        </form>
+        <?php endif; ?>
+        <?php if ($row): ?>
+        <a class="btn line" href="<?= htmlspecialchars((string)$row['url']) ?>" target="_blank" rel="noopener noreferrer"><?= t('links.review_visit') ?></a>
+        <?php endif; ?>
+        <a class="btn ghost" href="/"><?= t('links.review_back') ?></a>
+    </div>
+    <?php endif; ?>
+</div>
+</body></html><?php
     exit;
 }
 
@@ -1101,7 +1186,7 @@ if ($action === 'rss_guide') {
     <!-- v5.0.0：按请求服务端渲染分享卡片（站点模式 / 文章模式），补齐 og:image/og:url 与 Twitter Card -->
     <?php ysmShareRenderMeta($__ysmCtx); ?>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>" type="image/svg+xml">
-    <meta name="description" content="一个基于PHP语言开发的轻量、优雅、简洁的 Markdown 在线阅读器">
+    <meta name="description" content="<?= htmlspecialchars(t('site.desc')) ?>">
     <!-- v4.2.2：mermaid 3.3MB 不再放 <head> 阻塞首屏（render-blocking），改为正文/公告出现 ```mermaid 时按需动态加载（见 js/main.js ensureMermaid）；marked/highlight/qrcode 加 defer 不阻塞首屏渲染 -->
     <!-- v4.6.1：前端库本地化（marked/highlight/qrcode）——大陆网络 jsdelivr 加载失败导致 marked 缺失、
          文章只能纯文本 fallback；改为同源本地文件稳定加载。mermaid 仍按需加载（见 js/main.js ensureMermaid） -->
@@ -1627,7 +1712,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
         <div class="cmt-modal-body">
             <div class="cmt-modal-form">
                 <input class="cmt-modal-input" type="text" placeholder="<?= t('home.107') ?>" maxlength="20" id="cmtAdminQQ">
-                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.108') ?>" maxlength="20" id="cmtAdminNick" value="站长">
+                <input class="cmt-modal-input" type="text" placeholder="<?= t('home.108') ?>" maxlength="20" id="cmtAdminNick" value="<?= htmlspecialchars(t('admin.558')) ?>">
                 <input class="cmt-modal-input" type="password" placeholder="<?= t('home.109') ?>" id="cmtAdminPw">
                 <input class="cmt-modal-input" type="password" placeholder="<?= t('home.110') ?>" id="cmtAdminPw2">
                 <div class="cmt-modal-err" id="cmtAdminErr"></div>
@@ -1868,10 +1953,10 @@ document.addEventListener('DOMContentLoaded', function() {
 $loginHint = '';
 if (isset($_GET['admin_login']) && $_GET['admin_login'] === '1') {
     // v6.3.6：区分「真·环境变化」与「账号在别处重新登录（被踢）」——后者与环境无关，旧文案会误导
-    if (isset($_GET['kicked']) && $_GET['kicked'] === '1') $loginHint = '账号已在其他设备或标签页重新登录，本会话已失效，请重新登录';
-    elseif (isset($_GET['env']) && $_GET['env'] === '1') $loginHint = '登录环境已变化（换设备/浏览器/隐私模式），后台操作已被拦截，请重新登录';
-    elseif (isset($_GET['expired']) && $_GET['expired'] === '1') $loginHint = '登录会话已过期，请重新登录';
-    else $loginHint = '请先登录后台';
+    if (isset($_GET['kicked']) && $_GET['kicked'] === '1') $loginHint = t('home.117');
+    elseif (isset($_GET['env']) && $_GET['env'] === '1') $loginHint = t('home.118');
+    elseif (isset($_GET['expired']) && $_GET['expired'] === '1') $loginHint = t('home.119');
+    else $loginHint = t('home.120');
 }
 ?>
 <?php if ($loginHint !== ''): ?>

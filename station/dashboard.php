@@ -1285,6 +1285,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <div class="page-subtitle"><?= t('station.101') ?></div>
     </div>
     <div id="linksAdmin" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>">
+        <div class="link-stats">
+            <button type="button" class="link-stat" data-jump="linkPendingCard">
+                <span class="n" id="lsPending">0</span><span class="l"><?= t('links.dash_pending') ?></span>
+            </button>
+            <button type="button" class="link-stat" data-jump="linkTableCard">
+                <span class="n" id="lsActive">0</span><span class="l"><?= t('links.dash_active') ?></span>
+            </button>
+            <button type="button" class="link-stat" data-jump="linkRejectedCard">
+                <span class="n" id="lsRejected">0</span><span class="l"><?= t('links.dash_rejected') ?></span>
+            </button>
+        </div>
+        <div class="card">
+            <div class="card-title"><?= t('links.dash_review_setting') ?></div>
+            <label class="link-switch">
+                <input type="checkbox" id="linkReviewRequired">
+                <span><?= t('links.dash_review_label') ?></span>
+            </label>
+            <div class="form-hint"><?= t('links.dash_review_hint') ?></div>
+        </div>
+        <div class="card" id="linkPendingCard">
+            <div class="card-title"><?= t('links.dash_pending_title') ?> <span id="linkPendingCount">(0)</span></div>
+            <div id="linkPendingList" class="link-list"></div>
+        </div>
+        <div class="card" id="linkRejectedCard">
+            <div class="card-title"><?= t('links.dash_rejected_title') ?> <span id="linkRejectedCount">(0)</span></div>
+            <div id="linkRejectedList" class="link-list"></div>
+        </div>
         <div class="card">
             <div class="card-title" id="linkFormTitle"><?= t('station.102') ?></div>
             <div class="form-group">
@@ -1317,7 +1344,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             </div>
             <input type="hidden" id="linkId" value="">
         </div>
-        <div class="card">
+        <div class="card" id="linkTableCard">
             <div class="card-title"><?= t('station.112') ?></div>
             <div class="table-wrap">
                 <table id="linksTable" class="tbl-wide">

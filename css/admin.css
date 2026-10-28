@@ -2365,3 +2365,33 @@ td code {
     margin-left: auto; padding: 4px 10px; border: 1px solid currentColor; border-radius: 8px;
     background: transparent; color: inherit; font-size: 12px; cursor: pointer;
 }
+
+/* ---------- v6.3.9：友链申请审核（统计卡 / 展示设置 / 申请列表） ---------- */
+.link-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+.link-stat {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 10px; text-align: center; cursor: pointer; transition: all .2s;
+}
+.link-stat:hover { border-color: var(--accent); transform: translateY(-1px); }
+.link-stat .n { display: block; font-size: 22px; font-weight: 800; color: var(--accent); }
+.link-stat .l { display: block; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.link-switch { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text); cursor: pointer; }
+.link-switch input { width: 18px; height: 18px; }
+.link-list { display: flex; flex-direction: column; gap: 10px; }
+.link-item {
+    display: flex; gap: 12px; justify-content: space-between; align-items: flex-start;
+    border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; background: var(--surface);
+}
+.link-item-main { min-width: 0; }
+.link-item-title { font-weight: 700; font-size: 14.5px; color: var(--text); }
+.link-item-desc { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; word-break: break-word; }
+.link-item-meta { font-size: 12px; color: var(--text-muted); margin-top: 4px; word-break: break-all; }
+.link-item-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; flex: 0 0 auto; }
+.link-empty {
+    text-align: center; color: var(--text-muted); font-size: 13px;
+    padding: 22px 0; border: 1px dashed var(--border); border-radius: 12px;
+}
+@media (max-width: 640px) {
+    .link-item { flex-direction: column; }
+    .link-item-acts { width: 100%; justify-content: flex-start; }
+}

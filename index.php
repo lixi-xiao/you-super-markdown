@@ -1130,7 +1130,7 @@ if ($bgApi !== '') $bgApi .= (strpos($bgApi, '?') !== false ? '&' : '?') . '_t='
     <?php if ($musicEnabled): ?>
     <button type="button" class="app-panel-item" role="menuitem" data-act="music"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span><span class="app-panel-text"><?= t('home.015') ?></span></button>
     <?php endif; ?>
-    <button type="button" class="app-panel-item" role="menuitem" data-act="kbd"><span class="app-panel-ic"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="8" y1="14" x2="16" y2="14"/></svg></span><span class="app-panel-text"><?= t('home.020') ?></span></button>
+    <!-- v6.3.0：手机无物理键盘，「快捷键帮助」不进入移动端面板（桌面按钮保留） -->
 </div>
 <!-- v6.1.0：语言切换菜单（点击即写 Cookie + 账号，不再区分「临时」与「设为默认」） -->
 <div class="lang-dropdown" id="langDropdown" style="display:none;">

@@ -1320,5 +1320,7 @@ Then enter the challenge code:',
         '联系邮箱' => 'Contact email',
         '链接 7 天内有效，单次使用' => 'The link is valid for 7 days and can be used once',
         '友链申请' => 'Friend link application',
+        '审核（打开链接做一道算术题即可通过/拒绝）：' => 'Review (open the link, answer a simple math question to approve or reject):',
+        '本站已开启免审核，已自动收录。' => 'Review is disabled on this site; your link has been added automatically.',
     ],
 ];

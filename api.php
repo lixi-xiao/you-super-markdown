@@ -789,8 +789,9 @@ if ($action === 'link_apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     auditLog('link_apply', $name, '访客提交友链申请：' . $url . ($needReview ? '' : '（免审核直接上架）'), 'success');
     $base = rtrim((string)(appConfig('site_url') ?: ('https://' . ($_SERVER['HTTP_HOST'] ?? ''))), '/');
-    $approve = $base . '/index.php?action=link_review&token=' . $token;
     $ml = function_exists('ysmAdminMailLang') ? ysmAdminMailLang() : 'zh-CN';
+    // v6.3.14：审核链接带上邮件语言，点开后的页面跟随邮件语言（ysmLocale 优先读 ?lang）
+    $approve = $base . '/index.php?action=link_review&token=' . $token . '&lang=' . rawurlencode($ml);
     $tReview = function_exists('ysmMailT') ? ysmMailT('审核这条申请', $ml) : 'Review';
     $tVisit = function_exists('ysmMailT') ? ysmMailT('访问该站点', $ml) : 'Visit';
     $mSite = ysmMailT('站点名称', $ml);
@@ -798,9 +799,16 @@ if ($action === 'link_apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $mDesc = ysmMailT('简介', $ml);
     $mMail = ysmMailT('联系邮箱', $ml);
     $mTtl = ysmMailT('链接 7 天内有效，单次使用', $ml);
+    $mWait = ysmMailT('审核（打开链接做一道算术题即可通过/拒绝）：', $ml);
+    $mAuto = ysmMailT('本站已开启免审核，已自动收录。', $ml);
     $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
-    $detail = "站点名称：{$name}\n网址：{$url}\n简介：{$desc}\n联系邮箱：{$mail}\n\n"
-        . ($needReview ? "审核（打开链接做一道算术题即可通过/拒绝）：\n{$approve}\n\n令牌 7 天内有效，单次使用。" : "本站已开启免审核，已自动收录。\n{$approve}");
+    // v6.3.14：纯文本兜底正文同样按邮件语言取词（原先固定中文）
+    $sep = in_array($ml, ['zh-CN', 'zh-TW', 'ja-JP'], true) ? '：' : ': ';
+    $detail = $mSite . $sep . $name . "\n"
+        . $mUrl . $sep . $url . "\n"
+        . $mDesc . $sep . $desc . "\n"
+        . $mMail . $sep . $mail . "\n\n"
+        . ($needReview ? $mWait : $mAuto) . "\n" . $approve . "\n\n" . $mTtl;
     $htmlDetail = '<div style="font-size:14.5px;line-height:2;color:#2d3748;">'
         . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #edf0f5;border-radius:12px;font-size:13.5px;">'
         . '<tr><td style="padding:10px 16px;width:84px;color:#94a3b8;">' . $e($mSite) . '</td><td style="padding:10px 16px;color:#1e293b;font-weight:600;">' . $e($name) . '</td></tr>'

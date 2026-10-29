@@ -3639,7 +3639,7 @@ function ysmOpenUserDetail(btn) {
     }
     var fp = fullFp(), sfp = stableFp(), tries = 0;
     function report() {
-        fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp, 'X-FpS': sfp } })
+        fetch('/api.php?action=fp_report', { method: 'POST', headers: { 'X-Fp': fp, 'X-FpS': sfp, 'X-CSRF-Token': '<?= generateCsrfToken() ?>' } })
             .then(function(r) { return r.json(); })
             .then(function(res) {
                 if (res && res.success) return;

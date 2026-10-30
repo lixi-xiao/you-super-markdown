@@ -282,7 +282,7 @@ if (!$needDeviceVerify && is_array($pendingNow)
             <?php if (!empty($found)): ?>
             <div class="entry-expire">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                此入口将于 <strong><?= date('H:i:s', (int)($found['expires'] ?? 0)) ?></strong> 过期
+                <?= tn('entry.001', ['t' => '<strong>' . date('H:i:s', (int)($found['expires'] ?? 0)) . '</strong>']) ?>
             </div>
             <?php endif; ?>
         </div>

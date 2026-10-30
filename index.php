@@ -292,7 +292,7 @@ function ysmRenderShortNotFound($siteName, $siteConf = []) {
         <div class="nf-actions">
             <a href="/" class="btn btn-primary">
                 <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-                返回首页
+                <?= t('home.046') ?>
             </a>
         </div>
     </div>

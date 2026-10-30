@@ -214,7 +214,7 @@ if (is_dir($articlesDir)) {
         <div class="sidebar-user">
             <div class="sidebar-user-avatar"><?php if (!empty($currentUser['account'])): ?><img src="<?= htmlspecialchars(ysmAvatarUrl($currentUser['username'] ?? ($currentUser['account'] ?? ''), 100)) ?>" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
             <div class="sidebar-user-info">
-                <div class="sidebar-user-name"><?= htmlspecialchars($currentUser['nickname'] ?? '写作者') ?></div>
+                <div class="sidebar-user-name"><?= htmlspecialchars($currentUser['nickname'] ?? t('admin.354')) ?></div>
                 <div class="sidebar-user-role"><?= t('author.003') ?></div>
             </div>
         </div>
@@ -284,7 +284,7 @@ if (is_dir($articlesDir)) {
             <tr><th><?= t('author.008') ?></th><th><?= t('author.009') ?></th><th><?= t('author.010') ?></th></tr>
             <?php foreach ($myArticles as $a): ?>
             <tr>
-                <td><a class="inline-link" href="/?article=<?= urlencode($a['id'] ?? '') ?>"><?= htmlspecialchars($a['title'] ?? '无标题') ?></a></td>
+                <td><a class="inline-link" href="/?article=<?= urlencode($a['id'] ?? '') ?>"><?= htmlspecialchars($a['title'] ?? t('author.035')) ?></a></td>
                 <td style="color:var(--text-muted);font-size:0.85em"><?= htmlspecialchars($a['created'] ?? '') ?></td>
                 <td>
                     <span class="tr-entry" data-tr-slug="<?= htmlspecialchars($a['file'] ?? '') ?>"></span>

@@ -2313,9 +2313,9 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                 updatePreview();
             });
         });
-        window.testApiUrl = function() { var url = bgApiUrl.value.trim(); if (!url) return; var result = document.getElementById('apiTestResult'); result.innerHTML = '<span style="color:var(--text-muted);font-size:13px">测试中...</span>'; var img = new Image(); img.onload = function() { previewApiSrc = url; result.innerHTML = '<div class="img-preview-thumb"><img src="'+url+'" style="max-width:200px;max-height:120px"></div><div style="font-size:12px;color:#16a34a;margin-top:4px">✓ API 可用</div>'; updatePreview(); }; img.onerror = function() { result.innerHTML = '<div style="font-size:12px;color:#dc2626">✗ 无法加载图片</div>'; }; img.src = url + (url.indexOf('?')>=0?'&':'?') + '_t=' + Date.now(); };
+        window.testApiUrl = function() { var url = bgApiUrl.value.trim(); if (!url) return; var result = document.getElementById('apiTestResult'); result.innerHTML = '<span style="color:var(--text-muted);font-size:13px">' + TK('js.178') + '</span>'; var img = new Image(); img.onload = function() { previewApiSrc = url; result.innerHTML = '<div class="img-preview-thumb"><img src="'+url+'" style="max-width:200px;max-height:120px"></div><div style="font-size:12px;color:#16a34a;margin-top:4px">' + TK('js.179') + '</div>'; updatePreview(); }; img.onerror = function() { result.innerHTML = '<div style="font-size:12px;color:#dc2626">' + TK('js.180') + '</div>'; }; img.src = url + (url.indexOf('?')>=0?'&':'?') + '_t=' + Date.now(); };
         // v4.2.4：卡片封面 API 测试（仅探测可加载性，实际抓取走服务端池化代理）
-        window.testCardCoverApi = function() { var input = document.getElementById('cardCoverApiInput'); var url = input.value.trim(); if (!url) return; var result = document.getElementById('cardCoverApiTestResult'); result.innerHTML = '<span style="color:var(--text-muted);font-size:13px">测试中...</span>'; var img = new Image(); img.onload = function() { result.innerHTML = '<div class="img-preview-thumb"><img src="'+url+'" style="max-width:200px;max-height:120px"></div><div style="font-size:12px;color:#16a34a;margin-top:4px">✓ 图片可访问</div>'; }; img.onerror = function() { result.innerHTML = '<div style="font-size:12px;color:#dc2626">✗ 无法加载图片</div>'; }; img.src = url + (url.indexOf('?')>=0?'&':'?') + '_t=' + Date.now(); };
+        window.testCardCoverApi = function() { var input = document.getElementById('cardCoverApiInput'); var url = input.value.trim(); if (!url) return; var result = document.getElementById('cardCoverApiTestResult'); result.innerHTML = '<span style="color:var(--text-muted);font-size:13px">' + TK('js.178') + '</span>'; var img = new Image(); img.onload = function() { result.innerHTML = '<div class="img-preview-thumb"><img src="'+url+'" style="max-width:200px;max-height:120px"></div><div style="font-size:12px;color:#16a34a;margin-top:4px">' + TK('js.181') + '</div>'; }; img.onerror = function() { result.innerHTML = '<div style="font-size:12px;color:#dc2626">' + TK('js.180') + '</div>'; }; img.src = url + (url.indexOf('?')>=0?'&':'?') + '_t=' + Date.now(); };
         bgApiUrl.addEventListener('input', function() { previewApiSrc = ''; updatePreview(); });
         blurToggle.addEventListener('change', function() { blurLevelWrap.style.display = blurToggle.checked ? 'block' : 'none'; updatePreview(); });
         blurSlider.addEventListener('input', function() { blurVal.textContent = blurSlider.value + 'px'; updatePreview(); });
@@ -2727,12 +2727,12 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     function submitChallenge() {
         var code = document.getElementById('challengeCodeInput').value.trim().toUpperCase();
         if (!code || code.length < 4) {
-            document.getElementById('challengeError').textContent = '请输入有效的确认码';
+            document.getElementById('challengeError').textContent = TK('js.167');
             document.getElementById('challengeError').style.display = 'block';
             return;
         }
         document.getElementById('submitChallengeBtn').disabled = true;
-        document.getElementById('submitChallengeBtn').textContent = '验证中...';
+        document.getElementById('submitChallengeBtn').textContent = TK('js.168');
         document.getElementById('challengeError').style.display = 'none';
 
         var formData = new FormData();
@@ -2750,19 +2750,19 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         .then(function(r) { return r.json(); })
         .then(function(d) {
             document.getElementById('submitChallengeBtn').disabled = false;
-            document.getElementById('submitChallengeBtn').textContent = '确认并更新';
+            document.getElementById('submitChallengeBtn').textContent = TK('admin.350');
             if (d.success) {
                 closeChallengeModal();
                 startUpdateProgress(d.token);
             } else {
-                document.getElementById('challengeError').textContent = d.error || '验证失败';
+                document.getElementById('challengeError').textContent = d.error || TK('js.095');
                 document.getElementById('challengeError').style.display = 'block';
             }
         })
         .catch(function() {
             document.getElementById('submitChallengeBtn').disabled = false;
-            document.getElementById('submitChallengeBtn').textContent = '确认并更新';
-            document.getElementById('challengeError').textContent = '请求失败，请重试';
+            document.getElementById('submitChallengeBtn').textContent = TK('admin.350');
+            document.getElementById('challengeError').textContent = TK('admin.309');
             document.getElementById('challengeError').style.display = 'block';
         });
     }
@@ -2772,7 +2772,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
         document.getElementById('updateProgressContent').style.display = 'block';
         document.getElementById('sshCommandText').textContent = 'ysm-admin apply-update';
         document.getElementById('upStep1').className = 'update-progress-step active';
-        document.getElementById('upStep1').innerHTML = '<span class="step-icon">⏳</span> 等待 SSH 确认';
+        document.getElementById('upStep1').innerHTML = '<span class="step-icon">⏳</span> ' + TK('js.169');
         document.getElementById('upStep2').className = 'update-progress-step';
         document.getElementById('upStep3').className = 'update-progress-step';
         document.getElementById('upStep4').className = 'update-progress-step';
@@ -2786,26 +2786,26 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
                     currentUpdateStatus = s;
                     if (s.status === 'in_progress') {
                         document.getElementById('upStep1').className = 'update-progress-step completed';
-                        document.getElementById('upStep1').innerHTML = '<span class="step-icon">✓</span> SSH 已确认';
+                        document.getElementById('upStep1').innerHTML = '<span class="step-icon">✓</span> ' + TK('js.170');
                         document.getElementById('upStep2').className = 'update-progress-step active';
-                        document.getElementById('upStep2').innerHTML = '<span class="step-icon">⏳</span> 备份中';
+                        document.getElementById('upStep2').innerHTML = '<span class="step-icon">⏳</span> ' + TK('js.171');
                         document.getElementById('upStep3').className = 'update-progress-step';
                         document.getElementById('upStep4').className = 'update-progress-step';
-                        document.getElementById('updateProgressHint').textContent = 'CLI 正在执行更新...';
+                        document.getElementById('updateProgressHint').textContent = TK('js.172');
                     } else if (s.status === 'completed') {
                         document.getElementById('upStep1').className = 'update-progress-step completed';
-                        document.getElementById('upStep1').innerHTML = '<span class="step-icon">✓</span> SSH 已确认';
+                        document.getElementById('upStep1').innerHTML = '<span class="step-icon">✓</span> ' + TK('js.170');
                         document.getElementById('upStep2').className = 'update-progress-step completed';
-                        document.getElementById('upStep2').innerHTML = '<span class="step-icon">✓</span> 备份完成';
+                        document.getElementById('upStep2').innerHTML = '<span class="step-icon">✓</span> ' + TK('js.173');
                         document.getElementById('upStep3').className = 'update-progress-step completed';
-                        document.getElementById('upStep3').innerHTML = '<span class="step-icon">✓</span> 更新完成';
+                        document.getElementById('upStep3').innerHTML = '<span class="step-icon">✓</span> ' + TK('js.174');
                         document.getElementById('upStep4').className = 'update-progress-step completed';
-                        document.getElementById('upStep4').innerHTML = '<span class="step-icon">✓</span> 完成';
-                        document.getElementById('updateProgressHint').innerHTML = '✅ 更新成功！v' + s.from_version + ' → v' + s.to_version;
+                        document.getElementById('upStep4').innerHTML = '<span class="step-icon">✓</span> ' + TK('js.175');
+                        document.getElementById('updateProgressHint').innerHTML = '✅ ' + TK('js.176') + 'v' + s.from_version + ' → v' + s.to_version;
                         if (updatePollTimer) { clearInterval(updatePollTimer); updatePollTimer = null; }
                         setTimeout(function() { location.reload(); }, 3000);
                     } else if (s.status === 'failed') {
-                        document.getElementById('updateProgressHint').innerHTML = '❌ 更新失败：' + (s.error || '未知错误');
+                        document.getElementById('updateProgressHint').innerHTML = '❌ ' + TK('js.177') + (s.error || TK('editor.070'));
                         if (updatePollTimer) { clearInterval(updatePollTimer); updatePollTimer = null; }
                     }
                 });

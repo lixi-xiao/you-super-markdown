@@ -382,9 +382,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             if ($aSummary === '' && $aBody !== '') {
                 $aSummary = preg_replace('/[#>*_`\[\]()!-]/u', '', $aBody);
                 $aSummary = trim(mb_substr($aSummary, 0, 200));
-                if ($aSummary === '') $aSummary = '（公告正文，点击查看）';
+                if ($aSummary === '') $aSummary = t('station.179');
             }
-            if ($aTitle === '') $aTitle = '公告';
+            if ($aTitle === '') $aTitle = t('js.003');
             addAnnouncement($aType, '', $myId, $aTitle, $aSummary, $aBody);
             auditLog('announce_add', $aTitle, "站长新增公告: {$aTitle}");
             // v3.3.6：公告变更（含 .md 上传导入的正文）触发守护进程立即备份 DB + 文章
@@ -400,11 +400,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             if ($ex) {
                 $aArticle = $ex['article'] ?? '';
                 if ($ex['type'] !== 'update') $aArticle = ''; // 手动公告不保留关联文章
-                if ($aTitle === '') $aTitle = $ex['title'] ?? '公告';
+                if ($aTitle === '') $aTitle = $ex['title'] ?? t('js.003');
                 if ($aSummary === '' && $aBody !== '') {
                     $aSummary = preg_replace('/[#>*_`\[\]()!-]/u', '', $aBody);
                     $aSummary = trim(mb_substr($aSummary, 0, 200));
-                    if ($aSummary === '') $aSummary = '（公告正文，点击查看）';
+                    if ($aSummary === '') $aSummary = t('station.179');
                 }
                 updateAnnouncement($aId, $aArticle, $aTitle, $aSummary, $aBody);
                 auditLog('announce_update', $aId, "站长编辑公告: {$aTitle}");
@@ -486,7 +486,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
         <div class="sidebar-user">
             <div class="sidebar-user-avatar"><?php if (!empty($currentUser['account'])): ?><img src="<?= htmlspecialchars(ysmAvatarUrl($currentUser['username'] ?? ($currentUser['account'] ?? ''), 100)) ?>" alt="avatar"><?php else: ?><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?php endif; ?></div>
             <div class="sidebar-user-info">
-                <div class="sidebar-user-name"><?= htmlspecialchars($currentUser['nickname'] ?? '站长') ?></div>
+                <div class="sidebar-user-name"><?= htmlspecialchars($currentUser['nickname'] ?? t('admin.024')) ?></div>
                 <div class="sidebar-user-role"><?= t('station.003') ?></div>
             </div>
         </div>
@@ -860,7 +860,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <?php elseif ($tab === 'banlog'): ?>
     <?php
     // v3.3.9：封禁/登录/越权三个只读日志列表均支持分页 + 搜索（与超管后台一致，默认每页 10 条）
-    $typeLabels = ['register' => '注册', 'comment' => '评论', 'login' => '登录'];
+    $typeLabels = ['register' => t('home.093'), 'comment' => t('admin.067'), 'login' => t('home.026')];
     $allBans = loadBansList();
     $allLogins = array_reverse(loadLogsList());
     $allUnauth = db_all('SELECT * FROM unauthorized ORDER BY time DESC');
@@ -1029,7 +1029,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
             <tr><th><?= t('station.059') ?></th><th><?= t('station.060') ?></th><th><?= t('station.061') ?></th><th><?= t('station.062') ?></th><th><?= t('station.063') ?></th></tr>
             <?php foreach ($threatRows as $tr): $locked = (int)$tr['locked_left']; ?>
             <tr>
-                <td><code><?= htmlspecialchars($tr['dim_type'] === 'ip' ? 'IP: ' . $tr['dim_key'] : '指纹: ' . substr($tr['dim_key'], 0, 16) . '…') ?></code></td>
+                <td><code><?= htmlspecialchars($tr['dim_type'] === 'ip' ? 'IP: ' . $tr['dim_key'] : t('station.180') . ': ' . substr($tr['dim_key'], 0, 16) . '…') ?></code></td>
                 <td><b><?= $tr['score'] ?></b></td>
                 <td><?= $tr['cnt'] ?></td>
                 <td><?= date('m-d H:i', (int)$tr['last_ts']) ?></td>

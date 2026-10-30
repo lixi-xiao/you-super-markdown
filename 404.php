@@ -77,11 +77,11 @@ $bgCardOpacity = intval($siteCfg['bg_card_opacity'] ?? 100);?>
         <div class="nf-actions">
             <a href="/" class="btn btn-primary">
                 <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-                返回首页
+                <?= t('home.046') ?>
             </a>
             <button type="button" class="btn btn-outline" onclick="history.length > 1 ? history.back() : location.href='/'">
                 <svg viewBox="0 0 24 24"><polyline points="11 17 6 12 11 7"/><line x1="18" y1="12" x2="6" y2="12"/></svg>
-                返回上一页
+                <?= t('err.003') ?>
             </button>
         </div>
     </div>

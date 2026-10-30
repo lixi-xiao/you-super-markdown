@@ -946,6 +946,9 @@ return [
     'links.022' => 'Fetched; you can edit and save',
     'links.023' => 'Fetch failed',
     'links.024' => 'Checking',
+    'links.027' => 'Site name',
+    'links.029' => 'Site URL',
+    'links.031' => 'Description (optional)',
     // ---- api ----
     'api.901' => 'CSRF validation failed',
     'api.902' => 'Sent too frequently, please try again later',

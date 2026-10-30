@@ -1595,5 +1595,5 @@ return [
     'ai.086' => 'and it is saved only after passing the connectivity test. Key usage cost is borne by the user; the site does not control cost.',
     'ai.087' => 'Models and length',
     'ai.088' => '"Max input" is the character limit of processed text (empty falls back to 20000); "Max output" is in tokens (empty means provider default); "Timeout / stream timeout" in seconds (empty falls back to 60 / 120).',
-    'ai.089' => 'Clear someone's AI key (clear only, cannot view)',
+    'ai.089' => 'Clear the AI key of a user (clear only, cannot view)',
 ];

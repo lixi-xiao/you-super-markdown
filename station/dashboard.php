@@ -1308,48 +1308,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="page-header">
         <div class="page-title">
             <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            友站管理
+            <?= t('admin.471') ?>
         </div>
-        <div class="page-subtitle"><?= t('links.025') ?></div>
+        <div class="page-subtitle"><?= t('station.101') ?></div>
     </div>
     <div id="linksAdmin" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>">
+        <div class="link-stats">
+            <button type="button" class="link-stat" data-jump="linkPendingCard">
+                <span class="n" id="lsPending">0</span><span class="l"><?= t('links.dash_pending') ?></span>
+            </button>
+            <button type="button" class="link-stat" data-jump="linkTableCard">
+                <span class="n" id="lsActive">0</span><span class="l"><?= t('links.dash_active') ?></span>
+            </button>
+            <button type="button" class="link-stat" data-jump="linkRejectedCard">
+                <span class="n" id="lsRejected">0</span><span class="l"><?= t('links.dash_rejected') ?></span>
+            </button>
+        </div>
         <div class="card">
-            <div class="card-title" id="linkFormTitle"><?= t('links.026') ?></div>
+            <div class="card-title"><?= t('links.dash_review_setting') ?></div>
+            <label class="link-switch">
+                <input type="checkbox" id="linkReviewRequired">
+                <span><?= t('links.dash_review_label') ?></span>
+            </label>
+            <div class="form-hint"><?= t('links.dash_review_hint') ?></div>
+        </div>
+        <div class="card" id="linkPendingCard">
+            <div class="card-title"><?= t('links.dash_pending_title') ?> <span id="linkPendingCount">(0)</span></div>
+            <div id="linkPendingList" class="link-list"></div>
+        </div>
+        <div class="card" id="linkRejectedCard">
+            <div class="card-title"><?= t('links.dash_rejected_title') ?> <span id="linkRejectedCount">(0)</span></div>
+            <div id="linkRejectedList" class="link-list"></div>
+        </div>
+        <div class="card">
+            <div class="card-title" id="linkFormTitle"><?= t('station.102') ?></div>
             <div class="form-group">
-                <label class="form-label"><?= t('links.027') ?></label>
-                <input class="form-input" id="linkName" maxlength="60" placeholder="<?= t('links.028') ?>">
+                <label class="form-label"><?= t('station.103') ?></label>
+                <input class="form-input" id="linkName" maxlength="60" placeholder="<?= t('station.104') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label"><?= t('links.029') ?></label>
+                <label class="form-label"><?= t('station.105') ?></label>
                 <div class="api-url-group">
                     <input class="form-input" id="linkUrl" placeholder="https://example.com">
-                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn"><?= t('links.030') ?></button>
+                    <button class="btn btn-sm btn-outline" type="button" id="linkFetchBtn"><?= t('station.106') ?></button>
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label"><?= t('links.031') ?></label>
-                <input class="form-input" id="linkDesc" maxlength="200" placeholder="<?= t('links.032') ?>">
+                <label class="form-label"><?= t('station.107') ?></label>
+                <input class="form-input" id="linkDesc" maxlength="200" placeholder="<?= t('station.108') ?>">
             </div>
             <div class="form-group">
-                <label class="form-label"><?= t('links.033') ?></label>
+                <label class="form-label"><?= t('station.109') ?></label>
                 <input class="form-input" id="linkFavicon" placeholder="https://example.com/favicon.ico">
             </div>
             <div class="form-group">
-                <label class="form-label"><?= t('links.034') ?></label>
+                <label class="form-label"><?= t('station.110') ?></label>
                 <input class="form-input" id="linkSort" type="number" value="0" style="max-width:160px">
             </div>
             <div id="linkFormMsg" class="form-hint"></div>
             <div style="display:flex;justify-content:flex-end;gap:10px">
-                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none"><?= t('links.035') ?></button>
-                <button type="button" class="btn btn-primary" id="linkSaveBtn"><?= t('links.036') ?></button>
+                <button type="button" class="btn btn-outline" id="linkCancelBtn" style="display:none"><?= t('station.111') ?></button>
+                <button type="button" class="btn btn-primary" id="linkSaveBtn"><?= t('station.100') ?></button>
             </div>
             <input type="hidden" id="linkId" value="">
         </div>
-        <div class="card">
-            <div class="card-title"><?= t('links.037') ?></div>
+        <div class="card" id="linkTableCard">
+            <div class="card-title"><?= t('station.112') ?></div>
             <div class="table-wrap">
-                <table id="linksTable">
-                    <tr><th><?= t('links.038') ?></th><th><?= t('links.039') ?></th><th><?= t('links.040') ?></th><th><?= t('links.041') ?></th><th><?= t('links.042') ?></th></tr>
+                <table id="linksTable" class="tbl-wide">
+                    <tr><th><?= t('station.113') ?></th><th><?= t('station.114') ?></th><th><?= t('station.080') ?></th><th><?= t('station.115') ?></th><th><?= t('station.018') ?></th></tr>
                 </table>
             </div>
         </div>

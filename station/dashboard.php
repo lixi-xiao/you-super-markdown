@@ -1294,7 +1294,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['logout'])) {
     <div class="card">
         <div class="card-title"><?= t('ai.059') ?></div>
         <div class="form-hint">
-            你选择的文章内容将发送至所选第三方服务商进行处理；额度由你的账号自担。<br>
+            <?= t('ai.083') ?><br>
             <?= t('ai.060') ?><b><?= t('ai.061') ?></b><?= t('ai.062') ?>
         </div>
     </div>

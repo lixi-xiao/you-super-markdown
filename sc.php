@@ -727,7 +727,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
         </div>
         <?php else: ?>
         <div class="table-wrap">
-        <table>
+        <table class="tbl-xwide">
             <tr><th><?= t('editor.039') ?></th><th><?= t('editor.040') ?></th><th><?= t('editor.041') ?></th><th><?= t('editor.042') ?></th><th><?= t('editor.043') ?></th><th><?= t('editor.044') ?></th></tr>
             <?php foreach ($docItems as $f): ?>
             <?php

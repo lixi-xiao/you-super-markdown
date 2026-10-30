@@ -3618,11 +3618,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
-            AI 功能开关
+            <?= t('ai.084') ?>
         </div>
         <div class="form-hint" style="margin-bottom:12px">
-            仅"站长 / 写作者"可参与创作（超管不参与，入口不显示）。用户需在各自后台自行配置个人 Key（绑定其站内账号，密文存储、明文永不回显），
-            且必须通过"连通性测试"才会保存。Key 由用户自担额度，站点不做成本控制。
+            <?= t('ai.085') ?>
+            <?= t('ai.086') ?>
         </div>
         <form method="post" class="need-challenge">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -3673,11 +3673,11 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
-            模型与长度
+            <?= t('ai.087') ?>
         </div>
         <div class="form-hint" style="margin-bottom:12px">
             <?= t('ai.040') ?><b><?= t('ai.064') ?></b>）。<br>
-            「单次输入上限」为处理后正文字符上限（留空回退 20000）；「最大输出」为 tokens（留空则不传，用服务商默认）；「超时 / 流式超时」为秒（留空回退 60 / 120）。
+            <?= t('ai.088') ?>
         </div>
         <form method="post" class="need-challenge" id="aiModelsForm">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
@@ -3717,7 +3717,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <div class="card">
         <div class="card-title">
             <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            清除某人的 AI Key（仅清除，不能查看）
+            <?= t('ai.089') ?>
         </div>
         <div class="form-hint" style="margin-bottom:12px">
             <?= t('ai.051') ?><b><?= t('ai.052') ?></b><?= t('ai.053') ?>

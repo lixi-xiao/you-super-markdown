@@ -61,7 +61,7 @@
                     <?php foreach ($aiBuiltin as $pid => $p): ?>
                     <tr>
                         <td><input type="checkbox" name="ai_providers[]" value="<?= htmlspecialchars($pid) ?>" <?= in_array($pid, $aiEnabledIds, true) ? 'checked' : '' ?> style="width:16px;height:16px;accent-color:var(--accent)"></td>
-                        <td><?= htmlspecialchars($p['label']) ?></td>
+                        <td><?= !empty($p['label_key']) ? t($p['label_key']) : htmlspecialchars($p['label']) ?></td>
                         <td><code style="font-size:0.85em"><?= htmlspecialchars($p['base_url']) ?></code></td>
                     </tr>
                     <?php endforeach; ?>
@@ -90,7 +90,7 @@
             <?php foreach ($aiBuiltin as $pid => $p): $rows = isset($aiCatalog[$pid]) ? array_values($aiCatalog[$pid]) : []; ?>
             <div class="ai-model-provider">
                 <div class="ai-model-provider-head">
-                    <span class="ai-model-provider-name"><?= htmlspecialchars($p['label']) ?></span>
+                    <span class="ai-model-provider-name"><?= !empty($p['label_key']) ? t($p['label_key']) : htmlspecialchars($p['label']) ?></span>
                     <button type="button" class="btn btn-sm btn-outline" onclick="aiModelAddRow('<?= htmlspecialchars($pid) ?>')"><?= t('ai.065') ?></button>
                 </div>
                 <div class="table-wrap">

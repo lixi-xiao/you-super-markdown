@@ -56,8 +56,11 @@ if ($action === 'ai_config' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         'providers' => aiProvidersForClient(),
         'models' => aiPublicModels(),
         'actions' => aiActions(),
+        'action_keys' => aiActionLabelKeys(),
         'styles' => aiStyleOptions(),
+        'style_keys' => aiStyleLabelKeys(),
         'langs' => aiLangOptions(),
+        'lang_keys' => aiLangLabelKeys(),
         'privacy_ack' => aiPrivacyAcked($actor['id']),
         'privacy_version' => aiPrivacyVersion(),
         'keys' => aiKeysForClient($actor['id']),
@@ -137,7 +140,7 @@ if ($action === 'ai_key_test' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     [$ok, $reason] = aiConnectivityTest($provider, $key, $model);
     auditLog('ai_key_test', $provider, '连通性测试：' . ($ok ? '成功' : '失败'), $ok ? 'success' : 'failed');
-    sendJson(['success' => $ok, 'ok' => $ok, 'message' => $ok ? '连接成功' : $reason]);
+    sendJson(['success' => $ok, 'ok' => $ok, 'message' => $ok ? tn('ai.err_test_ok') : $reason]);
 }
 
 // POST ai_key_save：必须先做连通性测试，通过才固化（失败不落库，返回可读原因）
@@ -275,7 +278,7 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? (string)($res['message'] ?? aiBreakerNotice($provider))
                 : aiReadableError($res['code'], $res['err'], $res['raw']);
             auditLog('ai_call', $provider . '/' . $model, "动作={$act}; 耗时={$ms}ms; 失败", 'failed');
-            sendJson(['success' => false, 'error' => $reason !== '' ? $reason : '调用失败',
+            sendJson(['success' => false, 'error' => $reason !== '' ? $reason : tn('ai.err_call_failed'),
                       'degraded' => !empty($res['degraded']),
                       'retry_after' => (int)($res['retry_after'] ?? 0),
                       'breaker' => aiBreakerMap()], !empty($res['degraded']) ? 503 : 400);
@@ -290,7 +293,7 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('X-Accel-Buffering: no');
     while (ob_get_level() > 0) { @ob_end_flush(); }
     if (!function_exists('curl_init')) {
-        aiSseEmit(['event' => 'error', 'message' => '服务器不支持流式传输']);
+        aiSseEmit(['event' => 'error', 'message' => tn('ai.err_stream_unsupported')]);
         exit;
     }
     aiSseEmit(['event' => 'start', 'provider' => $provider, 'model' => $model]);
@@ -346,7 +349,7 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acc === '' && ($ok === false || $code >= 400)) {
         $degraded = aiBreakerOpen($provider);
         $reason = $degraded ? aiBreakerNotice($provider) : aiReadableError($code, $cerr, $rawHead);
-        aiSseEmit(['event' => 'error', 'message' => $reason !== '' ? $reason : '调用失败',
+        aiSseEmit(['event' => 'error', 'message' => $reason !== '' ? $reason : tn('ai.err_call_failed'),
                    'degraded' => $degraded, 'retry_after' => aiBreakerRemaining($provider)]);
         auditLog('ai_call', $provider . '/' . $model, "动作={$act}; 耗时={$ms}ms; 失败", 'failed');
     } else {

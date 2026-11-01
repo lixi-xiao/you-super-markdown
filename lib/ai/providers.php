@@ -7,10 +7,10 @@
 /** 固定 base_url 的服务商预设白名单（唯一真源；使用者只能选，不能改 base_url） */
 function aiBuiltinProviders() {
     return [
-        'deepseek'  => ['id' => 'deepseek',  'label' => 'DeepSeek',              'base_url' => 'https://api.deepseek.com/v1'],
-        'mimo-payg' => ['id' => 'mimo-payg', 'label' => 'MiMo（按量付费）',       'base_url' => 'https://api.xiaomimimo.com/v1'],
-        'mimo-plan' => ['id' => 'mimo-plan', 'label' => 'MiMo（Token Plan 订阅）', 'base_url' => 'https://token-plan-cn.xiaomimimo.com/v1'],
-        'qwen'      => ['id' => 'qwen',      'label' => '千问（DashScope 兼容）',   'base_url' => 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
+        'deepseek'  => ['id' => 'deepseek',  'label' => 'DeepSeek',              'label_key' => 'ai.prov_deepseek',  'base_url' => 'https://api.deepseek.com/v1'],
+        'mimo-payg' => ['id' => 'mimo-payg', 'label' => 'MiMo（按量付费）',       'label_key' => 'ai.prov_mimo_payg', 'base_url' => 'https://api.xiaomimimo.com/v1'],
+        'mimo-plan' => ['id' => 'mimo-plan', 'label' => 'MiMo（Token Plan 订阅）', 'label_key' => 'ai.prov_mimo_plan', 'base_url' => 'https://token-plan-cn.xiaomimimo.com/v1'],
+        'qwen'      => ['id' => 'qwen',      'label' => '千问（DashScope 兼容）',   'label_key' => 'ai.prov_qwen',      'base_url' => 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
     ];
 }
 /** 超管维护的启用白名单（config.ai_providers = 启用的 provider id 列表）；字段缺失视为全部启用 */
@@ -27,7 +27,7 @@ function aiEnabledProviderIds() {
 function aiProvidersForClient() {
     $all = aiBuiltinProviders();
     $out = [];
-    foreach (aiEnabledProviderIds() as $id) $out[] = ['id' => $id, 'label' => $all[$id]['label']];
+    foreach (aiEnabledProviderIds() as $id) $out[] = ['id' => $id, 'label' => $all[$id]['label'], 'label_key' => $all[$id]['label_key'] ?? ''];
     return $out;
 }
 /** 取服务商 base_url（仅白名单内且已启用；否则空——调用方据此拒绝） */

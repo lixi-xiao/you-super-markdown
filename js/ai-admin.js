@@ -7,6 +7,12 @@
 (function () {
     'use strict';
     var T = window.ysmT || function (s) { return s; };
+    // v6.4.6-beta：服务商展示名按后端下发的 label_key 取词（缺失时回落中文 label）
+    function tk(k, fb) {
+        if (window.TK) { var v = window.TK(k); if (v && v !== k) return v; }
+        return fb;
+    }
+    function provLabel(p) { return p && p.label_key ? tk(p.label_key, p.label) : (p ? p.label : ''); }
     var box = document.getElementById('aiKeyManager');
     if (!box) return;
     var csrf = box.getAttribute('data-csrf') || '';
@@ -80,7 +86,7 @@
     // 账号级思考模式开关卡（默认关闭）
     function thinkCard() {
         var supported = [];
-        providers.forEach(function (p) { if (thinkingSupport[p.id] !== false) supported.push(p.label); });
+        providers.forEach(function (p) { if (thinkingSupport[p.id] !== false) supported.push(provLabel(p)); });
         var note = supported.length
             ? T('支持思考模式的服务商：{n}').replace('{n}', function () { return supported.join(T('、')); })
             : T('当前所有服务商均不支持思考模式开关');
@@ -100,7 +106,7 @@
             var st = state[p.id] || { configured: false, hint: T('未配置'), model: '', is_default: false };
             html += '<div class="ai-key-card' + (st.is_default ? ' is-default' : '') + '" data-provider="' + esc(p.id) + '">';
             html += '<div class="ai-key-head">'
-                + '<span class="ai-key-name">' + esc(p.label) + '</span>'
+                + '<span class="ai-key-name">' + esc(provLabel(p)) + '</span>'
                 + '<span class="ai-key-state' + (st.configured ? ' is-on' : '') + '">'
                 + esc(st.hint) + (st.is_default ? ' ' + T('· 默认') : '') + '</span></div>';
             html += '<div class="ai-key-grid">';

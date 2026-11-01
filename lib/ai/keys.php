@@ -19,13 +19,14 @@ function aiKeysForClient($uid) {
         $r = $rows[$id] ?? null;
         if ($r) {
             $plain = aiDecryptKey($r['key_cipher']);
-            $hint = $plain !== '' ? '已配置(' . aiMaskKey($plain) . ')' : '已配置';
+            $hint = $plain !== '' ? tn('ai.key_configured', ['k' => aiMaskKey($plain)]) : tn('ai.key_configured_plain');
         } else {
-            $hint = '未配置';
+            $hint = tn('ai.key_missing');
         }
         $out[] = [
             'provider' => $id,
             'label' => $all[$id]['label'],
+            'label_key' => $all[$id]['label_key'] ?? '',
             'configured' => $r ? true : false,
             'hint' => $hint,
             'model' => $r['model'] ?? '',

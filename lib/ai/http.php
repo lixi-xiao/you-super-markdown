@@ -8,20 +8,20 @@
  *  绝不回传上游原始响应体片段；$raw 形参仅为保持调用签名不变）。 */
 function aiReadableError($httpCode, $curlErr = '', $raw = '') {
     if ($curlErr !== '') {
-        if (stripos($curlErr, 'timed out') !== false || stripos($curlErr, 'timeout') !== false) return '连接超时（网络不可达或服务商无响应）';
-        if (stripos($curlErr, 'resolve') !== false || stripos($curlErr, 'Could not resolve') !== false) return '网络不可达（域名解析失败）';
-        return '网络不可达（连接失败）';
+        if (stripos($curlErr, 'timed out') !== false || stripos($curlErr, 'timeout') !== false) return tn('ai.err_conn_timeout');
+        if (stripos($curlErr, 'resolve') !== false || stripos($curlErr, 'Could not resolve') !== false) return tn('ai.err_dns');
+        return tn('ai.err_network');
     }
     switch ((int)$httpCode) {
-        case 401: return '鉴权失败（Key 无效或无权限，HTTP 401）';
-        case 403: return '鉴权失败（Key 被拒绝访问该模型/服务，HTTP 403）';
-        case 404: return '接口或模型不存在（HTTP 404）';
-        case 400: return '请求被拒绝（多为模型名不存在，HTTP 400）';
-        case 429: return '请求过于频繁或额度不足（HTTP 429）';
-        case 500: case 502: case 503: case 504: return '服务商暂时不可用（HTTP ' . (int)$httpCode . '）';
+        case 401: return tn('ai.err_http_401');
+        case 403: return tn('ai.err_http_403');
+        case 404: return tn('ai.err_http_404');
+        case 400: return tn('ai.err_http_400');
+        case 429: return tn('ai.err_http_429');
+        case 500: case 502: case 503: case 504: return tn('ai.err_http_5xx', ['code' => (int)$httpCode]);
     }
     if ($httpCode >= 200 && $httpCode < 300) return '';
-    return '调用失败（HTTP ' . (int)$httpCode . '）';
+    return tn('ai.err_http_other', ['code' => (int)$httpCode]);
 }
 
 /** v6.2.0-beta：第三方依赖降级熔断（按服务商维度，全站共享）。
@@ -51,7 +51,7 @@ function aiBreakerRemaining($pid) {
 /** 打开期间的统一可读提示（含剩余分钟数，不暴露上游细节） */
 function aiBreakerNotice($pid) {
     $m = max(1, (int)ceil(aiBreakerRemaining($pid) / 60));
-    return 'AI 服务暂时不可用（已熔断，约 ' . $m . ' 分钟后自动恢复）';
+    return tn('ai.err_breaker', ['n' => $m]);
 }
 /** 记录一次外呼结果，维护熔断状态 */
 function aiBreakerRecord($pid, $ok, $code = 0, $curlErr = '') {
@@ -109,7 +109,7 @@ function aiHttpJson($url, $apiKey, $payload, $timeout = 60) {
     $parts = parse_url($url);
     $host = strtolower($parts['host'] ?? '');
     if ($host === '' || isPrivateHost($host)) {
-        return ['ok' => false, 'code' => 0, 'data' => null, 'raw' => '', 'err' => '目标地址不可用', 'blocked' => true];
+        return ['ok' => false, 'code' => 0, 'data' => null, 'raw' => '', 'err' => tn('ai.err_blocked'), 'blocked' => true];
     }
     $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
     $headers = ['Content-Type: application/json', 'Authorization: Bearer ' . $apiKey];
@@ -127,7 +127,7 @@ function aiHttpJson($url, $apiKey, $payload, $timeout = 60) {
         $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
         curl_close($ch);
-        if ($raw === false) return ['ok' => false, 'code' => $code, 'data' => null, 'raw' => '', 'err' => $err ?: '请求失败'];
+        if ($raw === false) return ['ok' => false, 'code' => $code, 'data' => null, 'raw' => '', 'err' => $err ?: tn('ai.err_request_failed')];
         $data = json_decode($raw, true);
         return ['ok' => $code >= 200 && $code < 300, 'code' => $code, 'data' => is_array($data) ? $data : null, 'raw' => (string)$raw, 'err' => ''];
     }
@@ -139,7 +139,7 @@ function aiHttpJson($url, $apiKey, $payload, $timeout = 60) {
         'ignore_errors' => true,
     ]]);
     $raw = @file_get_contents($url, false, $ctx);
-    if ($raw === false) return ['ok' => false, 'code' => 0, 'data' => null, 'raw' => '', 'err' => '请求失败'];
+    if ($raw === false) return ['ok' => false, 'code' => 0, 'data' => null, 'raw' => '', 'err' => tn('ai.err_request_failed')];
     $code = 0;
     foreach ($http_response_header ?? [] as $h) { if (preg_match('#^HTTP/\S+\s+(\d{3})#', $h, $m)) $code = (int)$m[1]; }
     $data = json_decode($raw, true);
@@ -150,9 +150,9 @@ function aiHttpJson($url, $apiKey, $payload, $timeout = 60) {
  *  成功返回 [true,'ok']，失败返回 [false, 可读原因]。绝不落库。 */
 function aiConnectivityTest($providerId, $apiKey, $model) {
     $base = aiProviderBaseUrl($providerId);
-    if ($base === '') return [false, '该服务商未启用或不存在'];
+    if ($base === '') return [false, tn('ai.err_provider_unavailable')];
     if (trim((string)$apiKey) === '') return [false, tn('ai.err_key_required')];
-    if (trim((string)$model) === '') return [false, '请填写模型名'];
+    if (trim((string)$model) === '') return [false, tn('ai.err_model_required')];
     $url = rtrim($base, '/') . '/chat/completions';
     $payload = [
         'model' => trim($model),
@@ -162,8 +162,8 @@ function aiConnectivityTest($providerId, $apiKey, $model) {
     ];
     // 管理端主动探测：忽略熔断（成功即闭合），但不跳过安全校验
     $res = aiHttpProvider($providerId, $url, trim($apiKey), $payload, 30, true);
-    if (!empty($res['blocked'])) return [false, '目标地址不可用（已被安全策略拦截）'];
+    if (!empty($res['blocked'])) return [false, tn('ai.err_blocked_policy')];
     if ($res['ok']) return [true, 'ok'];
     $reason = aiReadableError($res['code'], $res['err'], $res['raw']);
-    return [false, $reason !== '' ? $reason : '调用失败'];
+    return [false, $reason !== '' ? $reason : tn('ai.err_call_failed')];
 }

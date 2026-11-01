@@ -10,6 +10,15 @@
 (function() {
     var T = window.ysmT || function(s) { return s; };
     var $ = function(id) { return document.getElementById(id); };
+    // v6.4.6-beta：动作/风格/目标语言的展示名走服务端下发的取词映射（action_keys / style_keys / lang_keys）；
+    //   取值本身仍是中文（白名单与提示词口径不变），JS 内不再硬编码中文文案。
+    var labelKeys = { act: {}, opt: {} };
+    function tk(k, fb) {
+        if (window.TK) { var v = window.TK(k); if (v && v !== k) return v; }
+        return fb;
+    }
+    function trLabel(s) { var k = labelKeys.opt[s]; return k ? tk(k, s) : s; }
+    function actLabel(id, fb) { var k = labelKeys.act[id]; return k ? tk(k, fb) : fb; }
     var drawer = $('aiDrawer');
     var ta = $('editContent');
     if (!drawer || !ta) return;
@@ -95,20 +104,22 @@
         if (cfg.privacy_version && $('aiPrivacyVer')) $('aiPrivacyVer').textContent = cfg.privacy_version;
         // v5.4.2-beta：先套用本地记住的动作（决定 chip 高亮），再构建表单
         var pref = loadPref();
+        labelKeys.act = cfg.action_keys || {};
+        labelKeys.opt = Object.assign({}, cfg.style_keys || {}, cfg.lang_keys || {});
         if (pref.action && cfg.actions && cfg.actions[pref.action] !== undefined) curAction = pref.action;
         var chips = '', i;
         for (var k in cfg.actions) {
-            chips += '<button type="button" class="ai-chip' + (k === curAction ? ' active' : '') + '" data-action="' + k + '">' + esc(cfg.actions[k]) + '</button>';
+            chips += '<button type="button" class="ai-chip' + (k === curAction ? ' active' : '') + '" data-action="' + k + '">' + esc(actLabel(k, cfg.actions[k])) + '</button>';
         }
         $('aiActionChips').innerHTML = chips;
         var so = '';
-        cfg.styles.forEach(function(s) { so += '<option value="' + esc(s) + '">' + esc(s) + '</option>'; });
+        cfg.styles.forEach(function(s) { so += '<option value="' + esc(s) + '">' + esc(trLabel(s)) + '</option>'; });
         $('aiStyle').innerHTML = so;
         var lo = '';
-        cfg.langs.forEach(function(s) { lo += '<option value="' + esc(s) + '">' + esc(s) + '</option>'; });
+        cfg.langs.forEach(function(s) { lo += '<option value="' + esc(s) + '">' + esc(trLabel(s)) + '</option>'; });
         $('aiLang').innerHTML = lo;
         var po = '';
-        cfg.providers.forEach(function(p) { po += '<option value="' + esc(p.id) + '">' + esc(p.label) + '</option>'; });
+        cfg.providers.forEach(function(p) { po += '<option value="' + esc(p.id) + '">' + esc(p.label_key ? tk(p.label_key, p.label) : p.label) + '</option>'; });
         $('aiProvider').innerHTML = po;
         // 套用记住的服务商 / 风格 / 语言（仅当仍在候选集合内）
         if (pref.provider) { for (i = 0; i < cfg.providers.length; i++) if (cfg.providers[i].id === pref.provider) $('aiProvider').value = pref.provider; }

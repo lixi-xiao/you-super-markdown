@@ -19,6 +19,17 @@ function aiStyleOptions() {
 function aiLangOptions() {
     return ['英文', '简体中文', '繁体中文', '日文', '韩文'];
 }
+/** v6.4.6-beta：展示层取词映射（取值本身仍是中文——白名单与提示词口径不变，只用于 UI 翻译）。
+ *  动作按 id 映射；风格/目标语言按「中文取值」映射，前端用服务端下发的这份表，避免硬编码中文。 */
+function aiActionLabelKeys() {
+    return ['polish' => 'ai.act_polish', 'proofread' => 'ai.act_proofread', 'style' => 'ai.act_style', 'translate' => 'ai.act_translate'];
+}
+function aiStyleLabelKeys() {
+    return ['正式公文' => 'ai.style_formal', '口语科普' => 'ai.style_casual', '简明要点' => 'ai.style_brief', '文艺抒情' => 'ai.style_literary', '商务邮件' => 'ai.style_business'];
+}
+function aiLangLabelKeys() {
+    return ['英文' => 'ai.lang_en', '简体中文' => 'ai.lang_zh_cn', '繁体中文' => 'ai.lang_zh_tw', '日文' => 'ai.lang_ja', '韩文' => 'ai.lang_ko'];
+}
 /** 按动作构造服务端固定提示词（不接受任意自定义 prompt，避免被滥用）。
  *  v5.4.3-beta.2 定稿：system = 基座 + 动作追加；用户选中文本仍只作为 user 消息。 */
 function aiBuildMessages($action, $text, $style = '', $lang = '') {

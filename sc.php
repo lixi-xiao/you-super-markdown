@@ -946,6 +946,13 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 <?php endif; ?>
 
 <script>
+// v6.3.20：弹窗统一挂到 body —— 避免被编辑器左右栏的层叠上下文/包含块限制，
+//           导致遮罩只盖住一部分、右侧内容仍高亮。
+(function () {
+    document.querySelectorAll('.modal-overlay').forEach(function (m) {
+        if (m.parentNode !== document.body) document.body.appendChild(m);
+    });
+})();
 function closeModalById(id) { document.getElementById(id).classList.remove('active'); }
 document.querySelectorAll('.modal-overlay').forEach(function(m) {
     m.addEventListener('click', function(e) { if (e.target === m) m.classList.remove('active'); });

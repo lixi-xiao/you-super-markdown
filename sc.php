@@ -1178,9 +1178,11 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
 });
 </script>
 <?php // v6.4.0：AI 编辑器脚本挂载点（beta 独有；master 无该文件时自动跳过） ?>
+<?php if ($aiToolEnabled): // v6.4.3-beta：AI 关闭时不加载浮层相关脚本 ?>
 <?php if (is_file(__DIR__ . '/js/fp.js')): ?><script src="js/fp.js?v=<?= @filemtime(__DIR__ . '/js/fp.js') ?>"></script><?php endif; ?>
 <?php if (is_file(__DIR__ . '/js/ai-editor.js')): ?><script src="js/ai-editor.js?v=<?= @filemtime(__DIR__ . '/js/ai-editor.js') ?>"></script><?php endif; ?>
 <?php if (is_file(__DIR__ . '/js/translate-admin.js')): ?><script src="js/translate-admin.js?v=<?= @filemtime(__DIR__ . '/js/translate-admin.js') ?>"></script><?php endif; ?>
+<?php endif; ?>
 <!-- v6.3.2：Markdown 正文预览；v6.3.6：图表统一走 mermaid-loader（预加载 + 本地 SVG 缓存） -->
 <script src="js/mermaid-loader.js?v=<?= @filemtime(__DIR__ . '/js/mermaid-loader.js') ?>"></script>
 <script src="js/md-preview.js?v=<?= @filemtime(__DIR__ . '/js/md-preview.js') ?>"></script>

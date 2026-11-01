@@ -72,6 +72,8 @@ $tab = $_GET['tab'] ?? 'articles';
 if (!in_array($tab, ['articles', 'profile', 'ai'], true)) $tab = 'articles';
 // v6.4.3：AI 面板文件不存在（主线无 lib/ai）时回退，避免 ?tab=ai 空白页
 if ($tab === 'ai' && !is_file(__DIR__ . '/../lib/ai/views/panel_author.php')) $tab = 'articles';
+// v6.4.3-beta：AI 未对写作者开放时回退，避免关闭后仍可经 URL 直接进入 AI 面板
+if ($tab === 'ai' && !aiRoleAllowed(ROLE_AUTHOR)) $tab = 'articles';
 $msg = $_GET['msg'] ?? '';
 
 // v2.6.3：写作者修改个人信息（昵称/签名/新密码）；v2.10.0：扩展头像上传 + 邮箱更换
@@ -507,6 +509,8 @@ exit;
     report();
 })();
 </script>
+<?php if (aiRoleAllowed(ROLE_AUTHOR) && $tab === 'articles'): // v6.4.3-beta：仅在「我的文章」且 AI 可用时加载译本脚本 ?>
 <script src="../js/translate-admin.js?v=<?= @filemtime(__DIR__ . '/../js/translate-admin.js') ?>"></script>
+<?php endif; ?>
 </body>
 </html>

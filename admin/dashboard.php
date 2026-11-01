@@ -1117,10 +1117,12 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
             <?= t('admin.476') ?>
         </a>
+        <?php if (!empty($config['ai_enabled'])): // v6.4.3-beta：AI 总开关关闭时不显示入口 ?>
         <a href="dashboard.php?tab=ai" class="sidebar-link <?= ($_GET['tab'] ?? '') === 'ai' ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24"><path d="M12 2l2.4 5.2L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-1.8z"/></svg>
             <?= t('ai.067') ?>
         </a>
+        <?php endif; ?>
         <a href="#" onclick="bindLogoutSubmit(event)" class="sidebar-link danger">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             <?= t('admin.480') ?>
@@ -1165,6 +1167,8 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     if (!in_array($tab, ['overview', 'users', 'logs', 'config', 'security', 'ui', 'update', 'guard', 'data', 'hfish', 'mail', 'verify', 'threat', 'ai', 'links'], true)) $tab = 'overview';
     // v6.4.3：AI 面板文件不存在（主线无 lib/ai）时回退，避免 ?tab=ai 空白页
     if ($tab === 'ai' && !is_file(__DIR__ . '/../lib/ai/views/panel_admin.php')) $tab = 'overview';
+    // v6.4.3-beta：AI 总开关关闭时回退，避免关闭后仍可经 URL 直接进入 AI 面板
+    if ($tab === 'ai' && empty($config['ai_enabled'])) $tab = 'overview';
     $superCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_SUPER_ADMIN));
     $stationCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_STATION_ADMIN));
     $authorCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_AUTHOR));

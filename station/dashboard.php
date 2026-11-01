@@ -75,6 +75,8 @@ $tab = $_GET['tab'] ?? 'authors';
 if (!in_array($tab, ['authors', 'ui', 'banlog', 'profile', 'announce', 'images', 'threat', 'ai', 'links'], true)) $tab = 'authors';
 // v6.4.3：AI 面板文件不存在（主线无 lib/ai）时回退，避免 ?tab=ai 空白页
 if ($tab === 'ai' && !is_file(__DIR__ . '/../lib/ai/views/panel_station.php')) $tab = 'authors';
+// v6.4.3-beta：AI 未对站长开放时回退，避免关闭后仍可经 URL 直接进入 AI 面板
+if ($tab === 'ai' && !aiRoleAllowed(ROLE_STATION_ADMIN)) $tab = 'authors';
 
 // v3.1.6：文章列表（公告选择关联文章用：读 META title / 一级标题 / 文件名）
 function stArticleOptions() {

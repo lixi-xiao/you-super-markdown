@@ -1395,7 +1395,8 @@
     position: fixed;
     top: 0;
     right: 0;
-    z-index: 70;
+    /* v6.4.4-beta：高于 .modal-overlay(900)——编辑弹窗打开时点「AI 写作」，浮层不能被遮罩压住 */
+    z-index: 950;
     width: min(440px, 96vw);
     max-width: 96vw;
     height: 100vh;
@@ -1645,7 +1646,8 @@
   .ai-privacy-mask {
     position: fixed;
     inset: 0;
-    z-index: 200;
+    /* v6.4.4-beta：隐私确认层排在 AI 浮层(950)之上，高于编辑弹窗遮罩(900) */
+    z-index: 960;
     display: flex;
     align-items: center;
     justify-content: center;

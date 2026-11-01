@@ -10,7 +10,7 @@ $config = loadSiteConfig();
 $platform = $_GET['platform'] ?? 'netease';
 if (!in_array($platform, ['netease', 'qq', 'kugou'], true)) {
     http_response_code(400);
-    echo json_encode(['error' => '不支持的音乐平台'], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['error' => tn('music.err_platform_unsupported')], JSON_UNESCAPED_UNICODE);
     exit;
 }
 $sortAll = $_GET['sortAll'] ?? '';
@@ -24,7 +24,7 @@ $clientIP = getClientIP();
 db_rate_add('music_rates', $clientIP, '');
 if (db_rate_count('music_rates', $clientIP, 60) > 40) {
     http_response_code(429);
-    echo json_encode(['error' => '请求过于频繁，请稍后再试'], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['error' => tn('common.err_rate_limited')], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -139,7 +139,7 @@ if (empty($playlistId) && empty($sortAll)) {
 $handlerFile = __DIR__ . '/music/' . $platform . '.php';
 if (!file_exists($handlerFile)) {
     http_response_code(400);
-    echo json_encode(['error' => '不支持的音乐平台: ' . $platform], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['error' => tn('music.err_platform_unsupported') . ': ' . $platform], JSON_UNESCAPED_UNICODE);
     exit;
 }
 require_once $handlerFile;

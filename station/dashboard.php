@@ -44,7 +44,7 @@ function requireAdminEnv() {
     if (!empty($_SESSION['cmt_fp_ok'])) return true;
     if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') {
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_env_invalid'), 'env_invalid' => true], JSON_UNESCAPED_UNICODE);
         exit;
     }
     header('Location: /?admin_login=1&env=1');

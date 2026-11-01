@@ -37,7 +37,7 @@ function kugou_getPlaylist($id, $sortAll = '', $cookies = '') {
     $url = 'http://mobilecdn.kugou.com/api/v3/rank/song?rankid=' . urlencode(kugou_rankid($sortAll)) . '&page=1&pagesize=30&format=json';
     $d = musicSafeRequest($url, 12, '', null, 'https://m.kugou.com/');
     if (!is_array($d) || !isset($d['data']['info']) || !is_array($d['data']['info'])) {
-        return ['error' => '酷狗音乐源无数据'];
+        return ['error' => tn('music.err_kugou_no_data')];
     }
     $list = [];
     foreach ($d['data']['info'] as $s) {
@@ -54,7 +54,7 @@ function kugou_getPlaylist($id, $sortAll = '', $cookies = '') {
             'platform' => 'kugou',
         ];
     }
-    if (!$list) return ['error' => '酷狗音乐源无数据'];
+    if (!$list) return ['error' => tn('music.err_kugou_no_data')];
     return $list;
 }
 
@@ -64,7 +64,7 @@ function kugou_getLyric($hash) {
     if ($text !== null && trim($text) !== '' && strpos(ltrim($text), '[') === 0) {
         return ['success' => true, 'lrc' => $text];
     }
-    return ['success' => false, 'error' => '暂无歌词'];
+    return ['success' => false, 'error' => tn('music.err_no_lyrics')];
 }
 
 function kugou_getSongUrl($hash, $cookies = '') {

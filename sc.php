@@ -223,7 +223,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_content') {
     // 最小权限：写作者只能读取自己的文章（站长可读全部）
     if (!$isStationAdmin && !mayManageArticle(readArticleMeta($askPath))) {
         logUnauthorized('越权尝试读取文章内容: ' . $askFile);
-        echo json_encode(['success' => false, 'error' => '无权访问']); exit;
+        echo json_encode(['success' => false, 'error' => tn('auth.err_forbidden')]); exit;
     }
     $blob = file_get_contents($askPath);
     $frontMatter = []; $text = $blob;
@@ -370,7 +370,7 @@ if ((isset($_FILES['markdown_file']) || isset($_POST['content']) || isset($_POST
                     } elseif (file_put_contents($destPath, $finalBody, LOCK_EX)) {
                         $saveOk = '文档已更新';
                         auditLog('article_update', $destLeaf, '更新文档: ' . $docTitle);
-                    } else { $saveErr = '保存失败'; }
+                    } else { $saveErr = tn('admin.err_save_failed'); }
                 } else { $saveErr = '原文件不存在'; }
             } else {
                 if ($uploadedFile && $uploadedFile['error'] === UPLOAD_ERR_OK) {
@@ -382,7 +382,7 @@ if ((isset($_FILES['markdown_file']) || isset($_POST['content']) || isset($_POST
                 if (file_put_contents($articlesDir . '/' . $destLeaf, $finalBody, LOCK_EX)) {
                     $saveOk = '文档已创建';
                     auditLog('article_create', $destLeaf, '创建文档: ' . $docTitle);
-                } else { $saveErr = '保存失败'; }
+                } else { $saveErr = tn('admin.err_save_failed'); }
             }
         }
 

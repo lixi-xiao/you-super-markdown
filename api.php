@@ -256,7 +256,7 @@ if ($action === 'send_register_code' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $siteCfg = loadSiteConfig();
     // v4.7.1：联动封锁拦截（与 login/找回一致，堵住绕过路径）
     $linkLeft = checkLinkedBlock();
-    if ($linkLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试', 'locked_seconds' => $linkLeft], 429);
+    if ($linkLeft > 0) sendJson(['success' => false, 'error' => tn('auth.err_risk_cooldown', ['n' => $linkLeft]), 'locked_seconds' => $linkLeft], 429);
     $input = json_decode(file_get_contents('php://input'), true);
     $email = trim($input['email'] ?? '');
     // v4.4.0：算术人机验证——答错/未答一律拒绝发码（一次性消费，重放无效）
@@ -434,7 +434,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     if (isIPBanned($ipAddr, 'register')) sendJson(['success' => false, 'error' => tn('api.922')], 403);
     // v4.7.1：联动封锁拦截（bans type=link + link:ip/fp 登录锁，堵住 register 绕过联动封锁路径）
     $cooldownLeft = checkLinkedBlock();
-    if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $cooldownLeft . ' 秒后再试', 'locked_seconds' => $cooldownLeft], 429);
+    if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => tn('auth.err_risk_cooldown', ['n' => $cooldownLeft]), 'locked_seconds' => $cooldownLeft], 429);
     $regCap = max(1, intval($cfgSnap['max_registrations_per_ip'] ?? $cfgSnap['reg_limit_per_ip'] ?? 3));
     $ipRegCount = db_rate_count('reg_rates', $ipAddr, 2592000); // 30 天累计
     if ($ipRegCount >= $regCap) {
@@ -521,7 +521,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
     if (isIPBanned($ipAddr, 'login')) sendJson(['success' => false, 'error' => tn('api.926')], 403);
     // v4.7.0：联动威胁评分拦截（IP/指纹任一维度累计超阈值 → 联动封锁）
     $cooldownLeft = checkLinkedBlock();
-    if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $cooldownLeft . ' 秒后再试', 'locked_seconds' => $cooldownLeft], 429);
+    if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => tn('auth.err_risk_cooldown', ['n' => $cooldownLeft]), 'locked_seconds' => $cooldownLeft], 429);
     $payload = json_decode(file_get_contents('php://input'), true);
     // v6.2.0：用户名登录（兼容旧前端 account 字段与历史 QQ 数字账号）
     $loginRaw = trim((string)($payload['username'] ?? ($payload['account'] ?? '')));
@@ -536,7 +536,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
     if ($lockRemain > 0) {
         // v4.7.0：锁定期仍尝试 → 威胁计分（逐步升级联动封锁）
         logThreat('login_locked_try', $ipAddr, $fpToken, 60);
-        sendJson(['success' => false, 'error' => '登录失败次数过多，请 ' . $lockRemain . ' 秒后重试', 'locked_seconds' => $lockRemain], 429);
+        sendJson(['success' => false, 'error' => tn('auth.err_login_locked', ['n' => $lockRemain]), 'locked_seconds' => $lockRemain], 429);
     }
     $roster = fetchAllUsers();
     foreach ($roster as $candidate) {
@@ -559,7 +559,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
                 }
                 // 该设备正被陌生设备风控锁定 → 拒绝
                 $fpLockRemain = loginLocked('fp:' . $fpDigest);
-                if ($fpLockRemain > 0) sendJson(['success' => false, 'error' => '该设备触发风控，请 ' . $fpLockRemain . ' 秒后重试'], 429);
+                if ($fpLockRemain > 0) sendJson(['success' => false, 'error' => tn('auth.err_device_risk', ['n' => $fpLockRemain])], 429);
                 $_SESSION['cmt_pending_dev'] = [
                     'uid' => $candidate['id'], 'fp_hash' => $fpDigest, 'fp' => $fpToken,
                     'email' => $otpMail, 'role' => $candidate['role'] ?? '',
@@ -572,7 +572,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
                 sendJson(['success' => false, 'need_device_verify' => true,
                     'masked_email' => maskEmailAddr($otpMail),
                     'ttl' => is_array($sendErr) ? ($sendErr['ttl'] ?? 300) : 300,
-                    'error' => '新设备登录，验证码已发送至 ' . maskEmailAddr($otpMail)], 200);
+                    'error' => tn('auth.msg_new_device', ['email' => maskEmailAddr($otpMail)])], 200);
             }
             sendJson(finalizeLogin($candidate, $fpToken));
         }
@@ -606,7 +606,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
 // ===== v4.7.0：陌生设备登录邮件二次验证（验证码原子消费 → 记录设备 → 完成登录） =====
 if ($action === 'device_verify' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $linkLeft = checkLinkedBlock();
-    if ($linkLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试'], 429);
+    if ($linkLeft > 0) sendJson(['success' => false, 'error' => tn('auth.err_risk_cooldown', ['n' => $linkLeft])], 429);
     $input = json_decode(file_get_contents('php://input'), true);
     $code = trim($input['code'] ?? '');
     $pending = $_SESSION['cmt_pending_dev'] ?? null;
@@ -648,7 +648,7 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($mode === 'send_code') {
         $linkLeft = checkLinkedBlock();
-        if ($linkLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试'], 429);
+        if ($linkLeft > 0) sendJson(['success' => false, 'error' => tn('auth.err_risk_cooldown', ['n' => $linkLeft])], 429);
         if (empty($account) || empty($email)) sendJson(['success' => false, 'error' => tn('api.933')], 400);
         // 发码限速（IP 60 秒 ≥5 次 → 计分）
         $recent = db_one('SELECT COUNT(*) AS c FROM email_codes WHERE ip = ? AND created > ?', [$clientIP, time() - 60])['c'] ?? 0;
@@ -678,14 +678,14 @@ if ($action === 'password_reset' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($mode === 'do_reset') {
         $linkLeft = checkLinkedBlock();
-        if ($linkLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $linkLeft . ' 秒后再试'], 429);
+        if ($linkLeft > 0) sendJson(['success' => false, 'error' => tn('auth.err_risk_cooldown', ['n' => $linkLeft])], 429);
         if (empty($account) || empty($code) || empty($newPw)) sendJson(['success' => false, 'error' => tn('api.936')], 400);
         // v4.7.0：同账号验证码失败锁定——3 次失败锁 15 分钟（防 6 位验证码暴力枚举）
         $rstKey = 'rst:' . hash('sha256', 'account|' . strtolower($account));
         $rstLock = loginLocked($rstKey);
         if ($rstLock > 0) {
             logThreat('login_locked_try', $clientIP, $reqFp, 60);
-            sendJson(['success' => false, 'error' => '验证失败次数过多，请 ' . $rstLock . ' 秒后重试', 'locked_seconds' => $rstLock], 429);
+            sendJson(['success' => false, 'error' => tn('auth.err_verify_locked', ['n' => $rstLock]), 'locked_seconds' => $rstLock], 429);
         }
         $users = fetchAllUsers();
         $target = null;
@@ -1246,7 +1246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'post') {
     if (isIPBanned($ipAddr, 'comment')) sendJson(['success' => false, 'error' => tn('api.958')], 403);
     // v4.7.1：联动封锁拦截（堵住 comment 绕过联动封锁路径）
     $cooldownLeft = checkLinkedBlock();
-    if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $cooldownLeft . ' 秒后再试', 'locked_seconds' => $cooldownLeft], 429);
+    if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => tn('auth.err_risk_cooldown', ['n' => $cooldownLeft]), 'locked_seconds' => $cooldownLeft], 429);
     $cfgSnap = loadSiteConfig();
     if (!($cfgSnap['comments_enabled'] ?? true)) sendJson(['success' => false, 'error' => tn('api.959')], 403);
     // v2.6.5：超管身份默认不参与前台评论（可在超管后台「系统配置」开启 super_admin_comment）
@@ -1316,7 +1316,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'reply') {
     if (isIPBanned($ipAddr, 'comment')) sendJson(['success' => false, 'error' => tn('api.966')], 403);
     // v4.7.1：联动封锁拦截（堵住 reply 绕过联动封锁路径）
     $cooldownLeft = checkLinkedBlock();
-    if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => '触发联动风控，请 ' . $cooldownLeft . ' 秒后再试', 'locked_seconds' => $cooldownLeft], 429);
+    if ($cooldownLeft > 0) sendJson(['success' => false, 'error' => tn('auth.err_risk_cooldown', ['n' => $cooldownLeft]), 'locked_seconds' => $cooldownLeft], 429);
     $actor = verifyHomeUser();
     $replyConfig = loadSiteConfig();
     // v2.6.5：超管身份默认不参与前台回复（可在超管后台「系统配置」开启 super_admin_comment）

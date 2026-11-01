@@ -38,7 +38,7 @@ function requireAdminEnv() {
     if (!empty($_SESSION['cmt_fp_ok'])) return true;
     if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') {
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_env_invalid'), 'env_invalid' => true], JSON_UNESCAPED_UNICODE);
         exit;
     }
     header('Location: /?admin_login=1&env=1');
@@ -90,7 +90,7 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'save_channel' && isset($_POST['
     }
     // 切换更新通道属敏感操作，需服务器挑战码
     if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
-        echo json_encode(['success' => false, 'error' => '挑战码无效或已过期'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_challenge_expired')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $ch = ($_POST['channel'] ?? 'stable') === 'beta' ? 'beta' : 'stable';
@@ -177,12 +177,12 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'test_smtp') {
         exit;
     }
     if (!verifyChallenge($_POST['challenge_code'] ?? '')) {
-        echo json_encode(['success' => false, 'error' => '挑战码无效或已过期'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_challenge_expired')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $mailTo = $config['admin_email'] ?? '';
     if ($mailTo === '') {
-        echo json_encode(['success' => false, 'error' => '请先在系统配置中设置管理员邮箱（admin_email）'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_no_admin_email')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $site = $config['site_title'] ?? 'You Super Markdown';
@@ -246,13 +246,13 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'trigger_update') {
     $challengeCode = strtoupper(trim($_POST['challenge_code'] ?? ''));
     $targetVersion = trim($_POST['target_version'] ?? '');
     if (!$challengeCode || !$targetVersion) {
-        echo json_encode(['success' => false, 'error' => '参数不完整'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_missing_params')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     // 防注入：目标版本仅允许「字母数字 . _ -」——与 apply-update 同一白名单
     // v5.3.0：放开连字符以支持 beta 语义化版本（如 5.3.1-beta.2）；既有稳定版号不受影响
     if (!preg_match('/^[0-9A-Za-z][0-9A-Za-z._-]*$/', $targetVersion)) {
-        echo json_encode(['success' => false, 'error' => '目标版本格式非法'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_version_invalid')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     // v5.3.0：跨通道升级/降级规则早判（与 apply-update 共用 utils.php:ysmCanUpdate，唯一真源）——
@@ -266,19 +266,19 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'trigger_update') {
     // 读取上传的更新包路径（仅接受已上传到固定目录的路径，防止任意路径注入）
     $pkgPath = trim($_POST['package_path'] ?? '');
     if ($pkgPath !== '' && strpos($pkgPath, '/tmp/ysm-update-packages/') !== 0) {
-        echo json_encode(['success' => false, 'error' => '更新包路径非法'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_update_path_invalid')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     // v3.2.0：在线更新选择的仓库包下载地址（仅允许 https，防 SSRF/任意协议注入）
     $packageUrl = trim($_POST['package_url'] ?? '');
     if ($packageUrl !== '' && strpos($packageUrl, 'https://') !== 0) {
-        echo json_encode(['success' => false, 'error' => '更新包下载地址非法'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_update_url_invalid')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     // 挑战码尝试限次（防暴力枚举：连续 5 次失败锁定 60 秒）
     $nowTs = time();
     if ($nowTs < (int)($_SESSION['challenge_lock_until'] ?? 0)) {
-        echo json_encode(['success' => false, 'error' => '尝试过于频繁，请 60 秒后重试'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_too_frequent')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if (!verifyChallenge($challengeCode)) {
@@ -287,7 +287,7 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'trigger_update') {
             $_SESSION['challenge_lock_until'] = time() + 60;
             $_SESSION['challenge_fails'] = 0;
         }
-        echo json_encode(['success' => false, 'error' => '挑战码无效或已过期'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_challenge_expired')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $_SESSION['challenge_fails'] = 0;
@@ -326,21 +326,21 @@ if (isset($_POST['ajax']) && $_POST['ajax'] === 'upload_package') {
         exit;
     }
     if (!isset($_FILES['update_package']) || $_FILES['update_package']['error'] !== UPLOAD_ERR_OK) {
-        echo json_encode(['success' => false, 'error' => '上传失败'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_upload_failed')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $file = $_FILES['update_package'];
     $fname = strtolower($file['name']);
     $ext = substr($fname, -7) === '.tar.gz' ? 'tar.gz' : strtolower(pathinfo($fname, PATHINFO_EXTENSION));
     if (!in_array($ext, ['zip', 'gz', 'tar.gz'], true)) {
-        echo json_encode(['success' => false, 'error' => '仅支持 zip/tar.gz 格式'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_format_unsupported')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $pkgDir = '/tmp/ysm-update-packages';
     if (!is_dir($pkgDir)) mkdir($pkgDir, 0755, true);
     $pkgPath = $pkgDir . '/update-package.' . $ext;
     if (!move_uploaded_file($file['tmp_name'], $pkgPath)) {
-        echo json_encode(['success' => false, 'error' => '保存失败'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => tn('admin.err_save_failed')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     // 尝试读取版本信息

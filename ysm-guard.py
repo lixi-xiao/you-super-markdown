@@ -67,6 +67,7 @@ DEFAULT_BACKUP_CONF = {'DB_BACKUP_INTERVAL_MIN': '30', 'ARTICLE_BACKUP_KEEP': '7
 WATCH_FILES = [
     'index.php',
     'api.php',
+    'sc.php',               # v6.4.1：文档编辑器（含 AI 入口，此前漏监控）
     'utils.php',
     'img.php',              # v3.3.12：缩略图服务（首页封面加速，防篡改注入）
     'db.php',
@@ -79,6 +80,35 @@ WATCH_FILES = [
     'user.php',             # v2.10.0：用户个人详情页（评论区点击头像/昵称进入，防篡改）
     '_hfish_bridge.php',    # v5.0.0：蜜罐联动桥（ysm-hfish-sync.py 部署到站点根，防篡改）
 ]
+
+# v6.4.1：beta 独有的 AI 模块文件改为「按存在性动态发现」——两库共用同一份 guard 代码，
+#   master 无 lib/ai/ 等路径时自动跳过；母本 (install-base) 为全量镜像，可直接用于恢复。
+WATCH_GLOBS = [
+    'lib/ai/*.php',
+    'lib/ai/views/*.php',
+    'js/ai-editor.js',
+    'js/ai-admin.js',
+    'js/translate-admin.js',
+    'lang/ai-*.php',
+]
+_watch_cache = None
+
+
+def watch_files():
+    """实际监控清单：静态清单 + 动态发现的 AI 模块文件（首次调用后缓存）。"""
+    global _watch_cache
+    if _watch_cache is None:
+        out = list(WATCH_FILES)
+        for pat in WATCH_GLOBS:
+            for p in sorted(glob.glob(os.path.join(WEB_ROOT, pat))):
+                if not os.path.isfile(p):
+                    continue
+                rel = os.path.relpath(p, WEB_ROOT).replace(os.sep, '/')
+                if rel not in out:
+                    out.append(rel)
+        _watch_cache = out
+    return _watch_cache
+
 
 # 更新锁文件（v5.0.0：位于 root:www-data 共享、其他用户不可写的 /opt 目录——目录 0770、文件 0660。
 # 读取前一律做属主/权限校验，不可信锁视为「未加锁」，防本地用户伪造锁令
@@ -459,7 +489,7 @@ def verify_and_restore_file(rel_path: str) -> bool:
 def verify_all_files():
     """批量校验所有监控文件"""
     restored = 0
-    for rel_path in WATCH_FILES:
+    for rel_path in watch_files():
         if verify_and_restore_file(rel_path):
             restored += 1
     if restored > 0:
@@ -1220,7 +1250,7 @@ def save_guard_state():
         'pid': os.getpid(),
         'last_check': time.strftime('%Y-%m-%d %H:%M:%S'),
         'last_audit_check': time.strftime('%Y-%m-%d %H:%M:%S'),
-        'watch_files': len(WATCH_FILES),
+        'watch_files': len(watch_files()),
         # 自动备份状态
         'backup_interval_min': cfg['interval_min'],
         'article_backup_keep': cfg['article_keep'],
@@ -1378,7 +1408,7 @@ def run_inotify_watch():
 
     # 收集所有需要监控的目录
     watch_dirs = set()
-    for rel_path in WATCH_FILES:
+    for rel_path in watch_files():
         d = os.path.dirname(os.path.join(WEB_ROOT, rel_path))
         if os.path.isdir(d):
             watch_dirs.add(d)
@@ -1390,7 +1420,7 @@ def run_inotify_watch():
         except Exception as e:
             log(f"添加监控失败: {d} - {e}")
 
-    log(f"inotify 监控已启动，监控 {len(watch_dirs)} 个目录，{len(WATCH_FILES)} 个文件")
+    log(f"inotify 监控已启动，监控 {len(watch_dirs)} 个目录，{len(watch_files())} 个文件")
 
     # 启动 Watchdog 线程
     wd_thread = threading.Thread(target=watchdog_thread, daemon=True)
@@ -1430,7 +1460,7 @@ def run_inotify_watch():
             path_str = path.decode() if isinstance(path, bytes) else path
 
             # 检查是否在监控列表中
-            for rel_path in WATCH_FILES:
+            for rel_path in watch_files():
                 full_path = os.path.join(WEB_ROOT, rel_path)
                 event_path = os.path.join(path_str, fname)
                 if os.path.abspath(event_path) == os.path.abspath(full_path):

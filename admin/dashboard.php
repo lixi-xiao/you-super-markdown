@@ -1070,6 +1070,8 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     $tab = $_GET['tab'] ?? 'overview';
     // v5.0.0 P2：tab 白名单校验（对齐 station/author 后台），非法值回落 overview
     if (!in_array($tab, ['overview', 'users', 'logs', 'config', 'security', 'ui', 'update', 'guard', 'data', 'hfish', 'mail', 'verify', 'threat', 'ai', 'links'], true)) $tab = 'overview';
+    // v6.4.3：AI 面板文件不存在（主线无 lib/ai）时回退，避免 ?tab=ai 空白页
+    if ($tab === 'ai' && !is_file(__DIR__ . '/../lib/ai/views/panel_admin.php')) $tab = 'overview';
     $superCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_SUPER_ADMIN));
     $stationCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_STATION_ADMIN));
     $authorCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_AUTHOR));

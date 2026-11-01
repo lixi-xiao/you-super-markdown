@@ -73,6 +73,8 @@ $msg = $_GET['msg'] ?? '';
 // v2.6.0 起 tab 结构（authors 写作者管理 / background 网站背景 / music 音乐设置 / banlog 封禁日志只读）；v2.6.3 新增 profile 个人信息；v3.1.6 新增 announce 公告管理；v4.0.0 新增 images 图片管理；v4.1.18 背景+音乐合并为 ui 主界面及功能设置
 $tab = $_GET['tab'] ?? 'authors';
 if (!in_array($tab, ['authors', 'ui', 'banlog', 'profile', 'announce', 'images', 'threat', 'ai', 'links'], true)) $tab = 'authors';
+// v6.4.3：AI 面板文件不存在（主线无 lib/ai）时回退，避免 ?tab=ai 空白页
+if ($tab === 'ai' && !is_file(__DIR__ . '/../lib/ai/views/panel_station.php')) $tab = 'authors';
 
 // v3.1.6：文章列表（公告选择关联文章用：读 META title / 一级标题 / 文件名）
 function stArticleOptions() {

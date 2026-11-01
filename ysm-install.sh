@@ -658,6 +658,12 @@ server {
         return 403;
     }
 
+    # v6.4.3：lib/ 为服务端 include 片段（i18n / AI 模块），禁止直读
+    location ^~ /lib/ {
+        deny all;
+        return 403;
+    }
+
     # v5.4.1：信息暴露面收敛（更新元数据 / 项目文档不提供直读）
     location = /version.json {
         deny all;

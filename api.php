@@ -1499,4 +1499,6 @@ if ($action === 'bg_config' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         'bg_card_opacity' => $settings['bg_card_opacity'] ?? 100
     ]);
 }
+// v6.4.0：AI 路由挂载点（beta 独有；master 无 lib/ai/ 时自动跳过）
+if (is_file(__DIR__ . '/lib/ai/routes.php')) require __DIR__ . '/lib/ai/routes.php';
 sendJson(['success' => false, 'error' => tn('api.980')], 400);

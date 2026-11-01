@@ -69,7 +69,7 @@ $myId = $currentUser['id'] ?? '';
 
 // v2.6.3：写作者后台 tab 结构（articles 我的文章 / profile 个人信息）
 $tab = $_GET['tab'] ?? 'articles';
-if (!in_array($tab, ['articles', 'profile'], true)) $tab = 'articles';
+if (!in_array($tab, ['articles', 'profile', 'ai'], true)) $tab = 'articles';
 $msg = $_GET['msg'] ?? '';
 
 // v2.6.3：写作者修改个人信息（昵称/签名/新密码）；v2.10.0：扩展头像上传 + 邮箱更换
@@ -400,6 +400,9 @@ if (is_dir($articlesDir)) {
             </div>
         </form>
     </div>
+    <?php elseif ($tab === 'ai'): ?>
+    <?php // v6.4.0：AI 面板挂载点（beta 独有；master 无 lib/ai/ 时自动跳过） ?>
+    <?php if (is_file(__DIR__ . '/../lib/ai/views/panel_author.php')) include __DIR__ . '/../lib/ai/views/panel_author.php'; ?>
     <?php endif; ?>
 </div>
 

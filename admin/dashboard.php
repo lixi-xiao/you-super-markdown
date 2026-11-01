@@ -1069,7 +1069,7 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
     <?php
     $tab = $_GET['tab'] ?? 'overview';
     // v5.0.0 P2：tab 白名单校验（对齐 station/author 后台），非法值回落 overview
-    if (!in_array($tab, ['overview', 'users', 'logs', 'config', 'security', 'ui', 'update', 'guard', 'data', 'hfish', 'mail', 'verify', 'threat', 'links'], true)) $tab = 'overview';
+    if (!in_array($tab, ['overview', 'users', 'logs', 'config', 'security', 'ui', 'update', 'guard', 'data', 'hfish', 'mail', 'verify', 'threat', 'ai', 'links'], true)) $tab = 'overview';
     $superCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_SUPER_ADMIN));
     $stationCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_STATION_ADMIN));
     $authorCount = count(array_filter($users, fn($u) => ($u['role'] ?? '') === ROLE_AUTHOR));
@@ -3491,6 +3491,9 @@ $customFontName = (string)($config['custom_font_name'] ?? '');
             <div class="form-hint"><?= t('admin.343') ?></div>
         </form>
     </div>
+    <?php elseif ($tab === 'ai'): ?>
+    <?php // v6.4.0：AI 面板挂载点（beta 独有；master 无 lib/ai/ 时自动跳过） ?>
+    <?php if (is_file(__DIR__ . '/../lib/ai/views/panel_admin.php')) include __DIR__ . '/../lib/ai/views/panel_admin.php'; ?>
     <?php endif; ?>
 </div>
 

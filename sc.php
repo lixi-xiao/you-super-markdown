@@ -867,6 +867,9 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
     </div>
 </div>
 
+<?php // v6.4.0：AI 抽屉挂载点（beta 独有；master 无 lib/ai/ 时自动跳过） ?>
+<?php if (is_file(__DIR__ . '/lib/ai/views/drawer.php')) include __DIR__ . '/lib/ai/views/drawer.php'; ?>
+
 <script>
 // v6.3.20：弹窗统一挂到 body —— 避免被编辑器左右栏的层叠上下文/包含块限制，
 //           导致遮罩只盖住一部分、右侧内容仍高亮。
@@ -1164,6 +1167,8 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { openDeleteConfirmModal(this.dataset.name, this.dataset.display); });
 });
 </script>
+<?php // v6.4.0：AI 编辑器脚本挂载点（beta 独有；master 无该文件时自动跳过） ?>
+<?php if (is_file(__DIR__ . '/js/ai-editor.js')): ?><script src="js/ai-editor.js?v=<?= @filemtime(__DIR__ . '/js/ai-editor.js') ?>"></script><?php endif; ?>
 <!-- v6.3.2：Markdown 正文预览；v6.3.6：图表统一走 mermaid-loader（预加载 + 本地 SVG 缓存） -->
 <script src="js/mermaid-loader.js?v=<?= @filemtime(__DIR__ . '/js/mermaid-loader.js') ?>"></script>
 <script src="js/md-preview.js?v=<?= @filemtime(__DIR__ . '/js/md-preview.js') ?>"></script>

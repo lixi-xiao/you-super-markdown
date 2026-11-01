@@ -2035,7 +2035,12 @@ YSMPATH
         fi
         # 核心文件 MD5 校验：web 与母本必须逐字节一致（排除 data/ 与签名元数据）
         HC_BAD=""
-        for HC_F in index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ysm-admin ysm-guard.py; do
+        HC_CORE="index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ysm-admin ysm-guard.py"
+        # v6.4.2：beta 独有的 AI 模块按存在性纳入校验（主线无 lib/ai/，清单保持原样）
+        if [ -f "$WEB_ROOT/lib/ai/routes.php" ]; then
+            HC_CORE="$HC_CORE lib/ai/bootstrap.php lib/ai/routes.php lib/ai/crypto.php lib/ai/keys.php lib/ai/http.php lib/ai/views/drawer.php"
+        fi
+        for HC_F in $HC_CORE; do
             HC_A=$(md5sum "$WEB_ROOT/$HC_F" 2>/dev/null | awk '{print $1}')
             HC_B=$(md5sum "/opt/you-super-markdown/install-base/$HC_F" 2>/dev/null | awk '{print $1}')
             if [ -z "$HC_A" ] || [ "$HC_A" != "$HC_B" ]; then
@@ -2123,7 +2128,12 @@ YSMPATH
         RC_HOME=$(curl -sk -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$RC_DOMAIN/" 2>/dev/null || echo 000)
         RC_API=$(curl -sk -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$RC_DOMAIN/api.php?action=csrf" 2>/dev/null || echo 000)
         RC_BAD=""
-        for RC_F in index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ysm-admin ysm-guard.py; do
+        RC_CORE="index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ysm-admin ysm-guard.py"
+        # v6.4.2：beta 独有的 AI 模块按存在性纳入校验（主线无 lib/ai/，清单保持原样）
+        if [ -f "$WEB_ROOT/lib/ai/routes.php" ]; then
+            RC_CORE="$RC_CORE lib/ai/bootstrap.php lib/ai/routes.php lib/ai/crypto.php lib/ai/keys.php lib/ai/http.php lib/ai/views/drawer.php"
+        fi
+        for RC_F in $RC_CORE; do
             RC_A=$(md5sum "$WEB_ROOT/$RC_F" 2>/dev/null | awk '{print $1}')
             RC_B=$(md5sum "/opt/you-super-markdown/install-base/$RC_F" 2>/dev/null | awk '{print $1}')
             if [ -z "$RC_A" ] || [ "$RC_A" != "$RC_B" ]; then

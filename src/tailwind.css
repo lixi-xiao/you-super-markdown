@@ -1645,7 +1645,7 @@
   .ai-privacy-mask {
     position: fixed;
     inset: 0;
-    z-index: 80;
+    z-index: 200;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1662,6 +1662,9 @@
     background: var(--bg-card, var(--surface, #1a2035));
     color: var(--text, #e8edf5);
     box-shadow: var(--shadow-md, 0 8px 30px rgba(0, 0, 0, 0.4));
+    /* v6.3.19：小屏（横屏/小高度）时按钮不被挤出视口 */
+    max-height: 86vh;
+    overflow-y: auto;
   }
   .ai-privacy-box h3 { margin: 0 0 10px; font-size: 1.05rem; font-weight: 800; }
   .ai-privacy-box p { margin: 0 0 10px; font-size: 0.9rem; line-height: 1.7; color: var(--text-secondary, #9aa4bf); }

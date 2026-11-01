@@ -1371,6 +1371,13 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     $('aiStyle').addEventListener('change', savePref);
     $('aiLang').addEventListener('change', savePref);
 
+    var pendingOpen = false;
+
+    function showDrawer() {
+        drawer.style.display = 'flex';
+        hideFab();
+    }
+
     function openDrawer() {
         var s = ta.selectionStart, e = ta.selectionEnd;
         // v6.3.3：选区可能因点击按钮而丢失——回退到最近一次有效选区快照
@@ -1384,9 +1391,14 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
         $('aiResultWrap').style.display = 'none';
         $('aiUndoBtn').style.display = 'none';
         result = ''; finalized = false; undoValue = null; setStatus('');
-        drawer.style.display = 'flex';
-        hideFab();
-        if (!cfg.privacy_ack) $('aiPrivacyMask').style.display = 'flex';
+        // v6.3.19：隐私未确认时先只弹确认层，确认后自动打开抽屉；
+        //          此前两层同时打开，确认按钮被抽屉挡住，只能先关抽屉再确认。
+        if (!cfg.privacy_ack) {
+            pendingOpen = true;
+            $('aiPrivacyMask').style.display = 'flex';
+            return;
+        }
+        showDrawer();
     }
     function closeDrawer() {
         if (controller) { try { controller.abort(); } catch (e) {} }
@@ -1404,11 +1416,13 @@ document.querySelectorAll('.delete-article-btn').forEach(function(btn) {
     $('aiPrivacyOk').addEventListener('click', function() {
         $('aiPrivacyMask').style.display = 'none';
         api('ai_privacy_ack', 'POST', { version: (cfg && cfg.privacy_version) || '' }).then(function(d) {
-            if (d && d.success) cfg.privacy_ack = true;
-            else if (d && d.need_reload) { cfg.privacy_ack = false; setStatus(T('隐私提示已更新，请刷新页面后重新确认'), 'err'); }
+            if (d && d.success) {
+                cfg.privacy_ack = true;
+                if (pendingOpen) { pendingOpen = false; showDrawer(); }
+            } else if (d && d.need_reload) { cfg.privacy_ack = false; setStatus(T('隐私提示已更新，请刷新页面后重新确认'), 'err'); }
         });
     });
-    $('aiPrivacyCancel').addEventListener('click', function() { $('aiPrivacyMask').style.display = 'none'; });
+    $('aiPrivacyCancel').addEventListener('click', function() { pendingOpen = false; $('aiPrivacyMask').style.display = 'none'; });
 
     // v5.4.2-beta：生成按钮态（运行中显示「取消」；出错显示「重试」）
     function setRunBtns(state) {

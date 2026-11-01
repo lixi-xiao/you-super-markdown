@@ -741,6 +741,8 @@ nginx_rule_present() {
 nginx_hardening_ok() {
     nginx_rule_present 'location[[:space:]]+\^~[[:space:]]+/data/fonts/'    || return 1
     nginx_rule_present 'location[[:space:]]+\^~[[:space:]]+/data/articles/' || return 1
+    # v6.4.3：lib/ 为服务端 include 片段（i18n / AI 模块），禁止直读
+    nginx_rule_present 'location[[:space:]]+\^~[[:space:]]+/lib/'           || return 1
     return 0
 }
 
@@ -764,7 +766,7 @@ sync_nginx_hardening() {
         return 0
     fi
     if [ "$mode" = "check" ]; then
-        nginx_harden_warn "线上未检测到完整的敏感目录拒绝规则（/data/fonts/、/data/articles/）"
+        nginx_harden_warn "线上未检测到完整的敏感目录拒绝规则（/data/fonts/、/data/articles/、/lib/）"
         return 1
     fi
     if [ ! -f "$src" ]; then
@@ -820,7 +822,7 @@ sync_nginx_hardening() {
     fi
     if nginx_hardening_ok; then
         YSM_DETAIL="nginx 加固片段已同步并生效" php -r "require_once '$WEB_ROOT/utils.php'; auditLog('nginx_hardening_synced', 'update', getenv('YSM_DETAIL'));" 2>/dev/null || true
-        echo "  [nginx] 敏感目录拒绝规则已生效（/data/fonts/、/data/articles/）"
+        echo "  [nginx] 敏感目录拒绝规则已生效（/data/fonts/、/data/articles/、/lib/）"
     else
         nginx_harden_warn "同步后仍未检测到完整的敏感目录拒绝规则"
     fi
@@ -836,7 +838,7 @@ sensitive_paths_probe() {
     local d code bad="" p paths=()
     d=$(get_domain)
     if [ -z "$d" ]; then echo "  [敏感目录] 跳过直读探测（无法确定域名）"; return 0; fi
-    paths=("/data/fonts/x.ttf" "/data/ysm.db")
+    paths=("/data/fonts/x.ttf" "/data/ysm.db" "/lib/i18n.php")
     # 文章样本：取 data/articles 下任一存在的 .md（有则断言 403；无则跳过并明确输出）
     local art_sample art_rel=""
     art_sample=$(find "$WEB_ROOT/data/articles" -maxdepth 1 -type f -name '*.md' 2>/dev/null | head -1)

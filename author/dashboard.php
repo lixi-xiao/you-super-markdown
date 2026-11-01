@@ -70,6 +70,8 @@ $myId = $currentUser['id'] ?? '';
 // v2.6.3：写作者后台 tab 结构（articles 我的文章 / profile 个人信息 / ai AI 写作 Key）
 $tab = $_GET['tab'] ?? 'articles';
 if (!in_array($tab, ['articles', 'profile', 'ai'], true)) $tab = 'articles';
+// v6.4.3：AI 面板文件不存在（主线无 lib/ai）时回退，避免 ?tab=ai 空白页
+if ($tab === 'ai' && !is_file(__DIR__ . '/../lib/ai/views/panel_author.php')) $tab = 'articles';
 $msg = $_GET['msg'] ?? '';
 
 // v2.6.3：写作者修改个人信息（昵称/签名/新密码）；v2.10.0：扩展头像上传 + 邮箱更换

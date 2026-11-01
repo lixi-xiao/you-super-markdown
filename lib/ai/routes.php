@@ -13,11 +13,11 @@
 /** 校验当前用户为"可参与创作"的站长/写作者（未登录/超管/普通用户一律 403） */
 function aiActionUser() {
     $actor = verifyHomeUser();
-    if (!$actor) sendJson(['success' => false, 'error' => '无权限'], 403);
+    if (!$actor) sendJson(['success' => false, 'error' => tn('auth.err_no_permission')], 403);
     $role = $actor['role'] ?? '';
     if (!in_array($role, [ROLE_STATION_ADMIN, ROLE_AUTHOR], true)) {
         logUnauthorized('越权尝试使用 AI 写作接口');
-        sendJson(['success' => false, 'error' => '无权限'], 403);
+        sendJson(['success' => false, 'error' => tn('auth.err_no_permission')], 403);
     }
     return $actor;
 }

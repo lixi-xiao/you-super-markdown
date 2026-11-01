@@ -1508,11 +1508,11 @@ function aiMaskKey($plain) {
  *  $sender: 触发者 actor（用于复用一个已取好的 provider/key；空则自动按默认服务商）。 */
 function aiTranslateMd($md, $targetLang, $actor) {
     $provider = aiDefaultProvider($actor['id']);
-    if ($provider === '' || aiProviderBaseUrl($provider) === '') return [false, '请先配置 AI Key'];
+    if ($provider === '' || aiProviderBaseUrl($provider) === '') return [false, tn('ai.err_no_key')];
     $row = db_one('SELECT * FROM ai_keys WHERE user_id = ? AND provider = ?', [$actor['id'], $provider]);
-    if (!$row) return [false, '该服务商尚未配置 Key'];
+    if (!$row) return [false, tn('ai.err_provider_no_key')];
     $apiKey = aiDecryptKey($row['key_cipher']);
-    if ($apiKey === '') return [false, 'Key 不可用，请重新配置'];
+    if ($apiKey === '') return [false, tn('ai.err_key_invalid')];
     $model = trim((string)$row['model']);
     $base = aiProviderBaseUrl($provider);
     $url = rtrim($base, '/') . '/chat/completions';
@@ -2006,7 +2006,7 @@ function aiHttpJson($url, $apiKey, $payload, $timeout = 60) {
 function aiConnectivityTest($providerId, $apiKey, $model) {
     $base = aiProviderBaseUrl($providerId);
     if ($base === '') return [false, '该服务商未启用或不存在'];
-    if (trim((string)$apiKey) === '') return [false, '请填写 Key'];
+    if (trim((string)$apiKey) === '') return [false, tn('ai.err_key_required')];
     if (trim((string)$model) === '') return [false, '请填写模型名'];
     $url = rtrim($base, '/') . '/chat/completions';
     $payload = [

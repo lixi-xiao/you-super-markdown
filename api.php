@@ -1519,15 +1519,15 @@ function aiActionUser() {
 /** 校验当前用户且该角色已被超管开放 AI */
 function aiActionUserAllowed() {
     $actor = aiActionUser();
-    if (!aiRoleAllowed($actor['role'] ?? '')) sendJson(['success' => false, 'error' => 'AI 功能未开放'], 403);
+    if (!aiRoleAllowed($actor['role'] ?? '')) sendJson(['success' => false, 'error' => tn('ai.err_not_enabled')], 403);
     return $actor;
 }
 /** v5.4.1-beta：AI 写接口叠加后台会话有效期校验。
  *  环境一致性校验（requireSessionEnv）+ 后台会话 24h 显式过期（backendSessionExpired）双闸；
  *  AI 写作入口全部位于后台页面（sc.php 编辑器 / station|author dashboard），与此二页面的后台会话判定一致。 */
 function aiRequireFreshBackendSession() {
-    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => '登录环境已变化，请重新登录', 'env_invalid' => true], 401);
-    if (backendSessionExpired()) sendJson(['success' => false, 'error' => '后台会话已过期，请重新登录', 'backend_expired' => true], 401);
+    if (!requireSessionEnv()) sendJson(['success' => false, 'error' => tn('admin.err_env_invalid'), 'env_invalid' => true], 401);
+    if (backendSessionExpired()) sendJson(['success' => false, 'error' => tn('auth.err_backend_expired'), 'backend_expired' => true], 401);
 }
 /** 流式输出一个 SSE 事件并立即 flush */
 function aiSseEmit($payload) {
@@ -1581,7 +1581,7 @@ if ($action === 'ai_privacy_ack' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $ver = trim((string)($body['version'] ?? ''));
     // 只接受当前版本；传了旧版本说明前端页面过期，要求刷新后重新确认
     if ($ver !== '' && $ver !== aiPrivacyVersion()) {
-        sendJson(['success' => false, 'error' => '隐私提示已更新，请刷新页面后重新确认', 'need_reload' => true, 'privacy_version' => aiPrivacyVersion()], 409);
+        sendJson(['success' => false, 'error' => tn('ai.err_privacy_updated'), 'need_reload' => true, 'privacy_version' => aiPrivacyVersion()], 409);
     }
     aiSetPrivacyAck($actor['id']);
     auditLog('ai_privacy_ack', $actor['id'], '确认 AI 隐私提示 version=' . aiPrivacyVersion());
@@ -1607,7 +1607,7 @@ if ($action === 'ai_thinking' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $actor = aiActionUserAllowed();
     aiRequireFreshBackendSession();
     $body = aiJsonBody();
-    if (!array_key_exists('enabled', $body)) sendJson(['success' => false, 'error' => '缺少参数'], 400);
+    if (!array_key_exists('enabled', $body)) sendJson(['success' => false, 'error' => tn('common.err_missing_params')], 400);
     $enabled = !empty($body['enabled']);
     aiSetThinkingEnabled($actor['id'], $enabled);
     auditLog('ai_thinking_update', $actor['id'], '思考模式=' . ($enabled ? '开启' : '关闭'));
@@ -1624,11 +1624,11 @@ if ($action === 'ai_key_test' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $key = trim((string)($body['key'] ?? ''));
     if (aiProviderBaseUrl($provider) === '') {
         auditLog('ai_key_test', $provider, '连通性测试：服务商不可用', 'failed');
-        sendJson(['success' => false, 'ok' => false, 'message' => '服务商不可用'], 400);
+        sendJson(['success' => false, 'ok' => false, 'message' => tn('ai.err_provider_unavailable')], 400);
     }
     if ($model === '' || aiFindModel($provider, $model) === null) {
         auditLog('ai_key_test', $provider, '连通性测试：模型不在可用名单', 'failed');
-        sendJson(['success' => false, 'ok' => false, 'message' => '该模型不在可用名单，请重新选择模型'], 400);
+        sendJson(['success' => false, 'ok' => false, 'message' => tn('ai.err_model_not_allowed')], 400);
     }
     [$ok, $reason] = aiConnectivityTest($provider, $key, $model);
     auditLog('ai_key_test', $provider, '连通性测试：' . ($ok ? '成功' : '失败'), $ok ? 'success' : 'failed');
@@ -1646,13 +1646,13 @@ if ($action === 'ai_key_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $isDefault = !empty($body['is_default']);
     if (aiProviderBaseUrl($provider) === '') {
         auditLog('ai_key_save', $provider, '保存失败：服务商不可用', 'failed');
-        sendJson(['success' => false, 'error' => '服务商不可用'], 400);
+        sendJson(['success' => false, 'error' => tn('ai.err_provider_unavailable')], 400);
     }
-    if ($key === '') sendJson(['success' => false, 'error' => '请填写 Key'], 400);
-    if ($model === '') sendJson(['success' => false, 'error' => '请选择模型'], 400);
+    if ($key === '') sendJson(['success' => false, 'error' => tn('ai.err_key_required')], 400);
+    if ($model === '') sendJson(['success' => false, 'error' => tn('ai.err_model_required')], 400);
     if (aiFindModel($provider, $model) === null) {
         auditLog('ai_key_save', $provider, '保存失败：模型不在可用名单', 'failed');
-        sendJson(['success' => false, 'error' => '该模型不在可用名单，请重新选择模型'], 400);
+        sendJson(['success' => false, 'error' => tn('ai.err_model_not_allowed')], 400);
     }
     // 未通过连通性测试 → 拒绝固化（不落库）
     [$ok, $reason] = aiConnectivityTest($provider, $key, $model);
@@ -1663,7 +1663,7 @@ if ($action === 'ai_key_save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $exist = db_one('SELECT 1 AS x FROM ai_keys WHERE user_id = ? AND provider = ?', [$actor['id'], $provider]);
     if (!aiSaveKey($actor['id'], $provider, $model, $key, $isDefault)) {
         auditLog('ai_key_save', $provider, '保存失败（加密不可用）', 'failed');
-        sendJson(['success' => false, 'error' => '保存失败'], 500);
+        sendJson(['success' => false, 'error' => tn('admin.err_save_failed')], 500);
     }
     auditLog('ai_key_' . ($exist ? 'update' : 'add'), $provider,
         ($exist ? '更新' : '新增') . ' Key（模型=' . $model . '；测试通过；不留明文）');
@@ -1676,7 +1676,7 @@ if ($action === 'ai_key_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     aiRequireFreshBackendSession();
     $body = aiJsonBody();
     $provider = (string)($body['provider'] ?? '');
-    if (!isset(aiBuiltinProviders()[$provider])) sendJson(['success' => false, 'error' => '服务商不存在'], 400);
+    if (!isset(aiBuiltinProviders()[$provider])) sendJson(['success' => false, 'error' => tn('ai.err_provider_not_found')], 400);
     $n = aiDeleteKey($actor['id'], $provider);
     auditLog('ai_key_delete', $provider, '删除 Key');
     // 删除后若默认缺失，自动补一个默认
@@ -1689,18 +1689,18 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     aiRequireFreshBackendSession();
     $body = aiJsonBody();
     $act = (string)($body['action'] ?? '');
-    if (!array_key_exists($act, aiActions())) sendJson(['success' => false, 'error' => '不支持的动作'], 400);
+    if (!array_key_exists($act, aiActions())) sendJson(['success' => false, 'error' => tn('common.err_unknown_action')], 400);
     $text = trim((string)($body['text'] ?? ''));
-    if ($text === '') sendJson(['success' => false, 'error' => '请先选中要处理的文本'], 400);
+    if ($text === '') sendJson(['success' => false, 'error' => tn('ai.err_no_selection')], 400);
     $style = in_array((string)($body['style'] ?? ''), aiStyleOptions(), true) ? (string)$body['style'] : '';
     $lang = in_array((string)($body['lang'] ?? ''), aiLangOptions(), true) ? (string)$body['lang'] : '';
-    if ($act === 'style' && $style === '') sendJson(['success' => false, 'error' => '请选择目标风格'], 400);
-    if ($act === 'translate' && $lang === '') sendJson(['success' => false, 'error' => '请选择目标语言'], 400);
+    if ($act === 'style' && $style === '') sendJson(['success' => false, 'error' => tn('ai.err_style_required')], 400);
+    if ($act === 'translate' && $lang === '') sendJson(['success' => false, 'error' => tn('ai.err_target_lang_required')], 400);
     // 目标服务商：仅接受白名单内 id（不接受 base_url）；缺省用账号默认
     $provider = (string)($body['provider'] ?? '');
     if (aiProviderBaseUrl($provider) === '') $provider = aiDefaultProvider($actor['id']);
     if ($provider === '' || aiProviderBaseUrl($provider) === '') {
-        sendJson(['success' => false, 'error' => '请先在后台配置 AI Key'], 400);
+        sendJson(['success' => false, 'error' => tn('ai.err_no_key_admin')], 400);
     }
     // v6.2.0-beta：服务商熔断中 → 直接降级（不消耗配额、不计限速、不产生外呼）
     if (aiBreakerOpen($provider)) {
@@ -1714,35 +1714,35 @@ if ($action === 'ai_run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         ], 503);
     }
     $row = db_one('SELECT * FROM ai_keys WHERE user_id = ? AND provider = ?', [$actor['id'], $provider]);
-    if (!$row) sendJson(['success' => false, 'error' => '该服务商尚未配置 Key'], 400);
+    if (!$row) sendJson(['success' => false, 'error' => tn('ai.err_provider_no_key')], 400);
     $apiKey = aiDecryptKey($row['key_cipher']);
-    if ($apiKey === '') sendJson(['success' => false, 'error' => 'Key 不可用，请重新配置'], 400);
+    if ($apiKey === '') sendJson(['success' => false, 'error' => tn('ai.err_key_invalid')], 400);
     $model = trim((string)$row['model']);
-    if ($model === '') sendJson(['success' => false, 'error' => '未选择模型'], 400);
+    if ($model === '') sendJson(['success' => false, 'error' => tn('ai.err_model_not_selected')], 400);
     // v5.4.3-beta.2：模型必须仍在当前名单内，否则拒绝并提示重选（不静默失败、不自动改写为猜测值）
     if (aiFindModel($provider, $model) === null) {
         auditLog('ai_call', $provider . '/' . $model, '模型不在可用名单，拒绝调用', 'failed');
-        sendJson(['success' => false, 'error' => '该模型已下线或不在可用名单，请重新选择模型', 'need_reselect' => true], 400);
+        sendJson(['success' => false, 'error' => tn('ai.err_model_offline'), 'need_reselect' => true], 400);
     }
     // 按模型取运行时参数（单次输入上限 / 最大输出 / 超时）
     $rt = aiModelRuntime($provider, $model);
-    if (mb_strlen($text) > $rt['max_input_chars']) sendJson(['success' => false, 'error' => '选中文本过长（本模型上限 ' . $rt['max_input_chars'] . ' 字）'], 400);
+    if (mb_strlen($text) > $rt['max_input_chars']) sendJson(['success' => false, 'error' => tn('ai.err_selection_too_long', ['n' => $rt['max_input_chars']])], 400);
     // v6.0.0-beta：AI 加固注入顺序 —— 日配额 → 并发闸（shutdown 释放 + 租约兜底）→ 账号维度限速
     $uid = $actor['id'];
     if (aiDailyQuotaExceeded($uid)) {
         auditLog('ai_call', $provider . '/' . $model, '每日配额已用完，拒绝调用', 'failed');
-        sendJson(['success' => false, 'error' => '今日 AI 配额已用完，请明日再试'], 429);
+        sendJson(['success' => false, 'error' => tn('ai.err_quota_exhausted')], 429);
     }
-    if (!aiInflightAcquire($uid)) sendJson(['success' => false, 'error' => '当前已在处理请求，请稍后再试'], 429);
+    if (!aiInflightAcquire($uid)) sendJson(['success' => false, 'error' => tn('ai.err_busy')], 429);
     register_shutdown_function(function () use ($uid) { aiInflightRelease($uid); });
     if (aiRateBlockedUid($uid)) {
         auditLog('ai_call', $provider . '/' . $model, '账号维度调用过频，拒绝', 'failed');
-        sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
+        sendJson(['success' => false, 'error' => tn('ai.err_too_frequent')], 429);
     }
     // 出站限速（复用 ai_rates；防滥用放大外呼，IP+指纹维度并存）
     $ip = getClientIP();
     $fp = $_SESSION['cmt_fp'] ?? '';
-    if (aiRateBlocked($ip, $fp)) sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
+    if (aiRateBlocked($ip, $fp)) sendJson(['success' => false, 'error' => tn('ai.err_too_frequent')], 429);
     aiRateHit($ip, $fp);
     aiRateHitUid($uid);
     aiDailyQuotaAdd($uid);
@@ -1878,43 +1878,43 @@ if ($action === 'ai_translate' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = trim((string)($body['slug'] ?? ''));
     $lang = (string)($body['lang'] ?? '');
     // v6.0.0-beta：目标语言必须是 i18n 字库内已有的 locale（只翻有字库的语言，缺字典即拒绝）
-    if ($lang === '' || !isset(ysmSupportedLangs()[$lang])) sendJson(['success' => false, 'error' => '该语言暂无字库，暂不可翻译'], 400);
+    if ($lang === '' || !isset(ysmSupportedLangs()[$lang])) sendJson(['success' => false, 'error' => tn('ai.err_no_font')], 400);
     // v6.3.1：目标语言不能等于内容原语种（超管可配，默认 zh-CN）
-    if ($lang === ysmSourceLang()) sendJson(['success' => false, 'error' => '目标语言与原文语言相同，无需翻译'], 400);
+    if ($lang === ysmSourceLang()) sendJson(['success' => false, 'error' => tn('ai.err_same_lang')], 400);
     $path = articleSourcePath($slug);
-    if (!$path) sendJson(['success' => false, 'error' => '文章不存在'], 404);
+    if (!$path) sendJson(['success' => false, 'error' => tn('post.err_not_found')], 404);
     $meta = readArticleMeta($path);
     if (!canManageArticleFp($meta, $actor)) {
         logUnauthorized('越权尝试翻译他人文章: ' . $slug);
-        sendJson(['success' => false, 'error' => '只能翻译自己管理的文章'], 403);
+        sendJson(['success' => false, 'error' => tn('ai.err_not_own_post')], 403);
     }
     // v6.3.1：与 ai_run 对齐——先取服务商/模型并做白名单校验（下线模型不再继续外呼）
     $provider = aiDefaultProvider($actor['id']);
     if ($provider === '' || aiProviderBaseUrl($provider) === '') {
         auditLog('ai_translate', $slug, '未配置 AI Key，拒绝翻译', 'failed');
-        sendJson(['success' => false, 'error' => '请先配置 AI Key'], 400);
+        sendJson(['success' => false, 'error' => tn('ai.err_no_key')], 400);
     }
     $keyRow = db_one('SELECT * FROM ai_keys WHERE user_id = ? AND provider = ?', [$actor['id'], $provider]);
-    if (!$keyRow) sendJson(['success' => false, 'error' => '该服务商尚未配置 Key'], 400);
+    if (!$keyRow) sendJson(['success' => false, 'error' => tn('ai.err_provider_no_key')], 400);
     $model = trim((string)$keyRow['model']);
     if ($model === '' || aiFindModel($provider, $model) === null) {
         auditLog('ai_translate', $provider . '/' . $model, '模型不在可用名单，拒绝翻译', 'failed');
-        sendJson(['success' => false, 'error' => '该模型已下线或不在可用名单，请重新选择模型', 'need_reselect' => true], 400);
+        sendJson(['success' => false, 'error' => tn('ai.err_model_offline'), 'need_reselect' => true], 400);
     }
     if (aiBreakerOpen($provider)) {
         sendJson(['success' => false, 'error' => aiBreakerNotice($provider), 'degraded' => true, 'retry_after' => aiBreakerRemaining($provider)], 503);
     }
     $uid = $actor['id'];
-    if (aiDailyQuotaExceeded($uid)) sendJson(['success' => false, 'error' => '今日 AI 配额已用完，请明日再试'], 429);
-    if (!aiInflightAcquire($uid)) sendJson(['success' => false, 'error' => '当前已在处理请求，请稍后再试'], 429);
+    if (aiDailyQuotaExceeded($uid)) sendJson(['success' => false, 'error' => tn('ai.err_quota_exhausted')], 429);
+    if (!aiInflightAcquire($uid)) sendJson(['success' => false, 'error' => tn('ai.err_busy')], 429);
     register_shutdown_function(function () use ($uid) { aiInflightRelease($uid); });
     if (aiRateBlockedUid($uid)) {
         auditLog('ai_translate', $slug, '账号维度调用过频，拒绝', 'failed');
-        sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
+        sendJson(['success' => false, 'error' => tn('ai.err_too_frequent')], 429);
     }
     $ip = getClientIP();
     $fp = $_SESSION['cmt_fp'] ?? '';
-    if (aiRateBlocked($ip, $fp)) sendJson(['success' => false, 'error' => '操作过于频繁，请稍后再试'], 429);
+    if (aiRateBlocked($ip, $fp)) sendJson(['success' => false, 'error' => tn('ai.err_too_frequent')], 429);
     $src = (string)@file_get_contents($path);
     list($ok, $result) = aiTranslateMd($src, $lang, $actor);
     aiRateHit($ip, $fp);
@@ -1935,9 +1935,9 @@ if ($action === 'ai_translation_status' && $_SERVER['REQUEST_METHOD'] === 'GET')
     $actor = aiActionUserAllowed();
     $slug = trim((string)($_GET['slug'] ?? ''));
     $path = $slug !== '' ? articleSourcePath($slug) : null;
-    if (!$path) sendJson(['success' => false, 'error' => '文章不存在'], 404);
+    if (!$path) sendJson(['success' => false, 'error' => tn('post.err_not_found')], 404);
     $meta = readArticleMeta($path);
-    if (!canManageArticleFp($meta, $actor)) sendJson(['success' => false, 'error' => '无权查看该文章'], 403);
+    if (!canManageArticleFp($meta, $actor)) sendJson(['success' => false, 'error' => tn('auth.err_no_view')], 403);
     $out = [];
     foreach (array_keys(ysmSupportedLangs()) as $lc) {
         if ($lc === ysmSourceLang()) continue;

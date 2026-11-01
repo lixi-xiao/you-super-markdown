@@ -16,5 +16,5 @@
     </div>
     <div id="aiKeyManager" data-csrf="<?= htmlspecialchars(generateCsrfToken()) ?>"></div>
     <!-- v5.4.0-beta.4：AI Key 管理请求需带 X-Fp（本页不加载 main.js），先引入公共指纹 -->
-    <script src="../js/fp.js?v=<?= @filemtime(__DIR__ . '/../js/fp.js') ?>"></script>
-    <script src="../js/ai-admin.js?v=<?= @filemtime(__DIR__ . '/../js/ai-admin.js') ?>"></script>
+    <script src="../js/fp.js?v=<?= @filemtime(YSM_ROOT . '/js/fp.js') ?>"></script>
+    <script src="../js/ai-admin.js?v=<?= @filemtime(YSM_ROOT . '/js/ai-admin.js') ?>"></script>

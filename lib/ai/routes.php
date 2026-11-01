@@ -368,10 +368,11 @@ function canManageArticleFp($meta, $actor) {
     return ($meta['author_id'] ?? '') === $myId
         || (empty($meta['author_id']) && ($meta['author'] ?? '') === $myNick);
 }
-/** v6.0.0-beta：AI 翻译要读源文（写作者只能读自己的）（同 sc.php 判定口径） */
+/** v6.0.0-beta：AI 翻译要读源文（写作者只能读自己的）（同 sc.php 判定口径）
+ *  v6.4.5-beta：改用 YSM_ROOT——本文件已从 api.php 移到 lib/ai/，__DIR__ 不再是站点根（否则一律「文章不存在」） */
 function articleSourcePath($slug) {
     if ($slug === '' || !preg_match('/^[\p{L}\p{N}_\-\s\.\(\)（）]+$/u', $slug)) return null;
-    $p = __DIR__ . '/data/articles/' . basename($slug);
+    $p = YSM_ROOT . '/data/articles/' . basename($slug);
     return is_file($p) ? $p : null;
 }
 

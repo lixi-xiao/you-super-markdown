@@ -11,6 +11,14 @@
 (function () {
     'use strict';
 
+    // v6.4.5-beta：本脚本也会在 /author/ 下加载，相对路径 'api.php' 会打到 /author/api.php（404）。
+    //   按脚本自身 src 推导站点根（…/js/translate-admin.js → …/），兼容根目录与子目录两种挂载。
+    var API_BASE = (function () {
+        var s = document.currentScript;
+        if (s && s.src) return String(s.src).replace(/js\/translate-admin\.js.*$/, '');
+        return '';
+    })();
+
     function T(k, v) {
         if (typeof window.TK === 'function') return window.TK(k, v || {});
         var d = (window.I18N && window.I18N.dict) || {};
@@ -95,7 +103,7 @@
     }
 
     function loadStatus() {
-        return fetch('api.php?action=ai_translation_status&slug=' + encodeURIComponent(state.slug), {
+        return fetch(API_BASE + 'api.php?action=ai_translation_status&slug=' + encodeURIComponent(state.slug), {
             credentials: 'same-origin', headers: fpHeaders()
         }).then(function (r) { return r.json(); }).then(function (j) {
             if (!j || !j.success) throw new Error((j && j.error) || T('ai.tr_fail'));
@@ -199,7 +207,7 @@
         setRowRunning(lc, true);
         footMsg(T('ai.tr_running') + ' ' + langName(lc) + ' …');
         var payload = JSON.stringify({ slug: state.slug, lang: lc });
-        return fetch('api.php?action=ai_translate', {
+        return fetch(API_BASE + 'api.php?action=ai_translate', {
             method: 'POST',
             credentials: 'same-origin',
             signal: controller.signal,

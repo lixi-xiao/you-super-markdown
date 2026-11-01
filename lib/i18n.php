@@ -23,6 +23,8 @@ if (!function_exists('ysmAllLangs')) {
             if (!preg_match('/^([A-Za-z-]+)\.php$/', $f, $m)) continue;
             // v6.3.0：legacy-<code>.php 是邮件 msgid 表，不是语言，禁止出现在语言切换器
             if (strpos($f, 'legacy-') === 0) continue;
+            // v6.4.0：ai-<code>.php 是 AI 模块的附加词表（beta 独有），不是语言
+            if (strpos($f, 'ai-') === 0) continue;
             $code = $m[1];
             $langs[$code] = ['name' => $names[$code] ?? ucfirst(str_replace('-', ' ', $code)), 'code' => $code];
         }
@@ -60,11 +62,18 @@ if (!function_exists('ysmAllLangs')) {
         static $dicts = [];
         $lang = (string)$lang;
         if (!isset($dicts[$lang])) {
+            $base = basename($lang);
             $d = [];
-            $f = __DIR__ . '/../lang/' . basename($lang) . '.php';
+            $f = __DIR__ . '/../lang/' . $base . '.php';
             if (is_file($f)) {
                 $loaded = require $f;
                 if (is_array($loaded)) $d = $loaded;
+            }
+            // v6.4.0：AI 模块词表独立成片（lang/ai-<code>.php，beta 独有）；主词表优先，附加表补充
+            $af = __DIR__ . '/../lang/ai-' . $base . '.php';
+            if (is_file($af)) {
+                $extra = require $af;
+                if (is_array($extra)) $d = array_merge($extra, $d);
             }
             $dicts[$lang] = $d;
         }

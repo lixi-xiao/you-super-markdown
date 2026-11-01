@@ -4867,3 +4867,6 @@ function systemMailHealth() {
     ];
 }
 
+// v6.4.0：AI 模块挂载点（beta 独有；master 无 lib/ai/ 时自动跳过）
+if (is_file(__DIR__ . '/lib/ai/bootstrap.php')) require_once __DIR__ . '/lib/ai/bootstrap.php';
+

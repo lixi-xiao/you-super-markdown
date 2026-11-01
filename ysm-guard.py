@@ -86,8 +86,7 @@ WATCH_FILES = [
 WATCH_GLOBS = [
     'lib/ai/*.php',
     'lib/ai/views/*.php',
-    'js/ai-editor.js',
-    'js/ai-admin.js',
+    'js/ai-*.js',
     'js/translate-admin.js',
     'lang/ai-*.php',
 ]

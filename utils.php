@@ -806,7 +806,7 @@ function requireRole($role) {
         logUnauthorized("越权尝试：需要 {$role} 角色");
         header('Content-Type: application/json');
         http_response_code(403);
-        echo json_encode(['error' => '权限不足'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['error' => tn('auth.err_no_permission')], JSON_UNESCAPED_UNICODE);
         exit;
     }
 }
@@ -1581,17 +1581,17 @@ function linkFetchMeta($url) {
     $scheme = strtolower($parts['scheme'] ?? '');
     $host = strtolower($parts['host'] ?? '');
     if (!in_array($scheme, ['http', 'https'], true) || $host === '' || isPrivateHost($host)) {
-        return ['ok' => false, 'error' => '仅允许公网 http/https 地址'];
+        return ['ok' => false, 'error' => tn('common.err_private_url')];
     }
     // SSRF 安全：复用全局单跳校验抓取（禁自动跟随重定向；每跳均校验公网/非内网），并限制响应体大小
     $body = fetchHttpContent($url, 'YSM-LinkBot/1.0', 400000);
-    if ($body === false) return ['ok' => false, 'error' => '抓取失败或页面过大'];
+    if ($body === false) return ['ok' => false, 'error' => tn('common.err_fetch_failed')];
     $name = ''; $desc = ''; $favicon = '';
     if (preg_match('/<title[^>]*>(.*?)<\/title>/is', $body, $m)) $name = trim(strip_tags(html_entity_decode($m[1])));
     if (preg_match('/<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']/is', $body, $m)) $desc = trim(html_entity_decode($m[1]));
     elseif (preg_match('/<meta[^>]+content=["\'](.*?)["\'][^>]+name=["\']description["\']/is', $body, $m)) $desc = trim(html_entity_decode($m[1]));
     if (preg_match('/<link[^>]+rel=["\']?(?:shortcut\s+)?icon["\']?[^>]+href=["\'](.*?)["\']/is', $body, $m)) $favicon = trim(html_entity_decode($m[1]));
-    if ($name === '' && $desc === '') return ['ok' => false, 'error' => '未能识别站点信息'];
+    if ($name === '' && $desc === '') return ['ok' => false, 'error' => tn('sys.err_site_not_found')];
     return ['ok' => true, 'name' => mb_substr($name, 0, 60), 'desc' => mb_substr($desc, 0, 200), 'favicon' => $favicon !== '' ? $favicon : (rtrim(dirname($url), '/') . '/favicon.ico')];
 }
 /** 掉链/存活校验（只读；不跟随重定向，仅单跳校验；3xx 视为存活） */
@@ -4832,7 +4832,7 @@ function injectChangelogIntoArticle($artPath, $ver, $changelog) {
 // 返回 ['ok'=>bool, 'removed'=>int, 'backup'=>string, 'path'=>string, 'error'=>string]
 function cleanupChangelogArticle($artPath) {
     if (!is_file($artPath)) {
-        return ['ok' => false, 'removed' => 0, 'backup' => '', 'path' => $artPath, 'error' => '文章不存在'];
+        return ['ok' => false, 'removed' => 0, 'backup' => '', 'path' => $artPath, 'error' => tn('post.err_not_found')];
     }
     $content = (string)@file_get_contents($artPath);
     [$new, $removed] = dedupeChangelogSections($content);
@@ -4841,10 +4841,10 @@ function cleanupChangelogArticle($artPath) {
     }
     $backup = $artPath . '.dedup-bak-' . date('YmdHis');
     if (!@copy($artPath, $backup)) {
-        return ['ok' => false, 'removed' => 0, 'backup' => '', 'path' => $artPath, 'error' => '备份失败，已中止清理（未改动原文件）'];
+        return ['ok' => false, 'removed' => 0, 'backup' => '', 'path' => $artPath, 'error' => tn('sys.err_backup_failed')];
     }
     if (!@file_put_contents($artPath, $new, LOCK_EX)) {
-        return ['ok' => false, 'removed' => 0, 'backup' => $backup, 'path' => $artPath, 'error' => '写入失败（备份已保留，可用备份还原）'];
+        return ['ok' => false, 'removed' => 0, 'backup' => $backup, 'path' => $artPath, 'error' => tn('sys.err_write_failed')];
     }
     return ['ok' => true, 'removed' => $removed, 'backup' => $backup, 'path' => $artPath, 'error' => ''];
 }

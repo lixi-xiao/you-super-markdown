@@ -22,7 +22,7 @@ function netease_getPlaylist($id, $sortAll = '', $cookies = '') {
 
     $data = netease_apiRequest($apiUrl);
     if (!$data) {
-        return ['error' => 'API源无响应'];
+        return ['error' => tn('music.err_api_no_response')];
     }
 
     $tracks = null;
@@ -47,7 +47,7 @@ function netease_getPlaylist($id, $sortAll = '', $cookies = '') {
     }
 
     if (!$tracks || count($tracks) === 0) {
-        return ['error' => 'API源格式不识别'];
+        return ['error' => tn('music.err_api_format')];
     }
 
     $songs = [];
@@ -125,7 +125,7 @@ function netease_getLyric($id) {
             'tlrc' => $fbData['tlyric']['lyric'] ?? '',
         ];
     }
-    return ['success' => false, 'error' => '暂无歌词'];
+    return ['success' => false, 'error' => tn('music.err_no_lyrics')];
 }
 
 function netease_getSongUrl($id) {

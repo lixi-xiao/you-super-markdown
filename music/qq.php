@@ -60,7 +60,7 @@ function qq_getPlaylist($id, $sortAll = '', $cookies = '') {
             }
         }
     }
-    if (!$list) return ['error' => 'QQ音乐源无数据'];
+    if (!$list) return ['error' => tn('music.err_qq_no_data')];
     return $list;
 }
 
@@ -69,7 +69,7 @@ function qq_getLyric($songmid) {
     if (is_array($d) && !empty($d['lyric'])) {
         return ['success' => true, 'lrc' => $d['lyric'], 'tlrc' => $d['trans'] ?? ''];
     }
-    return ['success' => false, 'error' => '暂无歌词'];
+    return ['success' => false, 'error' => tn('music.err_no_lyrics')];
 }
 
 function qq_getSongUrl($songmid, $cookies = '') {

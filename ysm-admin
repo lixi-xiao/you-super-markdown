@@ -703,6 +703,62 @@ schema_needs_migration() {
 }
 
 # ============================================================
+# v6.4.7：AI 模块健康检查清单（beta 独有）
+#   从 lib/ai/bootstrap.php 的 require_once 行自动生成，避免手写清单漏项。
+#   背景：bootstrap.php 在 utils.php 末尾被「按存在性」require，其中任一模块缺失都会让
+#         utils.php 加载即致命错误 → 整站 500；而健康检查只比对清单内文件，漏项则报「通过」。
+#   主线无 lib/ai/ → 输出空，清单与旧版一致。
+ai_health_files() {
+    [ -f "$WEB_ROOT/lib/ai/bootstrap.php" ] || return 0
+    printf '%s' 'lib/ai/bootstrap.php lib/ai/routes.php lib/ai/views/drawer.php'
+    sed -n "s#.*require_once[[:space:]]\+__DIR__[[:space:]]*\.[[:space:]]*'\(/[^']*\)'.*# lib/ai\1#p" \
+        "$WEB_ROOT/lib/ai/bootstrap.php" 2>/dev/null
+}
+
+# ============================================================
+# v6.4.7：TLS 证书状态（供后台/CLI 与更新自检复用）
+#   证书路径优先取 nginx 生效配置里的 ssl_certificate；读不到再回退 letsencrypt live。
+#   输出：剩余天数（整数，负数=已过期）；无法判断输出空。
+cert_dir_candidates() {
+    local f
+    for f in /etc/letsencrypt/live/*/fullchain.pem; do
+        [ -f "$f" ] && echo "$f"
+    done
+}
+
+cert_expiry_days() {
+    local cert="$1" end ts
+    [ -f "$cert" ] || return 1
+    end=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | sed 's/^notAfter=//')
+    [ -n "$end" ] || return 1
+    ts=$(date -u -d "$end" +%s 2>/dev/null) || return 1
+    echo $(( (ts - $(date -u +%s)) / 86400 ))
+}
+
+cert_status_report() {
+    local warn_days="${1:-14}" f days bad=0
+    for f in $(cert_dir_candidates); do
+        days=$(cert_expiry_days "$f" 2>/dev/null)
+        if [ -z "$days" ]; then
+            echo "  [证书] $f → 无法解析"
+            bad=1
+            continue
+        fi
+        if [ "$days" -lt 0 ]; then
+            echo "  [证书] $f → 已过期 $(( 0 - days )) 天"
+            bad=1
+        elif [ "$days" -lt "$warn_days" ]; then
+            echo "  [证书] $f → 剩余 $days 天（低于 $warn_days 天阈值，请检查续期）"
+            bad=1
+        else
+            echo "  [证书] $f → 剩余 $days 天"
+        fi
+    done
+    [ -n "$(cert_dir_candidates)" ] || { echo "  [证书] 未找到 letsencrypt 证书（非 HTTPS 部署或有其他证书来源）"; }
+    return "$bad"
+}
+
+# ============================================================
 # v5.4.0：字体资源直读收紧 + Nginx 站点加固片段「同步 + 校验」（方案 B）
 # v5.4.1：加固规则扩展——除 /data/fonts/ 外，新增 /data/articles/（草稿/定时文章直读）、
 #         /music/（内部处理器）、/version.json、/README.md、/HELP.md 拒绝直读，并 server_tokens off。
@@ -978,6 +1034,12 @@ case "${1:-}" in
         PHP_FPM_SVC="php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')-fpm"
         echo "PHP-FPM: $(systemctl is-active $PHP_FPM_SVC 2>/dev/null || systemctl is-active php-fpm 2>/dev/null || echo 'unknown')"
         echo "用户数: $(php -r "require_once '$WEB_ROOT/utils.php'; echo count(fetchAllUsers());" 2>/dev/null)"
+        ;;
+
+    cert-status)
+        # v6.4.7：TLS 证书剩余天数（低于阈值退出码 1，便于外部监控/告警脚本判断）
+        cert_status_report "${2:-14}"
+        exit $?
         ;;
 
     log-verify)
@@ -1988,10 +2050,9 @@ YSMPATH
         # 核心文件 MD5 校验：web 与母本必须逐字节一致（排除 data/ 与签名元数据）
         HC_BAD=""
         HC_CORE="index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ysm-admin ysm-guard.py"
-        # v6.4.2：beta 独有的 AI 模块按存在性纳入校验（主线无 lib/ai/，清单保持原样）
-        if [ -f "$WEB_ROOT/lib/ai/routes.php" ]; then
-            HC_CORE="$HC_CORE lib/ai/bootstrap.php lib/ai/routes.php lib/ai/crypto.php lib/ai/keys.php lib/ai/http.php lib/ai/views/drawer.php"
-        fi
+        # v6.4.7：beta 独有的 AI 模块按存在性纳入；清单由 bootstrap.php 的 require_once 行动态生成，
+        #   避免新增模块后漏检（漏检会导致缺文件时 utils.php 加载即致命错误、整站 500，而健康检查仍「通过」）
+        HC_CORE="$HC_CORE $(ai_health_files)"
         for HC_F in $HC_CORE; do
             HC_A=$(md5sum "$WEB_ROOT/$HC_F" 2>/dev/null | awk '{print $1}')
             HC_B=$(md5sum "/opt/you-super-markdown/install-base/$HC_F" 2>/dev/null | awk '{print $1}')
@@ -2081,10 +2142,8 @@ YSMPATH
         RC_API=$(curl -sk -o /dev/null -w '%{http_code}' -A 'YSM-HealthCheck/1.0' "https://$RC_DOMAIN/api.php?action=csrf" 2>/dev/null || echo 000)
         RC_BAD=""
         RC_CORE="index.php utils.php api.php sc.php app-config.json css/style.css js/main.js ysm-admin ysm-guard.py"
-        # v6.4.2：beta 独有的 AI 模块按存在性纳入校验（主线无 lib/ai/，清单保持原样）
-        if [ -f "$WEB_ROOT/lib/ai/routes.php" ]; then
-            RC_CORE="$RC_CORE lib/ai/bootstrap.php lib/ai/routes.php lib/ai/crypto.php lib/ai/keys.php lib/ai/http.php lib/ai/views/drawer.php"
-        fi
+        # v6.4.7：同 HC_CORE——AI 模块清单由 bootstrap.php 动态生成（主线无 lib/ai 时为空）
+        RC_CORE="$RC_CORE $(ai_health_files)"
         for RC_F in $RC_CORE; do
             RC_A=$(md5sum "$WEB_ROOT/$RC_F" 2>/dev/null | awk '{print $1}')
             RC_B=$(md5sum "/opt/you-super-markdown/install-base/$RC_F" 2>/dev/null | awk '{print $1}')
@@ -2101,6 +2160,13 @@ YSMPATH
         # v5.4.0：敏感目录直读端到端探测（/data/fonts/、/data/ysm.db 应 403/404）；
         #   仅告警、不阻断（避免误判触发回滚导致站点不可用），失败写审计 + alert.log。
         sensitive_paths_probe || true
+        # v6.4.7：TLS 证书到期巡检——仅告警不阻断（证书过期不影响更新流程本身，
+        #   但过期后整站 HTTPS 不可用，必须让运维第一时间看到）。
+        cert_status_report 14 || {
+            echo "  [证书] 警告：证书即将过期/已过期，请检查 certbot 续期（sudo certbot renew --dry-run）"
+            YSM_DETAIL="TLS 证书剩余不足 14 天或已过期" php -r "require_once '$WEB_ROOT/utils.php'; auditLog('cert_expiring', 'update', getenv('YSM_DETAIL'));" 2>/dev/null || true
+            printf '%s [证书] 剩余不足 14 天或已过期\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> /opt/you-super-markdown/alert.log 2>/dev/null || true
+        }
         # v5.4.2：SMTP 口令落盘巡检（主配置无残留 / root-only 独立文件 0600 / 池目录无含口令备份）；
         #   与 ysm-admin check 同源，仅告警、不阻断（避免误判触发回滚导致站点不可用）。
         smtp_secret_disk_audit || true

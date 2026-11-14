@@ -369,13 +369,13 @@ if ((isset($_FILES['markdown_file']) || isset($_POST['content']) || isset($_POST
                 $destPath = $articlesDir . '/' . $destLeaf;
                 if (file_exists($destPath)) {
                     if (!mayManageArticle(readArticleMeta($destPath))) {
-                        $saveErr = '无权编辑该文章';
+                        $saveErr = tn('editor.086');
                         logUnauthorized('越权尝试编辑文章: ' . $destLeaf);
                     } elseif (file_put_contents($destPath, $finalBody, LOCK_EX)) {
-                        $saveOk = '文档已更新';
+                        $saveOk = tn('editor.083');
                         auditLog('article_update', $destLeaf, '更新文档: ' . $docTitle);
                     } else { $saveErr = tn('admin.err_save_failed'); }
-                } else { $saveErr = '原文件不存在'; }
+                } else { $saveErr = tn('editor.084'); }
             } else {
                 if ($uploadedFile && $uploadedFile['error'] === UPLOAD_ERR_OK) {
                     $origLeaf = pathinfo($uploadedFile['name'], PATHINFO_FILENAME);
@@ -384,7 +384,7 @@ if ((isset($_FILES['markdown_file']) || isset($_POST['content']) || isset($_POST
                 if (empty($destLeaf)) { $destLeaf = 'doc_' . time(); }
                 $destLeaf .= '.md';
                 if (file_put_contents($articlesDir . '/' . $destLeaf, $finalBody, LOCK_EX)) {
-                    $saveOk = '文档已创建';
+                    $saveOk = tn('editor.085');
                     auditLog('article_create', $destLeaf, '创建文档: ' . $docTitle);
                 } else { $saveErr = tn('admin.err_save_failed'); }
             }
@@ -467,12 +467,12 @@ $richZipImg = (int)($_GET['img'] ?? 0);
 $richZipVid = (int)($_GET['vid'] ?? 0);
 $richZipErr = isset($_GET['rich_zip']) && $_GET['rich_zip'] !== 'ok' ? $_GET['rich_zip'] : '';
 $richZipErrMsg = [
-    'csrf_error' => 'CSRF 校验失败，请刷新后重试',
-    'too_large' => '压缩包超过 80MB 上限，已拒绝',
-    'open_failed' => '无法打开 ZIP 文件',
-    'too_many' => 'ZIP 内文件过多（最多 200 个），已拒绝导入',
-    'file_too_large' => 'ZIP 内单个文件超过 40MB，已拒绝导入',
-    'aborted' => '导入中止（解压超限）',
+    'csrf_error' => tn('editor.087'),
+    'too_large' => tn('editor.088'),
+    'open_failed' => tn('editor.089'),
+    'too_many' => tn('editor.090'),
+    'file_too_large' => tn('editor.091'),
+    'aborted' => tn('editor.092'),
 ][$richZipErr] ?? '';
 $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
 ?>
@@ -534,7 +534,7 @@ $siteTitle = loadSiteConfig()['site_title'] ?? 'You Super Markdown';
         <div class="page-subtitle"><?= t('editor.003') ?></div>
     </div>
 
-    <?php if ($flagSaved): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= htmlspecialchars($saveOk ?: '操作成功') ?></div><?php endif; ?>
+    <?php if ($flagSaved): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= htmlspecialchars($saveOk ?: tn('editor.093')) ?></div><?php endif; ?>
     <?php if ($errText): ?><div class="msg msg-error"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><?= htmlspecialchars($errText) ?></div><?php endif; ?>
     <?php if ($flagDeleted): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('editor.075') ?></div><?php endif; ?>
     <?php if ($richZipOk): ?><div class="msg msg-success"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><?= t('editor.zip_done_head') ?><?= $richZipMd ?><?= t('editor.zip_done_mid1') ?><?= $richZipImg ?><?= t('editor.zip_done_mid2') ?><?= $richZipVid ?><?= t('editor.zip_done_tail') ?></div><?php endif; ?>

@@ -541,6 +541,16 @@ fi
 # ================================================================
 # 6. SSL 证书（公网首次部署前提：域名 DNS 已解析到本机公网 IP，云安全组放行 80/tcp）
 # ================================================================
+# v6.4.7：续期成功后自动 reload nginx——否则 certbot 续期成功但 nginx 仍用旧证书，
+#   等旧证书过期后整站 HTTPS 不可用（线上曾因此故障）。
+mkdir -p /etc/letsencrypt/renewal-hooks/deploy 2>/dev/null || true
+cat > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh << 'HOOK_EOF'
+#!/bin/sh
+# You Super Markdown: 证书续期成功后重载 nginx
+systemctl reload nginx
+HOOK_EOF
+chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh 2>/dev/null || true
+
 CERT_OK=false
 log "申请 SSL 证书..."
 if [ -n "$ADMIN_EMAIL" ]; then
@@ -552,6 +562,11 @@ fi
 # 证书就绪后追加 443 server（完整安全配置）并 reload
 if [ "$CERT_OK" = true ] || [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
     CERT_OK=true
+    # v6.4.7：校正续期配置的 webroot——站点根改名/迁移后若不同步，续期会写错目录 → 挑战 404 失败
+    if [ -f "/etc/letsencrypt/renewal/$DOMAIN.conf" ]; then
+        sed -i "s#^webroot_path = .*#webroot_path = $WEB_ROOT,#" "/etc/letsencrypt/renewal/$DOMAIN.conf" 2>/dev/null || true
+        sed -i "s#^$DOMAIN = .*#$DOMAIN = $WEB_ROOT#" "/etc/letsencrypt/renewal/$DOMAIN.conf" 2>/dev/null || true
+    fi
 # v6.2.0：可选 fastcgi_cache（默认关闭；YSM_ENABLE_FASTCGI_CACHE=1 时生成）
 YSM_CACHE_CFG=""
 if [ "${YSM_ENABLE_FASTCGI_CACHE:-0}" = "1" ]; then

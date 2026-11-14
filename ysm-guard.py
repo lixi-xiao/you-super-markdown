@@ -17,6 +17,7 @@ import tarfile
 import tempfile
 import hashlib
 import hmac
+import calendar
 import shutil
 import sqlite3
 import time
@@ -1423,6 +1424,60 @@ def periodic_v6_maintenance_thread():
                     log(f"友链巡检: {out}")
         except Exception as e:
             log(f"v6.0.0 自动运维失败: {e}")
+# ===== v6.4.7：TLS 证书到期巡检 =====
+# 背景：站点从 /var/www/you-markdown 改名到 you-super-markdown 后，letsencrypt 的 renewal 配置
+#       仍指向旧 webroot → 自动续期每次都 404 失败，证书过期 2 天无人发现（HTTPS 整站不可用）。
+# 策略：每 6 小时扫 /etc/letsencrypt/live/*/fullchain.pem，剩余 < 14 天告警；同一证书每天最多 1 封。
+CERT_WARN_DAYS = 14
+CERT_CHECK_INTERVAL = 6 * 3600
+_cert_alerted = {}  # 证书路径 -> 最近一次告警的日期（YYYY-MM-DD）
+
+
+def _cert_expiry_days(path):
+    """返回证书剩余天数（负=已过期）；无法解析返回 None。"""
+    try:
+        r = subprocess.run(['openssl', 'x509', '-enddate', '-noout', '-in', path],
+                           capture_output=True, timeout=15)
+        s = (r.stdout or b'').decode('utf-8', 'ignore').strip()
+        if '=' not in s:
+            return None
+        dt = s.split('=', 1)[1].replace('GMT', '').strip()
+        ts = calendar.timegm(time.strptime(dt, '%b %d %H:%M:%S %Y'))
+        return int((ts - time.time()) // 86400)
+    except Exception:
+        return None
+
+
+def check_certificates():
+    """证书到期巡检：低于阈值即告警（按证书每天去重）。"""
+    today = time.strftime('%Y-%m-%d')
+    for path in sorted(glob.glob('/etc/letsencrypt/live/*/fullchain.pem')):
+        days = _cert_expiry_days(path)
+        if days is None:
+            continue
+        if days >= CERT_WARN_DAYS:
+            _cert_alerted.pop(path, None)
+            continue
+        if _cert_alerted.get(path) == today:
+            continue
+        _cert_alerted[path] = today
+        if days < 0:
+            detail = f"TLS 证书已过期 {0 - days} 天：{path}"
+        else:
+            detail = f"TLS 证书剩余 {days} 天（低于 {CERT_WARN_DAYS} 天）：{path}"
+        log(detail)
+        send_alert("证书即将过期", detail + "。请检查 certbot 续期：sudo certbot renew --dry-run")
+
+
+def periodic_cert_thread():
+    """每 6 小时巡检一次证书有效期（启动 60 秒后先跑一次）。"""
+    time.sleep(60)
+    while running:
+        try:
+            check_certificates()
+        except Exception as e:
+            log(f"证书巡检失败: {e}")
+        time.sleep(CERT_CHECK_INTERVAL)
 
 
 def run_inotify_watch():
@@ -1468,6 +1523,10 @@ def run_inotify_watch():
     # v5.4.11：启动联动封锁告警汇总线程（每小时一封）
     digest_thread = threading.Thread(target=periodic_alert_digest_thread, daemon=True)
     digest_thread.start()
+
+    # v6.4.7：TLS 证书到期巡检线程（每 6 小时，剩余 < 14 天告警）
+    cert_thread = threading.Thread(target=periodic_cert_thread, daemon=True)
+    cert_thread.start()
 
     # 启动自动备份与健康检测线程
     backup_thread = threading.Thread(target=periodic_backup_thread, daemon=True)
@@ -1524,6 +1583,10 @@ def run_polling_mode():
     # v5.4.11：联动封锁告警汇总线程（每小时一封）
     digest_thread = threading.Thread(target=periodic_alert_digest_thread, daemon=True)
     digest_thread.start()
+
+    # v6.4.7：TLS 证书到期巡检线程（轮询模式同样启用）
+    cert_thread = threading.Thread(target=periodic_cert_thread, daemon=True)
+    cert_thread.start()
 
     backup_thread = threading.Thread(target=periodic_backup_thread, daemon=True)
     backup_thread.start()
